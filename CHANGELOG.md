@@ -38,4 +38,10 @@ names and amounts (pies, funnels, trees, Sankey diagrams, networks, maps,
 radars) through them, grids take them as `fields: compileFields(rules)`,
 and `herceg/fields` reads them for application code. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
-`{ label }`, text).
+`{ label }`, text). Displays also color values: a number field's
+`thresholds`, and colors of mappings and missing values, color bars,
+lines, areas, and regions colored by the field without a scale, points and
+heatmaps without a ramp of their own, series of category fields, gauges'
+bands, and tooltip fields' swatches, with a key in the legend; rules and
+regions stand at a field's thresholds (`{ thresholds: "p99" }`,
+`hg.AtThresholds` in Python).

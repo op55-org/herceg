@@ -29,9 +29,12 @@ import { cssFont, dashPattern, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
   AnnotationData,
+  type AtThresholds,
   checkLegend,
   type ItemPlace,
+  type Items,
   inView,
+  itemsIn,
   type Label,
   labelOf,
   leadersGeometry,
@@ -39,6 +42,7 @@ import {
   position,
   readsTable,
   type TextField,
+  thresholdPlace,
   valueAt,
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
@@ -107,9 +111,13 @@ interface RuleStyle<C extends string = never> {
   id?: string;
 }
 
-/** A rule at a constant place: `y` for a horizontal rule, `x` for a vertical one. */
+/**
+ * A rule at a constant place, `y` for a horizontal rule and `x` for a
+ * vertical one; or one at each step of a field's thresholds
+ * (`{ thresholds: "p99" }`), in the step's color unless `stroke` is given.
+ */
 export type RuleOptions = RuleStyle &
-  RulePosition<PlaceOption<never>> & {
+  RulePosition<PlaceOption<never> | AtThresholds> & {
     /** Text drawn by the rule: its text, or a label object (place, style). */
     label?: RuleLabel<never>;
     /**
@@ -151,9 +159,20 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
   readonly tooltip = "x";
   readonly featured: boolean;
   readonly domainFallback: boolean;
+  readonly thresholds: AtThresholds | undefined;
   readonly #data: AnnotationData;
+  /** Its places as its data reads them: at thresholds, the steps' column. */
+  readonly #positions: {
+    readonly x?: Frozen<AnnotationPosition> | undefined;
+    readonly y?: Frozen<AnnotationPosition> | undefined;
+    readonly span: readonly (Frozen<AnnotationPosition> | undefined)[];
+  };
+  /** Its items in a chart of compiled features (see `itemsIn`). */
+  readonly #items: (features: CompiledFeatures | undefined) => Items;
   /** The row of each label its labels geometry drew (see `partOf`). */
   readonly #labelRows = new WeakMap<Geometry, Uint32Array>();
+  /** At thresholds, the step of each rule or label a geometry drew (see `partOf`). */
+  readonly #stepKeys = new WeakMap<Geometry, readonly string[]>();
   /** The label drawn as rules always draw theirs: plain text, in the default place, kept apart from none. */
   readonly #plain: boolean;
   /**
@@ -176,7 +195,9 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
 
   constructor(input: RuleSpec, table?: Table) {
     checkLegend(input, "rule");
-    this.spec = frozen(input);
+    const [held, stepped] = thresholdPlace(input, "rule");
+    this.spec = frozen(held);
+    this.thresholds = stepped;
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.domainFallback = spec.contributeDomain !== true;
@@ -184,14 +205,32 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     if (problem) throw new Error(problem);
     const label = labelOf(spec.label);
     const [from, to] = spec.span ?? [];
-    this.#data = new AnnotationData(
-      table,
-      { x: spec.x, y: spec.y, "span[0]": from, "span[1]": to },
-      label,
-      "rule",
-      { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
-      spec.x !== undefined ? "y" : "x",
-    );
+    if (stepped && readsTable([from, to], spec.label))
+      throw new Error(
+        `rule ${spec.x === undefined ? "y" : "x"}.thresholds: rules at thresholds stand for steps, not rows; give span and label no fields`,
+      );
+    // At thresholds, the place is the steps' values (see `stepItems`).
+    const step = (place: unknown) => (place === undefined || !stepped ? place : "at");
+    const positions = {
+      x: step(spec.x) as Frozen<AnnotationPosition> | undefined,
+      y: step(spec.y) as Frozen<AnnotationPosition> | undefined,
+      span: [from, to],
+    };
+    this.#positions = positions;
+    const data = (columns?: Record<string, Float64Array>) =>
+      new AnnotationData(
+        table,
+        { x: positions.x, y: positions.y, "span[0]": from, "span[1]": to },
+        label,
+        "rule",
+        { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
+        spec.x !== undefined ? "y" : "x",
+        undefined,
+        columns,
+      );
+    // Without the chart's steps, it has none.
+    this.#data = data(stepped && { at: new Float64Array(0) });
+    this.#items = itemsIn(this, this.#data, !!stepped, false, data);
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "rule");
     if (spec.drag) {
@@ -215,7 +254,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         !label.format &&
         layout.overlap === "show" &&
         layout.group === undefined);
-    this.featured = lazyFormat(label?.format) || label?.content !== undefined;
+    this.featured = lazyFormat(label?.format) || label?.content !== undefined || !!stepped;
     const vertical = spec.x !== undefined;
     const place = label?.place;
     if (place?.outside && place.attachment === "center")
@@ -237,10 +276,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
   }
 
   channelKind(axis: "x" | "y") {
-    const own = axis === "x" ? this.spec.x : this.spec.y;
+    const own = this.#positions[axis];
     // Along the other axis, a span of fields says what that axis holds.
     if (own !== undefined) return this.#data.kind(own);
-    const [from, to] = this.spec.span ?? [];
+    const [from, to] = this.#positions.span;
     return this.#data.kind(from) ?? this.#data.kind(to);
   }
 
@@ -263,16 +302,18 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     locale: string | undefined,
     rows?: RowParts,
     frames?: readonly Frame[],
+    features?: CompiledFeatures,
   ): string | undefined {
     const vertical = this.spec.x !== undefined;
-    const place = this.#data.place(vertical ? this.spec.x! : this.spec.y!);
+    const data = this.#items(frames?.[0]?.features ?? features).data;
+    const place = data.place(this.#along(vertical ? "x" : "y")[0]!);
     const f = vertical ? format.x : format.y;
-    return this.#data.summary(
+    return data.summary(
       ["Rule", "Rules"],
       locale,
       (i) => {
         if (place.kind === "category") {
-          const category = this.#data.category(place, i);
+          const category = data.category(place, i);
           return category === undefined ? undefined : `${vertical ? "x" : "y"} ${category}`;
         }
         if (place.kind !== "value")
@@ -287,18 +328,24 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       rows,
       frames,
       format.content,
-      (i) => this.#data.value(place, i),
+      (i) => data.value(place, i),
     );
   }
 
   /** A rule's place on its axis, and its span's on the other. */
   #along(axis: "x" | "y"): readonly (Frozen<AnnotationPosition> | undefined)[] {
-    const own = axis === "x" ? this.spec.x : this.spec.y;
-    return own !== undefined ? [own] : (this.spec.span ?? []);
+    const own = this.#positions[axis];
+    return own !== undefined ? [own] : this.#positions.span;
   }
 
-  xExtent(_series: unknown, log: boolean, _breaks?: unknown, rows?: RowParts) {
-    return this.#data.extent(this.#along("x"), log, undefined, rows);
+  xExtent(
+    _series: unknown,
+    log: boolean,
+    _breaks?: unknown,
+    rows?: RowParts,
+    features?: CompiledFeatures,
+  ) {
+    return this.#items(features).data.extent(this.#along("x"), log, undefined, rows);
   }
 
   get scaled() {
@@ -309,8 +356,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     return this.#data.follows;
   }
 
-  scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
-    return this.#data.extent(this.#along(axis), log, undefined, rows, name);
+  scaleExtent(
+    name: string,
+    axis: "x" | "y",
+    log: boolean,
+    rows?: RowParts,
+    features?: CompiledFeatures,
+  ) {
+    return this.#items(features).data.extent(this.#along(axis), log, undefined, rows, name);
   }
 
   yExtent(
@@ -320,8 +373,9 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     log: boolean,
     _breaks?: unknown,
     rows?: RowParts,
+    features?: CompiledFeatures,
   ) {
-    return this.#data.extent(this.#along("y"), log, undefined, rows);
+    return this.#items(features).data.extent(this.#along("y"), log, undefined, rows);
   }
 
   /**
@@ -355,12 +409,13 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     const paint = this.#paint({ theme });
     const write = this.#data.writer(locale, features?.of(this)?.format);
     const content = features?.of(this)?.content;
-    const at = this.#data.place(this.spec.y);
+    const data = this.#items(features).data;
+    const at = data.place(this.#positions.y!);
     let widest = 0;
-    this.#data.each(undefined, (i) => {
-      const value = this.#data.value(at, i);
+    data.each(undefined, (i) => {
+      const value = data.value(at, i);
       const parts = content?.styled?.(i, "", value, undefined, paint, { measure });
-      const text = this.#data.text(i, locale, write, content, value);
+      const text = data.text(i, locale, write, content, value);
       widest = Math.max(widest, parts ? parts.lines.width : measure(text, paint.css));
     });
     const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
@@ -370,9 +425,12 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
 
   /**
    * Its rules and their labels are rows (of its table, or of its places
-   * given alone): a rule's, in its key; labels apart, as drawn.
+   * given alone): a rule's, in its key; labels apart, as drawn. At
+   * thresholds, they are its steps, by key.
    */
   partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    const steps = this.#stepKeys.get(geometry);
+    if (steps) return index < steps.length ? parts.group(drawn, [], [steps[index]!]) : undefined;
     if (geometry.kind === "rule")
       return index === 0
         ? parts.annotation(
@@ -437,14 +495,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     key: MarkKey,
     panelRows: RowParts | undefined,
   ): { rules: RuleGeometry[]; apart: ApartRule[] } {
-    const rows = this.#data.shown(frame.hidden, key, panelRows);
+    const { data, keys, colors } = this.#items(frame.features);
+    const rows = data.shown(frame.hidden, key, panelRows);
     const { spec } = this;
     const { plot } = frame;
-    const data = this.#data;
     const vertical = spec.x !== undefined;
     const scale = vertical ? frame.x : frame.y;
     // Dragged, it is drawn where the drag holds it.
-    const place = data.place(this.moved.get(frame.owner) ?? (vertical ? spec.x! : spec.y!));
+    const place = data.place(this.moved.get(frame.owner) ?? this.#along(vertical ? "x" : "y")[0]!);
     const across = vertical ? frame.y : frame.x;
     const span = spec.span?.map((c) => data.place(c));
     const strokeWidth = spec.strokeWidth ?? 1;
@@ -479,11 +537,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       const text = label
         ? data.text(i, frame.locale, write, content, data.value(place, i))
         : undefined;
+      // At thresholds, keyed by its step and in its color.
       const rule: RuleGeometry = {
         kind: "rule",
         draw: ruleDrawing,
-        key: `${JSON.stringify(key)}:${i}`,
-        stroke: painted(frame.paint, spec.stroke, "rule stroke") ?? frame.theme.muted,
+        key: `${JSON.stringify(key)}:${keys?.[i] ?? i}`,
+        stroke:
+          painted(frame.paint, spec.stroke, "rule stroke") ??
+          (colors ? frame.paint(colors[i]!, "chart fields") : frame.theme.muted),
         strokeWidth,
         dash,
         x1: vertical ? at : a,
@@ -502,6 +563,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
           plot: bounds,
         };
       rules.push(rule);
+      if (keys) this.#stepKeys.set(rule, [keys[i]!]);
       // A label that writes nothing takes no place, so it hides no other.
       if (text && /[^\n]/.test(text) && !plain(text))
         apart.push({
@@ -613,6 +675,12 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       geometry,
       Uint32Array.from(owners, (k) => rows[k]!),
     );
+    const steps = this.#items(frame.features).keys;
+    if (steps)
+      this.#stepKeys.set(
+        geometry,
+        owners.map((k) => steps[rows[k]!]!),
+      );
     if (leaders.length === 0) return [geometry];
     const { look } = this.#data.layout;
     return [leadersGeometry(`${id}|leaders`, leaders, look, frame, "rule label.leader"), geometry];

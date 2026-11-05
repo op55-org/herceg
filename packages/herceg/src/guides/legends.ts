@@ -273,7 +273,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
       theme,
       text.locale,
       paint,
-      content.parts,
+      content,
     );
     // Marks left out of legends (`legend: false`, annotations not listed by
     // their labels) are left out of those that show what no guide names;
@@ -452,8 +452,8 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
       const owned = new Set<string>(
         scales.map((scale) => (scale === "ramp" || scale === "key" ? "color" : scale)),
       );
-      // A color splitting series is theirs.
-      if (split.has(ref.mark)) owned.add("color");
+      // A color splitting series is theirs, and keys of display colors are its colors'.
+      if (split.has(ref.mark) || content.features?.ownParts(mark).length) owned.add("color");
       if (owned.has(ref.channel)) return;
       const has = [...owned].map((channel) => `channel: "${channel}"`).join(" or ");
       throw refused(
@@ -771,7 +771,8 @@ function ownersOf(
  * The marks and channels of each legend part (a color ramp, a key of
  * sizes, symbols, or colors): marks with the same scale share one part.
  * Layout marks own their parts too (by their ids or places), which guides
- * may name. Each part is as `parts`, the chart's, shows it.
+ * may name, and marks the keys the features list for them. Each part is as
+ * the chart's `parts` show it.
  */
 function partOwners(
   kit: GuideKit,
@@ -781,7 +782,7 @@ function partOwners(
   theme: Theme,
   locale: string | undefined,
   paint: PaintReader,
-  parts: readonly LegendPart[],
+  { parts, features }: LegendContent,
 ) {
   const owners = new Map<
     string,
@@ -799,9 +800,12 @@ function partOwners(
     if (shared) shared.owners.push(owner);
     else owners.set(part.key, { owners: [owner], part: shown.get(part.key) ?? part });
   };
-  for (const { mark, series } of marks)
+  for (const { mark, series } of marks) {
     for (const part of mark.legends?.(series, theme, format, paint) ?? [])
       own(part, places.get(mark)!);
+    // Keys the features make for it (of display colors).
+    for (const part of features?.ownParts(mark) ?? []) own(part, places.get(mark)!);
+  }
   for (const layout of layouts)
     for (const part of layout.legends?.(theme, locale, paint) ?? []) own(part, places.get(layout)!);
   return owners;

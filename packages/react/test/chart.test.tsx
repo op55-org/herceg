@@ -143,6 +143,37 @@ describe("<Chart>", () => {
     expect(chart!.toSVG()).not.toContain("Volume");
   });
 
+  it("places rules at thresholds, comparing the tables they name by identity", async () => {
+    // Two unnamed tables write the same JSON; each takes its own steps.
+    const first = table({ t: [0, 1], v: [1, 2] });
+    const second = table({ t: [0, 1], v: [1, 2] });
+    const steps = (color: string) => ({ steps: [{ value: 1.5, color }] });
+    let chart: HercegChart | null = null;
+    const draw = (named: typeof first) =>
+      root.render(
+        <Chart
+          ref={(value) => {
+            chart = value;
+          }}
+          renderer="svg"
+          fields={[
+            { match: { table: first }, thresholds: steps("#c62828") },
+            { match: { table: second }, thresholds: steps("#1565c0") },
+          ]}
+        >
+          <Line data={first} x="t" y="v" />
+          <Line data={second} x="t" y="v" />
+          <Rule y={{ thresholds: "v", table: named }} />
+        </Chart>,
+      );
+    act(() => draw(first));
+    await act(() => chart!.loading);
+    expect(chart!.toSVG()).toContain('stroke="#c62828"');
+    act(() => draw(second));
+    await act(frame);
+    expect(chart!.toSVG()).toContain('stroke="#1565c0"');
+  });
+
   for (const stack of ["fill", "center", "wiggle"] as const) {
     it(`passes ${stack} and inside-out area options through React`, () => {
       let chart: HercegChart | null = null;

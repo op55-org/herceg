@@ -461,6 +461,13 @@ def remake(chart: Chart, call: Call, data: Any) -> Chart:
         _PREVIOUS.reset(token)
     # Marks added after the function made the chart: those reading its table
     # read the new chart's, which the same arguments give the same columns.
+    # Data their options name (threshold places' tables) is kept, not copied;
+    # the data the chart was computed from becomes the new data, unless a
+    # mark draws it, as the chart names tables (`Chart._name_of`).
+    kept: dict[int, Any] = {}
+    if chart._computed_from is not None:
+        kept[id(chart._computed_from)] = made._computed_from
+    kept.update({id(source): source for source, _ in chart._tables})
     for spec, table in chart._marks[call.marks :]:
         if table is None:
             target = None
@@ -468,7 +475,7 @@ def remake(chart: Chart, call: Call, data: Any) -> Chart:
             target = made._default
         else:
             target = made._table(chart._tables[table][0])
-        made._add(copy.deepcopy(spec), target)
+        made._add(copy.deepcopy(spec, kept), target)
     return made
 
 

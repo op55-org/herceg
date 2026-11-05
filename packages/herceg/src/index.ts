@@ -147,7 +147,7 @@ export {
   type XAxisOptions,
 } from "./guides/options.ts";
 export type { MeasureText } from "./layout/text.ts";
-export type { TextField } from "./marks/annotation.ts";
+export type { AtThresholds, TextField } from "./marks/annotation.ts";
 export { type AreaOptions, area } from "./marks/area.ts";
 export {
   type BarOptions,

@@ -307,7 +307,7 @@ Of 2130 cells: 1379 proved to work, 216 supported but not yet proved, 354 refuse
 | line3d | ✓ | ✗35 | ✓ | ✓ | ✓ |
 | surface | ·72 | ✓ | ✓ | ·73 | ·73 |
 
-- ✗35 Refused: `line "m" color.field: field "y" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: "identity" }); give scale, or a category field` (for line). Instead: Color it by a category field, which the legend lists.
+- ✗35 Refused: `line "m" color.field: field "y" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: "identity" }), or give fields.y thresholds or mappings with colors` (for line). Instead: Color it by a category field, which the legend lists.
 - ·36 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: a colorbar shows it.
 - ·37 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing.
 - ·38 Not applicable: Candlesticks color by rise and fall, not by a category.

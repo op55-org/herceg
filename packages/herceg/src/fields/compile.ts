@@ -10,6 +10,7 @@ import { itemLegends } from "../marks/features/item-legends.ts";
 import { displayedContent } from "../marks/features/label-displays.ts";
 import { naming } from "../marks/features/names.ts";
 import { type ChartFieldKit, type ChartFields, chartFields } from "./chart.ts";
+import { mappedColors, stepsAt } from "./colors.ts";
 import type { FieldDisplays } from "./rules.ts";
 
 /**
@@ -40,4 +41,4 @@ export function chartFieldsOf(
   return made;
 }
 
-export { displayedContent, guideFields, itemLegends, naming };
+export { displayedContent, guideFields, itemLegends, mappedColors, naming, stepsAt };

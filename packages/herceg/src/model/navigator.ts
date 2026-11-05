@@ -38,6 +38,7 @@ import type { NavigatorSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { type AxisContext, type AxisPlan, createScale, usableDomain } from "./axis.ts";
+import type { CompiledFeatures } from "./features.ts";
 import type { InspectedMark, Inspector, MarkSeries } from "./inspect.ts";
 import type { ChartConfig, ChartModel, RangeSource } from "./model.ts";
 import { overviewBars } from "./navigator-bars.ts";
@@ -398,6 +399,7 @@ export class Navigator {
       strip.width,
       context,
       shown,
+      frame.features,
     );
     const { scale } = rail;
     const drawn = this.#drawnMarks(sources);
@@ -565,6 +567,7 @@ function railPlan(
   width: number,
   context: AxisContext,
   shown: readonly [number, number],
+  features: CompiledFeatures | undefined,
 ): { rail: AxisPlan; labeled: boolean } {
   const { type, spec, breaks } = context;
   const log = type === "log";
@@ -574,7 +577,7 @@ function railPlan(
   let data = domainExtent(
     marks.map(({ mark, series, rows }) => [
       mark,
-      offAxis(mark.bound, "x") ? undefined : mark.xExtent(series, log, breaks, rows),
+      offAxis(mark.bound, "x") ? undefined : mark.xExtent(series, log, breaks, rows, features),
     ]),
   );
   if (spec?.zero && !log) data = unionExtent([data, [0, 0]]);
@@ -661,7 +664,10 @@ function overview(
       );
       const type = (right ? inspector.rightFrame : inspector.frame)?.y.type ?? "linear";
       const spec = layout ? layout.panelAxis(axis, sources[at]!.index, config[axis]) : config[axis];
-      found = { y: yScale(among, type, rail, strip, spec, context), seen: new Set() };
+      found = {
+        y: yScale(among, type, rail, strip, spec, context, frame.features),
+        seen: new Set(),
+      };
       groups.set(group, found);
     }
     // What another panel sharing the scale drew whole is drawn already.
@@ -715,6 +721,7 @@ function yScale(
   strip: Rect,
   spec: ChartConfig["y"],
   x: AxisContext,
+  features: CompiledFeatures | undefined,
 ): PositionScale {
   const type = plotType === "log" || plotType === "time" ? plotType : "linear";
   const log = type === "log";
@@ -725,7 +732,9 @@ function yScale(
       const visible = series.filter((s) => !hidden.has(s.key));
       if (standsOn(mark, "y") && (visible.length > 0 || mark.seriesless)) stands = true;
       // Rows placed in the strip's box tell its y nothing.
-      return offAxis(mark.bound, "y") ? undefined : mark.yExtent(visible, x0, x1, log, x.breaks);
+      return offAxis(mark.bound, "y")
+        ? undefined
+        : mark.yExtent(visible, x0, x1, log, x.breaks, undefined, features);
     }),
   );
   const zero = (spec?.zero ?? stands) && !log && data;

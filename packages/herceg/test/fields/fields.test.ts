@@ -383,9 +383,10 @@ describe("checks", () => {
       mappings([{ text: "a" }]),
       "displayOf fields.x.mappings[0]: a mapping matches by value, between, or regex; give one",
     );
+    refused(mappings([{ value: 1 }]), "displayOf fields.x.mappings[0]: give text, color, or both");
     refused(
-      mappings([{ value: 1 }]),
-      "displayOf fields.x.mappings[0].text: expected text; received nothing",
+      mappings([{ value: 1, color: 2 }]),
+      "displayOf fields.x.mappings[0].color: expected a color; received 2",
     );
     refused(
       mappings([{ between: [0.9, 0.5], text: "a" }]),
@@ -396,8 +397,8 @@ describe("checks", () => {
       "displayOf fields.x.mappings[0].between: expected [from, to], null for an open end; received [0]",
     );
     refused(
-      mappings([{ value: 1, text: "a", color: "red" }]),
-      /^displayOf fields\.x\.mappings\[0\]\.color: unknown setting/,
+      mappings([{ value: 1, text: "a", icon: "warning" }]),
+      /^displayOf fields\.x\.mappings\[0\]\.icon: unknown setting/,
     );
   });
 

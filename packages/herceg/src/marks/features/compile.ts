@@ -26,7 +26,7 @@ import type {
   SeriesFeatures,
   SeriesSwatch,
 } from "../../model/features.ts";
-import type { LegendEntry } from "../../model/legend.ts";
+import type { LegendEntry, LegendPart } from "../../model/legend.ts";
 import type { ChartConfig } from "../../model/model.ts";
 import type { AreaGeometry, Geometry, GuideItem, LineGeometry } from "../../scene/scene.ts";
 import type {
@@ -42,6 +42,7 @@ import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
 import type { AreaSpec, BarSpec, LineSpec, TextSpec } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
+import { keyLegendWith } from "../key-legend.ts";
 import type { LayoutMark } from "../layout-mark.ts";
 import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
@@ -51,6 +52,7 @@ import {
   compileChannel,
   fieldsOf,
   IDENTITY,
+  keyPath,
   outputCheck,
   type ScaleOf,
   scalePath,
@@ -248,53 +250,68 @@ function compile(
     prefixes.add(prefix);
     return prefix;
   };
-  const readIn =
-    (
-      table: Table | undefined,
-      mark: Where,
-      panel: string | undefined,
-      rows?: () => MarkRows,
-    ): ScaleOf =>
-    (name, path, field) => {
-      if (unmapped.has(name)) return IDENTITY;
-      const channelScale = continuous.get(name);
-      if (channelScale) {
-        // The rows the mark draws, before facets and the legend, whose values the domain spans.
-        if (field !== undefined && table?.has(field))
-          channelScale.read(rows ?? (() => wholeTable(table)), field);
-        return channelScale;
+  const readIn = (
+    table: Table | undefined,
+    mark: Where,
+    panel: string | undefined,
+    rows?: () => MarkRows,
+  ): ScaleOf =>
+    Object.assign(
+      (name: string, path: string, field?: string) =>
+        scaleFor(table, mark, panel, rows, name, path, field),
+      // A number field's colors without a scale: its display's, where the chart's give some.
+      { colors: (field: string) => fields?.of(table, field)?.values },
+    );
+  const scaleFor = (
+    table: Table | undefined,
+    mark: Where,
+    panel: string | undefined,
+    rows: (() => MarkRows) | undefined,
+    name: string,
+    path: string,
+    field?: string,
+  ): CategoryScale | ChannelScale => {
+    if (unmapped.has(name)) return IDENTITY;
+    const channelScale = continuous.get(name);
+    if (channelScale) {
+      // The rows the mark draws, before facets and the legend, whose values the domain spans.
+      if (field !== undefined && table?.has(field))
+        channelScale.read(rows ?? (() => wholeTable(table)), field);
+      return channelScale;
+    }
+    const scale = scaleIn(name, panel, path);
+    if (scale) return scale;
+    // Without a declared "color", a field's values take the colors of what they stand for.
+    if (name === "color" && field !== undefined && table) {
+      const prefix = identities.field(table, field, mark.index);
+      let made = colors.get(prefix);
+      if (!made) {
+        made = new IdentityColors(
+          prefix,
+          chart,
+          mapped && ((value) => mapped.color(prefix, value)),
+        );
+        colors.set(prefix, made);
       }
-      const scale = scaleIn(name, panel, path);
-      if (scale) return scale;
-      // Without a declared "color", a field's values take the colors of what they stand for.
-      if (name === "color" && field !== undefined && table) {
-        const prefix = identities.field(table, field, mark.index);
-        let made = colors.get(prefix);
-        if (!made) {
-          made = new IdentityColors(prefix, chart);
-          colors.set(prefix, made);
-        }
-        return made;
-      }
-      // A field's values take the shapes and dashes of its name, apart from other fields'.
-      if (DEFAULT_SCALES.includes(name)) {
-        const key = field === undefined ? name : `${name}\0${field}`;
-        return scales.get(key) ?? scaleOf(name, undefined, key);
-      }
-      const names = [
-        ...new Set([...scales.values()].map((scale) => scale.name)),
-        ...ofPanels.keys(),
-      ]
-        .filter((n) => !DEFAULT_SCALES.includes(n) || config.scales?.[n] !== undefined)
-        .map((n) => `"${n}"`)
-        .join(", ");
-      throw new kit.ChartError({
-        code: "unknown-reference",
-        path: `marks[${mark.index}].${path.slice(mark.path.length + 1)}`,
-        mark: mark.mark,
-        message: `${path}: the chart has no scale "${name}"; add it to scales${names ? `, or name one of ${names}` : ""}`,
-      });
-    };
+      mapped?.read(prefix, table, field);
+      return made;
+    }
+    // A field's values take the shapes and dashes of its name, apart from other fields'.
+    if (DEFAULT_SCALES.includes(name)) {
+      const key = field === undefined ? name : `${name}\0${field}`;
+      return scales.get(key) ?? scaleOf(name, undefined, key);
+    }
+    const names = [...new Set([...scales.values()].map((scale) => scale.name)), ...ofPanels.keys()]
+      .filter((n) => !DEFAULT_SCALES.includes(n) || config.scales?.[n] !== undefined)
+      .map((n) => `"${n}"`)
+      .join(", ");
+    throw new kit.ChartError({
+      code: "unknown-reference",
+      path: `marks[${mark.index}].${path.slice(mark.path.length + 1)}`,
+      mark: mark.mark,
+      message: `${path}: the chart has no scale "${name}"; add it to scales${names ? `, or name one of ${names}` : ""}`,
+    });
+  };
   const zone = config.timeZone ?? "local";
   /**
    * The scales whose values series and layout items stand for, by the
@@ -303,6 +320,7 @@ function compile(
    * from (`reads`, which name entries; see `ChartFields.entry`): legends
    * list their declared domains for those marks.
    */
+  const ownParts = new Map<Mark, LegendPart[]>();
   const listed = new Map<
     string,
     {
@@ -333,6 +351,13 @@ function compile(
    */
   const paintedRows = new Map<Mark, PaintedRows>();
   const declared = config.scales?.color !== undefined;
+  // Category values' display colors, through every field standing for them (fields/colors.ts).
+  const mapped =
+    fields &&
+    kit.loaded[2]?.mappedColors(
+      fields,
+      (message) => new kit.ChartError({ code: "invalid-option", path: "fields", message }),
+    );
   // Labels following series: marks' own `labels`, and text `from` a mark
   // (by its id). Their sources' series record what they draw (labels.ts).
   const followed = new Set(
@@ -345,6 +370,18 @@ function compile(
   const drawings = new Map<Mark, Drawings>();
   // How marks write the legend entries they share through color fields (see `naming`).
   const entryDisplays = new Map<string, [Table, string][]>();
+  /**
+   * What a layout mark's items stand for without a declared scale: its
+   * field's values, keyed as `#itemColor` (model.ts) keys them.
+   */
+  const itemPrefix = (mark: Mark) => {
+    const identity = mark.identity as unknown as { field: string; table?: Table };
+    return identities.field(
+      identity.table ?? mark.table!,
+      identity.field,
+      config.marks.indexOf(mark as never),
+    );
+  };
   // What layout items' legend entries and parts are named by, as the display code names them.
   const itemNames =
     fields &&
@@ -353,14 +390,7 @@ function compile(
         (mark) => !marks.includes(mark),
       ) as unknown as LayoutMark[],
       // As `#itemColor` (model.ts) keys what items stand for.
-      (mark) =>
-        declared
-          ? prefixIn("color", mark.spec.panel)
-          : identities.field(
-              mark.identity!.table ?? mark.table!,
-              mark.identity!.field,
-              config.marks.indexOf(mark as never),
-            ),
+      (mark) => (declared ? prefixIn("color", mark.spec.panel) : itemPrefix(mark as never)),
       (mark) => config.marks.indexOf(mark as never),
       fields,
       config.locale,
@@ -388,6 +418,25 @@ function compile(
         );
       if (named)
         byMark.set(mark, named(byMark.get(mark) ?? { use() {}, palette: (p) => p, attach() {} }));
+      const own = identities.scopes[at];
+      const field = mark.identity?.field;
+      if (mapped && own !== undefined && field !== undefined) {
+        mapped.read(own, mark.table, field);
+        // Series take their values' display colors where nothing of the mark's
+        // colors them, nor a declared scale: below what the mark's features give.
+        const features = byMark.get(mark) ?? { use() {}, palette: (p) => p, attach() {} };
+        const palette = features.palette.bind(features);
+        features.palette = (p) =>
+          palette((key, label, color, entry) =>
+            p(
+              key,
+              label,
+              color ?? (entry ? mapped.key(entry) : mapped.color(own, label ?? sourceOf(key))),
+              entry,
+            ),
+          );
+        byMark.set(mark, features);
+      }
     } catch (error) {
       throw placed(kit, error, where);
     }
@@ -485,7 +534,7 @@ function compile(
     else if (spec.type === "region" && (mark.spec as { encode?: object }).encode) {
       const looks = rowLooks(mark.spec as RowStyleSpec, mark.table, read, path, kit.isColor);
       byMark.set(mark, {
-        ...labelFeatures(kit, mark, zone, path, where, config.locale, fields, shown),
+        ...labelFeatures(kit, mark, zone, path, where, config, fields, shown),
         ...looks,
       });
       const { label } = mark.spec as { label?: string | { field?: string } };
@@ -501,7 +550,7 @@ function compile(
           ),
         });
     } else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
-      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config.locale, fields, shown));
+      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config, fields, shown));
     else
       throw new Error(
         `${path}: encode, style, markers, continuity, and where are not options of ${spec.type} marks`,
@@ -562,6 +611,13 @@ function compile(
           `${mark.spec.type} (mark ${(config.marks as readonly Mark[]).indexOf(mark)})`,
         ) ?? scaleOf("color", undefined))
       : undefined;
+  // Layout marks' items stand for their field's values, which take its display colors.
+  if (mapped)
+    for (const mark of config.marks as readonly Mark[]) {
+      const identity = mark.identity as { field?: string; table?: Table } | undefined;
+      if (!marks.includes(mark) && identity?.field !== undefined && mark.table)
+        mapped.read(itemPrefix(mark), identity.table ?? mark.table, identity.field);
+    }
   if (declared)
     for (const mark of config.marks as readonly Mark[]) {
       const identity = mark.identity as { field?: string; table?: Table } | undefined;
@@ -583,18 +639,44 @@ function compile(
     fields,
     items: (mark) => {
       const scale = colorOf(mark);
-      return (
-        scale && {
+      if (scale)
+        return {
           prefix: prefixIn("color", mark.spec.panel),
           color: (value) =>
             theme && paint!(scale.output(value, theme.palette, theme.muted), "chart scales.color"),
-        }
-      );
+        };
+      if (!mapped || (mark.identity as { field?: string } | undefined)?.field === undefined)
+        return undefined;
+      const prefix = itemPrefix(mark);
+      return {
+        prefix,
+        color: (value) => {
+          const color = mapped.color(prefix, value);
+          return color === undefined ? undefined : paint!(color, "chart fields");
+        },
+      };
     },
     of: (mark) => byMark.get(mark),
     labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark)),
     listDomains: (entries, plain, parts) => {
       let out = itemNames?.write(entries, parts, theme, paint) ?? [...entries];
+      // Marks colored by display colors show a key of them, which they own
+      // as marks own their own keys (points theirs): marks left out of
+      // legends only where guides name them.
+      ownParts.clear();
+      if (fields && (config.legend !== false || !plain))
+        for (const [mark, features] of byMark) {
+          const listed = mark.spec.legend !== false;
+          if (!listed && plain) continue;
+          for (const field of features.displayColors ?? []) {
+            const part = fields.colorLegend(mark.table, field, (color) =>
+              paint!(color, `${mark.spec.type} color`),
+            );
+            if (!part) continue;
+            ownParts.set(mark, [...(ownParts.get(mark) ?? []), part]);
+            if (listed && !parts.some(({ key }) => key === part.key)) parts.push(part);
+          }
+        }
       for (const [prefix, { scale, marks, reads }] of listed) {
         const domain = scale.spec?.domain;
         // Marks left out of legends list it where guides name them, and only there.
@@ -624,6 +706,7 @@ function compile(
       const painted = paintedRows.get(mark);
       return painted ? rowPainted(entries, painted) : entries;
     },
+    ownParts: (mark) => ownParts.get(mark as Mark) ?? [],
     domainKeys: (mark) =>
       [...listed].flatMap(([prefix, { scale, marks }]) =>
         marks.has(mark) ? domainKeys(prefix, scale) : [],
@@ -950,6 +1033,7 @@ function lineFeatures(
   let paintOf: PaintReader;
   return {
     ...(reach > 0 && { inset: { x: reach, y: reach }, clearDomain }),
+    displayColors: styles.displayColors,
     use(t, p) {
       theme = t;
       paintOf = p;
@@ -1341,7 +1425,10 @@ function barFeatures(
       const stroke = look?.stroke ?? (spec.stroke && paintOf(spec.stroke, `${path} stroke`));
       s.features = {
         rows,
-        key: () => styles.key(),
+        legend: () => {
+          const key = styles.key();
+          return key && keyLegendWith(kit, key);
+        },
         swatch: look
           ? () => ({
               type: "rect",
@@ -1355,12 +1442,15 @@ function barFeatures(
     },
     format,
     content,
+    displayColors: styles.displayColors,
   };
 }
 
 /**
  * Annotations' labels in pattern formats, and of parts (`content`): a
- * field of their table's, or a rule's value at its place.
+ * field of their table's, or a rule's value at its place; and the steps of
+ * rules and regions at a field's thresholds, whose labels write the step's
+ * value through the field's display.
  */
 function labelFeatures(
   kit: FeatureKit,
@@ -1368,10 +1458,12 @@ function labelFeatures(
   zone: string,
   path: string,
   where: Where,
-  locale: string | undefined,
+  config: ChartConfig,
   fields: ChartFields | undefined,
   shown: LabelContent | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
+  const { locale } = config;
+  const placed = mark.thresholds && placedSteps(kit, mark, config, fields, path);
   const format = formatOf(kit, zone);
   const label = (mark.spec as { label?: unknown }).label;
   const own =
@@ -1392,10 +1484,49 @@ function labelFeatures(
       locale,
       zone,
       (i) => `marks[${where.index}].label${own?.content ? `.content[${i}]` : ""}`,
-      { series: false, value: mark.spec.type === "rule" },
+      { series: false, value: mark.spec.type === "rule" || !!placed },
       fields,
+      undefined,
+      placed?.shown,
     );
-  return { use() {}, palette: (base) => base, attach() {}, format, content };
+  return {
+    use() {},
+    palette: (base) => base,
+    attach() {},
+    format,
+    content,
+    steps: placed?.steps,
+  };
+}
+
+/**
+ * The steps of a rule or region at a field's thresholds (`Mark.thresholds`)
+ * as the chart's displays give them, over the tables its marks read, and
+ * the field's display; refused where they give none.
+ */
+function placedSteps(
+  kit: FeatureKit,
+  mark: Mark,
+  config: ChartConfig,
+  fields: ChartFields | undefined,
+  path: string,
+) {
+  const place = mark.thresholds!;
+  const axis = (mark.spec as { x?: unknown }).x === undefined ? "y" : "x";
+  const at = `${path} ${axis}.thresholds`;
+  // Every table marks read: a network's nodes as well as its links.
+  const tables = new Set(
+    config.marks.flatMap((m) => {
+      const { table, otherTables = [] } = m as { table?: Table; otherTables?: readonly Table[] };
+      return table ? [table, ...otherTables] : otherTables;
+    }),
+  );
+  const found = fields && kit.loaded[2]?.stepsAt(fields, place, [...tables], at);
+  if (found) return found;
+  const name = place.thresholds;
+  throw new Error(
+    `${at}: fields give ${JSON.stringify(name)} no thresholds; give ${keyPath("fields", name)}.thresholds, or ${mark.spec.type === "rule" ? "place the rule at a value" : `give ${axis}1 and ${axis}2`}`,
+  );
 }
 
 /**
@@ -1508,6 +1639,7 @@ function areaFeatures(
   let theme: Theme | undefined;
   return {
     continuity: unioned ? continuity : undefined,
+    displayColors: styles.displayColors,
     use(t, p) {
       theme = t;
       styles.use(t, p);

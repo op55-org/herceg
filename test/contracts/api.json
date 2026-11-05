@@ -1004,6 +1004,48 @@
         "mark": "Python's hg.ItemCoordinate names the layout mark as its own mark, the spec's item.mark."
       }
     },
+    "settings RulePlace hg.AtThresholds|hg.DataPosition|hg.Fraction|hg.ItemCoordinate|hg.Pixels": {
+      "spelled": {
+        "fraction": {
+          "as": "value",
+          "reason": "Python's hg.Fraction, hg.Pixels, and hg.DataPosition name the kind of place (`{ fraction: 0.5 }` is `hg.Fraction(0.5)`) and take its number as value."
+        },
+        "px": {
+          "as": "value",
+          "reason": "Python's hg.Fraction, hg.Pixels, and hg.DataPosition name the kind of place (`{ fraction: 0.5 }` is `hg.Fraction(0.5)`) and take its number as value."
+        },
+        "data": {
+          "as": "value",
+          "reason": "Python's hg.Fraction, hg.Pixels, and hg.DataPosition name the kind of place (`{ fraction: 0.5 }` is `hg.Fraction(0.5)`) and take its number as value."
+        },
+        "thresholds": {
+          "as": "field",
+          "reason": "Python names the column whose thresholds the place takes as its field (`hg.AtThresholds(\"p99\")`), as its other places name columns, where the spec writes `{ thresholds: \"p99\" }`."
+        }
+      },
+      "untyped": {
+        "fraction": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`.",
+        "px": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`.",
+        "item": "Python's hg.ItemCoordinate takes the layout mark's id and the item's names as its own mark and item (`hg.ItemCoordinate(\"cells\", [hg.col(\"market\")])`), where the spec writes `{ item: { mark, item: [{ field: \"market\" }] } }`; a name is text, or hg.col(column) for `{ field }`."
+      },
+      "choices": {
+        "item": {
+          "takes": ["*"],
+          "reason": "As untyped item: Python's item is the item's names, the spec's item.item."
+        }
+      },
+      "only": {
+        "mark": "Python's hg.ItemCoordinate names the layout mark as its own mark, the spec's item.mark."
+      }
+    },
+    "settings ThresholdPlace hg.AtThresholds": {
+      "spelled": {
+        "thresholds": {
+          "as": "field",
+          "reason": "Python names the column whose thresholds the place takes as its field (`hg.AtThresholds(\"p99\")`), as its other places name columns, where the spec writes `{ thresholds: \"p99\" }`."
+        }
+      }
+    },
     "settings LayoutSpec hg.Grid": {
       "without": {
         "type": "Python's hg.Grid is a grid's tracks and gap (layout=hg.Grid(rows=..., columns=...)); the class is its type.",
@@ -1702,11 +1744,28 @@
     "chart python fields": {
       "without": {
         "link": "No surface draws a field's link yet; hg.FieldDisplay takes link when one does."
+      },
+      "untyped": {
+        "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
       }
     },
     "chart update fields": {
       "without": {
         "link": "As chart python fields'."
+      },
+      "untyped": {
+        "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
+      }
+    },
+    "settings Thresholds hg.Thresholds": {
+      "untyped": {
+        "steps": "Python takes each step as a (value, color) pair, or a dict of value and color (`steps=[(200, \"#f9a825\")]`), where the spec writes `{ value, color }`."
+      },
+      "choices": {
+        "steps": {
+          "takes": ["*"],
+          "reason": "As untyped steps: a step is a pair or a dict."
+        }
       }
     }
   }

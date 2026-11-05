@@ -56,7 +56,7 @@ import {
   writtenTicks,
 } from "./axis.ts";
 import type { clearDomain } from "./clearance.ts";
-import type { DisplayCode, FeatureCompiler } from "./features.ts";
+import type { CompiledFeatures, DisplayCode, FeatureCompiler } from "./features.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
   entryOf,
@@ -220,6 +220,8 @@ export interface CompiledScales {
     headroom: (mark: Mark, series: readonly Series[]) => number;
     /** Panel `i`'s plot's length along `axis`, read once panels are placed. */
     length: (i: number, axis: "x" | "y") => number;
+    /** The chart's compiled features, which marks' extents read (`Mark.xExtent`). */
+    features: CompiledFeatures | undefined;
   }): OwnScales;
 }
 

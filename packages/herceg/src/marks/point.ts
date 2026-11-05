@@ -3,6 +3,7 @@ import type { CategoryField, NumericField, PositionField, Schema, Table } from "
 import { pointDrawing } from "../draw/point.ts";
 import { SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../draw/symbols.ts";
 import type { ChartFields, ShownField } from "../fields/chart.ts";
+import type { DisplayTones } from "../fields/colors.ts";
 import { formatNumber } from "../format/format.ts";
 import { GridIndex } from "../lod/grid-index.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -267,8 +268,8 @@ const LEGEND_REACH = 6;
 /** How a point's radius, color, opacity, and shape follow fields, for one frame. */
 interface Encoding {
   radius?: (value: number) => number;
-  /** A number or time `color`'s scale. */
-  color?: SequentialScale;
+  /** A number or time `color`'s scale, or its display colors in its place. */
+  color?: SequentialScale | DisplayTones;
   /** The colors of a color channel the feature compiler reads (see `PointLooks`). */
   looks?: PointLooks;
   palette?: readonly string[];
@@ -571,8 +572,10 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         encoding.opacity === undefined &&
         !opacityOf &&
         opacity >= 1 &&
-        (encoding.color !== undefined ||
-          (toneOf ? encoding.palette!.every(isOpaqueColor) : isOpaqueColor(s.color)));
+        // A ramp's colors are opaque; display colors may not be.
+        (encoding.color !== undefined || toneOf
+          ? encoding.palette!.every(isOpaqueColor)
+          : isOpaqueColor(s.color));
       // Device-pixel occupancy for sampling; only opaque plain points qualify,
       // since overlapping translucent or varied points look different from one.
       const sample = this.spec.sampling === "pixel" && opaque && !encoded;
@@ -738,7 +741,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
       encoding.opacity !== undefined ||
       looks?.opacity ||
       this.#opacity < 1 ||
-      (color === undefined && !palette.every(isOpaqueColor))
+      !palette.every(isOpaqueColor)
     )
       return undefined;
     const tones =
@@ -792,15 +795,18 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   /**
    * The continuous color scale of a number or time `color` field, with the
    * current data: over `colorDomain`, else the field's display's bounds,
-   * else the data's extent for an end without one.
+   * else the data's extent for an end without one; or the field's display
+   * colors, where it gives some and the mark gives no ramp of its own.
    */
   #colorScale(
     theme: Theme,
     paint: PaintReader,
     fields: ChartFields | undefined,
-  ): SequentialScale | undefined {
+  ): SequentialScale | DisplayTones | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
+    const tones = fields?.tones(this.table, this.#toneField, spec, theme.muted, paint);
+    if (tones) return tones;
     const extent = extentAt(this.rows(), this.#toneField);
     const tone = this.#shown(this.#toneField, fields);
     const domain =
@@ -812,7 +818,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   }
 
   /** The scale's colors, kept while the scale's ramp, domain, and midpoint are unchanged. */
-  #palette(scale: SequentialScale): readonly string[] {
+  #palette(scale: SequentialScale | DisplayTones): readonly string[] {
     const key = `${scale.stops.join()}|${scale.domain.join()}|${scale.midpoint}`;
     if (this.#palettes?.key !== key) this.#palettes = { key, colors: scale.colors() };
     return this.#palettes.colors;
@@ -831,18 +837,22 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     const fields = series[0]?.fields;
     const scale = series.length > 0 ? this.#colorScale(theme, paint, fields) : undefined;
     const tone = this.#shown(this.#toneField, fields);
-    const ramps: ColorRamp[] = scale
-      ? [
-          {
-            stops: scale.legendStops(),
-            domain: scale.domain,
-            midpoint: scale.midpoint,
-            title: tone?.label ?? this.#toneField!,
-            field: tone,
-          },
-        ]
-      : [];
-    return legendParts(ramps, this.#glyphKeys(series, format));
+    // Display colors show as a key of them.
+    const shown = scale && "legend" in scale ? scale.legend : undefined;
+    const ramps: ColorRamp[] =
+      scale && !("legend" in scale)
+        ? [
+            {
+              stops: scale.legendStops(),
+              domain: scale.domain,
+              midpoint: scale.midpoint,
+              title: tone?.label ?? this.#toneField!,
+              field: tone,
+            },
+          ]
+        : [];
+    const parts = legendParts(ramps, this.#glyphKeys(series, format));
+    return shown ? [shown, ...parts] : parts;
   }
 
   /**

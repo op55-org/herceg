@@ -1629,11 +1629,26 @@ export type AnnotationValue = number | Field;
  */
 export type AnnotationPosition = AnnotationValue | Coordinate | ItemCoordinate;
 
+/**
+ * A place at each step of the thresholds the chart's field displays give a
+ * number field (`fields`): a rule at each step's value, or a band from each
+ * step to the next. Places of no rows: one item per step.
+ */
+export interface ThresholdPlace {
+  /** The field whose display's thresholds give the places. */
+  thresholds: Field;
+  /** The table whose field it is, by name, where the tables the chart's marks read give it different thresholds. */
+  table?: string;
+}
+
 /** Where rules stand: at `x` (vertical) or at `y` (horizontal). */
 export type RulePosition<P> = { x: P; y?: never } | { y: P; x?: never };
 
-/** Horizontal (y) or vertical (x) reference lines. */
-export type RuleSpec = RuleStyle & RulePosition<AnnotationPosition>;
+/** Where a rule stands: a place, or each step of a field's thresholds. */
+export type RulePlace = AnnotationPosition | ThresholdPlace;
+
+/** Horizontal (y) or vertical (x) reference lines, at places or at a field's thresholds. */
+export type RuleSpec = RuleStyle & RulePosition<RulePlace>;
 
 /** What annotations have besides their places: no selection looks, which they do not draw. */
 interface AnnotationBase extends Omit<MarkBase, keyof SelectionLooks> {
@@ -1693,16 +1708,28 @@ export interface DendrogramSpec extends Omit<MarkBase, "axis" | keyof SelectionL
 
 /** The ranges a region spans: along x, along y, or both. */
 export type RegionRange<P> =
-  | { x1: P; x2: P; y1?: never; y2?: never }
-  | { y1: P; y2: P; x1?: never; x2?: never }
-  | { x1: P; x2: P; y1: P; y2: P };
+  | { x1: P; x2: P; y1?: never; y2?: never; x?: never; y?: never }
+  | { y1: P; y2: P; x1?: never; x2?: never; x?: never; y?: never }
+  | { x1: P; x2: P; y1: P; y2: P; x?: never; y?: never };
+
+/**
+ * Bands at a field's thresholds along x or y (`ThresholdPlace`): one from
+ * each step to the next, the last to the plot's end, and one from the
+ * plot's start to the first step where the thresholds give a base color;
+ * within a range along the other axis, where one is given.
+ */
+export type RegionSteps<P, T = ThresholdPlace> =
+  | ({ y: T; x?: never; y1?: never; y2?: never } & ({ x1: P; x2: P } | { x1?: never; x2?: never }))
+  | ({ x: T; y?: never; x1?: never; x2?: never } & ({ y1: P; y2: P } | { y1?: never; y2?: never }));
 
 /**
  * Shaded regions: from `x1` to `x2` across the plot's height, from `y1` to
- * `y2` across its width, or rectangles with both. Drawn in mark order, so
- * list them before the marks they highlight to draw them underneath.
+ * `y2` across its width, or rectangles with both; or bands at a field's
+ * thresholds. Drawn in mark order, so list them before the marks they
+ * highlight to draw them underneath.
  */
-export type RegionSpec = RegionStyle & RegionRange<AnnotationPosition>;
+export type RegionSpec = RegionStyle &
+  (RegionRange<AnnotationPosition> | RegionSteps<AnnotationPosition>);
 
 interface RegionStyle extends AnnotationBase, RowItems {
   /**

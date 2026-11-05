@@ -143,7 +143,7 @@ describe("field displays in specs", () => {
       "fields.status.mappings[0]: a mapping matches by value, between, or regex; give one",
     );
     expect(fields({ status: { mappings: [{ value: "1" }] } })).toThrow(
-      "fields.status.mappings[0].text: required",
+      "fields.status.mappings[0]: give text, color, or both",
     );
     expect(fields({ score: { mappings: [{ between: [0.9, 0.5], text: "a" }] } })).toThrow(
       "fields.score.mappings[0].between: 0.9 is above 0.5; give from, then to",

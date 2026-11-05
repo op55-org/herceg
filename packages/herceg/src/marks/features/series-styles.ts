@@ -130,6 +130,8 @@ export class SeriesStyles {
   readonly #scaled: readonly Channel<unknown>[];
   /** What the runs' looks were read with: the theme, and the channel scales' revisions. */
   #runKey: { theme: Theme | undefined; scaled: number } | undefined;
+  /** The number fields whose display colors color the series along their rows, read without a scale. */
+  displayColors: string[] | undefined;
   /** The axis the series' positions run along. */
   readonly #along: "x" | "y";
   /** The field the series' color is read from, where it is not the series field. */
@@ -222,6 +224,7 @@ export class SeriesStyles {
         compiled.kind === "condition" ||
         compiled.kind === "identity" ||
         compiled.kind === "scaled" ||
+        compiled.kind === "display" ||
         (compiled.kind === "field" && compiled.field !== spec.series)
       ) {
         if (compiled.kind === "scaled") scaled.push(compiled);
@@ -232,6 +235,8 @@ export class SeriesStyles {
         });
         if (paint) rows = true;
         if (paint && compiled.kind === "field") colorField = compiled.field;
+        if (compiled.kind === "display")
+          this.displayColors = [...(this.displayColors ?? []), compiled.field];
         return undefined;
       }
       return this.#reader(compiled, defaults, fallback);

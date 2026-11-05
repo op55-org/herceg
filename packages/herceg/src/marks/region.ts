@@ -11,25 +11,37 @@ import {
   slidesAlong,
 } from "../layout/placer.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
+import type { CompiledFeatures, RowPaint } from "../model/features.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, LabelsGeometry, RectGeometry } from "../scene/scene.ts";
 import type { LabelLayoutSpec, LabelPlaceSpec } from "../spec/encoding.ts";
 import type { Side } from "../spec/place.ts";
-import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "../spec/spec.ts";
+import type {
+  AnnotationPosition,
+  Clip,
+  Frozen,
+  RegionRange,
+  RegionSpec,
+  RegionSteps,
+} from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import type { TextPaint } from "../style/style.ts";
 import {
   AnnotationData,
+  type AtThresholds,
   checkLegend,
+  type Items,
+  itemsIn,
   labelOf,
   type Place,
   type PlaceOption,
   position,
   readsTable,
   type TextField,
+  thresholdPlace,
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
-import type { ItemKeyed, RowChannel } from "./encoding.ts";
+import type { ColorChannel, ItemKeyed, RowChannel } from "./encoding.ts";
 import type { PartText } from "./features/part-text.ts";
 import {
   grown,
@@ -97,9 +109,13 @@ interface RegionStyle {
   id?: string;
 }
 
-/** A region between constant places: an x range, a y range, or both (a rectangle). */
+/**
+ * A region between constant places: an x range, a y range, or both (a
+ * rectangle); or bands at a field's thresholds along y or x
+ * (`{ thresholds: "p99" }`), each in its step's color unless `fill` is given.
+ */
 export type RegionOptions = RegionStyle &
-  RegionRange<PlaceOption<never>> & {
+  (RegionRange<PlaceOption<never>> | RegionSteps<PlaceOption<never>, AtThresholds>) & {
     /** Text drawn in the region (its top left corner by default): its text, or a label object. */
     label?: RuleLabel<never, RegionLabelLayout>;
   };
@@ -117,9 +133,9 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
      * Regions are drawn in row order whatever their looks.
      */
     encode?: {
-      color?: RowChannel<string, S>;
-      fill?: RowChannel<string, S>;
-      stroke?: RowChannel<string, S>;
+      color?: Exclude<ColorChannel<S>, { series: true }>;
+      fill?: Exclude<ColorChannel<S>, { series: true }>;
+      stroke?: Exclude<ColorChannel<S>, { series: true }>;
       opacity?: RowChannel<number, S>;
     };
   };
@@ -130,18 +146,34 @@ type RegionLabelLayout = LabelLayoutSpec & { leader?: never };
 /** Pixels between a region's edge and its label. */
 const PADDING = 4;
 
-/** Why a region spec has no range, or half of one, if it does. */
+/** Why a region spec has no range, or half of one, or bands at thresholds and a range along one axis, if it does. */
 export function regionFormError(spec: {
+  x?: unknown;
+  y?: unknown;
   x1?: unknown;
   x2?: unknown;
   y1?: unknown;
   y2?: unknown;
 }): string | undefined {
+  if (spec.x !== undefined && spec.y !== undefined)
+    return "region: bands at thresholds go along x or along y; give one";
+  for (const axis of ["x", "y"] as const)
+    if (spec[axis] !== undefined) {
+      if (typeof spec[axis] !== "object" || spec[axis] === null || !("thresholds" in spec[axis]))
+        return `region ${axis}: places bands at a field's thresholds, such as { thresholds: "p99" }; give ${axis}1 and ${axis}2 for a range`;
+      if (spec[`${axis}1`] !== undefined || spec[`${axis}2`] !== undefined)
+        return `region: ${axis} places bands at thresholds, and ${axis}1 and ${axis}2 a range; give one`;
+    }
   if ((spec.x1 === undefined) !== (spec.x2 === undefined))
     return "region: needs both x1 and x2, or neither";
   if ((spec.y1 === undefined) !== (spec.y2 === undefined))
     return "region: needs both y1 and y2, or neither";
-  if (spec.x1 === undefined && spec.y1 === undefined)
+  if (
+    spec.x1 === undefined &&
+    spec.y1 === undefined &&
+    spec.x === undefined &&
+    spec.y === undefined
+  )
     return "region: needs x1 and x2, y1 and y2, or both";
   return undefined;
 }
@@ -157,9 +189,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   readonly tooltip = "x";
   readonly featured: boolean;
   readonly domainFallback: boolean;
+  readonly thresholds: AtThresholds | undefined;
   readonly #data: AnnotationData;
+  /** Its places as its data reads them: at thresholds, the bands' columns. */
+  readonly #positions: Readonly<
+    Record<"x1" | "x2" | "y1" | "y2", Frozen<AnnotationPosition> | undefined>
+  >;
+  /** Its items in a chart of compiled features (see `itemsIn`). */
+  readonly #items: (features: CompiledFeatures | undefined) => Items;
   /** The rows each geometry drawn draws, by item (see `partOf`). */
   readonly #drawnRows = new WeakMap<Geometry, Uint32Array>();
+  /** At thresholds, the step of each region or label a geometry drew (see `partOf`). */
+  readonly #stepKeys = new WeakMap<Geometry, readonly string[]>();
   /** The label drawn as regions always draw theirs: plain text, in the top left corner. */
   readonly #plain: boolean;
   /**
@@ -198,32 +239,57 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       const { encode: _, ...rest } = input;
       input = rest;
     }
-    this.spec = frozen(input);
+    const problem = regionFormError(input);
+    if (problem) throw new Error(problem);
+    const [held, stepped] = thresholdPlace(input, "region");
+    this.spec = frozen(held);
+    this.thresholds = stepped;
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.domainFallback = spec.contributeDomain !== true;
-    const problem = regionFormError(spec);
-    if (problem) throw new Error(problem);
     const label = labelOf(spec.label);
     // Channels paint each row of the table, wherever the rows' places are.
     if (spec.encode && !table)
       throw new Error(
         "region encode: channels read the rows of a table; give region(table, options), or drop encode",
       );
-    this.#data = new AnnotationData(
-      table,
-      { x1: spec.x1, x2: spec.x2, y1: spec.y1, y2: spec.y2 },
-      label,
-      "region",
-      { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
-      "x",
-      spec.encode,
-    );
+    const along = spec.x === undefined ? "y" : "x";
+    // At thresholds, the bands' ends are their columns (see `stepItems`).
+    const positions = {
+      x1: stepped && along === "x" ? "from" : spec.x1,
+      x2: stepped && along === "x" ? "to" : spec.x2,
+      y1: stepped && along === "y" ? "from" : spec.y1,
+      y2: stepped && along === "y" ? "to" : spec.y2,
+    };
+    this.#positions = positions;
+    const across = along === "y" ? [spec.x1, spec.x2] : [spec.y1, spec.y2];
+    if (stepped && readsTable(across, spec.label, spec.encode))
+      throw new Error(
+        `region ${along}.thresholds: regions at thresholds stand for steps, not rows; give the other places and label no fields, and drop encode`,
+      );
+    const data = (columns?: Record<string, Float64Array>) =>
+      new AnnotationData(
+        table,
+        positions,
+        label,
+        "region",
+        { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
+        "x",
+        spec.encode,
+        columns,
+      );
+    // Without the chart's steps, it has none.
+    const none = new Float64Array(0);
+    this.#data = data(stepped && { from: none, to: none });
+    this.#items = itemsIn(this, this.#data, !!stepped, true, data);
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "region");
     this.#plain = label !== undefined && !label.style && !label.place && !label.format;
     this.featured =
-      lazyFormat(label?.format) || label?.content !== undefined || spec.encode !== undefined;
+      lazyFormat(label?.format) ||
+      label?.content !== undefined ||
+      spec.encode !== undefined ||
+      !!stepped;
   }
 
   get table(): Table | undefined {
@@ -240,12 +306,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     locale: string | undefined,
     rows?: RowParts,
     frames?: readonly Frame[],
+    features?: CompiledFeatures,
   ): string | undefined {
-    const data = this.#data;
-    const x = this.#places("x");
-    const y = this.#places("y");
+    const data = this.#items(frames?.[0]?.features ?? features).data;
+    const x = this.#places("x", data);
+    const y = this.#places("y", data);
+    const starts = this.thresholds && (this.spec.x === undefined ? y : x)?.[0];
     // Places that are not values or categories (fractions, pixels) say
-    // nothing of where the region is.
+    // nothing of where the region is; bands at thresholds open at an end
+    // say where they start or end.
     const range = (places: [Place, Place] | undefined, f: Formatter, i: number) => {
       if (!places || places.some((p) => p.kind === "frame" || p.kind === "item")) return "";
       const [a, b] = places.map((p) =>
@@ -255,6 +324,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             ? f(data.value(p, i))
             : undefined,
       );
+      if (this.thresholds && (a ?? b) !== undefined)
+        return a === undefined ? `up to ${b}` : b === undefined ? `from ${a}` : `${a} to ${b}`;
       return a !== undefined && b !== undefined ? `${a} to ${b}` : undefined;
     };
     return data.summary(
@@ -269,6 +340,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       rows,
       frames,
       format.content,
+      // Labels at thresholds write each band's step, as drawn.
+      starts && ((i) => data.value(starts, i)),
     );
   }
 
@@ -286,8 +359,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     return data.entries(key, locale, rows, data.writer(locale, pattern));
   }
 
-  xExtent(_series: unknown, log: boolean, _breaks?: unknown, rows?: RowParts) {
-    return this.#data.extent(this.#pair("x"), log, undefined, rows);
+  xExtent(
+    _series: unknown,
+    log: boolean,
+    _breaks?: unknown,
+    rows?: RowParts,
+    features?: CompiledFeatures,
+  ) {
+    return this.#items(features).data.extent(this.#pair("x"), log, undefined, rows);
   }
 
   get scaled() {
@@ -298,8 +377,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     return this.#data.follows;
   }
 
-  scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
-    return this.#data.extent(this.#pair(axis), log, undefined, rows, name);
+  scaleExtent(
+    name: string,
+    axis: "x" | "y",
+    log: boolean,
+    rows?: RowParts,
+    features?: CompiledFeatures,
+  ) {
+    return this.#items(features).data.extent(this.#pair(axis), log, undefined, rows, name);
   }
 
   yExtent(
@@ -309,22 +394,24 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     log: boolean,
     _breaks?: unknown,
     rows?: RowParts,
+    features?: CompiledFeatures,
   ) {
-    const x = this.#places("x");
-    if (!x) return this.#data.extent(this.#pair("y"), log, undefined, rows);
+    const data = this.#items(features).data;
+    const x = this.#places("x", data);
+    if (!x) return data.extent(this.#pair("y"), log, undefined, rows);
     // Regions that also span x count toward y only where they overlap the view.
     const lo = Math.min(x0, x1);
     const hi = Math.max(x0, x1);
     // An edge at a fraction, pixels, a category, or on a scale of the
     // chart's own is in view wherever x is.
     const edge = (place: Place, i: number, end: number) =>
-      place.kind === "value" && !place.scale ? this.#data.value(place, i) : end;
+      place.kind === "value" && !place.scale ? data.value(place, i) : end;
     const overlaps = (i: number) => {
       const p = edge(x[0], i, hi);
       const q = edge(x[1], i, lo);
       return Math.max(p, q) >= lo && Math.min(p, q) <= hi;
     };
-    return this.#data.extent(this.#pair("y"), log, overlaps, rows);
+    return data.extent(this.#pair("y"), log, overlaps, rows);
   }
 
   /** Its regions; the panel's placer places their labels (`labelRequests`). */
@@ -378,12 +465,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     panelRows: RowParts | undefined,
   ): { fills: RectGeometry[]; labels: RegionLabel[] } {
     // What the legend hides of it goes undrawn.
-    const rows = this.#data.shown(frame.hidden, key, panelRows);
+    const { data, keys, colors } = this.#items(frame.features);
+    const rows = data.shown(frame.hidden, key, panelRows);
     const { plot, theme } = frame;
-    const data = this.#data;
     const id = seriesKey(key, "region");
-    const xs = this.#places("x");
-    const ys = this.#places("y");
+    const xs = this.#places("x", data);
+    const ys = this.#places("y", data);
+    // At thresholds, a band's label writes the step it starts at.
+    const starts = this.thresholds && (this.spec.x === undefined ? ys : xs)![0];
     const label = data.label;
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
     // Buffers as large as the items drawn: a facet panel's, not the table's.
@@ -392,9 +481,16 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     // The row each region drawn is (and, with labels, each label), for drawn-mark records.
     const drawnRows = rowBuffer(frame, id, "rows", size);
     const color = painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted;
-    // Each row's look, where channels read rows; runs of rows of one look start at `starts`.
-    const looks = frame.features?.of(this)?.rowLooks?.();
-    const starts: number[] = [];
+    // Each row's look, where channels read rows, or at thresholds each
+    // band's color; runs of rows of one look start at `runs`.
+    const looks =
+      colors && this.spec.fill === undefined
+        ? {
+            paints: colors.map((c): RowPaint => ({ fill: frame.paint(c, "chart fields") })),
+            of: (i: number) => i,
+          }
+        : frame.features?.of(this)?.rowLooks?.();
+    const runs: number[] = [];
     const runLooks: number[] = [];
     // An outline draws the sides it is given of each region's own edges.
     const outlined =
@@ -419,15 +515,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       // Each region is cut to its box, its label placed in its visible part;
       // without places on an axis, it spans the plot.
       const across = xs
-        ? this.#span(xs, "x", i, frame.x, frame, box.x, box.x + box.width)
+        ? this.#span(data, xs, "x", i, frame.x, frame, box.x, box.x + box.width)
         : ([plot.x, plot.x + plot.width, 0] as const);
       const down = ys
-        ? this.#span(ys, "y", i, frame.y, frame, box.y, box.y + box.height)
+        ? this.#span(data, ys, "y", i, frame.y, frame, box.y, box.y + box.height)
         : ([plot.y, plot.y + plot.height, 0] as const);
       if (!across || !down) return;
       const look = looks ? looks.of(i) : 0;
       if (count === 0 || look !== runLooks[runLooks.length - 1]) {
-        starts.push(count);
+        runs.push(count);
         runLooks.push(look);
       }
       drawnRows[count] = i;
@@ -441,8 +537,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
           given & (((across[2] & 1) << 3) | (across[2] & 2) | (down[2] & 1) | ((down[2] & 2) << 1));
       if (paint) {
         const content = frame.features?.of(this)?.content;
-        const text = data.text(i, frame.locale, write, content);
-        const parts = content?.styled?.(i, "", Number.NaN, undefined, paint, frame);
+        const at = starts ? data.value(starts, i) : Number.NaN;
+        const text = data.text(i, frame.locale, write, content, at);
+        const parts = content?.styled?.(i, "", at, undefined, paint, frame);
         // A label that writes nothing takes no place, so it hides no other.
         if (parts ? parts.lines.width > 0 : /[^\n]/.test(text)) {
           const label: PlacedLabel =
@@ -479,19 +576,20 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       }
       count++;
     });
-    if (starts.length === 0) {
-      starts.push(0);
+    if (runs.length === 0) {
+      runs.push(0);
       runLooks.push(0);
     }
     const fillOpacity = this.spec.fillOpacity ?? 0.15;
-    const fills = starts.map((start, run): RectGeometry => {
-      const end = starts[run + 1] ?? count;
+    const fills = runs.map((start, run): RectGeometry => {
+      const end = runs[run + 1] ?? count;
       const look = looks?.paints[runLooks[run]!];
       const opacity = look?.opacity ?? 1;
       const fill: RectGeometry = {
         kind: "rect",
         draw: rectDrawing,
-        key: looks ? `${id}|${run}` : id,
+        // At thresholds, a run is a band, keyed by its step.
+        key: keys ? `${id}|${keys[runLooks[run]!]}` : looks ? `${id}|${run}` : id,
         fill: look?.fill ?? color,
         fillOpacity: fillOpacity * opacity,
         rects: rects.subarray(start * 4, end * 4),
@@ -500,6 +598,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       const edge = this.#edge(frame, fill.fill, look?.stroke);
       if (edge) fill.edge = { ...edge, opacity, sides: sides!.subarray(start, end) };
       this.#drawnRows.set(fill, drawnRows.subarray(start, end));
+      if (keys) this.#stepKeys.set(fill, stepsOf(keys, drawnRows.subarray(start, end)));
       return fill;
     });
     return { fills, labels };
@@ -551,17 +650,23 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             frame,
           )
         : labelsGeometry(labelKey, placed, paint, halo, frame, owners);
-    this.#drawnRows.set(
-      geometry,
+    const drawn =
       geometry.kind === "labels"
         ? Uint32Array.from(owners, (k) => rows[k]!)
-        : Uint32Array.from(rows),
-    );
+        : Uint32Array.from(rows);
+    this.#drawnRows.set(geometry, drawn);
+    const keys = this.#items(frame.features).keys;
+    if (keys) this.#stepKeys.set(geometry, stepsOf(keys, drawn));
     return [geometry];
   }
 
-  /** Its regions and their labels are rows (of its table, or of its places given alone). */
+  /**
+   * Its regions and their labels are rows (of its table, or of its places
+   * given alone); at thresholds, its steps, by key.
+   */
   partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    const steps = this.#stepKeys.get(geometry);
+    if (steps) return index < steps.length ? parts.group(drawn, [], [steps[index]!]) : undefined;
     const rows = this.#drawnRows.get(geometry);
     const count =
       (geometry as { count?: number }).count ?? (geometry as LabelsGeometry).items?.length;
@@ -687,6 +792,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
    * cut by the view or the range's: 1 its start, 2 its end.
    */
   #span(
+    data: AnnotationData,
     places: [Place, Place],
     axis: "x" | "y",
     item: number,
@@ -695,8 +801,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     min: number,
     max: number,
   ): readonly [number, number, number] | undefined {
-    const a = this.#data.pixel(places[0], axis, item, scale, frame, true);
-    const b = this.#data.pixel(places[1], axis, item, scale, frame, true);
+    const a = data.pixel(places[0], axis, item, scale, frame, true);
+    const b = data.pixel(places[1], axis, item, scale, frame, true);
     if (a === undefined || b === undefined) return undefined;
     const low = Math.min(a, b);
     const high = Math.max(a, b);
@@ -708,15 +814,19 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   #pair(
     axis: "x" | "y",
   ): [Frozen<AnnotationPosition> | undefined, Frozen<AnnotationPosition> | undefined] {
-    return axis === "x" ? [this.spec.x1, this.spec.x2] : [this.spec.y1, this.spec.y2];
+    const p = this.#positions;
+    return axis === "x" ? [p.x1, p.x2] : [p.y1, p.y2];
   }
 
-  #places(axis: "x" | "y"): [Place, Place] | undefined {
+  #places(axis: "x" | "y", data: AnnotationData): [Place, Place] | undefined {
     const [a, b] = this.#pair(axis);
-    return a === undefined || b === undefined
-      ? undefined
-      : [this.#data.place(a), this.#data.place(b)];
+    return a === undefined || b === undefined ? undefined : [data.place(a), data.place(b)];
   }
+}
+
+/** The step key of each item `rows` holds. */
+function stepsOf(keys: readonly string[], rows: Uint32Array): string[] {
+  return Array.from(rows, (row) => keys[row]!);
 }
 
 /**
@@ -755,6 +865,8 @@ export function region<S extends Schema>(
         "halo",
         "id",
         "itemKey",
+        "x",
+        "y",
         "x1",
         "x2",
         "y1",

@@ -56,6 +56,9 @@ import type {
   FieldDisplay,
   FieldLink,
   FieldRuleSpec,
+  MissingDisplay,
+  ThresholdStep,
+  Thresholds,
   ValueMapping,
 } from "./fields.ts";
 import type { ItemAnchor, ItemCoordinate, ItemRef } from "./place.ts";
@@ -110,6 +113,7 @@ import {
   type TextStyle,
   type ThemeSpec,
   type ThemeTokens,
+  type ThresholdPlace,
   type TickLabelsSpec,
   type TickLayerSpec,
   type TickMarkSpec,
@@ -989,7 +993,12 @@ const linkParts: Check = (v, path) => {
   for (const [i, part] of v.entries()) linkPart(part, `${path}[${i}]`);
 };
 
-/** Mappings of values to text: each by value, by a range, or by a regular expression. */
+/** A color fields give values: text, which surfaces read as CSS. */
+const displayColor: Check = (v, path) => {
+  if (typeof v !== "string" || v === "") fail(path, "a color", v);
+};
+
+/** Mappings of values to text and colors: each by value, by a range, or by a regular expression. */
 const valueMappings: Check = (v, path) => {
   if (!Array.isArray(v)) fail(path, "a list of mappings", v);
   for (const [i, item] of v.entries()) {
@@ -998,7 +1007,9 @@ const valueMappings: Check = (v, path) => {
     const mapping = item as Record<string, unknown>;
     if (["value", "between", "regex"].filter((key) => mapping[key] !== undefined).length !== 1)
       throw refusal(at, "a mapping matches by value, between, or regex; give one");
-    checkProperties(mapping, at, ["text"], {
+    if (mapping.text === undefined && mapping.color === undefined)
+      throw refusal(at, "give text, color, or both");
+    checkProperties(mapping, at, [], {
       value: (x, p) => {
         if (typeof x !== "string" && !Number.isFinite(x)) fail(p, "text or a finite number", x);
       },
@@ -1012,19 +1023,59 @@ const valueMappings: Check = (v, path) => {
         if (problem) throw refusal(p, problem);
       },
       text: string,
+      color: displayColor,
     } satisfies ChecksOf<ValueMapping>);
   }
+};
+
+/** Thresholds: steps ascending by value, each with a color; a mode and a base color. */
+const thresholds: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["steps"], {
+    mode: oneOf("absolute", "percent"),
+    base: displayColor,
+    steps: (list, at) => {
+      if (!Array.isArray(list) || list.length === 0)
+        fail(at, "a list of steps, { value, color } each", list);
+      for (const [i, item] of list.entries()) {
+        const where = `${at}[${i}]`;
+        object(item, where);
+        const step = item as Record<string, unknown>;
+        checkProperties(step, where, ["value", "color"], {
+          value: finite,
+          color: displayColor,
+        } satisfies ChecksOf<ThresholdStep>);
+        const previous = i > 0 ? (list[i - 1] as { value: number }).value : undefined;
+        if (previous !== undefined && !((step.value as number) > previous))
+          throw refusal(
+            `${where}.value`,
+            `steps ascend; ${step.value} follows ${previous}; order the steps by value`,
+          );
+      }
+    },
+  } satisfies ChecksOf<Thresholds>);
+};
+
+/** How missing values show: text, or text and a color. */
+const missingDisplay: Check = (v, path) => {
+  if (typeof v === "string") return;
+  object(v, path);
+  const shown = v as Record<string, unknown>;
+  if (shown.text === undefined && shown.color === undefined)
+    throw refusal(path, "give text, color, or both");
+  properties(shown, path, { text: string, color: displayColor } satisfies ChecksOf<MissingDisplay>);
 };
 
 /** A field display's settings; links are checked, and drawn by nothing yet. */
 const DISPLAY: ChecksOf<FieldDisplay> = {
   label: orFalse(string),
   description: orFalse(string),
-  missing: orFalse(string),
+  missing: orFalse(missingDisplay),
   format: orFalse(axisFormat(undefined)),
   min: orFalse(finite),
   max: orFalse(finite),
   mappings: orFalse(valueMappings),
+  thresholds: orFalse(thresholds),
   link: orFalse((v, path) => {
     object(v, path);
     checkProperties(v as Record<string, unknown>, path, ["url"], {
@@ -2152,6 +2203,19 @@ const annotationCoordinate: Check = (v, path) =>
 const annotationPlace: Check = (v, path) =>
   isRecord(v) ? annotationCoordinate(v, path) : position(v, path);
 
+/** A place at each step of a field's thresholds: the field, and the table whose field it is. */
+const thresholdPlace: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["thresholds"], {
+    thresholds: field,
+    table: string,
+  } satisfies ChecksOf<ThresholdPlace>);
+};
+
+/** A rule's place: an annotation's, or at a field's thresholds. */
+const rulePlace: Check = (v, path) =>
+  isRecord(v) && "thresholds" in v ? thresholdPlace(v, path) : annotationPlace(v, path);
+
 /** Text following a layout item: the mark, the item's names, an anchor of its box, and an offset. */
 const itemAnchor: Check = (v, path) => {
   checkProperties(v as Record<string, unknown>, path, ["mark", "item", "at"], {
@@ -2754,8 +2818,8 @@ const MARKS: MarkChecks = {
     checks: {
       itemKey: field,
       ...placement,
-      x: annotationPlace,
-      y: annotationPlace,
+      x: rulePlace,
+      y: rulePlace,
       drag: boolean,
       stroke: string,
       strokeWidth: width,
@@ -2776,6 +2840,8 @@ const MARKS: MarkChecks = {
       itemKey: field,
       halo,
       ...placement,
+      x: thresholdPlace,
+      y: thresholdPlace,
       x1: annotationPlace,
       x2: annotationPlace,
       y1: annotationPlace,

@@ -42,9 +42,12 @@ bar(sales, { x: "region", y: ["q1", "q2"] }); // grouped bars
 point(cars, { x: "weight", y: "mpg", color: "origin", size: "power" });
 heatmap(load, { x: "hour", y: "host", color: "cpu" });
 
-// Fields named and their values written once, for axes, legends, and tooltips.
-createChart(c, { fields: { p99: { label: "99th percentile", format: { duration: "millisecond" } } },
-  marks: [line(metrics, { x: "time", y: "p99" })] });
+// Fields named, their values written, and their steps colored once, for every surface.
+createChart(c, {
+  fields: { p99: { label: "99th percentile", format: { duration: "millisecond" },
+    thresholds: { steps: [{ value: 500, color: "#c62828" }] } } },
+  marks: [line(metrics, { x: "time", y: "p99" }), rule({ y: { thresholds: "p99" } })],
+});
 
 // Brushing one chart highlights the same rows in another.
 const focus = selectionStore(cars);

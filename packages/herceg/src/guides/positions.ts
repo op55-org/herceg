@@ -75,7 +75,7 @@ export function ownScales(
   // Each instance's domain, by what it was found from, kept while that stays.
   const kept = new Map<string, readonly [string, [number, number]]>();
   return {
-    resolve({ split, hidden, zone, locale, instances, room, headroom, length }) {
+    resolve({ split, hidden, zone, locale, instances, room, headroom, length, features }) {
       const contexts = new Map(
         [...own].map(([name, spec]) => [
           name,
@@ -96,15 +96,21 @@ export function ownScales(
             const shown = series.filter((s) => !hidden(mark, s));
             for (const axis of ["x", "y"] as const) {
               if (!on(mark, axis, name)) {
-                parts.push(mark.scaleExtent?.(name, axis, log, rows));
+                parts.push(mark.scaleExtent?.(name, axis, log, rows, features));
                 continue;
               }
               // As the mark measures its values on its axes: what its
               // features draw, positions of hidden series too.
               parts.push(
                 axis === "x"
-                  ? mark.xExtent(mark.tooltip === "y" ? shown : series, log, undefined, rows)
-                  : mark.yExtent(shown, -Infinity, Infinity, log, undefined, rows),
+                  ? mark.xExtent(
+                      mark.tooltip === "y" ? shown : series,
+                      log,
+                      undefined,
+                      rows,
+                      features,
+                    )
+                  : mark.yExtent(shown, -Infinity, Infinity, log, undefined, rows, features),
               );
               if (mark.zero === axis && shown.length > 0) stands = true;
             }

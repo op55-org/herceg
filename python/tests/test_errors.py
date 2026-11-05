@@ -267,6 +267,18 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         lambda o: _chart(fields=[hg.FieldDisplay(match="v", mappings=[o])]),
         {"value": 1, "text": "one"},
     ),
+    "Thresholds": (
+        "fields[0].thresholds",
+        lambda o: _chart(fields=[hg.FieldDisplay(match="v", thresholds=o)]),
+        {"steps": [(1.5, "#c62828")]},
+    ),
+    "AtThresholds": (
+        "marks[1].y",
+        lambda o: _chart(
+            fields=[hg.FieldDisplay(match="v", thresholds=hg.Thresholds(steps=[(1.5, "#c62828")]))]
+        ).rule(y=o),
+        {"field": "v"},
+    ),
     "LabelPart": (
         "marks[1].label.content[1]",
         lambda o: _line().rule(y=1.0, label={"content": ["at ", o]}),

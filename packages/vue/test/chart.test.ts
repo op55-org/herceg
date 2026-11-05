@@ -195,6 +195,29 @@ describe("<Chart>", () => {
     expect(chart().toSVG()).not.toContain("Volume");
   });
 
+  it("places rules at thresholds, comparing the tables they name by identity", async () => {
+    // Two unnamed tables write the same JSON; each takes its own steps.
+    const { view, chart } = chartRef();
+    const first = table({ t: [0, 1], v: [1, 2] });
+    const second = table({ t: [0, 1], v: [1, 2] });
+    const steps = (color: string) => ({ steps: [{ value: 1.5, color }] });
+    const fields = [
+      { match: { table: first }, thresholds: steps("#c62828") },
+      { match: { table: second }, thresholds: steps("#1565c0") },
+    ];
+    const place = shallowRef({ thresholds: "v", table: first });
+    mount(
+      `<Chart ref="view" renderer="svg" :fields="fields"><Line :data="first" x="t" y="v" /><Line :data="second" x="t" y="v" /><Rule :y="place" /></Chart>`,
+      () => ({ first, second, view, fields, place }),
+    );
+    await chart().loading;
+    expect(chart().toSVG()).toContain('stroke="#c62828"');
+    place.value = { thresholds: "v", table: second };
+    await nextTick();
+    await frame();
+    expect(chart().toSVG()).toContain('stroke="#1565c0"');
+  });
+
   for (const stack of ["fill", "center", "wiggle"] as const) {
     it(`passes ${stack} and inside-out area options through Vue`, () => {
       const { view, chart } = chartRef();

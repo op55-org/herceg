@@ -389,6 +389,36 @@
       ]
     },
     {
+      "id": "thresholds",
+      "text": "Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.",
+      "matches": ["fields give \"[^\"]*\" no thresholds"],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            },
+            {
+              "type": "rule",
+              "y": {
+                "thresholds": "v"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "tables",
       "text": "Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.",
       "matches": [

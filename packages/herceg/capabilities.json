@@ -471,7 +471,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "line \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },
@@ -573,7 +573,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "line \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },
@@ -675,7 +675,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "area \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },
@@ -777,7 +777,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "area \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },
@@ -879,7 +879,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "bar \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },
@@ -981,7 +981,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
+            "message": "bar \"m\" color.field: field \"y\" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: \"identity\" }), or give fields.y thresholds or mappings with colors"
           },
           "alternative": "Color it by a category field, which the legend lists."
         },

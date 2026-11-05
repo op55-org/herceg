@@ -19,6 +19,7 @@ export const SETTINGS = [
   "max",
   "missing",
   "mappings",
+  "thresholds",
   "link",
 ] as const;
 export type Setting = (typeof SETTINGS)[number];
@@ -71,6 +72,12 @@ export function misfit(
   }
   if ((setting === "min" || setting === "max") && kind !== "number")
     return problem("", (s) => `${s}; bounds are for numbers; drop ${setting}`);
+  if (setting === "thresholds" && kind !== "number")
+    return problem(
+      "",
+      (s) =>
+        `${s}; thresholds are for number fields; ${kind === "category" ? "color categories with mappings" : "drop thresholds"}`,
+    );
   if (setting === "mappings")
     for (const [i, mapping] of (value as readonly Record<string, unknown>[]).entries()) {
       if (mapping.between !== undefined && kind === "category")
@@ -167,7 +174,17 @@ export function checkDisplay(display: unknown, at: string, kit: FormatKit, rule:
     if (value === undefined || value === false) continue;
     if (key === "format") checkFormat(value, where, kit);
     else if (key === "mappings") checkMappings(value, where);
-    else if (key === "link") {
+    else if (key === "thresholds") checkThresholds(value, where);
+    else if (key === "missing" && typeof value === "object") {
+      const { text, color } = settingsOf(value, where, "text, or { text, color }", [
+        "text",
+        "color",
+      ]);
+      if (text === undefined && color === undefined)
+        throw new Error(`${where}: give text, color, or both`);
+      if (text !== undefined && typeof text !== "string") expected(`${where}.text`, "text", text);
+      if (color !== undefined) checkColor(color, `${where}.color`);
+    } else if (key === "link") {
       const { url, text } = settingsOf(value, where, "{ url, text }", ["url", "text"]);
       if (typeof url !== "string") checkParts(url, `${where}.url`);
       if (text !== undefined) checkParts(text, `${where}.text`);
@@ -214,15 +231,18 @@ function checkMappings(mappings: unknown, at: string): void {
   if (!Array.isArray(mappings)) expected(at, "a list of mappings", mappings);
   mappings.forEach((mapping: unknown, i) => {
     const where = `${at}[${i}]`;
-    const { value, between, regex, text } = settingsOf(mapping, where, "{ value, text }", [
-      "value",
-      "between",
-      "regex",
-      "text",
-    ]);
+    const { value, between, regex, text, color } = settingsOf(
+      mapping,
+      where,
+      "{ value, text, color }",
+      ["value", "between", "regex", "text", "color"],
+    );
     if ([value, between, regex].filter((way) => way !== undefined).length !== 1)
       throw new Error(`${where}: a mapping matches by value, between, or regex; give one`);
-    if (typeof text !== "string") expected(`${where}.text`, "text", text);
+    if (text === undefined && color === undefined)
+      throw new Error(`${where}: give text, color, or both`);
+    if (text !== undefined && typeof text !== "string") expected(`${where}.text`, "text", text);
+    if (color !== undefined) checkColor(color, `${where}.color`);
     if (value !== undefined && typeof value !== "string" && !Number.isFinite(value))
       expected(`${where}.value`, "text or a number", value);
     const problem =
@@ -235,6 +255,32 @@ function checkMappings(mappings: unknown, at: string): void {
             : `expected text; received ${shown(regex)}`;
     if (problem)
       throw new Error(`${where}.${between !== undefined ? "between" : "regex"}: ${problem}`);
+  });
+}
+
+/** Refuses a color that is not text, naming its path `at`: surfaces read it as CSS. */
+function checkColor(color: unknown, at: string): void {
+  if (typeof color !== "string" || color === "") expected(at, "a color", color);
+}
+
+/** Refuses malformed thresholds, naming their path `at`: steps ascend, each with a color. */
+function checkThresholds(thresholds: unknown, at: string): void {
+  const { mode, base, steps } = settingsOf(thresholds, at, "{ steps }", ["mode", "base", "steps"]);
+  if (mode !== undefined && mode !== "absolute" && mode !== "percent")
+    expected(`${at}.mode`, '"absolute" or "percent"', mode);
+  if (base !== undefined) checkColor(base, `${at}.base`);
+  if (!Array.isArray(steps) || steps.length === 0)
+    expected(`${at}.steps`, "a list of steps, { value, color } each", steps);
+  steps.forEach((step: unknown, i) => {
+    const where = `${at}.steps[${i}]`;
+    const { value, color } = settingsOf(step, where, "{ value, color }", ["value", "color"]);
+    if (!Number.isFinite(value)) expected(`${where}.value`, "a finite number", value);
+    const previous = i > 0 ? (steps[i - 1] as { value: number }).value : undefined;
+    if (previous !== undefined && !((value as number) > previous))
+      throw new Error(
+        `${where}.value: steps ascend; ${value} follows ${previous}; order the steps by value`,
+      );
+    checkColor(color, `${where}.color`);
   });
 }
 

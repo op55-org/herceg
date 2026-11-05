@@ -1304,7 +1304,18 @@ export class ChartModel {
     return domainExtent(
       marks.flatMap(({ mark, series, rows }) =>
         shares(mark) && !offAxis(mark.bound, "x")
-          ? [[mark, mark.xExtent(this.#xSeries(mark, series), type === "log", breaks, rows)]]
+          ? [
+              [
+                mark,
+                mark.xExtent(
+                  this.#xSeries(mark, series),
+                  type === "log",
+                  breaks,
+                  rows,
+                  this.#featured,
+                ),
+              ],
+            ]
           : [],
       ),
     );
@@ -1353,7 +1364,7 @@ export class ChartModel {
           const [from, to, cut] = offAxis(mark.bound, "x") ? WHOLE : [x0, x1, breaks];
           const extent = offAxis(mark.bound, "y")
             ? undefined
-            : mark.yExtent(visible, from, to, log, cut, rows);
+            : mark.yExtent(visible, from, to, log, cut, rows, this.#featured);
           return [mark, extent] as const;
         }),
       ),
@@ -1590,6 +1601,7 @@ export class ChartModel {
       room: roomOf,
       headroom: (mark, series) => mark.headroom?.(series, context) ?? 0,
       length: (i, axis) => (axis === "x" ? plotWs[i]! : plotHs[i]!),
+      features: this.#featured,
     });
     // Where the panels go: a facet's uniform grid, or subplots' layout of cells.
     const placement = layout?.placement(split, grid);
@@ -1656,7 +1668,7 @@ export class ChartModel {
           mark,
           offAxis(mark.bound, "x")
             ? undefined
-            : mark.xExtent(this.#xSeries(mark, series), log, breaks, rows),
+            : mark.xExtent(this.#xSeries(mark, series), log, breaks, rows, this.#featured),
         ]),
       );
       if ((spec?.zero ?? xMeasures[h]) && !log) dataX = unionExtent([dataX, [0, 0]]);
@@ -3476,6 +3488,7 @@ export class ChartModel {
         this.#config.locale,
         rows,
         this.#items?.framesOf(mark, view),
+        this.#featured,
       ) ?? [];
     return (
       this.#panels?.annotations(this.#views, this.#marks, describe, panel) ??

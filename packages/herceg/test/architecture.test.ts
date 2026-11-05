@@ -20,6 +20,13 @@ const CORE = [
 ];
 // The formats the lazy chunks write with, which they share.
 const FORMATS = ["format/patterns.ts", "format/units.ts"];
+// Keys' layout, which takes the text helpers it uses: bars' keys and display
+// colors' come from the lazy chunks, points' and contours' from the marks,
+// whose charts get it in a chunk of its own.
+const KEYS = "marks/key-legend.ts";
+// CSS colors as bytes, for heatmaps' display colors; static output reads them
+// too, live charts' first chunks not.
+const CSS_COLORS = "scale/css-color.ts";
 // The display code (fields/compile.ts): what a chart loads for field displays
 // and series named by parts, in a chunk of its own.
 const DISPLAYS = [
@@ -28,6 +35,7 @@ const DISPLAYS = [
   "fields/rules.ts",
   "fields/display.ts",
   "fields/check.ts",
+  "fields/colors.ts",
   "format/intl-options.ts",
   "guides/fields.ts",
   "marks/features/item-legends.ts",
@@ -72,8 +80,9 @@ describe("architecture", () => {
   // The display code loads only for charts that give fields or name series
   // by parts: the compilers take it from the chart, importing only its
   // types, and it imports only types from the chart's and the compilers'
-  // modules but their formats. The tooltip content checks its fields'
-  // formats with the Intl option lists alone, so it brings none of it.
+  // modules but their formats and keys' layout. The tooltip content checks
+  // its fields' formats with the Intl option lists alone, so it brings none
+  // of it.
   it("the display code is a chunk of its own, which the compilers import only types of", () => {
     const displays = DISPLAYS.map((file) => join(SRC, file));
     const runtime = (file: string) =>
@@ -83,7 +92,8 @@ describe("architecture", () => {
     for (const file of displays)
       for (const path of runtime(file))
         expect(
-          displays.includes(path) || FORMATS.some((one) => path === join(SRC, one)),
+          displays.includes(path) ||
+            [...FORMATS, KEYS, CSS_COLORS].some((one) => path === join(SRC, one)),
           `${file} imports ${path}`,
         ).toBe(true);
     for (const file of [
@@ -106,14 +116,15 @@ describe("architecture", () => {
   // padding's solver (for lines' markers), the guide compiler's pattern
   // formats, what channels draw (`outputProblem`), the placement of labels
   // following series and of text blocks, and the boxes bars' labels that
-  // hide keep apart by (layout/label-boxes.ts). Charts that import these
-  // themselves (grids the first, points the second and third) get them in a
-  // chunk of their own.
+  // hide keep apart by (layout/label-boxes.ts), and keys' layout. Charts
+  // that import these themselves (grids the first, points the second, third,
+  // and last) get them in a chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
   it("the feature compiler imports only types from the line chart's modules", () => {
     const features = join(SRC, "marks/features");
     const allowed = [
       ...FORMATS,
+      KEYS,
       "data/expression.ts",
       "draw/symbol-shapes.ts",
       "model/clearance.ts",

@@ -279,10 +279,15 @@ export class PointStyles {
         if (held && !held[code]) return none;
         check(value, `${path}.field`);
       }
+      // Number fields read without a scale (display colors too) are the mark's own (marks/point.ts).
       const output =
         channel.kind === "identity"
           ? (value as V)
-          : channel.scale.output(value, defaults, fallback as V);
+          : (channel as Extract<Channel<V>, { kind: "field" }>).scale.output(
+              value,
+              defaults,
+              fallback as V,
+            );
       return output === undefined ? none : of(output);
     });
     return (row) => {

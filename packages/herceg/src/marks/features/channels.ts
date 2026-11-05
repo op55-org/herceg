@@ -1,9 +1,10 @@
 // Channels compiled against a mark's table: a constant, a category field's
 // values through an ordinal scale (by dictionary code, so reading a row is
 // an array lookup), a number field's values through a channel scale
-// (channel-scales.ts), a field's values as they are (an identity scale's,
-// checked as constants are), the series' names through a scale, or a
-// condition on each row. Every output is checked against the channel that
+// (channel-scales.ts) or, for colors without one, by the colors the chart's
+// field displays give them, a field's values as they are (an identity
+// scale's, checked as constants are), the series' names through a scale,
+// or a condition on each row. Every output is checked against the channel that
 // draws it (`outputProblem`, spec/channels.ts): a constant, a scale's map
 // and `unknown`, used or not, a channel scale's range, and the values an
 // identity scale reads.
@@ -24,6 +25,8 @@ export type Channel<V> =
   | { readonly kind: "identity"; readonly field: string; readonly numbers: boolean }
   /** The series' names through a scale (`{ series: true, scale }`). */
   | { readonly kind: "series"; readonly scale: CategoryScale }
+  /** A number field's values in their display colors (`ValueColors`), read without a scale. */
+  | { readonly kind: "display"; readonly field: string; readonly colors: ValueColors }
   | {
       readonly kind: "condition";
       readonly when: (row: number) => boolean;
@@ -45,9 +48,26 @@ export interface ScaledChannel {
  * them; a `field` read through the default "color" scale where the chart
  * declares none takes the colors of what its values stand for. An identity
  * scale of the chart's is `IDENTITY`. A channel scale read for a `field`
- * reads that field of the mark's rows into its domain.
+ * reads that field of the mark's rows into its domain. `colors` gives a
+ * number field's display colors, where the chart's field displays give it
+ * some.
  */
-export type ScaleOf = (name: string, path: string, field?: string) => CategoryScale | ChannelScale;
+export type ScaleOf = ((
+  name: string,
+  path: string,
+  field?: string,
+) => CategoryScale | ChannelScale) & { colors?(field: string): ValueColors | undefined };
+
+/**
+ * A number field's display colors as channels read them: the colors its
+ * values take, and which each value takes, one more than its place among
+ * them (0 for none, which takes the mark's own paint; -1 for a missing
+ * value without a color).
+ */
+export interface ValueColors {
+  readonly colors: readonly string[];
+  index(value: number): number;
+}
 
 /**
  * A channel's outputs by value through its channel scale: colors, or
@@ -210,11 +230,20 @@ export function compileChannel<V>(
   }
   if ("field" in spec) {
     const given = spec.scale as string | IdentityScaleSpec | undefined;
-    // The field first: a scale reads what is there.
-    if (table?.has(spec.field) && given === undefined && table.kind(spec.field) === "number")
+    // The field first: a scale reads what is there; colors without one, its display colors.
+    if (table?.has(spec.field) && given === undefined && table.kind(spec.field) === "number") {
+      const colors = scale === "color" ? scales.colors?.(spec.field) : undefined;
+      if (colors) {
+        for (const one of colors.colors)
+          check(one, `${path}.field (a color fields give "${spec.field}")`);
+        return { kind: "display", field: spec.field, colors };
+      }
       throw new TypeError(
-        `${path}.field: field "${spec.field}" holds numbers, which ${name} reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: "identity" }); give scale, or a category field`,
+        scale === "color"
+          ? `${path}.field: field "${spec.field}" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: "identity" }), or give ${keyPath("fields", spec.field)} thresholds or mappings with colors`
+          : `${path}.field: field "${spec.field}" holds numbers, which ${name} reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: "identity" }); give scale, or a category field`,
       );
+    }
     const numbers = NUMBERS.includes(name);
     if (typeof given === "object" || !table?.has(spec.field)) {
       const field = categoryField(
@@ -276,7 +305,12 @@ export function compileChannel<V>(
  * that is not an identifier, `scales["regions:v1"]`, which error paths keep whole.
  */
 export function scalePath(name: string): string {
-  return /^[A-Za-z_$][\w$]*$/.test(name) ? `scales.${name}` : `scales[${JSON.stringify(name)}]`;
+  return keyPath("scales", name);
+}
+
+/** A key's place under `option`: `fields.p99`, or `fields["p.99"]` for a key that is not an identifier. */
+export function keyPath(option: string, key: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(key) ? `${option}.${key}` : `${option}[${JSON.stringify(key)}]`;
 }
 
 /** Checks that a scale's fixed outputs are what the channel at `path` takes. */
@@ -363,6 +397,13 @@ export function rowReader<V>(
     if (!counted) return { count: 0, at: key, output };
     return { ...numbered(key, drawn, table.length), output };
   }
+  if (channel.kind === "display") {
+    const values = table.numbers(channel.field as never);
+    const { colors, index } = channel.colors;
+    // Rows' looks are their colors; missing values and those without one take the fallback.
+    const at = (row: number) => Math.max(0, index(values[row]!));
+    return { count: colors.length + 1, at, output: (row) => colors[at(row) - 1] as V | undefined };
+  }
   if (channel.kind === "identity" && channel.numbers) {
     const values = table.numbers(channel.field as never);
     const output = (row: number) => {
@@ -383,7 +424,11 @@ export function rowReader<V>(
     at: (row) => codes[row]! + 1,
     output(row) {
       const code = codes[row]!;
-      if (code < 0) return undefined;
+      // Missing values take the color fields' displays give them, where they give one.
+      if (code < 0)
+        return channel.kind === "identity"
+          ? undefined
+          : ((channel.scale as { missing?(): string | undefined }).missing?.() as V | undefined);
       if (!(code in outputs)) {
         const value = dictionary[code]!;
         if (channel.kind === "identity") check(value, `${path}.field`);

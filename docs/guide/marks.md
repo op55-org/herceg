@@ -556,6 +556,8 @@ rule({ y: 300, span: [{ fraction: 0.5 }, { fraction: 1 }], strokeOpacity: 0.5 })
 rule(deploys, { x: "time", label: { field: "version" } }); // a vertical rule per deploy
 region({ x1: start, x2: end, label: { text: "Maintenance", place: { side: "bottom" } } });
 region({ y1: 200, y2: 300 }); // a y range; with x1 and x2 too, a rectangle
+rule({ y: { thresholds: "p99" } }); // a rule at each step of the thresholds `fields` give p99
+region({ y: { thresholds: "p99" }, fillOpacity: 0.12 }); // a band from each step to the next
 text({ at: { x: { fraction: 0.03 }, y: { data: 1.7 } }, label: "Note" });
 text(peaks, {
   x: "time",
@@ -566,10 +568,11 @@ text(peaks, {
 
 ```python
 (
-    hg.Chart(df)
+    hg.Chart(df, fields={"ms": hg.FieldDisplay(thresholds=hg.Thresholds(steps=[(250, "#c62828")]))})
     .line(x="time", y="ms")
     .rule(y=250, label=hg.Label(text="Threshold", place=hg.LabelPlace(attachment="start", outside=True)))
     .region(x1=start, x2=end, label=hg.Label(text="Incident", place={"side": "bottom"}))
+    .rule(y=hg.AtThresholds("ms"), dash="--")
     .text(at=hg.Position(x=hg.Fraction(0.03), y=1.7), label="Peak")
     .text(data=peaks, x="time", y=hg.DataPosition(field="ms", offset=-8), label=hg.Label(field="name"))
 )
@@ -583,6 +586,7 @@ text(peaks, {
 | `{ fraction, frame?, offset? }` | `hg.Fraction(f, frame=, offset=)` | A share of the plot or chart. |
 | `{ px, frame?, offset? }` | `hg.Pixels(px, frame=, offset=)` | Pixels from the left or top. |
 | `{ item: { mark, item }, at?, offset? }` | `hg.ItemCoordinate(mark, item, at=, offset=)` | The start, center, or end of a layout mark's item's box, beside it ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
+| `{ thresholds, table? }` | `hg.AtThresholds(field, table=)` | Rules' `x` or `y`, and regions' `x` or `y` in place of a pair: each step of the thresholds the chart's `fields` give the field, an item per step ([threshold places](fields.md#colors)). |
 
 A rule takes a place on one axis and a `span` along the other (the plot by
 default); a region one or two pairs of places; text `at: { x, y }`, `x`
@@ -620,6 +624,15 @@ draws has no place.
 - **Overlap.** Labels that would cover another are drawn anyway by
   default; see [labels that would overlap](#labels-that-would-overlap).
   Text is meant for a few hundred labels.
+- **At thresholds.** A rule at `{ thresholds: "p99" }` stands at each step
+  of the field's thresholds, and a region there shades a band from each
+  step to the next (the last to the plot's end, and from the plot's start
+  to the first step where the thresholds give a base color), each in its
+  step's color unless `stroke` or `fill` is given. They stand for steps,
+  not rows: their places along the other axis and labels read no fields,
+  and `{ value: true }` writes the step's value through the field's display.
+  Events name each by its step (`item: '["slo","500"]'`), and they are not
+  dragged. See [field displays](fields.md#colors).
 - **Legend.** `legend: true` lists an annotation by its label (a rule as a
   line, a region as a box) and its entry hides it.
 - **Dragging.** A rule at a number or a time with `drag: true` can be

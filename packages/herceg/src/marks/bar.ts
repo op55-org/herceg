@@ -43,7 +43,6 @@ import type { ContentWriter } from "./features/content.ts";
 import type { PartText } from "./features/part-text.ts";
 import { withoutHidden } from "./hidden.ts";
 import { namesBy } from "./item-names.ts";
-import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -1074,8 +1073,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
 
   /** A key of the colors a field gives the bars' rows (the feature compiler's), as points list theirs. */
   legends(series: readonly Series[]): LegendPart[] {
-    const key = series[0]?.features?.key?.();
-    return key ? [keyLegend(key)] : [];
+    const part = series[0]?.features?.legend?.();
+    return part ? [part] : [];
   }
 
   /** Room past the bars' ends for their labels; stacked labels, and those placed inside, sit inside. */

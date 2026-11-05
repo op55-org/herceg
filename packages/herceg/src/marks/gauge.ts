@@ -27,7 +27,9 @@ export interface GaugeOptions<S extends Schema> {
   max?: number;
   /**
    * Colored ranges of the dial, by ascending ends: each from the previous
-   * band's end (the first from `min`) up to its `to`, at most `max`.
+   * band's end (the first from `min`) up to its `to`, at most `max`. By
+   * default, a band per step of the field's display's `thresholds`, the
+   * value colored by its step.
    */
   bands?: readonly GaugeBand[];
   /** Text under the value; the field's label by default (its display's, else its name). */
@@ -155,7 +157,28 @@ export class GaugeMark implements LayoutMark, FormatUser {
     return -1;
   }
 
-  #bands({ theme, paint }: Pick<LayoutFrame, "theme" | "paint">, min: number): Band[] {
+  /**
+   * The dial's bands: its own, from `min`; else a band per step of its
+   * field's thresholds (`display`), within its ends (the base, where it has
+   * a color, from `min`).
+   */
+  #bands(
+    { theme, paint }: Pick<LayoutFrame, "theme" | "paint">,
+    min: number,
+    max: number,
+    display: ShownField | undefined,
+  ): Band[] {
+    const steps = this.spec.bands ? undefined : display?.steps;
+    if (steps) {
+      const ends = [-Infinity, ...steps.values, Infinity];
+      return [steps.base, ...steps.colors].flatMap((color, i) => {
+        const from = Math.max(min, ends[i]!);
+        const to = Math.min(max, ends[i + 1]!);
+        return color === undefined || !(to > from)
+          ? []
+          : [{ from, to, color: paint(color, "chart fields") }];
+      });
+    }
     let from = min;
     return (this.spec.bands ?? []).map(({ to, color }, i) => {
       const band = {
@@ -202,7 +225,9 @@ export class GaugeMark implements LayoutMark, FormatUser {
     const format: Formatter = shown ? (v) => shown(v) : ends;
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
-    const bands = this.#bands(frame, min);
+    const bands = this.#bands(frame, min, max, display);
+    // Bands from thresholds color a value as its display does, from each step's value up.
+    const stepped = !this.spec.bands && display?.steps;
     const label = this.spec.label ?? display?.label ?? this.spec.value;
 
     // The dial reaches its outer radius above its center, and half that below
@@ -222,8 +247,20 @@ export class GaugeMark implements LayoutMark, FormatUser {
     };
 
     // The band of a value as drawn: values past an end are drawn at it.
-    const bandOf = (v: number) => bands.find(({ to }) => Math.min(max, Math.max(min, v)) <= to);
-    const colorOf = (v: number) => bandOf(v)?.color ?? theme.palette[0] ?? theme.text;
+    const bandOf = (v: number) => {
+      const at = Math.min(max, Math.max(min, v));
+      return bands.find(({ from, to }) =>
+        stepped ? at >= from && (at < to || to === max) : at <= to,
+      );
+    };
+    const colorOf = (v: number) => {
+      const shown = stepped ? display!.color?.(v) : bandOf(v)?.color;
+      return (
+        (shown !== undefined && stepped ? frame.paint(shown, "chart fields") : shown) ??
+        theme.palette[0] ??
+        theme.text
+      );
+    };
     const endOf = (v: number) => (Number.isNaN(v) ? START : angle(v));
     const extremes = [ends(min), ends(max)];
     const widths = extremes.map((extreme) => measure(extreme, font));
@@ -355,7 +392,11 @@ export class GaugeMark implements LayoutMark, FormatUser {
         const name = `Gauge of ${item.label}`;
         const range = `from ${ends(min)} to ${ends(max)}`;
         if (Number.isNaN(value)) return `${name}: no value, ${range}.`;
-        const within = band ? `, in the band up to ${ends(band.to)}` : "";
+        const within = band
+          ? stepped
+            ? `, in the band from ${ends(band.from)}`
+            : `, in the band up to ${ends(band.to)}`
+          : "";
         return `${name}: ${format(value)}, ${range}${outside(value, min, max)}${within}.`;
       },
     };

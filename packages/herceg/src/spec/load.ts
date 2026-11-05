@@ -84,6 +84,7 @@ import type {
   MarkTooltipSpec,
   RowSelectionSpec,
   SelectionSpec,
+  ThresholdPlace,
 } from "./spec.ts";
 import { describeUnknown, findUnknown, unknownRefusal } from "./validate.ts";
 
@@ -782,7 +783,7 @@ function withScheme<T extends { colors?: string | readonly string[] | undefined 
 
 function annotationTable(
   spec: { data?: string; label?: string | LabelSpec; encode?: object },
-  positions: readonly (AnnotationPosition | undefined)[],
+  positions: readonly (AnnotationPosition | ThresholdPlace | undefined)[],
   tables: Map<string, Table>,
 ): Table | undefined {
   return readsTable(positions, spec.label, spec.encode) ? tableFor(spec.data, tables) : undefined;

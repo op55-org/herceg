@@ -129,6 +129,45 @@ TypeScript imports schemes one by one, so a bundle carries only those it
 uses; specs and Python name them as strings (`"viridis"`). A color scale is
 explained by a color legend or a [colorbar](axes-and-legends.md#colorbars).
 
+## Display colors
+
+A field's display can color its values: a number field's `thresholds`
+color them by step, and mappings and missing values take colors of their
+own ([field displays](fields.md#colors)). Marks that color by the field
+without a scale take those colors, and show a key of them in the legend:
+
+```ts
+createChart(el, {
+  fields: {
+    p99: {
+      format: { duration: "millisecond" },
+      thresholds: { base: "#2e7d32", steps: [{ value: 200, color: "#f9a825" }, { value: 500, color: "#c62828" }] },
+    },
+  },
+  marks: [
+    bar(latency, { x: "service", y: "p99", encode: { color: { field: "p99" } } }),
+    rule({ y: { thresholds: "p99" }, dash: "--" }),
+  ],
+});
+```
+
+```python
+fields = {"p99": hg.FieldDisplay(format=hg.Format(duration="millisecond"),
+    thresholds=hg.Thresholds(base="#2e7d32", steps=[(200, "#f9a825"), (500, "#c62828")]))}
+hg.Chart(latency, fields=fields).bar(x="service", y="p99", encode=hg.Encodings(color=hg.Channel(field="p99")))
+```
+
+- Bars, lines, areas, and regions take them through `encode.color` (or
+  `fill`, `stroke`) of a number field with no `scale`; such a field without
+  display colors is refused.
+- Points and heatmaps colored by a number field take them in place of
+  their ramp unless they give `colors`, `colorDomain`, or `colorMidpoint`.
+- Series and bars colored by a category field take mapping colors where no
+  [declared scale](#scales-of-categories) colors it; a declared scale's
+  colors win whole.
+- Gauges without `bands` take a band per step, and tooltip fields a swatch
+  of the value's color.
+
 ## Themes
 
 | Theme | Surface |

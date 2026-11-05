@@ -160,8 +160,8 @@ function applies(rule: Rule, field: FieldOf): boolean {
  * The display `rules` give `field`, setting by setting in order: a rule
  * naming it refuses settings its kind cannot take, and broader rules give
  * it only what it takes. Settings that clash once merged (`min` not below
- * `max`) are refused, naming the field on `surface` and the rules that
- * gave them.
+ * `max`, percent thresholds without both) are refused, naming the field on
+ * `surface` and the rules that gave them.
  */
 export function resolve(rules: readonly Rule[], field: FieldOf, surface: string): Resolved {
   const settings: Record<string, unknown> = {};
@@ -188,11 +188,15 @@ export function resolve(rules: readonly Rule[], field: FieldOf, surface: string)
       }
     }
   }
-  const { min, max } = settings;
+  const { min, max, thresholds } = settings as FieldDisplay;
+  const at = `${surface} fields${keyPath(field.name)}`;
   if (typeof min === "number" && typeof max === "number" && !(min < max))
     throw new Error(
-      `${surface} fields${keyPath(field.name)}: min ${min} (${from.min}) is not below max ${max} (${from.max}); give min below max`,
+      `${at}: min ${min} (${from.min}) is not below max ${max} (${from.max}); give min below max`,
     );
+  // Percent steps are shares of the field's bounds, never of its data's extent.
+  if (thresholds && thresholds.mode === "percent" && !(min !== undefined && max !== undefined))
+    throw new Error(`${at}: percent thresholds (${from.thresholds}) need min and max; give both`);
   return { settings, from };
 }
 

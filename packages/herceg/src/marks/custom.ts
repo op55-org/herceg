@@ -21,7 +21,7 @@ import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import { ShapeIndex } from "./custom-shapes.ts";
 import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
-import type { Channel, ItemKeyed, RowChannel } from "./encoding.ts";
+import type { ColorChannel, ItemKeyed, RowChannel } from "./encoding.ts";
 import { copiesOf, type ItemInfo } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { clipBox } from "./lookups.ts";
@@ -262,7 +262,7 @@ export interface CustomDataOptions<S extends Schema> extends CustomBase, ItemKey
    * field colors the series, as a line's does.
    */
   encode?: {
-    color?: Channel<string, S>;
+    color?: ColorChannel<S>;
     strokeWidth?: RowChannel<number, S>;
     opacity?: RowChannel<number, S>;
   };
