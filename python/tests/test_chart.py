@@ -1107,7 +1107,7 @@ def test_scheme_and_symbol_names_match_typescript():
     schemes = (root / "scale" / "schemes.ts").read_text()
     table = schemes[schemes.index("export const schemes") :]
     assert tuple(re.findall(r"^  (\w+),$", table, re.MULTILINE)) == hg.SCHEMES
-    symbols = (root / "draw" / "symbol-shapes.ts").read_text()
+    symbols = (root / "spec" / "symbols.ts").read_text()
     order = symbols[symbols.index("export const SYMBOLS") :]
     assert tuple(re.findall(r'^  "([\w-]+)",$', order, re.MULTILINE)) == hg.SYMBOLS
 

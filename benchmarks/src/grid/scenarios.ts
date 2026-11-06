@@ -51,6 +51,8 @@ export interface GridScenario {
   warmup: number;
   /** Seconds before the runner abandons the scenario for a library (default 600). */
   timeout?: number;
+  /** Grids show the looks scenarios' conditional formatting (looks.ts), checked in every frame. */
+  looks?: boolean;
   description: string;
 }
 
@@ -308,9 +310,78 @@ function scenariosFor(name: SizeName, stress: boolean): GridScenario[] {
     .map(({ stress: _, ...s }) => ({ ...s, sizeName: name }));
 }
 
+/**
+ * Looks at one size: six presented columns colored by thresholds, a
+ * gradient, a label, a row condition, and a rank (looks.ts), mounted,
+ * scrolled, traced, and streamed through a rolling window, each frame's
+ * looks checked with its text.
+ */
+function looksFor(name: SizeName): GridScenario[] {
+  const size = SIZES[name];
+  const shape = `${size.rows.toLocaleString("en-US")} x ${size.groups * 20}`;
+  const big = size.rows >= 1_000_000;
+  const id = (suffix: string) => `grid-${name}-looks-${suffix}`;
+  const timeout = big ? 900 : 300;
+  return [
+    {
+      id: id("mount"),
+      sizeName: name,
+      size,
+      operation: "mount",
+      looks: true,
+      samples: big ? 5 : 20,
+      warmup: big ? 1 : 3,
+      timeout,
+      description: `${shape} with looks: mount to the first correct frame (cold, warm, and over reordered dictionaries)`,
+    },
+    ...(["vertical", "diagonal"] as const).map((direction) => ({
+      id: id(`scroll-${direction}`),
+      sizeName: name,
+      size,
+      operation: "scroll" as const,
+      direction,
+      looks: true,
+      samples: big ? 10 : 40,
+      warmup: big ? 2 : 5,
+      timeout,
+      description: `${shape} with looks: ${direction} scroll steps of a screen`,
+    })),
+    ...(["vertical", "diagonal"] as const).map((direction) => ({
+      id: id(`trace-${direction}`),
+      sizeName: name,
+      size,
+      operation: "scroll-trace" as const,
+      direction,
+      looks: true,
+      durationMs: 3000,
+      samples: big ? 1 : 2,
+      warmup: big ? 0 : 1,
+      timeout,
+      description: `${shape} with looks: 3 s of ${direction} scrolling, offsets set every frame`,
+    })),
+    {
+      id: id("append-rolling"),
+      sizeName: name,
+      size,
+      operation: "append",
+      looks: true,
+      batch: 1000,
+      evict: true,
+      rateHz: 10,
+      durationMs: 5000,
+      samples: big ? 1 : 2,
+      warmup: big ? 0 : 1,
+      timeout,
+      description: `${shape} with looks: append 1,000 rows and evict the oldest 1,000 at 10 Hz`,
+    },
+  ];
+}
+
 export const GRID_SCENARIOS: GridScenario[] = [
   ...scenariosFor("10k", false),
   ...scenariosFor("100k", false),
+  ...looksFor("100k"),
   ...scenariosFor("1m", true),
+  ...looksFor("1m"),
   ...scenariosFor("1m-wide", true),
 ];

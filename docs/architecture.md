@@ -67,6 +67,7 @@ One name per concept, used the same way in code and docs.
 | **Grid** | A mounted grid in the browser (`createGrid`) showing a row view's rows, or its row groups as header rows each followed by its groups below (or its rows) when expanded, or a row pivot's rows (`createPivotGrid`), or a grid source's rows (`createRemoteGrid`), drawn from a grid model (`GridModel`, `RemoteGridModel`), which holds its columns, scroll position, expansion, focus, and selection without a DOM. |
 | **Grid query** | What a remote grid asks of a grid source, as portable JSON (`GridQuery`): a filter expression, sort keys, and optionally groups with aggregates; never layout or interaction. |
 | **Grid source** | Rows that live elsewhere (a server, a worker) behind `GridSource`: it answers a grid query in windows of typed columns, from a snapshot the query's first answer starts. |
+| **Look** | What a row's channels give it to draw beyond the mark's own paint: in charts, the style a row or series takes (`style.by`, encodings), drawn in runs of rows alike; in grids, a cell's background (`fill`) and text color (`color`) from `encode` of a column or the grid's rows and `aggregateEncode` of group rows. |
 | **Grid column** | A column a grid shows, with its id, title, width, alignment, and format: a field (`GridColumn`), or a column a row pivot generates for a value and an aggregate (or a total), named by an id of those. Not a table's column (its storage). |
 
 ## Pipeline

@@ -276,19 +276,24 @@ about 48 KB gzip.
   `trace`, `band`, `extent`, `across`, `drawn`, `markerRows`, `pathEnds`,
   `curved`, `takeTrace`, `shown`, `rows`, `points`, `key`, `swatch`.
 - The compiler imports code only from modules no line chart imports
-  (`data/expression.ts`, `draw/symbol-shapes.ts`, `format/patterns.ts`);
-  the chart's code reaches it through `FeatureKit`. A module imported by
+  (`data/expression.ts`, the channel code it shares with grids in
+  `encoding/`, symbols' names and shapes in `spec/symbols.ts` and
+  `draw/symbol-shapes.ts`, `format/patterns.ts`); the chart's
+  code reaches it through `FeatureKit`. A module imported by
   both would become a chunk of its own, which `test/architecture.test.ts`
   prevents.
 
 ### Channels
 
-Every channel compiles through `compileChannel` into one of: a constant; a
+Every channel compiles through `compileChannel` (`encoding/channels.ts`,
+which grids' looks compile through too) into one of: a constant; a
 category field through an `OrdinalScale` (outputs per dictionary code, so a
 row's value is an array lookup); a number or time field through a
-`ChannelScale` (`channel-scales.ts`); an identity scale (values as they
-are); the series' names through a scale; a condition, compiled once and
-read per row; or a list of these.
+`ChannelScale` (`encoding/channel-scales.ts`); an identity scale (values as
+they are); the series' names through a scale; a condition, compiled once
+and read per row; or a list of these. What only charts do with channels
+(series tails, legends' display colors, outputs checked per channel)
+stays in `marks/features/channels.ts`.
 
 - Every output is checked against the channel drawing it (`outputProblem`
   in `spec/channels.ts`): constants, both branches of a condition, a named

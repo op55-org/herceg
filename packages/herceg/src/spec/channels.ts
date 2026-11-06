@@ -3,8 +3,8 @@
 // field's name (`color: "region"`), a field through a scale (`{ field,
 // scale }`, a scale of the chart's by name or `{ type: "identity" }`), the
 // series' names through a scale, a condition, and the same in `encode`.
-// The feature compiler compiles each to one channel
-// (marks/features/channels.ts), checking its outputs here, and the
+// The feature compiler compiles each to one channel (encoding/channels.ts),
+// checking its outputs here (marks/features/channels.ts), and the
 // validator reads the table of the channels each mark takes in `encode`.
 //
 // Rules every reader keeps (see docs/architecture/marks.md, "Channels"):
@@ -22,9 +22,9 @@
 // - A named scale's outputs (its `map` and `unknown`, used or not) are
 //   checked against every channel reading it.
 
-import { SYMBOLS } from "../draw/symbol-shapes.ts";
 import type { EncodingsSpec, SymbolName } from "./encoding.ts";
 import type { Dash, MarkSpec } from "./spec.ts";
+import { SYMBOLS } from "./symbols.ts";
 
 /** What each channel's values are. */
 export interface ChannelValues {

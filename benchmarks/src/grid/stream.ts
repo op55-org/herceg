@@ -48,11 +48,16 @@ function topWindow(reference: Reference, order: readonly number[] | null): Expec
   const fields = Math.min(WINDOW_FIELDS, reference.fields.length);
   const ids = Array.from({ length: rows }, (_, i) => (order ? order[i]! : reference.start + i));
   const text = ids.map((id) => Array.from({ length: fields }, (_, f) => reference.text(id, f)));
+  const domain = reference.looks ? reference.lookDomain() : undefined;
+  const looks =
+    domain &&
+    ids.map((id) => Array.from({ length: fields }, (_, f) => reference.look(id, f, domain)));
   return {
     count,
     fields: reference.fields.length,
     idAt: (i) => ids[i]!,
     text: (id, field) => text[ids.indexOf(id)]?.[field] ?? "(outside the checked window)",
+    ...(looks && { look: (id: number, field: number) => looks[ids.indexOf(id)]?.[field] }),
     top: 0,
     left: 0,
   };
@@ -66,7 +71,7 @@ function topWindow(reference: Reference, order: readonly number[] | null): Expec
  * offset, the call changes nothing.
  */
 function buildTicks(s: GridScenario, table: GridTable, count: number): Tick[] {
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const sort = s.sort ?? [];
   const filter = s.filter ?? null;
   let order = sort.length > 0 || filter ? reference.order(sort, filter) : null;
@@ -314,9 +319,9 @@ export async function runStream(adapter: Adapter, s: GridScenario): Promise<Grid
   const ticks = buildTicks(s, table, offered);
   const trials: Trial[] = [];
   for (let i = 0; i < s.warmup + s.samples; i++) {
-    const grid = await mount(adapter, table, new Reference(table));
+    const grid = await mount(adapter, table, new Reference(table, s.looks));
     try {
-      if (queried) await applyQuery(grid.handle, new Reference(table), sort, filter);
+      if (queried) await applyQuery(grid.handle, new Reference(table, s.looks), sort, filter);
       await settle();
       const trial = await pacedTrial(grid.handle, ticks, s, slots);
       // The end state, from the ticks this trial delivered.

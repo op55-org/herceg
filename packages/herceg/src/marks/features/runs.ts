@@ -8,9 +8,9 @@
 
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
+import type { RowReader } from "../../encoding/channels.ts";
 import type { Dash } from "../../spec/spec.ts";
 import type { Series } from "../series.ts";
-import type { RowReader } from "./channels.ts";
 
 /** What a run draws in: its channels' outputs, as they give them (colors not yet read). */
 export interface Look {

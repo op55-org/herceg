@@ -38,7 +38,7 @@ export function ownScales(
   path: (name: string) => string,
 ): CompiledScales | undefined {
   const own = new Map<string, ScaleSpec>();
-  // Scales with a range map channels other than position (marks/features/channel-scales.ts).
+  // Scales with a range map channels other than position (encoding/channel-scales.ts).
   for (const [name, spec] of Object.entries(config.scales ?? {}))
     if (
       !["x", "y", "yRight"].includes(name) &&

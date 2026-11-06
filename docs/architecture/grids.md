@@ -62,6 +62,26 @@ changes anything, so a refused update leaves the model as it was; the
 column list, sort, groups, selection, focus, and scroll are kept, and
 listeners are told once.
 
+**Looks** (`grid/looks.ts`) are compiled by the channel code charts use
+(`encoding/`), so a grid's channels take every form a mark's colors take;
+the grid model imports nothing of marks. They are compiled once per change
+of columns, groups, scales, displays, or encodings, against each table
+cells read: the records (`encode`), each group level's table
+(`aggregateEncode`, levels above the last keeping only the entries whose
+fields they have), a pivot's long table and rows' totals, and for remote
+grids each block's window, cached per window. Nothing is kept per row: a
+look is read when a cell is written, through the channel's reader for the
+table's version (a category field's outputs per dictionary code). The
+grid's scales (`LookScales`) are shared by every table: a channel scale's
+domain spans every (rows, field) read through it, rank tests rank the
+records (in a pivot, each value's column), and both are brought up to
+date before cells are read, once per display the model makes, never while
+reading. `looksRevision` counts changes of what looks were compiled from,
+domains, and ranks' nth values, so the DOM grid writes looks again only
+when it moves. A palette place is `var(--hg-palette-N)`, which the DOM
+grid resolves from its theme, so models hold no theme. Updates compile the
+new looks before anything changes, as `fields` do.
+
 Models are held weakly by what they follow, so a model no one keeps stops
 on its own; `dispose()` stops it at once.
 
@@ -183,7 +203,11 @@ row and a spacer as tall as the rows.
   is therefore at most 8 million pixels; taller rows scroll scaled. Each
   frame pairs the scroller's offset with the model's top it stands for, so
   the grid's own scrolling keeps exact targets and only the user's offsets
-  map by the ratio.
+  map by the ratio. Scrolled scaled, rows the browser scrolls natively
+  land in the wrong place, so a frame the grid draws first takes the
+  scroller's offset where it moved since the last scroll event: an offset
+  a script set in the frame's callbacks (synced or animated scrolling)
+  shows in that frame, not the next.
 - **Focus** follows the WAI grid pattern: one tab stop, held by the focused
   cell when mounted, else by the grid. While focus is inside, the focused
   cell is never recycled: its row stays mounted outside the window, clipped
@@ -193,7 +217,16 @@ row and a spacer as tall as the rows.
   value.
 - **Styling.** Theme tokens become custom properties on the grid's root,
   read by one stylesheet each grid carries, so grids in shadow roots are
-  styled. Frames go through the shared scheduler; grids out of view wait.
+  styled. A cell's look is custom properties and `data-look`, written
+  only where they differ. Text over a fill takes black or white by WCAG's
+  relative luminance of what it lands on (the fill composited over the
+  surface, under the selection's tint in selected rows) against the
+  crossover of 0.1791. The grid works both inks out for fills it parses,
+  cached by fill and theme; fills only the page reads (CSS variables,
+  color names) take CSS relative colors over the channels the theme gives
+  as numbers, so they follow the page, at a higher style cost. Forced
+  colors drop looks. Frames go through the shared scheduler; grids out of
+  view wait.
 - **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
   model's `GridRef`, taken before the click selects (listeners of the
   selection may move or restrict rows), and give its index after; Enter on

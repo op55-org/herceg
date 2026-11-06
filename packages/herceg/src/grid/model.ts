@@ -12,7 +12,7 @@ import { compileExpression, type Expression, type Fields } from "../data/express
 import { type GroupKey, groupId, type RowGroups } from "../data/groups.ts";
 import type { SortKey } from "../data/order.ts";
 import { RowSet } from "../data/row-set.ts";
-import type { RowSnapshot, RowView } from "../data/row-view.ts";
+import type { MarkRows, RowSnapshot, RowView } from "../data/row-view.ts";
 import {
   type DataSelection,
   type SelectionStore,
@@ -20,14 +20,19 @@ import {
   selectRows,
 } from "../data/selection.ts";
 import type { PositionField, Schema, Table } from "../data/table.ts";
+import { wholeTable } from "../encoding/channel-scales.ts";
+import { missingValue } from "../fields/display.ts";
 import {
   BaseGridModel,
   type Column,
   cycled,
+  type GridCellRead,
+  type GridCellState,
   type GridDisplay,
   type GridFocus,
   type GridRef,
   type GridSettings,
+  type LookPresentation,
   nextOrder,
   type SelectionState,
   type SelectMode,
@@ -39,6 +44,7 @@ import {
   type FormatSettings,
   type GridColumn,
   type PlacedColumn,
+  type ScopeOf,
 } from "./columns.ts";
 import {
   countGroup,
@@ -54,10 +60,24 @@ import {
   shownAs,
   stamped,
 } from "./grouped.ts";
+import {
+  type CellEncodings,
+  type CellLook,
+  compileEncodings,
+  type Look,
+  LookScales,
+  type LookSettings,
+  type LookTable,
+  lookOf,
+  rankOf,
+  withEncodingsCopied,
+} from "./looks.ts";
 
 export {
   BaseGridModel,
   type FocusMove,
+  type GridCellRead,
+  type GridCellState,
   type GridFocus,
   type GridPresentation,
   type GridRange,
@@ -69,23 +89,54 @@ export {
   type ShownRow,
 } from "./base.ts";
 export {
+  type AggregateScope,
+  type AnyAggregates,
   type GridColumn,
   type GridColumnLayout,
   MIN_COLUMN_WIDTH,
   MIN_SCROLLING_WIDTH,
   type PinSide,
+  type ScopeOf,
 } from "./columns.ts";
+export type {
+  CellEncodings,
+  CellLook,
+  GridCategories,
+  GridGradient,
+  GridScale,
+  GridScales,
+} from "./looks.ts";
 
-export interface GridModelOptions<S extends Schema = Schema> extends GridSettings {
+/**
+ * A model's options. `G` and `B` are its groups' (their last level's table
+ * and grouping fields), inferred from `groups`; by default (no groups, or a
+ * schema given alone: `createGridModel<S>(...)`), columns name any
+ * aggregates, which the model checks as groups arrive.
+ */
+export interface GridModelOptions<
+  S extends Schema = Schema,
+  // biome-ignore lint/suspicious/noExplicitAny: groups of any fields, as erased groups are.
+  G extends Schema = any,
+  B extends readonly string[] = readonly string[],
+> extends GridSettings {
   /** The rows to show, in order. The application owns the view; the grid sorts through it. */
   data: RowView<S>;
-  columns: readonly GridColumn<S>[];
+  /**
+   * The columns. Their `aggregate` and `aggregateEncode` name what the
+   * groups' tables hold, checked against the groups the model is made with.
+   */
+  columns: readonly GridColumn<S, NoInfer<ScopeOf<G, B>>>[];
   /**
    * Groups of the view's rows (`groupRows(data, ...)`) to show as group
    * rows, each followed by its groups below, or its rows, when expanded;
    * none by default.
    */
-  groups?: RowGroups<S> | null;
+  groups?: RowGroups<S, G, B> | null;
+  /**
+   * How whole table rows look (`fill`, `color`): every cell of a row where
+   * its column's own channel gives no output. Group rows take none.
+   */
+  encode?: CellEncodings<S> | undefined;
   /** Where the selected rows go; a store of the grid's own when left out. */
   selectionStore?: SelectionStore<S>;
   /** The store's channel for the selected rows; "grid-rows" by default. */
@@ -160,6 +211,14 @@ interface Entry {
   readonly offset: number;
 }
 
+/** A pivot's cells' looks, compiled (see `GridPivot.looks`). */
+export interface PivotLooks {
+  /** Whether any aggregate's columns have looks. */
+  readonly any: boolean;
+  /** The look of the cell of generated column `column` in pivot row `row`. */
+  lookAt(column: string, row: number): CellLook | undefined;
+}
+
 /**
  * A pivot as a grid shows it (grid/pivot.ts, which keeps pivots out of
  * grids that show none): its rows are its groups' first level, never
@@ -187,6 +246,26 @@ export interface GridPivot {
     given: readonly GridColumn[] | null,
     settings: FormatSettings,
   ): { columns: Column[]; contents: Map<string, ColumnContent> };
+  /** Its aggregates' looks compiled as `settings` say; throws where they are refused. */
+  looks(settings: LookSettings): PivotLooks;
+  /** What the cell of column `column` in pivot row `row` holds. */
+  read(column: string, row: number): Pick<GridCellRead, "state" | "value" | "kind">;
+}
+
+/** A model's looks, compiled (see grid/looks.ts). */
+interface ModelLooks {
+  readonly scales: LookScales;
+  /** Each column's channels on table rows, by column id, and the rows' own. */
+  readonly records: ReadonlyMap<string, Look>;
+  readonly rows: Look | undefined;
+  /** Each group level's table, and each column's channels on its rows, by column id. */
+  readonly tables: readonly Table[];
+  readonly levels: readonly ReadonlyMap<string, Look>[];
+  readonly pivot: PivotLooks | undefined;
+  /** Whether anything has looks. */
+  readonly any: boolean;
+  /** The display the domains and ranks were last brought up to date for. */
+  seen: GridDisplay | undefined;
 }
 
 /**
@@ -199,6 +278,9 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   readonly selectionStore: SelectionStore<S>;
   readonly channel: string;
   readonly #table: Table;
+  #looks: ModelLooks | null = null;
+  /** The view's rows as looks last read them. */
+  #recordRows: MarkRows | undefined;
 
   #groups: RowGroups | null = null;
   readonly #pivot: GridPivot | null;
@@ -239,7 +321,8 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   readonly #stop: () => void;
 
   /** `pivot`, from `createPivotGridModel`, shows a pivot's rows. */
-  constructor(options: GridModelOptions<S>, pivot?: GridPivot) {
+  // biome-ignore lint/suspicious/noExplicitAny: groups of any fields, which the columns' types were checked against.
+  constructor(options: GridModelOptions<S, any, any>, pivot?: GridPivot) {
     super(options, pivot ? "pivot grid" : "grid", options.data.source as unknown as Table);
     const { data, selectionStore: store } = options;
     this.data = data;
@@ -251,10 +334,10 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     this.selectionStore = store ?? selectionStore(data.source);
     this.channel = options.channel ?? "grid-rows";
     this.#pivot = pivot ?? null;
-    this.#groups = pivot
-      ? pivot.groups
-      : this.#checkGroups(options.groups ?? null, options.columns);
-    this.setColumns(options.columns);
+    const columns = options.columns as unknown as readonly GridColumn[];
+    this.#groups = pivot ? pivot.groups : this.#checkGroups(options.groups ?? null, columns);
+    if (pivot) this.#looks = this.#compileLooks([], this.settings, this.presentation, null);
+    this.setColumns(options.columns as unknown as readonly GridColumn<S>[]);
     // Held weakly by what it follows, so a model no one keeps stops following on its own.
     const ref = new WeakRef(this);
     const changed = () => {
@@ -273,43 +356,59 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   // Columns
 
   /**
-   * Replaces the columns: their order, widths, pins, formats, aggregates, and
-   * which are hidden. A pivot grid's columns are generated: it takes their
+   * Replaces the columns: their order, widths, pins, formats, aggregates,
+   * looks, and which are hidden; names of aggregates are checked against
+   * the groups. A pivot grid's columns are generated: it takes their
    * layout, by id, kept for columns not generated now until they are.
    */
   setColumns(columns: readonly GridColumn<S>[]): void {
     const pivot = this.#pivot;
+    // Encodings copied, so a caller's later changes reach looks only through `setColumns`.
+    const given = (columns as unknown as readonly GridColumn[]).map(withEncodingsCopied);
     if (pivot) {
       const generated = pivot.columns(
-        this.columnList as readonly Column[],
-        columns as readonly GridColumn[],
+        this.columnList as unknown as readonly Column[],
+        given,
         this.settings,
       );
       this.#pivotRevision = pivot.revision;
-      this.takeColumns(generated.columns as Column<S>[], generated.contents);
+      this.takeColumns(generated.columns as unknown as Column<S>[], generated.contents);
       return;
     }
-    const contents = describeColumns(this.#table, columns as readonly GridColumn[], this.settings);
-    this.#checkGroups(this.#groups, columns);
+    const contents = describeColumns(this.#table, given, this.settings);
+    this.#checkGroups(this.#groups, given);
+    const looks = this.#compileLooks(given, this.settings, this.presentation, this.#groups);
+    this.#looks = looks;
     this.takeColumns(
-      columns.map((column) => ({ ...column, id: column.id ?? column.field })) as Column<S>[],
+      given.map((column) => ({
+        ...column,
+        id: column.id ?? column.field,
+      })) as unknown as Column<S>[],
       contents,
     );
   }
 
-  protected restyle(settings: FormatSettings): () => void {
+  protected restyle(settings: FormatSettings, presentation: LookPresentation): () => void {
     const pivot = this.#pivot;
     if (pivot) {
       pivot.check(settings);
+      const looks = this.#compileLooks([], settings, presentation, null);
       // Once the settings are the model's: the columns generated as the
       // pivot is now and written as they say, as catching up generates them.
-      return () => this.#generate(pivot);
+      return () => {
+        this.#looks = looks;
+        this.#generate(pivot);
+      };
     }
-    const columns = this.columnList;
-    const contents = describeColumns(this.#table, columns as readonly GridColumn[], settings);
+    const columns = this.columnList as unknown as readonly GridColumn[];
+    const contents = describeColumns(this.#table, columns, settings);
     // Group rows write keys of grouping fields no column shows too.
     checkKeys(this.#table, this.#groups?.by ?? [], settings, this.#table);
-    return () => this.takeColumns(columns, contents);
+    const looks = this.#compileLooks(columns, settings, presentation, this.#groups);
+    return () => {
+      this.#looks = looks;
+      this.takeColumns(this.columnList, contents);
+    };
   }
 
   // Groups
@@ -331,9 +430,17 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   setGroups(groups: RowGroups<S> | null): void {
     if (this.#pivot) throw new Error("A pivot grid shows its pivot's rows");
     if (groups === this.#groups) return;
-    this.#checkGroups(groups, this.columnList);
+    const columns = this.columnList as unknown as readonly GridColumn[];
+    this.#checkGroups(groups, columns);
+    const looks = this.#compileLooks(
+      columns,
+      this.settings,
+      this.presentation,
+      groups as RowGroups | null,
+    );
     this.current();
     this.#groups = groups as RowGroups | null;
+    this.#looks = looks;
     this.#toggled.clear();
     this.#expandedByDefault = false;
     this.#groupSort = [];
@@ -470,11 +577,72 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   textAt(rowIndex: number, columnIndex: number): string {
     // Catching up first: a pivot's columns follow its rows.
     const { group, depth, position } = this.#entry(rowIndex);
-    const column = this.columnLayout[columnIndex] as PlacedColumn | undefined;
-    if (!column) throw new RangeError(`Column ${columnIndex} is not shown`);
+    const column = this.#column(columnIndex);
     if (position >= 0) return column.content.text(this.#table, position);
     if (this.#pivot) return column.content.text(this.#pivot.rows, group);
     return this.#textsOfGroups()[columnIndex]!(group, depth);
+  }
+
+  lookAt(rowIndex: number, columnIndex: number): CellLook | undefined {
+    const { group, depth, position } = this.#entry(rowIndex);
+    const { id } = this.#column(columnIndex);
+    const looks = this.#currentLooks();
+    if (!looks.any) return undefined;
+    if (looks.pivot) return looks.pivot.lookAt(id, group);
+    if (position >= 0) return lookOf(this.#table, position, looks.records.get(id), looks.rows);
+    return lookOf(looks.tables[depth]!, group, looks.levels[depth]?.get(id));
+  }
+
+  cellAt(rowIndex: number, columnIndex: number): GridCellRead {
+    const text = this.textAt(rowIndex, columnIndex);
+    const look = this.lookAt(rowIndex, columnIndex);
+    const { group, depth, position } = this.#entry(rowIndex);
+    const column = this.#column(columnIndex);
+    const cell = (
+      state: GridCellState,
+      value: GridCellRead["value"],
+      kind: GridCellRead["kind"],
+    ) => ({
+      state,
+      value,
+      kind,
+      text,
+      look,
+      link: undefined,
+    });
+    if (this.#pivot) return { ...this.#pivot.read(column.id, group), text, look, link: undefined };
+    if (position >= 0) {
+      const value = this.#table.value(column.field as never, position) as number | string | null;
+      const missing = missingValue(column.kind, value);
+      return {
+        ...cell(missing ? "missing" : "value", missing ? null : value, column.kind),
+        link: column.content.link?.(this.#table, position),
+      };
+    }
+    // A group's header: its key's values, and its aggregates.
+    const groups = this.#groups!;
+    const by = groups.by as readonly string[];
+    const k = columnIndex === 0 ? depth : by.indexOf(column.field);
+    if (k >= 0 && k <= depth) {
+      const value = groups.keyOf(group, depth)[k]!;
+      const kind = this.#table.kind(by[k]!) as "number" | "time" | "category";
+      return missingValue(kind, value) ? cell("missing", null, kind) : cell("value", value, kind);
+    }
+    const name = column.content.aggregate;
+    if (name === undefined || !groups.aggregates.some((one) => one.name === name))
+      return cell("empty", undefined, null);
+    const table = groups.tableOf(by[depth]!) as Table;
+    const kind = table.kind(name) as "number" | "time";
+    const value = table.numbers(name as never)[group]!;
+    return missingValue(kind, value) ? cell("missing", null, kind) : cell("value", value, kind);
+  }
+
+  get hasLooks(): boolean {
+    return this.#looks?.any ?? false;
+  }
+
+  get looksRevision(): number {
+    return this.#currentLooks().scales.revision;
   }
 
   // Sorting
@@ -636,6 +804,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     this.#count = null;
     this.#counts = null;
     this.#groupTexts = null;
+    this.#recordRows = undefined;
   }
 
   // For the shared model (base.ts)
@@ -772,10 +941,118 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     this.notify();
   }
 
+  /** The shown column `columnIndex`, or an error. */
+  #column(columnIndex: number): PlacedColumn {
+    const column = this.columnLayout[columnIndex] as PlacedColumn | undefined;
+    if (!column) throw new RangeError(`Column ${columnIndex} is not shown`);
+    return column;
+  }
+
+  /**
+   * The records looks read: the view's rows, or the table's every row where
+   * the view shows each of them (in any order), whose extents appends extend.
+   */
+  #records = (): MarkRows => {
+    const view = this.data as unknown as RowView;
+    const { filter } = view.query;
+    if ((filter === undefined || filter === true) && view.restriction === null)
+      return wholeTable(this.#table);
+    this.#recordRows = view.markRows(this.#recordRows);
+    return this.#recordRows;
+  };
+
+  /**
+   * Looks of `columns` and of `presentation`'s rows compiled for `groups`,
+   * as `settings` say; throws where any is refused, changing nothing.
+   */
+  #compileLooks(
+    columns: readonly GridColumn[],
+    settings: FormatSettings,
+    presentation: LookPresentation,
+    groups: RowGroups | null,
+  ): ModelLooks {
+    const table = this.#table;
+    const { surface } = settings;
+    const scales = new LookScales(presentation.scales, surface, false, this.#looks?.scales);
+    const looks: LookSettings = {
+      surface,
+      scales,
+      fields: settings.fields,
+      source: settings.source,
+      kinds: table,
+    };
+    const records = new Map<string, Look>();
+    const levels: Map<string, Look>[] = [];
+    const tables: Table[] = [];
+    const pivot = this.#pivot;
+    if (pivot) {
+      if (presentation.encode !== undefined)
+        throw new TypeError(
+          `${surface} encode: a pivot's cells take looks by aggregate (aggregates.<name>.encode); drop encode`,
+        );
+      const cells = pivot.looks(looks);
+      return {
+        scales,
+        records,
+        rows: undefined,
+        tables,
+        levels,
+        pivot: cells,
+        any: cells.any,
+        seen: undefined,
+      };
+    }
+    const of: LookTable = { table, rows: this.#records, rank: rankOf(this.#records) };
+    columns.forEach((column, i) => {
+      const look = compileEncodings(column.encode, of, looks, `${surface} columns[${i}].encode`);
+      if (look) records.set(column.id ?? column.field, look);
+    });
+    const rows = compileEncodings(presentation.encode, of, looks, `${surface} encode`);
+    // Group rows read their level's table; levels above the last lack the
+    // grouping fields below them, which give their rows no look.
+    const by = (groups?.by ?? []) as readonly string[];
+    for (let depth = by.length - 1; depth >= 0; depth--) {
+      const level = groups!.tableOf(by[depth]!) as Table;
+      const rows = () => wholeTable(level);
+      const at: LookTable = {
+        table: level,
+        rows,
+        rank: "ranks read table rows; group rows take no rank",
+        aggregates: groups!.aggregates,
+      };
+      const map = new Map<string, Look>();
+      columns.forEach((column, i) => {
+        const look = compileEncodings(
+          column.aggregateEncode,
+          at,
+          looks,
+          `${surface} columns[${i}].aggregateEncode`,
+          depth < by.length - 1,
+        );
+        if (look) map.set(column.id ?? column.field, look);
+      });
+      tables[depth] = level;
+      levels[depth] = map;
+    }
+    const any = records.size > 0 || rows !== undefined || levels.some((map) => map.size > 0);
+    return { scales, records, rows, tables, levels, pivot: undefined, any, seen: undefined };
+  }
+
+  /** The looks, their domains and ranks brought up to date with what the grid shows. */
+  #currentLooks(): ModelLooks {
+    const looks = this.#looks!;
+    const display = this.current();
+    if (looks.seen !== display) {
+      looks.seen = display;
+      looks.scales.update();
+    }
+    return looks;
+  }
+
   /** Throws unless the groups are of the view and have the aggregates the columns show. */
   #checkGroups(
     groups: RowGroups<S> | RowGroups | null,
-    columns: readonly GridColumn<S>[],
+    columns: readonly GridColumn[],
   ): RowGroups | null {
     if (!groups) return null;
     if (groups.view !== this.data) throw new Error("A grid's groups must be of its view's rows");
@@ -797,12 +1074,16 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * view stays where it was, and sort keys of columns gone go too.
    */
   #generate(pivot: GridPivot) {
-    const generated = pivot.columns(this.columnList as readonly Column[], null, this.settings);
+    const generated = pivot.columns(
+      this.columnList as unknown as readonly Column[],
+      null,
+      this.settings,
+    );
     this.#pivotRevision = pivot.revision;
     // Rows sort by the columns there are; the others' keys go.
     const keys = this.#groupSort.filter(({ field }) => pivot.fields.has(field));
     if (keys.length < this.#groupSort.length) this.#groupSort = Object.freeze(keys);
-    this.regenerate(generated.columns as Column<S>[], generated.contents);
+    this.regenerate(generated.columns as unknown as Column<S>[], generated.contents);
   }
 
   /** Forgets the expansion of groups gone once they outnumber those left, so streams of keys do not pile up. */
@@ -991,8 +1272,18 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 }
 
-/** A grid model; see `GridModel`. */
-export function createGridModel<S extends Schema>(options: GridModelOptions<S>): GridModel<S> {
+/**
+ * A grid model; see `GridModel`. The columns' `aggregate` and
+ * `aggregateEncode` it is given are typed by the groups it is given; made
+ * without groups (as groups a user picks later), they take any names,
+ * which `setGroups` checks, as `setColumns` checks the columns it takes.
+ */
+export function createGridModel<
+  S extends Schema,
+  // biome-ignore lint/suspicious/noExplicitAny: groups of any fields (see `GridModelOptions`).
+  G extends Schema = any,
+  B extends readonly string[] = readonly string[],
+>(options: GridModelOptions<S, G, B>): GridModel<S> {
   return new GridModel(options);
 }
 

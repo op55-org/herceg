@@ -2635,7 +2635,7 @@ function entry(value: Check): Check {
         },
         scale: string,
       });
-      // As the feature compiler refuses it (marks/features/channels.ts).
+      // As the feature compiler refuses it (encoding/channels.ts).
       if (c.scale === undefined)
         throw refusal(
           `${path}.scale`,

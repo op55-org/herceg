@@ -10,25 +10,6 @@ import type { SymbolName } from "../spec/encoding.ts";
 
 export type { SymbolName };
 
-/**
- * Every symbol: the first `CYCLE` in the order category fields take them,
- * distinct silhouettes first; "x", a cross turned 45 degrees, only by name.
- */
-export const SYMBOLS: readonly SymbolName[] = [
-  "circle",
-  "square",
-  "triangle",
-  "diamond",
-  "cross",
-  "star",
-  "wye",
-  "triangle-down",
-  "x",
-];
-
-/** How many of SYMBOLS category fields take in turn. */
-export const CYCLE = 8;
-
 const PI = Math.PI;
 
 /** Regular polygon vertices around the center, starting straight up. */

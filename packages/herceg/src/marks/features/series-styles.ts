@@ -9,6 +9,15 @@
 
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
+import {
+  type Channel,
+  type Check,
+  categoryField,
+  channelRevision,
+  compileChannel,
+  rowReader,
+  type ScaleOf,
+} from "../../encoding/channels.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { Geometry } from "../../scene/scene.ts";
 import type {
@@ -21,19 +30,7 @@ import type { Dash } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { Series } from "../series.ts";
-import {
-  type Channel,
-  type Check,
-  categoryField,
-  channelRevision,
-  colorShortForm,
-  compileChannel,
-  displayFields,
-  outputCheck,
-  rowReader,
-  type ScaleOf,
-  seriesTail,
-} from "./channels.ts";
+import { colorShortForm, displayFields, outputCheck, seriesTail } from "./channels.ts";
 import type { Where } from "./compile.ts";
 import { categoryKey, keyedFields } from "./row-styles.ts";
 import { firstAfter, type Look, type RunPart, type Runs, StyleRuns, subset } from "./runs.ts";

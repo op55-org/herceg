@@ -7,6 +7,16 @@
 // of them gives an output the series' look.
 
 import type { Table } from "../../data/table.ts";
+import { wholeTable } from "../../encoding/channel-scales.ts";
+import {
+  type Channel,
+  type Check,
+  categoryField,
+  channelRevision,
+  compileChannel,
+  rowReader,
+  type ScaleOf,
+} from "../../encoding/channels.ts";
 import type { ChartFields } from "../../fields/chart.ts";
 import type { MarkFeatures, RowLooks, RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
@@ -14,20 +24,7 @@ import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { MarkRows } from "../rows.ts";
 import type { Series } from "../series.ts";
-import { wholeTable } from "./channel-scales.ts";
-import {
-  type Channel,
-  type Check,
-  categoryField,
-  channelRevision,
-  colorShortForm,
-  compileChannel,
-  displayFields,
-  outputCheck,
-  rowReader,
-  type ScaleOf,
-  seriesTail,
-} from "./channels.ts";
+import { colorShortForm, displayFields, outputCheck, seriesTail } from "./channels.ts";
 import { subset } from "./runs.ts";
 
 /** The options of a mark's spec its rows' looks come from. */

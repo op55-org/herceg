@@ -11,26 +11,25 @@
 // `seriesTail`) gives rows without another output their series' color.
 
 import type { Table } from "../../data/table.ts";
-import { CYCLE, SYMBOLS, symbolReach } from "../../draw/symbol-shapes.ts";
-import type { ChartFields } from "../../fields/chart.ts";
-import type { FeatureKit, PointChannel, PointChannels, PointLooks } from "../../model/features.ts";
-import type { ChannelName } from "../../spec/channels.ts";
-import type { SymbolName } from "../../spec/encoding.ts";
-import type { PaintReader, Theme } from "../../theme.ts";
-import type { GlyphKey } from "../mark.ts";
-import type { MarkRows } from "../rows.ts";
-import type { Series } from "../series.ts";
+import { symbolReach } from "../../draw/symbol-shapes.ts";
 import {
   type Channel,
   type Check,
   channelRevision,
   compileChannel,
-  displayFields,
-  outputCheck,
   type ScaleOf,
   scaledOutputs,
-  seriesTail,
-} from "./channels.ts";
+} from "../../encoding/channels.ts";
+import type { ChartFields } from "../../fields/chart.ts";
+import type { FeatureKit, PointChannel, PointChannels, PointLooks } from "../../model/features.ts";
+import type { ChannelName } from "../../spec/channels.ts";
+import type { SymbolName } from "../../spec/encoding.ts";
+import { CYCLE, SYMBOLS } from "../../spec/symbols.ts";
+import type { PaintReader, Theme } from "../../theme.ts";
+import type { GlyphKey } from "../mark.ts";
+import type { MarkRows } from "../rows.ts";
+import type { Series } from "../series.ts";
+import { displayFields, outputCheck, seriesTail } from "./channels.ts";
 import { sourceOf } from "./identity.ts";
 import { markerPath } from "./markers.ts";
 import { keyedFields } from "./row-styles.ts";

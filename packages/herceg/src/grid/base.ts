@@ -11,6 +11,7 @@ import type { SortKey } from "../data/order.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { compiledFields } from "../fields/compiled.ts";
 import type { CompiledFields } from "../fields/display.ts";
+import type { RowLink } from "../fields/links.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import { timeFormatter } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
@@ -28,6 +29,7 @@ import {
   placeColumns,
   widthOf,
 } from "./columns.ts";
+import { type CellEncodings, type CellLook, type GridScales, plain } from "./looks.ts";
 
 /** Options every grid model takes. */
 export interface GridSettings {
@@ -46,6 +48,12 @@ export interface GridSettings {
    * are written in their columns' formats, and missing values are empty.
    */
   fields?: FieldDisplays | CompiledFields | undefined;
+  /**
+   * Scales looks read values through, by name, as charts' `scales`: channel
+   * scales (gradients through hex colors), scales of categories, and
+   * identity scales (see `GridScales`).
+   */
+  scales?: GridScales | undefined;
   /** How clicks select rows (see `GridSelectionOptions`). */
   selection?: GridSelectionOptions;
 }
@@ -54,9 +62,42 @@ export interface GridSettings {
  * What a grid model's `update` takes: what is given changes (undefined
  * clears it), what is left out stays.
  */
-export interface GridPresentation {
+export interface GridPresentation<S extends Schema = Schema> {
   /** Field displays, as the model's option takes them (see `GridSettings.fields`). */
   fields?: FieldDisplays | CompiledFields | undefined;
+  /** Scales looks read values through (see `GridSettings.scales`). */
+  scales?: GridScales | undefined;
+  /** How whole table rows look, where a cell's column gives no look of its own (see `CellEncodings`). */
+  encode?: CellEncodings<S> | undefined;
+}
+
+/** What state a cell's value is in (see `GridCellRead`). */
+export type GridCellState =
+  /** A value, which `value` holds. */
+  | "value"
+  /** Its field's value is missing, as displays read it: null, NaN, and times past the ends of dates. */
+  | "missing"
+  /** A pivot's combination no row holds. */
+  | "absent"
+  /** Nothing to show: a group row's cell without a key or aggregate. */
+  | "empty"
+  /** A remote row still loading, or that failed to load. */
+  | "loading"
+  | "failed";
+
+/** One cell read whole (`cellAt`): made when asked for, kept by no one. */
+export interface GridCellRead {
+  readonly state: GridCellState;
+  /** The raw value: a number, a time's epoch milliseconds, or a label; null when missing; undefined where the cell has none. */
+  readonly value: number | string | null | undefined;
+  /** The value's kind: its column's, or on group rows its aggregate's (a count in a time column is a number); null without a value. */
+  readonly kind: "number" | "time" | "category" | null;
+  /** The text the grid writes, as `textAt` gives it. */
+  readonly text: string;
+  /** Its look, as `lookAt` gives it. */
+  readonly look: CellLook | undefined;
+  /** Its row's link of the column's field, where the field's display gives one. */
+  readonly link: RowLink | undefined;
 }
 
 /** How a grid's clicks select its rows. */
@@ -191,6 +232,8 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   readonly rowHeight: number;
   /** How values are written: replaced whole by `update`. */
   protected settings: FormatSettings;
+  /** The scales and row encodings looks read, as given: replaced whole by `update`. */
+  protected presentation: LookPresentation;
   /** The columns, shown or hidden, in order: the one record of their layout. */
   #columns: readonly Column<S>[] = [];
   /** What each column shows, by id, made when the columns are set. */
@@ -250,6 +293,13 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
       fields: compiledFields(options.fields, surface),
       source,
     };
+    // Copies, so a caller's later changes reach looks only through `update`.
+    this.presentation = {
+      scales: plain(options.scales) as GridScales | undefined,
+      encode: plain((options as { encode?: CellEncodings | undefined }).encode) as
+        | CellEncodings
+        | undefined,
+    };
   }
 
   // Columns
@@ -286,22 +336,38 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /**
    * Changes how the grid presents its columns: `fields` (field displays),
-   * as given, or cleared with undefined; what is left out stays. The whole
-   * update is checked and compiled before any of it applies, so a refused
-   * one changes nothing; listeners are told once. The columns' layout, the
-   * sort, groups, selection, and scroll stay.
+   * `scales`, and `encode` (whole rows' looks), as given, or cleared with
+   * undefined; what is left out stays. The whole update is checked and
+   * compiled before any of it applies, so a refused one changes nothing;
+   * listeners are told once. The columns' layout, the sort, groups,
+   * selection, and scroll stay.
    */
-  update(options: GridPresentation): void {
+  update(options: GridPresentation<S>): void {
     const { surface } = this.settings;
     if (typeof options !== "object" || options === null)
       throw new TypeError(`${surface} update: expected options such as { fields }`);
     for (const key of Object.keys(options))
-      if (key !== "fields") throw new Error(`${surface} update.${key}: unknown option; use fields`);
-    if (!("fields" in options)) return;
-    const settings = { ...this.settings, fields: compiledFields(options.fields, surface) };
-    const apply = this.restyle(settings);
+      if (key !== "fields" && key !== "scales" && key !== "encode")
+        throw new Error(`${surface} update.${key}: unknown option; use fields, scales, or encode`);
+    if (Object.keys(options).length === 0) return;
+    const settings =
+      "fields" in options
+        ? { ...this.settings, fields: compiledFields(options.fields, surface) }
+        : this.settings;
+    const presentation: LookPresentation = {
+      scales:
+        "scales" in options
+          ? (plain(options.scales) as GridScales | undefined)
+          : this.presentation.scales,
+      encode:
+        "encode" in options
+          ? (plain(options.encode) as CellEncodings | undefined)
+          : this.presentation.encode,
+    };
+    const apply = this.restyle(settings, presentation);
     this.#batch(() => {
       this.settings = settings;
+      this.presentation = presentation;
       apply();
       this.notify();
     });
@@ -414,6 +480,26 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /** The text of a cell: row `rowIndex`, shown column `columnIndex`. */
   abstract textAt(rowIndex: number, columnIndex: number): string;
+
+  /**
+   * The look of a cell (`cellAt(rowIndex, columnIndex).look`), without its
+   * text or the rest of the cell: undefined where its channels give none.
+   */
+  abstract lookAt(rowIndex: number, columnIndex: number): CellLook | undefined;
+
+  /** A cell read whole: its state, raw value and kind, text, look, and link. */
+  abstract cellAt(rowIndex: number, columnIndex: number): GridCellRead;
+
+  /** Whether the grid's columns or rows have looks: without them, every cell's look is undefined. */
+  abstract get hasLooks(): boolean;
+
+  /**
+   * Counts changes of looks that a row's own version does not count: what
+   * looks are compiled from, a channel scale's domain found from the data,
+   * a rank test's nth value. Renderers read mounted cells' looks again when
+   * it moves.
+   */
+  abstract get looksRevision(): number;
 
   /** Where the row a ref names shows now, or -1 when the grid no longer shows it. */
   indexOf(ref: GridRef): number {
@@ -723,10 +809,11 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   protected generated(): void {}
 
   /**
-   * What the columns show written as `settings` say, checked (throwing
-   * before anything changes), and what then takes it.
+   * What the columns show written as `settings` say, and the looks as
+   * `presentation` and `settings` say, checked (throwing before anything
+   * changes), and what then takes them.
    */
-  protected abstract restyle(settings: FormatSettings): () => void;
+  protected abstract restyle(settings: FormatSettings, presentation: LookPresentation): () => void;
 
   /**
    * What the grid shows, catching up with changes since the last read: the
@@ -886,6 +973,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     focus.rowIndex = index;
     focus.row = index < 0 ? null : this.refAt(index);
   }
+}
+
+/** The scales and row encodings a model's looks read, as given. */
+export interface LookPresentation {
+  readonly scales: GridScales | undefined;
+  readonly encode: CellEncodings | undefined;
 }
 
 /** Sort keys after a header click on `field`: going to `order`, or off without one. */

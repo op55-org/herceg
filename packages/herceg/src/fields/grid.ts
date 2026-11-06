@@ -30,6 +30,14 @@ export interface ColumnDisplay {
   /** An aggregate of the field's values in its units (a sum, a mean) as text: its format, without mappings. */
   amount(value: number): string;
   /**
+   * A value's display color: the missing color for a missing value, its
+   * mapping's, or its threshold step's; undefined where none gives one.
+   */
+  color(value: string | number | null): string | undefined;
+  /** The field's bounds, where its display gives them. */
+  readonly min: number | undefined;
+  readonly max: number | undefined;
+  /**
    * Row `row`'s link of `table`, its text written as cells write values
    * (see `DisplayedField.link`): what link cells draw.
    */
@@ -72,6 +80,9 @@ export function columnDisplay<S extends Schema>(
     format: text as ColumnDisplay["format"],
     key: key as ColumnDisplay["key"],
     amount: shown.format as ColumnDisplay["amount"],
+    color: shown.color as ColumnDisplay["color"],
+    min: shown.min,
+    max: shown.max,
     link: shown.link as ColumnDisplay["link"],
     text: (table, position) => {
       if (kind !== "category") return text(table.numbers(field)[position]!);

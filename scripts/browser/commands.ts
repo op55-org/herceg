@@ -116,9 +116,17 @@ const bundleHerceg: BrowserCommand<["esm" | "iife"]> = async (_context, format) 
   return result.outputFiles[0]!.text;
 };
 
+/** Emulates forced colors (a high-contrast theme) on the test's page, or stops; whether the page now matches. */
+const forcedColors: BrowserCommand<[boolean]> = async (context, active) => {
+  await context.page.emulateMedia({ forcedColors: active ? "active" : "none" });
+  const frame = await context.frame();
+  return frame.evaluate(() => matchMedia("(forced-colors: active)").matches);
+};
+
 export const commands = {
   accessibilityTree: accessibilityTree as BrowserCommand<[string, readonly string[]]>,
   bundleHerceg,
   collectGarbage,
+  forcedColors,
   mouse,
 };

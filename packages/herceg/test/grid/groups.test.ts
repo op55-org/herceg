@@ -372,6 +372,7 @@ describe("grouped grids", () => {
       createGridModel({
         data: view,
         groups: groupRows(view, { by: ["host"] }),
+        // @ts-expect-error The groups have no aggregates: Type 'string' is not assignable to type 'never'.
         columns: [{ field: "ms", aggregate: "nope" }],
       }),
     ).toThrow(/"ms" shows "nope", which the groups lack/);

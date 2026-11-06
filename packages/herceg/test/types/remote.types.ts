@@ -1,4 +1,5 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
+// biome-ignore-all lint/suspicious/noThenProperty: conditions' branches, as specs name them.
 import { expectTypeOf } from "vitest";
 import { category, time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
@@ -51,3 +52,16 @@ const sum: GridAggregate = { op: "sum", field: "latency", as: "total" };
 const fieldless: GridAggregate = { op: "sum", as: "total" };
 void sum;
 void fieldless;
+
+// Looks read the source's fields; scales are the grid's.
+createRemoteGridModel({
+  source,
+  columns: [{ field: "host", encode: { fill: { field: "host", scale: "hosts" } } }],
+  scales: { hosts: { type: "ordinal", domain: ["a", "b"], map: { a: "#00aa00" } } },
+  encode: { color: { condition: { when: ["==", ["field", "host"], "c"], then: "#888" } } },
+});
+createRemoteGridModel({
+  source,
+  // @ts-expect-error unknown field
+  columns: [{ field: "host", encode: { fill: { field: "missing" } } }],
+});

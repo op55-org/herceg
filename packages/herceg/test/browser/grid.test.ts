@@ -196,6 +196,63 @@ describe("grids", () => {
     expect(visibleRows(grid).at(-1)).toBe(999_999);
   });
 
+  it("draw each frame of a scripted scroll scaled at its offset, from the second on", async () => {
+    const grid = mount(model(requests(1_000_000), COLUMNS));
+    const root = scroller(grid);
+    root.scrollTop = 400_000;
+    await frames();
+    const rowHeight = grid.model.rowHeight;
+    const headerBottom = () =>
+      grid.root.querySelector(".hg-header")!.getBoundingClientRect().bottom;
+    // Pixels of rows per pixel the scroller moves (about 3.5 here).
+    const ratio =
+      (1_000_000 * rowHeight -
+        (root.clientHeight - (headerBottom() - root.getBoundingClientRect().top))) /
+      (root.scrollHeight - root.clientHeight);
+    expect(ratio).toBeGreaterThan(3);
+    /** How far into the rows the body's top edge shows, as drawn. */
+    const drawnTop = () => {
+      const edge = headerBottom();
+      const row = bodyRows(grid).find((r) => {
+        const box = r.getBoundingClientRect();
+        return box.top <= edge && box.bottom > edge;
+      })!;
+      const index = Number(row.getAttribute("aria-rowindex")) - 2;
+      return index * rowHeight + (edge - row.getBoundingClientRect().top);
+    };
+    // An animation sets the offset in each frame's callbacks, as synced and
+    // animated scrolling do, and each frame is read just before it paints.
+    const probe = host("position:fixed;top:0;left:0;width:1px;height:1px");
+    const misses: number[] = [];
+    await new Promise<void>((resolve) => {
+      let k = 0;
+      let reading = false;
+      const observer = new ResizeObserver(() => {
+        if (!reading) return;
+        reading = false;
+        misses.push(Math.abs(drawnTop() - root.scrollTop * ratio));
+        if (k === 5) {
+          observer.disconnect();
+          resolve();
+        }
+      });
+      observer.observe(probe);
+      const tick = () => {
+        k++;
+        root.scrollTop += 15;
+        reading = true;
+        probe.style.width = `${1 + (k % 2)}px`;
+        if (k < 5) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(() => requestAnimationFrame(tick));
+    });
+    // The first frame paints before the grid hears of the scroll; scrolled
+    // natively, its rows are a frame behind. From the second on, the grid
+    // draws the offset set in the frame it paints.
+    expect(misses).toHaveLength(5);
+    for (const miss of misses.slice(1)) expect(miss).toBeLessThan(Math.ceil(ratio));
+  });
+
   it("mount only the columns in view of wide tables", async () => {
     const fields = Object.fromEntries(
       Array.from({ length: 100 }, (_, f) => [

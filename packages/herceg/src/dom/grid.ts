@@ -19,11 +19,12 @@ import type {
   ShownRow,
 } from "../grid/base.ts";
 import type { ColumnContent, GridColumnLayout, PlacedColumn } from "../grid/columns.ts";
+import type { CellLook } from "../grid/looks.ts";
 import type { GridModel } from "../grid/model.ts";
 import type { ThemeName, ThemeSpec } from "../spec/spec.ts";
 import { resolveTokens, themeReadsPage } from "../theme.ts";
 import { ColumnControls } from "./grid-columns.ts";
-import { GRID_CSS, themeProperties } from "./grid-style.ts";
+import { contrastOf, GRID_CSS, PAGE_INKS, themeProperties } from "./grid-style.ts";
 import { readPage, watchPage } from "./page-theme.ts";
 import { observeVisibility, report, type Scheduled, schedule, unschedule } from "./scheduler.ts";
 
@@ -109,6 +110,8 @@ const HEADER_HEIGHT = 32;
 /** Height of grids whose container has none. */
 const DEFAULT_HEIGHT = 320;
 const OVERSCAN = { rows: 10, columns: 2 };
+/** Fills whose inks are kept: more than a screen of cells shows. */
+const INKS_KEPT = 4096;
 /** How far a press may move and still be a click; farther, it selects text or drags a header. */
 const CLICK_SLOP = 4;
 const HIDDEN_TEXT =
@@ -133,6 +136,10 @@ const MOVES = {
 interface Cell {
   /** What column's content its text was written for. */
   content: ColumnContent | null;
+  /** The fill and text color its look was written with, as the page reads them, and the theme's count then. */
+  fill: string | undefined;
+  color: string | undefined;
+  themed: number;
   readonly element: HTMLDivElement;
   readonly text: Text;
   readonly sort: Text | undefined;
@@ -211,6 +218,14 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   #rows: Row[] = [];
   #headerCells: Cell[] = [];
   #header: { layout: readonly GridColumnLayout[]; sort: unknown } | null = null;
+  /** The model's looks revision as cells' looks were last written, and the palette they read. */
+  #looks = Number.NaN;
+  #palette: readonly string[] = [];
+  /** Counts themes taken, which cells' inks follow. */
+  #themes = 0;
+  /** Inks of text over fills, by fill, for the theme (see `contrastOf`). */
+  #inks = new Map<string, readonly [string, string]>();
+  #contrast: (fill: string) => [string, string] | undefined = () => undefined;
   /** The cell with tabindex 0. */
   #active: HTMLElement | null = null;
   /** Content box of the scroller, from the resize observer. */
@@ -405,6 +420,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       this.#applyTheme();
       this.#dirty = true;
     }
+    // Scrolled scaled, rows the browser scrolls natively land in the wrong
+    // place: an offset a script set this frame (an animation, a synced
+    // scroll), whose scroll event comes only next frame, is taken now.
+    if (this.#ratio > 1 && this.#scroller.scrollTop !== this.#scrollTop) this.#onScroll();
     if (this.#dirty) this.#draw();
   }
 
@@ -436,6 +455,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   #applyTheme() {
     this.#pageChanged = false;
     const theme = readPage(this.#container, (page) => resolveTokens(this.#options.theme, page));
+    // Looks' palette places take the theme's colors: mounted cells read theirs again.
+    this.#palette = theme.tokens.palette;
+    this.#looks = Number.NaN;
+    this.#themes++;
+    this.#inks.clear();
+    this.#contrast = contrastOf(theme);
     const properties = themeProperties(theme, this.model.rowHeight, this.#headerHeight);
     for (const [name, value] of Object.entries(properties))
       this.root.style.setProperty(name, value);
@@ -681,6 +706,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
 
     const grouped = model.grouped;
     const height = model.rowHeight;
+    // Mounted cells read their looks again when what looks follow besides
+    // their rows moved (a domain, a rank, the looks themselves).
+    const looks = model.hasLooks;
+    const revision = looks ? model.looksRevision : -1;
+    const relook = revision !== this.#looks;
+    this.#looks = revision;
     for (let k = 0; k < rows.length; k++) {
       const row = rows[k]!;
       const index = indices[k]!;
@@ -722,10 +753,13 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         const controls = entry.kind === "group" && cell.column === 0;
         this.#place(cell, column, layout);
         const decorated = this.#decorate(cell, controls, selected, grouped);
-        if (stale || decorated || cell.content !== column.content) {
+        const write = stale || decorated || cell.content !== column.content;
+        if (write) {
           cell.content = column.content;
           setText(cell.text, model.textAt(index, cell.column));
         }
+        if (write || relook)
+          this.#paint(cell, looks ? model.lookAt(index, cell.column) : undefined);
       }
     }
   }
@@ -789,6 +823,57 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       cell.controls!.element.remove();
     }
     return wanted !== shown;
+  }
+
+  /** Writes a cell's look where it changed: its fill and text color, as CSS properties the stylesheet reads. */
+  #paint(cell: Cell, look: CellLook | undefined) {
+    // currentColor would follow the text over the fill, which the fill sets:
+    // it is the color text has without a look.
+    const given = look?.fill;
+    const fill =
+      given !== undefined && /^\s*currentcolor\s*$/i.test(given)
+        ? "var(--hg-text)"
+        : this.#paletted(given);
+    const color = this.#paletted(look?.color);
+    if (fill === cell.fill && color === cell.color && cell.themed === this.#themes) return;
+    cell.fill = fill;
+    cell.color = color;
+    cell.themed = this.#themes;
+    // Text over a fill without a color of its own takes the fill's inks.
+    const inks = fill !== undefined && color === undefined ? this.#inksOf(fill) : undefined;
+    const { element } = cell;
+    for (const [name, value] of [
+      ["--hg-look-fill", fill],
+      ["--hg-look-color", color],
+      ["--hg-look-ink", inks?.[0]],
+      ["--hg-look-ink-selected", inks?.[1]],
+    ] as const)
+      if (value === undefined) element.style.removeProperty(name);
+      else element.style.setProperty(name, value);
+    const kinds = [fill !== undefined && "fill", color !== undefined && "color"].filter(Boolean);
+    setAttribute(element, "data-look", kinds.join(" "));
+  }
+
+  /**
+   * Black or white text over `fill`, in plain and selected rows: worked out
+   * once a fill and theme, for as many fills as a screen shows (a field of
+   * colors streaming through starts the cache again).
+   */
+  #inksOf(fill: string): readonly [string, string] {
+    let inks = this.#inks.get(fill);
+    if (!inks) {
+      if (this.#inks.size >= INKS_KEPT) this.#inks.clear();
+      inks = this.#contrast(fill) ?? PAGE_INKS;
+      this.#inks.set(fill, inks);
+    }
+    return inks;
+  }
+
+  /** A look's color as the page reads it: a palette place takes the theme's palette color there, cycled. */
+  #paletted(color: string | undefined): string | undefined {
+    const place = color === undefined ? null : /^var\(--hg-palette-(\d+)\)$/.exec(color);
+    const palette = this.#palette;
+    return place && palette.length > 0 ? palette[Number(place[1]) % palette.length] : color;
   }
 
   #newRow(): Row {
@@ -874,6 +959,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     }
     const cell: Cell = {
       content: null,
+      fill: undefined,
+      color: undefined,
+      themed: 0,
       element,
       text,
       sort,

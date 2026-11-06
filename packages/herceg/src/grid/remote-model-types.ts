@@ -2,6 +2,7 @@ import type { GroupKey } from "../data/groups.ts";
 import type { Schema } from "../data/table.ts";
 import type { GridRef, GridSettings } from "./base.ts";
 import type { GridColumn } from "./columns.ts";
+import type { CellEncodings } from "./looks.ts";
 import type { GridQuery, GridQueryOf, RowKey } from "./query.ts";
 import type { RemoteSelectionStore } from "./remote-selection.ts";
 import type { GridSource } from "./source.ts";
@@ -15,7 +16,15 @@ export interface RemoteGridModelOptions<S extends Schema = Schema> extends GridS
   source: GridSource<S>;
   /** The query; every row in the source's order by default. */
   query?: GridQueryInput<S>;
+  /**
+   * The columns; their looks read the fields they name, which the grid asks
+   * the source for. A remote grid holds only the rows in view, so its
+   * channel scales and scales of categories need domains, and rank tests
+   * are refused.
+   */
   columns: readonly GridColumn<S>[];
+  /** How whole rows look, where a cell's column gives no look of its own (see `CellEncodings`). */
+  encode?: CellEncodings<S> | undefined;
   /** Where the selection goes; a store of the grid's own when left out. */
   selectionStore?: RemoteSelectionStore;
   /** The store's channel for the selection; "grid-rows" by default. */

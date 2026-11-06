@@ -11,6 +11,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Columns](#columns)
 - [Formats](#formats)
 - [Field displays](#field-displays)
+- [Looks](#looks)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
 - [Pivots](#pivots)
@@ -219,6 +220,93 @@ model.update({ fields: { latency: { format: { duration: "second" } } } }); // ne
   listeners hear of one that applies once.
 - Rules are checked as the grid is made and as `update` takes them
   (`grid fields[1].match.regex: ...`), as charts check theirs.
+
+## Looks
+
+Cells take looks from their rows' values: a background (`fill`) and a
+text color (`color`), each a channel as [marks' colors](marks.md#encodings)
+take them. A column's `encode` colors its cells, a grid's `encode` its
+whole rows where a column's own channel gives a cell none, and a column's
+`aggregateEncode` its cells on group rows.
+
+```ts
+import { col } from "herceg";
+import { compileFields } from "herceg/fields";
+import type { GridScales } from "herceg/grid";
+
+const scales = {
+  heat: { type: "linear", range: ["#ffffff", "#c62828"] },
+  services: { type: "ordinal", domain: ["api", "web", "db"], map: { db: "#6a1b9a" } },
+} satisfies GridScales;
+
+const model = createGridModel({
+  data: rowView(requests),
+  fields: compileFields({ latency: { thresholds: { base: "#e8f5e9", steps: [{ value: 200, color: "#fff3cd" }, { value: 500, color: "#f8d7da" }] } } }),
+  scales,
+  columns: [
+    { field: "time" },
+    { field: "service", encode: { color: { field: "service", scale: "services" } } },
+    { field: "latency", encode: { fill: { field: "latency" } } }, // the field's threshold colors
+    { field: "bytes", encode: { fill: { field: "bytes", scale: "heat" } } }, // a gradient
+    { field: "errors", encode: { fill: { condition: { when: { top: 10, field: "errors" }, then: "#ffd54f" } } } },
+  ],
+  encode: { fill: { condition: { when: col("status").ge(500), then: "#fdecea" } } }, // whole rows
+});
+// `scales` replaces them all, so keep the ones still named.
+model.update({ scales: { ...scales, heat: { type: "linear", range: ["#ffffff", "#1565c0"] } } });
+```
+
+- **Channels** take the forms marks' colors take: a constant (`{ value }`);
+  a field's [display colors](styling.md#display-colors) without a `scale`
+  (a number field's thresholds, a category field's mapping colors, or the
+  grid's `"color"` scale where it declares one); a field through a scale of
+  the grid's; a field of colors as they are (`scale: { type: "identity" }`;
+  values that are not colors draw nothing); a condition (an expression, or
+  a rank test of the rows the grid shows, `{ top: n, field }`); or a list
+  of these, the first giving a row an output winning. A row a channel
+  gives no output has no look. Cells have no series, so `{ series: true }`
+  is refused, and take only `fill` and `color`.
+- **Scales** (`scales`) are the grid's, shared by every channel naming one,
+  in columns and rows alike, as a chart's are by its marks: a channel
+  scale is a gradient through hex colors along a number or time field,
+  whose domain, unless given, spans every field read through it over the
+  rows the grid shows (the records and their groups' aggregates together)
+  and grows as rows stream in; a scale of categories colors values by its
+  `map`, else by the theme's palette at the value's place in its domain,
+  kept as values come and go. Without a `domain`, such a scale keeps a
+  place for every value it has ever seen, so give streams of new
+  categories one.
+- **Text** over a fill without a `color` is black or white, whichever has
+  the higher WCAG contrast with what it lands on: the fill over the grid's
+  surface, and in selected rows the selection's tint over that (a
+  translucent theme background is taken over a white page under dark
+  text, and a black one under light text). The grid
+  works it out for the colors it reads; for fills given as the page's CSS
+  variables or color names, CSS works it out from what the page gives
+  them, so they follow the page (and style more slowly). A fill of
+  `currentColor` is the grid's text color; a page variable holding
+  `currentColor` would follow the ink over it, so give fills colors.
+- **Group rows** read their level's table: a column's `aggregateEncode`
+  names the groups' aggregates (`{ field: "latency" }` for `latency:
+  mean("latency")`). A mean, minimum, or maximum takes its field's display
+  colors; sums and counts, which are not in their field's units, need a
+  scale. Levels above the last give no look from the grouping fields
+  below them, and rank tests are refused. `setGroups` refuses groups
+  lacking an aggregate a look reads, changing nothing.
+- **Pivots** take looks by aggregate (`aggregates.latency.encode`), read
+  from each combination's row: the rows and pivot fields and every
+  aggregate. A rank test ranks a pivot value's column; totals columns read
+  their row's totals.
+- **Remote grids** ask the source for the fields looks read, and color
+  rows as their blocks arrive. Their scales need domains (gradients and
+  scales of categories alike: rows arrive in blocks, so neither the extent
+  nor first appearance is known), and rank tests are refused. Group rows
+  give no look from aggregates the query lacks.
+- **`model.update({ scales, encode })`** compiles the new looks before
+  anything changes, as with `fields`; a refused update changes nothing.
+  `model.cellAt(row, column)` reads a cell's state, value, text, and look;
+  `model.lookAt` its look alone.
+- Forced-colors mode drops looks for the system's colors.
 
 ## Linking a grid and a chart
 
@@ -470,7 +558,7 @@ naming the query's `as`). There is no `expandAll`.
   toggles it.
 - Sorting, selecting, and column changes are announced. Rows say their
   index and selection; grouped rows their level and place.
-- Forced-colors mode uses system colors.
+- Forced-colors mode uses system colors; cells drop their looks.
 
 ## In React
 

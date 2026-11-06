@@ -17,20 +17,26 @@ export const adapter: Adapter = {
     "DOM rows and cells written through field displays, mounted through @herceg/react/grid (React 19)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
   prepare: hercegTable,
-  mount: (container, fixture, input) =>
-    hercegHandle(container, fixture, input as Table<Schema>, (model) => {
-      const root = createRoot(container);
-      flushSync(() =>
-        root.render(
-          <Grid
-            model={model}
-            ariaLabel="Benchmark grid"
-            headerHeight={HEADER_HEIGHT}
-            theme={THEME}
-            style={{ width: GRID_WIDTH, height: GRID_HEIGHT }}
-          />,
-        ),
-      );
-      return { destroy: () => root.unmount() };
-    }),
+  mount: (container, fixture, input, options) =>
+    hercegHandle(
+      container,
+      fixture,
+      input as Table<Schema>,
+      (model) => {
+        const root = createRoot(container);
+        flushSync(() =>
+          root.render(
+            <Grid
+              model={model}
+              ariaLabel="Benchmark grid"
+              headerHeight={HEADER_HEIGHT}
+              theme={THEME}
+              style={{ width: GRID_WIDTH, height: GRID_HEIGHT }}
+            />,
+          ),
+        );
+        return { destroy: () => root.unmount() };
+      },
+      options,
+    ),
 };

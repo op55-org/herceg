@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { numberTickLabels, timeTickLabels } from "../../src/format/format.ts";
 import { fromWall, toWall, zoneOffset } from "../../src/format/zone.ts";
 import { alphaOf } from "../../src/scale/alpha.ts";
-import { isLightColor } from "../../src/scale/color.ts";
+import { colorChannels, isLightColor } from "../../src/scale/color.ts";
 import { BandScale, LinearScale, LogScale, niceLogDomain } from "../../src/scale/scale.ts";
 import { linearTicks, niceDomain, tickStep } from "../../src/scale/ticks.ts";
 import { chooseInterval, niceTimeDomain, TimeScale, timeTicks } from "../../src/scale/time.ts";
@@ -335,5 +335,29 @@ describe("isLightColor", () => {
     expect(isLightColor("hsl(60, 100%, 50%)")).toBe(true);
     expect(isLightColor("hsl(240 100% 25%)")).toBe(false);
     expect(isLightColor("white")).toBeUndefined();
+  });
+});
+
+describe("colorChannels", () => {
+  it("reads hex, rgb(), and hsl() colors in degrees", () => {
+    const blue = [0, 0, 255, 1];
+    expect(colorChannels(" #0000FF ")).toEqual(blue);
+    expect(colorChannels("rgb(0 128 255 / 0.5)")).toEqual([0, 128, 255, 0.5]);
+    expect(colorChannels("rgba(0, 50%, 100%, 50%)")).toEqual([0, 127.5, 255, 0.5]);
+    expect(colorChannels("hsl(240 100% 50%)")?.map(Math.round)).toEqual(blue);
+    expect(colorChannels("hsl(600deg 100% 50%)")?.map(Math.round)).toEqual(blue);
+  });
+
+  it("leaves to the page what it would read differently", () => {
+    expect(colorChannels("hsl(-120 100% 50%)")).toBeUndefined();
+    expect(colorChannels("hsl(0.25turn 100% 40%)")).toBeUndefined();
+    expect(colorChannels("hsl(0 150% 50%)")).toBeUndefined();
+    expect(colorChannels("hsl(0 -50% 50%)")).toBeUndefined();
+    // Numbers are percentages without the sign: 0.5 is 0.5%, not a half.
+    expect(colorChannels("hsl(0 0 0.5)")).toBeUndefined();
+    expect(colorChannels("rgb(300 -20 128)")).toBeUndefined();
+    expect(colorChannels("#ff000080")).toBeUndefined();
+    expect(colorChannels("var(--brand)")).toBeUndefined();
+    expect(colorChannels("red")).toBeUndefined();
   });
 });

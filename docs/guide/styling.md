@@ -167,6 +167,9 @@ hg.Chart(latency, fields=fields).bar(x="service", y="p99", encode=hg.Encodings(c
   colors win whole.
 - Gauges without `bands` take a band per step, and tooltip fields a swatch
   of the value's color.
+- Grid cells take them through `encode.fill` or `encode.color` of a field
+  with no `scale` ([looks](grids.md#looks)); group rows' means, minimums,
+  and maximums take their field's colors.
 
 ## Themes
 
