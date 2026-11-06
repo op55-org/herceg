@@ -7,7 +7,12 @@ import type { Schema, Table } from "../data/table.ts";
 import { FULL_TIME } from "../format/format.ts";
 import type { DisplayedKind } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
-import type { CompiledFields, DisplaySettings, FieldColumns } from "./display.ts";
+import {
+  type CompiledFields,
+  type DisplaySettings,
+  type FieldColumns,
+  hasLink,
+} from "./display.ts";
 import type { LinkRows, RowLink } from "./links.ts";
 
 /** What a grid column shows through its field's display (see `columnDisplay`). */
@@ -39,9 +44,12 @@ export interface ColumnDisplay {
   readonly max: number | undefined;
   /**
    * Row `row`'s link of `table`, its text written as cells write values
-   * (see `DisplayedField.link`): what link cells draw.
+   * (see `DisplayedField.link`), which text cells draw; undefined where the
+   * field's display gives no link.
    */
-  link(table: LinkRows, row: number): RowLink | undefined;
+  readonly link: ((table: LinkRows, row: number) => RowLink | undefined) | undefined;
+  /** The fields its link reads besides the field: what a remote grid asks for with it. */
+  readonly reads: readonly string[];
 }
 
 /** A grid column's field, and its own settings that its display takes. */
@@ -83,7 +91,8 @@ export function columnDisplay<S extends Schema>(
     color: shown.color as ColumnDisplay["color"],
     min: shown.min,
     max: shown.max,
-    link: shown.link as ColumnDisplay["link"],
+    link: hasLink(shown) ? (shown.link as ColumnDisplay["link"]) : undefined,
+    reads: shown.linkFields.filter((name) => name !== field),
     text: (table, position) => {
       if (kind !== "category") return text(table.numbers(field)[position]!);
       const { codes, dictionary, revision } = table.categories(field);

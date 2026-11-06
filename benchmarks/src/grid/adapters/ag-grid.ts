@@ -11,7 +11,12 @@
 // With looks, every column takes a `cellStyle` (background and text color,
 // set explicitly empty where a cell has none, as AG Grid keeps styles a
 // cell no longer returns), the domain is adapter code (looks.ts), and cells
-// are refreshed (`refreshCells({ force: true })`) when it moves.
+// are refreshed (`refreshCells({ force: true })`) when it moves. With cells,
+// the cell-bearing columns take a `cellRenderer` component (AG Grid's
+// documented vanilla form: `init`, `getGui`, and `refresh`, which updates
+// the element in place rather than letting the grid build another) drawing
+// cells.ts' bars, chips, links, and symbols; n4's bar's domain is adapter
+// code, found from the rows at mount.
 
 import {
   CellStyleModule,
@@ -22,6 +27,8 @@ import {
   createGrid,
   ExternalFilterModule,
   type GridApi,
+  type ICellRendererComp,
+  type ICellRendererParams,
   type IRowNode,
   ModuleRegistry,
   NumberFilterModule,
@@ -43,6 +50,7 @@ import {
   rowObjects,
   scrollport,
 } from "../adapter.ts";
+import { CELL_FIELDS, DOM_CELL_CSS, domContent, extentOf, fillDomCell } from "../cells.ts";
 import { formatValue, type GridTable } from "../fixture.ts";
 import { type CellLook, cellLook, LookTracker } from "../looks.ts";
 
@@ -101,6 +109,37 @@ function styledLook(cell: Element): CellLook | undefined {
   return { fill: backgroundColor || undefined, color: color || undefined };
 }
 
+/** The parameters a cells column's renderer is given: the column's field and n4's bar's domain. */
+type CellParams = ICellRendererParams<RowObject> & {
+  field: string;
+  extent: readonly [number, number];
+};
+
+/** A cell of the cells scenario (cells.ts), drawn into one element it keeps across rows. */
+class CellRenderer implements ICellRendererComp<RowObject> {
+  #element!: HTMLElement;
+
+  init(params: CellParams): void {
+    this.#element = document.createElement("div");
+    this.refresh(params);
+  }
+
+  getGui(): HTMLElement {
+    return this.#element;
+  }
+
+  refresh(params: CellParams): boolean {
+    fillDomCell(
+      this.#element,
+      params.field,
+      params.valueFormatted ?? "",
+      params.value as number | string | undefined,
+      params.extent,
+    );
+    return true;
+  }
+}
+
 function mount(
   container: HTMLElement,
   table: GridTable,
@@ -109,6 +148,15 @@ function mount(
 ): GridHandle {
   const fields = table.fields;
   const tracker = options.looks ? new LookTracker(table) : undefined;
+  const cells = options.cells === true;
+  if (cells && !document.getElementById("bc-cells-style")) {
+    const style = document.createElement("style");
+    style.id = "bc-cells-style";
+    style.textContent = DOM_CELL_CSS;
+    document.head.append(style);
+  }
+  // Adapter code: the rows' extent, which n4's bars are drawn within.
+  const extent = cells ? extentOf(table, "n4") : undefined;
   let membership: { field: string; labels: Set<string> } | null = null;
   const columnDefs: ColDef<RowObject>[] = fields.map((field) => ({
     field: field.name,
@@ -128,6 +176,11 @@ function mount(
         return { backgroundColor: look?.fill ?? "", color: look?.color ?? "" };
       },
     }),
+    ...(extent &&
+      (CELL_FIELDS as readonly string[]).includes(field.name) && {
+        cellRenderer: CellRenderer,
+        cellRendererParams: { field: field.name, extent },
+      }),
   }));
   const api: GridApi<RowObject> = createGrid(container, {
     theme,
@@ -175,6 +228,7 @@ function mount(
           fields.findIndex((field) => field.name === cell.getAttribute("col-id")),
         selected: (row) => row.classList.contains("ag-row-selected"),
         ...(tracker && { look: styledLook }),
+        ...(cells && { content: domContent }),
       });
     },
     rowCount: () => api.getDisplayedRowCount(),
@@ -252,7 +306,8 @@ function mount(
 
 export const adapter: Adapter = {
   id: "ag-grid",
-  renderer: "DOM rows and cells (rowBuffer 10, column virtualization), Quartz theme",
+  renderer:
+    "DOM rows and cells (rowBuffer 10, column virtualization), Quartz theme; cells scenarios: cellRenderer components",
   processing: {
     sort: "native (comparator keeping missing values last, delta sort)",
     filter: "native number filter; external filter for category membership",

@@ -1,6 +1,7 @@
 // The contract between the grid harness and one grid library, plus the
 // layout every grid is configured with.
 
+import type { CellContent } from "./cells.ts";
 import type { GridTable } from "./fixture.ts";
 import type { CellLook } from "./looks.ts";
 
@@ -50,6 +51,11 @@ export interface Visible {
    * (`looks[r][c]`, like `text`), undefined for a cell drawn without one.
    */
   looks?: (CellLook | undefined)[][];
+  /**
+   * With cells on: what each cell draws beyond its text (`content[r][c]`,
+   * like `text`), undefined for a cell drawing only text.
+   */
+  content?: (CellContent | undefined)[][];
   /** Scroll offset of the shown body content and the body viewport's size. */
   top: number;
   left: number;
@@ -125,6 +131,8 @@ export interface Adapter {
 
 export interface MountOptions {
   looks?: boolean;
+  /** Drawing the cells scenarios' cells (cells.ts), read back in `visible`. */
+  cells?: boolean;
 }
 
 /** Row objects for libraries that take them: `id` plus one property per field. */
@@ -187,6 +195,8 @@ export interface DomGrid {
   selected(row: Element): boolean;
   /** With looks on: a cell's look as drawn. */
   look?(cell: Element): CellLook | undefined;
+  /** With cells on: what a cell draws beyond its text. */
+  content?(cell: Element): CellContent | undefined;
 }
 
 /**
@@ -205,9 +215,16 @@ export function readDomVisible(grid: DomGrid): Visible {
   const columns: number[] = [];
   const text: string[][] = [];
   const looks: (CellLook | undefined)[][] = [];
-  const look = grid.look;
+  const content: (CellContent | undefined)[][] = [];
+  const { look, content: drawn } = grid;
   shown.forEach(({ row }, r) => {
-    const cells: { x: number; field: number; text: string; look: CellLook | undefined }[] = [];
+    const cells: {
+      x: number;
+      field: number;
+      text: string;
+      look: CellLook | undefined;
+      content: CellContent | undefined;
+    }[] = [];
     for (const cell of grid.cells(row)) {
       const rect = cell.getBoundingClientRect();
       if (rect.right > view.left + 0.5 && rect.left < view.right - 0.5)
@@ -216,6 +233,7 @@ export function readDomVisible(grid: DomGrid): Visible {
           field: grid.cellField(cell),
           text: cell.textContent ?? "",
           look: look?.(cell),
+          content: drawn?.(cell),
         });
     }
     cells.sort((a, b) => a.x - b.x);
@@ -224,6 +242,7 @@ export function readDomVisible(grid: DomGrid): Visible {
     const byField = new Map(cells.map((cell) => [cell.field, cell]));
     text.push(columns.map((field) => byField.get(field)?.text ?? ""));
     if (look) looks.push(columns.map((field) => byField.get(field)?.look));
+    if (drawn) content.push(columns.map((field) => byField.get(field)?.content));
   });
   return {
     count: grid.count,
@@ -232,6 +251,7 @@ export function readDomVisible(grid: DomGrid): Visible {
     text,
     selected: shown.map(({ row }) => grid.selected(row)),
     ...(look && { looks }),
+    ...(drawn && { content }),
     top: grid.top,
     left: grid.left,
     width: view.right - view.left,

@@ -47,9 +47,9 @@ by name, regular expression, kind, and table.
   of a category field, gauges' bands and dials, tooltip fields' swatches,
   and grid cells' looks; legends show a key of the colors; rules and
   regions stand at a field's thresholds.
-- Displays link values ([Links](#links)): pinned tooltips draw tooltip
-  fields' links, events carry them, and `displayOf` gives them to
-  application code. Grid cells do not draw links yet.
+- Displays link values ([Links](#links)): pinned tooltips and grid cells
+  draw them, events carry them, and `displayOf` gives them to application
+  code.
 - Python builds and checks `hg.FieldDisplay`, `hg.Match`, `hg.Mapping`,
   `hg.Thresholds`, `hg.AtThresholds`, and `hg.Link`.
 - Every format form a display takes (durations, SI and binary prefixes,
@@ -63,7 +63,7 @@ by name, regular expression, kind, and table.
 | `label` | The field's name where surfaces name it: "Latency" for `latency`. |
 | `description` | A sentence about the field, for surfaces that describe fields. |
 | `format` | How values are written, in any [format](axes-and-legends.md#formats) form: number forms for number fields, time forms for times. Categories take none. |
-| `min`, `max` | A number field's bounds, for surfaces that show a value against them. Never an axis' domain. |
+| `min`, `max` | A number field's bounds, for surfaces that show a value against them (gauges, color ramps, grids' bar cells). Never an axis' domain. |
 | `missing` | The text of missing values (null, NaN, and missing times): "–" by default; or `{ text, color }`, either or both. |
 | `mappings` | Values written as given text, colored in a given color, or both (see [Mappings](#mappings)). |
 | `thresholds` | A number field's colors by step (see [Colors](#colors)). |
@@ -268,8 +268,11 @@ createChart(element, {
   field's link (`InspectedField.link`, `{ url, text }`); targets do not.
 - **Static output** writes a tooltip field's link text in SVG titles, as
   unpinned tooltips do, and draws no links.
-- **Grids** do not draw links yet; their models resolve each column's
-  link for the cells that will.
+- **Grids.** A linked field's text cells hold the link
+  (`<a target="_blank" rel="noopener noreferrer">`), its text the cell's;
+  the anchor takes the cell's focus, and Enter or a press follows it
+  ([Cells](grids.md#cells)). `model.cellAt(row, column).link` reads a
+  cell's link. Remote grids ask the source for the fields a link reads.
 - A field a part names must be in the table of the field linked: the
   surface reading the link refuses it as it first reads that table
   (`chart fields.trace.link.url[3].field: no field "span" in the table of
@@ -455,8 +458,9 @@ read fields' labels and descriptions, cells write through the displays,
 group rows write keys and aggregates by operation and kind, and pivot
 grids write their rows column, value headings, and cells through them.
 See [Grids](grids.md#field-displays). Cells take display colors through
-their looks ([Looks](grids.md#looks)); they do not draw links yet
-([Links](#links)).
+their looks ([Looks](grids.md#looks)) and draw links ([Links](#links));
+bar cells without a `domain` of their own take each end from the field's
+`min` and `max` ([Cells](grids.md#cells)).
 
 ```ts
 const fields = compileFields([{ match: "latency", format: { duration: "millisecond" } }]);

@@ -12,6 +12,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Formats](#formats)
 - [Field displays](#field-displays)
 - [Looks](#looks)
+- [Cells](#cells)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
 - [Pivots](#pivots)
@@ -308,6 +309,158 @@ model.update({ scales: { ...scales, heat: { type: "linear", range: ["#ffffff", "
   `model.lookAt` its look alone.
 - Forced-colors mode drops looks for the system's colors.
 
+## Cells
+
+A cell writes its value's text. A column draws more with a link from its
+field's display, a cell kind, or a custom renderer; a column without a
+field draws only what a renderer draws.
+
+```ts
+import { barCell, chipCell, symbolCell } from "herceg/grid";
+
+createGridModel({
+  data: rowView(requests),
+  fields: {
+    trace: { link: { url: ["/traces/", { value: true }] } },
+    status: { mappings: [{ value: "error", color: "#c62828" }] },
+  },
+  columns: [
+    { field: "trace" }, // a link in each cell
+    { field: "latency", cell: barCell() }, // from 0, within the rows' extent
+    { field: "cpu", cell: barCell({ domain: [0, 1], track: true }) },
+    { field: "status", cell: chipCell(), encode: { color: { field: "status" } } },
+    { field: "region", cell: symbolCell(), encode: { symbol: { field: "region" } } },
+  ],
+});
+```
+
+**Links.** A text cell of a field whose display has a
+[`link`](fields.md#links) holds an anchor with the link's text, opening in
+a new browsing context (`target="_blank" rel="noopener noreferrer"`). A
+row missing a value its URL reads, or whose values make a URL of a scheme
+links do not take, writes its text. The anchor takes the cell's focus:
+Enter and a press follow it (a modified press as the browser does), Space
+still selects the row, and arrows move on. A link is the theme's accent,
+or the column's `color` look.
+
+**Cell kinds** draw behind or beside the text, which stays:
+
+| Kind | Fields | Draws |
+| --- | --- | --- |
+| `barCell({ domain, base, track, text })` | numbers | A bar from `base` (0) to the value, within `domain`; else each end from the field's display (`min`, `max`), else the rows' extent with the base in it, found again as rows change. Values below the base draw toward the start. `track: true` draws the bar's full extent behind it. `encode.color` colors the bar. `text: false` draws the bar alone, its text naming the cell for screen readers. |
+| `chipCell()` | numbers, categories | The text in a chip filled by `encode.color` (the theme's muted color, faint, by default; `currentColor` is the grid's text color), its text black or white, whichever contrasts more over the cell's fill, in selected rows too. |
+| `symbolCell({ size, text })` | any | A symbol of `size` square pixels (64) before the text, shaped by `encode.symbol` (a circle by default) and filled by `encode.color`. `text: false` draws the symbol alone, its text naming the cell for screen readers. |
+
+- Missing values and group rows write their text alone. A kind a field's
+  kind does not take is refused, in TypeScript and when the column is
+  described (`grid columns[1].cell: bar cells draw numbers; "service"
+  holds categories; give a number field, or chipCell()`).
+- **`encode.symbol`** takes symbol cells' shapes in the forms colors take:
+  a symbol's name (`{ value: "triangle" }`), a category field (symbols in
+  turn by first appearance, as charts' points take them), a field through
+  a scale of categories (`map` names symbols), a condition, or a list.
+  Columns of other cells refuse it.
+- A kind's `spec` is its portable form (`barCell({ domain: [0, 1] }).spec`
+  is `{ kind: "bar", domain: [0, 1] }`); what draws it in the page comes
+  with the grid.
+- **Remote grids** hold no records, so bars need both ends (`domain`, or
+  the display's `min` and `max`), and symbols in turn are refused (name a
+  scale of categories).
+
+**Custom renderers** draw columns' cells in code, by column id:
+
+```ts
+createGrid(element, {
+  model,
+  ariaLabel: "Requests",
+  cells: {
+    status: {
+      fields: ["error"], // fields `read` gives, besides the column's own
+      create(host) {
+        const badge = host.ownerDocument.createElement("span");
+        host.append(badge);
+        return {
+          update(cell) {
+            badge.textContent = cell.text;
+            badge.className = cell.read("error") ? "badge failed" : "badge";
+          },
+          destroy() {},
+        };
+      },
+    },
+  },
+});
+```
+
+- **Lifecycle.** A view is created once for each cell element given the
+  column, and updated as the element shows another row, its row changes
+  (a table's rows change together), or its look, selection, or index
+  moves. It is destroyed once: when the element leaves the column or
+  shows a group's row, when the renderer is replaced
+  (`grid.update({ cells })`; `cells: undefined` gives columns their own
+  cells back), and with the grid.
+- **The cell** (`GridCellContext`) is the model's read of it (`state`,
+  `value`, `text`, `look`, `link`, `bar`), its `row`, `rowIndex`,
+  `column`, and `selected`, and `read(field)` of the fields the renderer
+  names. Rows are the same row when their refs' `scope` and `id` agree. A
+  `signal` aborts when the next update supersedes this one and on
+  destroy: asynchronous work checks it before drawing, and `read` refuses
+  after it.
+- **Keys.** `interaction` is `"text"` by default: what the renderer draws
+  is presentation (its host is `inert`: hidden from screen readers, never
+  focused, and its presses the cell's), and the cell's text names the
+  cell. With `"control"`, one button or link takes the cell's focus,
+  its Enter and Space its own. With `"composite"`, Enter or F2 moves the
+  focus to the cell's first control, keys are the controls' until Escape
+  goes back to the cell, and Tab leaves the grid. Presses on controls are
+  theirs: the grid neither selects nor reports a click. A disabled or
+  hidden control is passed over; with none left, the cell takes the focus.
+- **Errors.** A view that throws is reported once (`reportError`), and its
+  cell writes its text until it leaves the column; the rest of the grid
+  draws on.
+- **Frameworks.** A renderer with `framework` instead of `create` is a
+  framework adapter's: in each draw the grid hands it the cells to draw
+  and the hosts to let go of, and shows each cell's text until it says
+  the cell's content is drawn. React, Vue, and Svelte have no cells yet.
+- Pivot grids take no renderers: their rows are combinations, not
+  records.
+
+**Columns without fields** have an id and write their `text`: literal
+text and fields written through their displays (`["Open ", { field:
+"trace" }]`). A renderer draws more where `cells` gives one, and the text
+then names its cells for screen readers and is the renderer's
+`cell.text`. They take looks, but no sort, format, aggregate, or kind;
+remote grids ask the source for the fields their text reads.
+
+```ts
+const model = createGridModel({
+  data: rowView(requests),
+  columns: [{ field: "trace" }, { id: "open", title: "", text: ["Open ", { field: "trace" }] }],
+});
+createGrid(element, {
+  model,
+  ariaLabel: "Requests",
+  cells: {
+    open: {
+      interaction: "control",
+      fields: ["trace"],
+      create(host) {
+        const button = host.ownerDocument.createElement("button");
+        button.textContent = "Open";
+        host.append(button);
+        let trace: string | null = null;
+        button.addEventListener("click", () => openTrace(trace));
+        return {
+          update(cell) {
+            trace = cell.read("trace");
+          },
+        };
+      },
+    },
+  },
+});
+```
+
 ## Linking a grid and a chart
 
 A grid and a chart over one table, each with a view of its own: the grid's
@@ -558,7 +711,14 @@ naming the query's `as`). There is no `expandAll`.
   toggles it.
 - Sorting, selecting, and column changes are announced. Rows say their
   index and selection; grouped rows their level and place.
-- Forced-colors mode uses system colors; cells drop their looks.
+- Linked cells' anchors and control cells' controls take the cell's
+  focus; a composite cell's controls are entered with Enter or F2 and left
+  with Escape ([Cells](#cells)). A cell holding the focus in its content
+  is outlined as a focused cell is.
+- Kinds' drawing is hidden from screen readers: bars, chips, and symbols
+  read as their text.
+- Forced-colors mode uses system colors; cells drop their looks, and
+  chips their fills, their text the row's.
 
 ## In React
 
@@ -583,8 +743,9 @@ function Requests({ data }: { data: typeof requests }) {
 A new `model` makes a new grid; `ariaLabel`, `theme`, and `headerHeight`
 change in place. `onRowClick`, `onCellClick`, and `onRender` hear the
 grid's [events](#events), the latest handler each time. A model no one keeps stops following its view, so one
-made with `useMemo` needs no cleanup. Vue and Svelte have no grid
-component; call `createGrid` on an element.
+made with `useMemo` needs no cleanup. Cell kinds and links come with the
+model's columns; `<Grid>` takes no custom renderers yet. Vue and Svelte
+have no grid component; call `createGrid` on an element.
 
 ## Limits
 
@@ -592,9 +753,11 @@ component; call `createGrid` on an element.
   explicit widths. Rows taller together than 8 million pixels scroll
   scaled (a pixel scrolled moves more than one).
 - Not available: column groups other than a pivot's values, sizing columns
-  to content, moving columns by touch (the menu moves them), custom cell
-  content, editing, and copying. Remote grids have no pivots and no bins
-  in queries.
+  to content, moving columns by touch (the menu moves them), editing,
+  copying, custom renderers in React, Vue, and Svelte, and in pivot grids.
+  Remote grids have no pivots and no bins in queries.
+- Custom renderers update every mounted cell of their columns when any row
+  of a local grid's table changes, as a table's rows share one version.
 - Only mounted rows are in the DOM, so text selection, the browser's find,
   and screen readers reach only those. Announcements are in English, and
   grids have not been tried with screen readers themselves.

@@ -3,6 +3,8 @@ import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC = join(import.meta.dirname, "..", "src");
+// Symbols' shapes, which import nothing: symbol cells (grid/cells.ts) draw them too.
+const SHAPES = join(SRC, "draw", "symbol-shapes.ts");
 // The chart engine must run without a DOM (servers, workers, Python exports).
 const CORE = [
   "data",
@@ -225,6 +227,8 @@ describe("architecture", () => {
     visit(join(SRC, "grid", "model.ts"));
     for (const file of seen) {
       const directory = file.slice(SRC.length + 1).split("/")[0]!;
+      // Symbol cells draw symbols' shapes, which import nothing.
+      if (file === SHAPES) continue;
       expect(CORE, `herceg/grid/model reaches ${file}`).toContain(directory);
     }
   });
@@ -246,7 +250,8 @@ describe("architecture", () => {
     };
     for (const entry of ["grid.ts", "grid-pivot.ts", "grid-remote.ts"]) visit(join(SRC, entry));
     for (const file of seen)
-      expect(file.slice(SRC.length + 1), "a grid entry loads it").not.toMatch(/^(marks|draw)\//);
+      if (file !== SHAPES)
+        expect(file.slice(SRC.length + 1), "a grid entry loads it").not.toMatch(/^(marks|draw)\//);
   });
 
   // `herceg/pivot` is data: charts read its tables, and grids load it only to show one.
@@ -266,11 +271,23 @@ describe("architecture", () => {
     }
   });
 
+  // Cell kinds' drawings (grid/cells.ts) run only when a grid mounts them:
+  // they name the element they are given, and reach the page only through it.
+  const KINDS = join(SRC, "grid", "cells.ts");
   for (const directory of CORE) {
     it(`src/${directory} does not use the DOM or import browser code`, () => {
       for (const file of files(join(SRC, directory))) {
         const source = readFileSync(file, "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
-        expect(DOM.test(source), `${file} uses a DOM API`).toBe(false);
+        const kinds = file === KINDS;
+        expect(
+          DOM.test(kinds ? source.replace(/\bHTMLElement\b/g, "") : source),
+          `${file} uses a DOM API`,
+        ).toBe(false);
+        if (kinds)
+          for (const reach of source.match(/[\w.]*ownerDocument/g) ?? [])
+            expect(reach, `${file} reaches the DOM other than through its element`).toBe(
+              "element.ownerDocument",
+            );
         expect(/from "\.\.\/(dom|render)\//.test(source), `${file} imports browser code`).toBe(
           false,
         );

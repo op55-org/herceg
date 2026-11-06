@@ -71,7 +71,7 @@ function topWindow(reference: Reference, order: readonly number[] | null): Expec
  * offset, the call changes nothing.
  */
 function buildTicks(s: GridScenario, table: GridTable, count: number): Tick[] {
-  const reference = new Reference(table, s.looks);
+  const reference = new Reference(table, s.looks, s.cells);
   const sort = s.sort ?? [];
   const filter = s.filter ?? null;
   let order = sort.length > 0 || filter ? reference.order(sort, filter) : null;
@@ -319,9 +319,10 @@ export async function runStream(adapter: Adapter, s: GridScenario): Promise<Grid
   const ticks = buildTicks(s, table, offered);
   const trials: Trial[] = [];
   for (let i = 0; i < s.warmup + s.samples; i++) {
-    const grid = await mount(adapter, table, new Reference(table, s.looks));
+    const grid = await mount(adapter, table, new Reference(table, s.looks, s.cells));
     try {
-      if (queried) await applyQuery(grid.handle, new Reference(table, s.looks), sort, filter);
+      if (queried)
+        await applyQuery(grid.handle, new Reference(table, s.looks, s.cells), sort, filter);
       await settle();
       const trial = await pacedTrial(grid.handle, ticks, s, slots);
       // The end state, from the ticks this trial delivered.

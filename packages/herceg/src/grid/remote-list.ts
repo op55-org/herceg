@@ -2,6 +2,7 @@
 // rows shown by expanded groups.
 
 import { type GroupKey, groupId } from "../data/groups.ts";
+import type { GridRef } from "./base.ts";
 import type { GridAggregate, GridQuery } from "./query.ts";
 import type { Block, List, RemoteRef, Revision } from "./remote-types.ts";
 import { type RowsWindow, valueAt } from "./source.ts";
@@ -15,6 +16,7 @@ export function start(
 ): Revision {
   const revision: Revision = {
     number,
+    token: Object.freeze({ revision: number }),
     query,
     snapshot: null,
     starting: false,
@@ -206,8 +208,25 @@ export function count(list: List, size = 0): number {
   return Math.max(list.provisional, list.frontier + size);
 }
 
+/** Row `ordinal` of `list`'s ref: its id is the list's (a JSON array) and the ordinal after it. */
 export function refOf(list: List, ordinal: number): RemoteRef {
-  return { scope: list.revision, id: `${list.id}${ordinal}`, list, ordinal };
+  return { scope: list.revision.token, id: `${list.id}${ordinal}`, list, ordinal };
+}
+
+/**
+ * Where a ref's row is: a model's ref says, and a light ref (a scope and an
+ * id alone, as renderers' contexts give them) is found in `revision`, whose
+ * token it must carry; null for a row of another query.
+ */
+export function locate(
+  revision: Revision,
+  ref: GridRef,
+): { readonly list: List; readonly ordinal: number } | null {
+  if ("list" in ref) return ref as RemoteRef;
+  if (ref.scope !== revision.token || typeof ref.id !== "string") return null;
+  const end = ref.id.lastIndexOf("]") + 1;
+  const list = revision.lists.get(ref.id.slice(0, end));
+  return list ? { list, ordinal: Number(ref.id.slice(end)) } : null;
 }
 
 /** The value of a group's own grouping field: a label, a number, or null for missing. */

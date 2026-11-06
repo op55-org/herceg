@@ -142,6 +142,16 @@ describe("<Grid>", () => {
     expect(commits).toBe(1);
   });
 
+  it("draws a column without a field by its text", () => {
+    const model = createGridModel({
+      data: rowView(requests(100)),
+      columns: [{ field: "id" }, { id: "open", text: ["Open ", { field: "id" }] }],
+    });
+    act(() => root.render(<Grid model={model} ariaLabel="Requests" style={{ height: 300 }} />));
+    const row = host.querySelectorAll(".hg-body [role=row]")[2]!;
+    expect(row.querySelectorAll("[role=gridcell]")[1]!.textContent).toBe("Open 2");
+  });
+
   it("makes a new grid for a new model and keeps its ref current", () => {
     const first = createGridModel({ data: rowView(requests(10)), columns: [{ field: "id" }] });
     const second = createGridModel({ data: rowView(requests(20)), columns: [{ field: "ms" }] });

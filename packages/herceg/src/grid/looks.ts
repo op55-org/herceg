@@ -35,20 +35,27 @@ import {
 } from "../encoding/channels.ts";
 import { Rank } from "../encoding/ranks.ts";
 import { type CompiledFields, type DisplayedField, hasColors } from "../fields/display.ts";
-import type { RowColorChannels } from "../marks/encoding.ts";
+import type { RowChannels, RowColorChannels } from "../marks/encoding.ts";
 import type {
   ChannelScaleSpec,
   ChannelSpec,
   IdentityScaleSpec,
   OrdinalScaleSpec,
+  SymbolName,
 } from "../spec/encoding.ts";
 import type { DisplayedKind } from "../spec/fields.ts";
+import { CYCLE, SYMBOLS } from "../spec/symbols.ts";
 import { expressionFields } from "./query.ts";
 
-/** A cell's look: its background (`fill`) and its text's color, as given (CSS variables unresolved). */
+/**
+ * A cell's look: its background (`fill`), its primary paint (`color`: its
+ * text's, or a kind's: a bar's, a chip's, a symbol's), as given (CSS
+ * variables unresolved), and a symbol cell's shape (`symbol`).
+ */
 export interface CellLook {
   readonly fill?: string;
   readonly color?: string;
+  readonly symbol?: SymbolName;
 }
 
 /**
@@ -65,6 +72,12 @@ export interface CellLook {
 export interface CellEncodings<S extends Schema = Schema> {
   fill?: RowColorChannels<S> | undefined;
   color?: RowColorChannels<S> | undefined;
+  /**
+   * A symbol cell's shape (`symbolCell`): a symbol's name, a category field
+   * (symbols in turn, by first appearance) or one through a scale of the
+   * grid's whose `map` gives names, or a condition.
+   */
+  symbol?: RowChannels<SymbolName, S> | undefined;
 }
 
 /**
@@ -130,19 +143,40 @@ const lenient: Check = (value) => {
   if (typeof value !== "string" || !isColor(value)) throw NO_OUTPUT;
 };
 
+/** The symbols categories take in turn, as charts' points do. */
+const SHAPES = (place: number) => SYMBOLS[place % CYCLE]!;
+
+const isSymbol = (value: unknown) => SYMBOLS.includes(value as SymbolName);
+
+/** Refuses an output that is not a symbol's name, at `path`. */
+const checkSymbol: Check = (value, path) => {
+  if (!isSymbol(value))
+    throw new TypeError(
+      `${path}: expected a symbol: ${SYMBOLS.map((name) => JSON.stringify(name)).join(", ")}; received ${JSON.stringify(value)}`,
+    );
+};
+
+/** Values of a field read as symbols that are not symbols' names give no output. */
+const lenientSymbol: Check = (value) => {
+  if (!isSymbol(value)) throw NO_OUTPUT;
+};
+
 /**
  * A channel compiled against one table, reading its rows for the table
  * version, and the domains and ranks it reads, as last read.
  */
 export class LookChannel {
   readonly channel: Channel<string>;
+  /** What a scale of categories' places give: palette places, or symbols. */
+  readonly #symbols: boolean;
   #table: Fields | undefined;
   #version = -1;
   #revision = -1;
   #reader: RowReader<string> | undefined;
 
-  constructor(channel: Channel<string>) {
+  constructor(channel: Channel<string>, symbols = false) {
     this.channel = channel;
+    this.#symbols = symbols;
   }
 
   /** Row `row`'s output of `table` (the table compiled against, or a remote window of its fields); undefined for none. */
@@ -154,12 +188,13 @@ export class LookChannel {
       this.#table = table;
       this.#version = version;
       this.#revision = revision;
+      const symbols = this.#symbols;
       this.#reader = rowReader(
         this.channel,
         table as Table,
-        PALETTE,
+        symbols ? SHAPES : PALETTE,
         undefined as unknown as string,
-        lenient,
+        symbols ? lenientSymbol : lenient,
         "",
         false,
       );
@@ -199,6 +234,7 @@ export function withEncodingsCopied<T extends { encode?: unknown; aggregateEncod
 export interface Look {
   readonly fill: LookChannel | undefined;
   readonly color: LookChannel | undefined;
+  readonly symbol?: LookChannel | undefined;
 }
 
 /**
@@ -213,6 +249,13 @@ export function lookOf(
 ): CellLook | undefined {
   const fill = own?.fill?.output(table, row) ?? rows?.fill?.output(table, row);
   const color = own?.color?.output(table, row) ?? rows?.color?.output(table, row);
+  const symbol = own?.symbol?.output(table, row) as SymbolName | undefined;
+  if (symbol !== undefined)
+    return {
+      ...(fill !== undefined && { fill }),
+      ...(color !== undefined && { color }),
+      symbol,
+    };
   if (fill === undefined) return color === undefined ? undefined : { color };
   return color === undefined ? { fill } : { fill, color };
 }
@@ -260,6 +303,7 @@ export function compileEncodings(
   settings: LookSettings,
   path: string,
   partial = false,
+  symbols = false,
 ): Look | undefined {
   if (given === undefined) return undefined;
   if (typeof given !== "object" || given === null || Array.isArray(given))
@@ -267,13 +311,29 @@ export function compileEncodings(
       `${path}: expected channels such as { fill, color }; received ${JSON.stringify(given)}`,
     );
   for (const key of Object.keys(given))
-    if (key !== "fill" && key !== "color")
-      throw new TypeError(`${path}.${key}: unknown channel; cells take fill and color`);
-  const { fill, color } = given as { fill?: unknown; color?: unknown };
+    if (key === "symbol" && !symbols)
+      throw new TypeError(
+        `${path}.symbol: symbol cells draw shapes; give the column cell: symbolCell(), or drop symbol`,
+      );
+    else if (key !== "fill" && key !== "color" && key !== "symbol")
+      throw new TypeError(
+        `${path}.${key}: unknown channel; cells take fill and color${symbols ? ", and symbol cells symbol" : ""}`,
+      );
+  const { fill, color, symbol } = given as { fill?: unknown; color?: unknown; symbol?: unknown };
   const look = (channel: unknown, name: string) =>
-    compileLook(partial ? within(channel, of.table) : channel, of, settings, `${path}.${name}`);
-  const compiled = { fill: look(fill, "fill"), color: look(color, "color") };
-  return compiled.fill || compiled.color ? compiled : undefined;
+    compileLook(
+      partial ? within(channel, of.table) : channel,
+      of,
+      settings,
+      `${path}.${name}`,
+      name === "symbol",
+    );
+  const compiled = {
+    fill: look(fill, "fill"),
+    color: look(color, "color"),
+    symbol: look(symbol, "symbol"),
+  };
+  return compiled.fill || compiled.color || compiled.symbol ? compiled : undefined;
 }
 
 /**
@@ -286,6 +346,7 @@ export function compileLook(
   of: LookTable,
   settings: LookSettings,
   path: string,
+  symbols = false,
 ): LookChannel | undefined {
   if (given === undefined) return undefined;
   const copied = plain(given);
@@ -297,11 +358,12 @@ export function compileLook(
     copied as ChannelSpec<string>,
     of.table as Table,
     settings.scales.scaleOf(of, settings),
-    "color",
-    check,
+    symbols ? "symbol" : "color",
+    symbols ? checkSymbol : check,
     path,
+    symbols ? "symbol" : "color",
   );
-  return new LookChannel(channel);
+  return new LookChannel(channel, symbols);
 }
 
 /** The keys each form of a cell's channel takes, and what the form is called. */
@@ -415,6 +477,10 @@ export class LookScales {
   readonly #channel = new Map<string, ChannelScale>();
   readonly #ordinal = new Map<string, OrdinalScale>();
   readonly #identity = new Set<string>();
+  /** The scale symbol channels read category fields through without one of their own. */
+  #implicit: OrdinalScale | undefined;
+  /** That of the scales before, whose places it takes: a value keeps its symbol as columns change. */
+  #implicitBefore: OrdinalScale | undefined;
   /** Rank tests of the looks, brought up to date with the channel scales. */
   readonly #ranks: (RankRead & Updating)[] = [];
   /** Display colors by field and kind, for the displays of the looks' compilation. */
@@ -440,6 +506,7 @@ export class LookScales {
     this.#surface = surface;
     this.#remote = remote;
     this.#revision = previous ? previous.#revision + 1 : 0;
+    this.#implicitBefore = previous ? (previous.#implicit ?? previous.#implicitBefore) : undefined;
     if (
       given !== undefined &&
       (typeof given !== "object" || given === null || Array.isArray(given))
@@ -530,6 +597,18 @@ export class LookScales {
       }
       const ordinal = this.#ordinal.get(name);
       if (ordinal) return ordinal;
+      // A category field without a scale on symbol cells: symbols in turn, by first appearance.
+      if (name === "symbol" && field !== undefined && of.table.has(field)) {
+        if (this.#remote)
+          throw new TypeError(
+            `${path.replace(/\.scale$/, "")}: a remote grid's categories arrive block by block, so symbols in turn would depend on load order; name a scale of categories with a domain or a map`,
+          );
+        if (!this.#implicit) {
+          this.#implicit = new OrdinalScale("symbol", undefined, this.#implicitBefore);
+          this.#implicitBefore = undefined;
+        }
+        return this.#implicit;
+      }
       // A category field without a scale: the grid's "color" scale, else its mappings' colors.
       if (name === "color" && field !== undefined && of.table.has(field)) {
         const display = this.#display(of, settings, field, "category");
@@ -607,6 +686,7 @@ export class LookScales {
       sum += scale.revision;
     }
     for (const scale of this.#ordinal.values()) scale.update();
+    this.#implicit?.update();
     for (const rank of this.#ranks) {
       rank.update();
       sum += rank.revision;

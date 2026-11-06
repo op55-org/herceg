@@ -20,9 +20,14 @@ import type { ResolvedTokens } from "../theme.ts";
 
 const G = ".herceg-grid";
 
-/** A fill over the surface, opaque; `--hg-sr` and the rest are the surface's channels, from 0 to 1. */
-const UNDER =
-  "color(from var(--hg-look-fill) srgb calc(r*alpha + var(--hg-sr)*(1 - alpha)) calc(g*alpha + var(--hg-sg)*(1 - alpha)) calc(b*alpha + var(--hg-sb)*(1 - alpha)) / 1)";
+/** `color` over `under` (channels from 0 to 1: the surface's by default), opaque. */
+const over = (
+  color: string,
+  [r, g, b]: readonly (string | number)[] = ["var(--hg-sr)", "var(--hg-sg)", "var(--hg-sb)"],
+) =>
+  `color(from ${color} srgb calc(r*alpha + ${r}*(1 - alpha)) calc(g*alpha + ${g}*(1 - alpha)) calc(b*alpha + ${b}*(1 - alpha)) / 1)`;
+/** A fill over the surface. */
+const UNDER = over("var(--hg-look-fill)");
 /** That under the selection's tint: the accent's channels at `--hg-tint`, its opacity (see `--hg-selected`). */
 const TINTED = `color(from ${UNDER} srgb calc(r*(1 - var(--hg-tint)) + var(--hg-ar)*var(--hg-tint)) calc(g*(1 - var(--hg-tint)) + var(--hg-ag)*var(--hg-tint)) calc(b*(1 - var(--hg-tint)) + var(--hg-ab)*var(--hg-tint)) / 1)`;
 /** Black or white text on `under`, by its relative luminance (`--hg-ink`, one channel). */
@@ -31,6 +36,15 @@ const ink = (under: string) =>
 
 /** The inks of a fill only the page reads exactly: in plain rows and in selected rows. */
 export const PAGE_INKS: readonly [string, string] = [ink(UNDER), ink(TINTED)];
+
+/**
+ * The inks of text in a kind's color (a chip's) that only the page reads
+ * exactly, over `under`: channels from 0 to 1, plain and under the tint.
+ */
+const pageInks = (color: string, under: readonly (readonly number[])[]): [string, string] => [
+  ink(over(color, under[0])),
+  ink(over(color, under[1])),
+];
 
 /** The relative luminance at which black and white text have the same WCAG contrast. */
 const CROSSOVER = 0.1791;
@@ -136,10 +150,15 @@ function contrastChannels(theme: ResolvedTokens): {
 
 /**
  * The inks of text over a fill in `theme`, in plain rows and in selected
- * rows (see above); undefined for a fill the grid does not read exactly (a
- * CSS variable, a name), whose inks are `PAGE_INKS`.
+ * rows (see above): over a cell's fill (or the surface, without one), or
+ * of a kind's color (`top`, a chip's) over that, worked out by the page
+ * where the grid does not read the color (`pageInks`); undefined for a
+ * fill the grid does not read exactly (a CSS variable, a name), whose inks
+ * are `PAGE_INKS`.
  */
-export function contrastOf(theme: ResolvedTokens): (fill: string) => [string, string] | undefined {
+export function contrastOf(
+  theme: ResolvedTokens,
+): (fill: string | undefined, top?: string) => [string, string] | undefined {
   const { surface, accent, tint } = contrastChannels(theme);
   const ink = (rgb: readonly number[]) => {
     const linear = (c: number) => {
@@ -149,13 +168,34 @@ export function contrastOf(theme: ResolvedTokens): (fill: string) => [string, st
     const l = 0.2126 * linear(rgb[0]!) + 0.7152 * linear(rgb[1]!) + 0.0722 * linear(rgb[2]!);
     return l < CROSSOVER ? "#ffffff" : "#000000";
   };
-  return (fill) => {
-    const channels = colorChannels(fill);
-    if (!channels) return undefined;
-    const alpha = channels[3];
-    const under = [0, 1, 2].map((i) => channels[i]! * alpha + surface[i]! * (1 - alpha));
-    return [ink(under), ink(under.map((c, i) => c * (1 - tint) + accent[i]! * tint))];
+  const blend = (above: readonly number[], under: readonly number[]) =>
+    [0, 1, 2].map((i) => above[i]! * above[3]! + under[i]! * (1 - above[3]!));
+  return (fill, top) => {
+    const channels = fill === undefined ? undefined : colorChannels(fill);
+    if (fill !== undefined && !channels) return undefined;
+    const under = channels ? blend(channels, surface) : surface;
+    const unders = [under, under.map((c, i) => c * (1 - tint) + accent[i]! * tint)];
+    if (top === undefined) return [ink(unders[0]!), ink(unders[1]!)];
+    const above = colorChannels(top);
+    if (!above)
+      return pageInks(
+        top,
+        unders.map((one) => one.map((c) => c / 255)),
+      );
+    return [ink(blend(above, unders[0]!)), ink(blend(above, unders[1]!))];
   };
+}
+
+/**
+ * A chip's fill without a color of its own, the theme's muted color at 22%
+ * (as `chipCell`'s stylesheet draws it): read exactly where the grid can,
+ * so its inks are worked out here.
+ */
+export function faintOf({ tokens: { muted } }: ResolvedTokens): string {
+  const c = colorChannels(muted);
+  return c
+    ? `rgba(${c[0]},${c[1]},${c[2]},${c[3] * 0.22})`
+    : `color-mix(in srgb,${muted} 22%,transparent)`;
 }
 
 /** The theme as the custom properties the stylesheet reads. */

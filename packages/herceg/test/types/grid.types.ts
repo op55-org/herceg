@@ -320,8 +320,8 @@ focusFirst(grid);
   });
   createGridModel({
     data: view,
-    // @ts-expect-error cells take fill and color
-    columns: [{ field: "host", encode: { symbol: { value: "circle" } } }],
+    // @ts-expect-error symbols are named
+    columns: [{ field: "host", encode: { symbol: { value: "circel" } } }],
   });
   createGridModel({
     data: view,

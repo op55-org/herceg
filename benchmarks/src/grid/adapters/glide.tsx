@@ -18,20 +18,27 @@
 // (which then draws the cell as usual). The canvas pixels are not read.
 // With looks, a cell's `themeOverride` carries its background (`bgCell`)
 // and text color (`textDark`), from the store's columns and a domain kept
-// by adapter code (looks.ts), recorded with the cell as drawn.
+// by adapter code (looks.ts), recorded with the cell as drawn. With cells,
+// chips are Glide's bubble cells (filled through `themeOverride`), links its
+// URI cells, and bars and symbols custom cells whose renderers draw them
+// with the text (Glide's `drawTextCell`); a cell's content is recorded with
+// it as drawn, and n4's bar's domain is adapter code, found from the rows at
+// mount.
 
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
   CompactSelection,
+  type CustomCell,
+  type CustomRenderer,
   DataEditor,
   type DataEditorRef,
   type DrawCellCallback,
+  drawTextCell,
   type GridCell,
   GridCellKind,
   type GridColumn,
   type GridSelection,
   type Item,
-  type TextCell,
 } from "@glideapps/glide-data-grid";
 import { type RefObject, useLayoutEffect, useState } from "react";
 import { flushSync } from "react-dom";
@@ -49,6 +56,19 @@ import {
   type SortKey,
   type Visible,
 } from "../adapter.ts";
+import {
+  barEnds,
+  type CellContent,
+  CHIP_FILLS,
+  extentOf,
+  inkOver,
+  LINK_URL,
+  N0_DOMAIN,
+  SHAPE_PATHS,
+  type Shape,
+  SYMBOL_BOX,
+  shapeOf,
+} from "../cells.ts";
 import { formatValue, type GridField, type GridTable } from "../fixture.ts";
 import { type CellLook, cellLook, LookTracker } from "../looks.ts";
 
@@ -250,8 +270,135 @@ interface Drawn {
   ty: number;
 }
 
-/** A text cell that also carries its row's identity and look, so drawing can record them. */
-type RowCell = TextCell & { readonly rowId: number; readonly look?: CellLook | undefined };
+/**
+ * A cell that also carries its row's identity, its text, and its look and
+ * content, so drawing can record them.
+ */
+type RowCell = GridCell & {
+  readonly rowId: number;
+  readonly text: string;
+  readonly look?: CellLook | undefined;
+  readonly content?: CellContent | undefined;
+};
+
+type BarCell = CustomCell<{ kind: "bar"; text: string; start: number; end: number }>;
+type SymbolCell = CustomCell<{ kind: "symbol"; text: string; shape: Shape }>;
+
+const isKind = (cell: CustomCell, kind: string) => (cell.data as { kind?: string }).kind === kind;
+
+/** A bar behind the text, within the cell's padding. */
+const BAR: CustomRenderer<BarCell> = {
+  kind: GridCellKind.Custom,
+  isMatch: (cell): cell is BarCell => isKind(cell, "bar"),
+  draw(args, cell) {
+    const { ctx, rect, theme } = args;
+    const { start, end, text } = cell.data;
+    const width = rect.width - 2 * theme.cellHorizontalPadding;
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = "#2196f3";
+    ctx.fillRect(
+      rect.x + theme.cellHorizontalPadding + start * width,
+      rect.y + 4,
+      (end - start) * width,
+      rect.height - 8,
+    );
+    ctx.globalAlpha = 1;
+    drawTextCell(args, text);
+  },
+};
+
+const PATHS: Record<Shape, Path2D> = {
+  circle: new Path2D(SHAPE_PATHS.circle),
+  triangle: new Path2D(SHAPE_PATHS.triangle),
+};
+const SYMBOL_GAP = 6;
+
+/** A symbol before the text. */
+const SYMBOL: CustomRenderer<SymbolCell> = {
+  kind: GridCellKind.Custom,
+  isMatch: (cell): cell is SymbolCell => isKind(cell, "symbol"),
+  draw(args, cell) {
+    const { ctx, rect, theme } = args;
+    ctx.save();
+    ctx.translate(rect.x + theme.cellHorizontalPadding + SYMBOL_BOX / 2, rect.y + rect.height / 2);
+    ctx.fillStyle = "#2196f3";
+    ctx.fill(PATHS[cell.data.shape]);
+    ctx.restore();
+    const shift = SYMBOL_BOX + SYMBOL_GAP;
+    drawTextCell(
+      { ...args, rect: { ...rect, x: rect.x + shift, width: rect.width - shift } },
+      cell.data.text,
+    );
+  },
+};
+// Glide takes renderers of any custom cell (`CustomRenderer<any>[]`); each matches its own.
+const RENDERERS = [BAR, SYMBOL] as unknown as readonly CustomRenderer[];
+
+/**
+ * A cell of the cells scenario (cells.ts) for a field's value and text;
+ * undefined for fields and values drawing only text.
+ */
+function cellOf(
+  field: string,
+  value: number | string | undefined,
+  text: string,
+  rowId: number,
+  extent: readonly [number, number],
+): RowCell | undefined {
+  if (value === undefined || (typeof value === "number" && Number.isNaN(value))) return undefined;
+  const base = { allowOverlay: false, readonly: true, rowId, text } as const;
+  switch (field) {
+    case "c0": {
+      const fill = CHIP_FILLS[value as string];
+      return {
+        ...base,
+        kind: GridCellKind.Bubble,
+        data: [text],
+        content: { kind: "chip", fill },
+        ...(fill && { themeOverride: { bgBubble: fill, textBubble: inkOver(fill) } }),
+      };
+    }
+    case "n1": {
+      const href = `${LINK_URL}${encodeURIComponent(String(value))}`;
+      return {
+        ...base,
+        kind: GridCellKind.Uri,
+        data: href,
+        displayData: text,
+        hoverEffect: true,
+        // Glide follows a URI cell's link only through this; in a new tab, as the other grids' links open.
+        onClickUri: (args) => {
+          args.preventDefault();
+          window.open(href, "_blank", "noopener,noreferrer");
+        },
+        content: { kind: "link", href },
+      };
+    }
+    case "n3": {
+      const shape = shapeOf(value as number)!;
+      return {
+        ...base,
+        kind: GridCellKind.Custom,
+        data: { kind: "symbol", text, shape },
+        copyData: text,
+        content: { kind: "symbol", shape },
+      };
+    }
+    case "n0":
+    case "n4": {
+      const [start, end] = barEnds(value as number, field === "n0" ? N0_DOMAIN : extent)!;
+      return {
+        ...base,
+        kind: GridCellKind.Custom,
+        data: { kind: "bar", text, start, end },
+        copyData: text,
+        content: { kind: "bar", start, end },
+      };
+    }
+    default:
+      return undefined;
+  }
+}
 
 interface GridProps {
   shown: Shown;
@@ -278,6 +425,7 @@ function Grid({ shown, columns, editor, drawn, drawCell }: GridProps) {
       gridSelection={shown.selection}
       rowHeight={ROW_HEIGHT}
       headerHeight={HEADER_HEIGHT}
+      customRenderers={RENDERERS}
       smoothScrollX
       smoothScrollY
       rowMarkers="none"
@@ -296,6 +444,8 @@ function mount(
 ): GridHandle {
   const store = input as Store;
   const tracker = options.looks ? new LookTracker(table) : undefined;
+  // Adapter code: the rows' extent, which n4's bars are drawn within.
+  const extent = options.cells === true ? extentOf(table, "n4") : undefined;
   const fieldIndex = new Map(table.fields.map((field, f) => [field.name, f]));
   const columns: GridColumn[] = table.fields.map((field) => ({
     id: field.name,
@@ -312,15 +462,22 @@ function mount(
   /** What Glide last drew in each cell (row * columns + column). */
   const painted = new Map<
     number,
-    { id: number; text: string; highlighted: boolean; look: CellLook | undefined }
+    {
+      id: number;
+      text: string;
+      highlighted: boolean;
+      look: CellLook | undefined;
+      content: CellContent | undefined;
+    }
   >();
   const drawCell: DrawCellCallback = (args, drawContent) => {
     const cell = args.cell as RowCell;
     painted.set(args.row * columns.length + args.col, {
       id: cell.rowId,
-      text: cell.displayData,
+      text: cell.text,
       highlighted: args.highlighted,
       look: cell.look,
+      content: cell.content,
     });
     drawContent();
   };
@@ -334,6 +491,9 @@ function mount(
     const getCellContent = ([col, row]: Item): GridCell => {
       const id = idAt(row);
       const text = store.text(id, col);
+      const drawn =
+        extent && cellOf(table.fields[col]!.name, store.value(id, col), text, id, extent);
+      if (drawn) return drawn;
       const look =
         domain &&
         cellLook(table.fields[col]!.name, (name) => store.value(id, fieldIndex.get(name)!), domain);
@@ -344,6 +504,7 @@ function mount(
         allowOverlay: false,
         readonly: true,
         rowId: id,
+        text,
         ...(look && {
           look,
           themeOverride: {
@@ -410,6 +571,9 @@ function mount(
         text: rows.map((row) => fields.map((col) => at(row, col)?.text ?? "(not drawn)")),
         selected: rows.map((row) => at(row, fields[0]!)?.highlighted ?? false),
         ...(tracker && { looks: rows.map((row) => fields.map((col) => at(row, col)?.look)) }),
+        ...(extent && {
+          content: rows.map((row) => fields.map((col) => at(row, col)?.content)),
+        }),
         top,
         left,
         width,
@@ -497,7 +661,8 @@ function mount(
 
 export const adapter: Adapter = {
   id: "glide",
-  renderer: "Canvas 2D, React 19 (pixel scrolling, no row markers)",
+  renderer:
+    "Canvas 2D, React 19 (pixel scrolling, no row markers); cells scenarios: bubble and URI cells, custom cells",
   processing: {
     sort: "external: adapter code (typed-array index sort, merge on append)",
     filter: "external: adapter code (typed-array scan)",

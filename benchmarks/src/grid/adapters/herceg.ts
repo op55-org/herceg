@@ -14,10 +14,20 @@
 // colors through field displays, a gradient through a scale of the grid's,
 // a rank test, a row condition); the grid finds the gradient's domain and
 // the rank as rows stream, and picks black or white text over fills.
+// With cells, columns take cell kinds (`barCell`, `chipCell`, `symbolCell`)
+// and n1's display a link; the grid finds n4's bar's domain from the rows.
 
 import { col, encodedCategory, rowView, type Schema, Table, time } from "herceg";
 import { compileFields } from "herceg/fields";
-import { createGrid, createGridModel, type GridColumn, type GridModel } from "herceg/grid";
+import {
+  barCell,
+  chipCell,
+  createGrid,
+  createGridModel,
+  type GridColumn,
+  type GridModel,
+  symbolCell,
+} from "herceg/grid";
 import {
   type Adapter,
   COLUMN_WIDTH,
@@ -28,6 +38,15 @@ import {
   readDomVisible,
   scrollport,
 } from "../adapter.ts";
+import {
+  CELL_FIELDS,
+  type CellContent,
+  CHIP_FILLS,
+  LINK_URL,
+  N0_DOMAIN,
+  N3_OVER,
+  type Shape,
+} from "../cells.ts";
 import { FORMAT, type GridTable } from "../fixture.ts";
 import {
   C0_COLORS,
@@ -51,6 +70,65 @@ const RULES = [
 
 /** Every column's display: the shared formats by kind, and the shared missing text. */
 const FIELDS = compileFields(RULES);
+
+/** The same, and the cells' display settings: c0's chip colors, and n1's link. */
+const CELL_DISPLAYS = compileFields([
+  ...RULES,
+  {
+    match: "c0",
+    mappings: Object.entries(CHIP_FILLS).map(([value, color]) => ({ value, color })),
+  },
+  ...((CELL_FIELDS as readonly string[]).includes("n1")
+    ? [{ match: "n1", link: { url: [LINK_URL, { value: true }] } } as const]
+    : []),
+]);
+
+/** Each cell-bearing column's kind and channels (cells.ts). */
+const CELLS: Record<string, Pick<GridColumn<Schema>, "cell" | "encode">> = {
+  c0: { cell: chipCell(), encode: { color: { field: "c0" } } },
+  n0: { cell: barCell({ domain: [...N0_DOMAIN] }) },
+  n3: {
+    cell: symbolCell(),
+    encode: {
+      symbol: [
+        // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+        { condition: { when: col("n3").gt(N3_OVER), then: "triangle" } },
+        { value: "circle" },
+      ],
+    },
+  },
+  n4: { cell: barCell() },
+};
+
+/** A drawn symbol's shape, from its path: a circle is drawn with arcs, a triangle with three corners. */
+const shapeOf = (d: string): Shape | undefined =>
+  d.includes("a") ? "circle" : d.split("L").length === 3 ? "triangle" : undefined;
+
+/** What a cell draws beyond its text, read from the DOM the grid wrote. */
+function contentOf(cell: Element): CellContent | undefined {
+  const bar = cell.querySelector<HTMLElement>(".hg-bar");
+  if (bar)
+    return bar.hidden
+      ? undefined
+      : {
+          kind: "bar",
+          start: Number(bar.style.getPropertyValue("--hg-bar-start")),
+          end: Number(bar.style.getPropertyValue("--hg-bar-end")),
+        };
+  const chip = cell.querySelector<HTMLElement>(".hg-chip");
+  if (chip)
+    return chip.hasAttribute("data-none")
+      ? undefined
+      : { kind: "chip", fill: chip.style.getPropertyValue("--hg-chip") || undefined };
+  const link = cell.querySelector("a[href]");
+  if (link) return { kind: "link", href: link.getAttribute("href")! };
+  const symbol = cell.querySelector<SVGElement>("svg.hg-symbol");
+  if (symbol && symbol.style.visibility !== "hidden") {
+    const shape = shapeOf(symbol.querySelector("path")!.getAttribute("d") ?? "");
+    return shape && { kind: "symbol", shape };
+  }
+  return undefined;
+}
 
 const steps = (thresholds: { steps: readonly (readonly [number, string])[] }) =>
   thresholds.steps.map(([value, color]) => ({ value, color }));
@@ -121,11 +199,13 @@ export function hercegHandle(
 ): GridHandle {
   const view = rowView(source);
   const looks = options.looks === true;
+  const cells = options.cells === true;
   const columns: GridColumn<Schema>[] = fixture.fields.map((field) => ({
     field: field.name,
     width: COLUMN_WIDTH,
     align: "start",
     ...(looks && ENCODE[field.name] && { encode: ENCODE[field.name] }),
+    ...(cells && (CELL_FIELDS as readonly string[]).includes(field.name) && CELLS[field.name]),
   }));
   const model = createGridModel({
     data: view,
@@ -133,7 +213,7 @@ export function hercegHandle(
     rowHeight: ROW_HEIGHT,
     locale: FORMAT.locale,
     timeZone: FORMAT.timeZone,
-    fields: looks ? LOOK_FIELDS : FIELDS,
+    fields: looks ? LOOK_FIELDS : cells ? CELL_DISPLAYS : FIELDS,
     ...(looks && {
       scales: { gradient: { type: "linear", range: [...N2_RANGE] } },
       // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
@@ -184,6 +264,7 @@ export function hercegHandle(
           cellField: (cell) => Number(cell.getAttribute("aria-colindex")) - 1,
           selected: (row) => row.getAttribute("aria-selected") === "true",
           ...(looks && { look: lookOf }),
+          ...(cells && { content: contentOf }),
         }),
         scrollStep: ratio(),
       };

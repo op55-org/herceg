@@ -98,6 +98,11 @@ export interface GridCellRead {
   readonly look: CellLook | undefined;
   /** Its row's link of the column's field, where the field's display gives one. */
   readonly link: RowLink | undefined;
+  /**
+   * A bar cell's bar (`barCell`): where it starts and ends, as fractions of
+   * the cell's width from its start; undefined where it draws none.
+   */
+  readonly bar?: readonly [number, number] | undefined;
 }
 
 /** How a grid's clicks select its rows. */
@@ -500,6 +505,34 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
    * it moves.
    */
   abstract get looksRevision(): number;
+
+  /**
+   * Counts changes of what cells' kinds draw that a row's own version does
+   * not count: a bar's domain found from the records. Renderers draw
+   * mounted cells' kinds again when it moves.
+   */
+  abstract get cellsRevision(): number;
+
+  /**
+   * A reader of the record at `rowIndex`'s raw values, bound to that record
+   * wherever it moves: a number, a time's epoch milliseconds, or a label;
+   * null when missing (custom renderers' `read`). Throws for a group's row
+   * and a row still loading; the reader throws for a field the grid does
+   * not have, and once a local table no longer holds the record.
+   */
+  abstract rowValues(rowIndex: number): (field: string) => number | string | null;
+
+  /**
+   * Fields `asker` (a DOM grid of the model) reads besides those the
+   * columns and looks read: its custom renderers' (`cells`), each with
+   * where it was given (`[field, at]`), replacing those it asked for
+   * before; none lets go of them. A remote grid asks its source for every
+   * asker's with its rows. Refuses a field the grid lacks, changing nothing.
+   */
+  abstract askFields(
+    asker: object,
+    fields: readonly (readonly [field: string, at: string])[],
+  ): void;
 
   /** Where the row a ref names shows now, or -1 when the grid no longer shows it. */
   indexOf(ref: GridRef): number {

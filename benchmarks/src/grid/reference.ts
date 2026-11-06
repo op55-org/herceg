@@ -8,6 +8,15 @@
 // break ties by row identity, oldest first. Filters drop missing values.
 
 import { COLUMN_WIDTH, ROW_HEIGHT, type RowFilter, type SortKey, type Visible } from "./adapter.ts";
+import {
+  CELL_FIELDS,
+  type CellContent,
+  CHIP_FILLS,
+  LINK_URL,
+  N0_DOMAIN,
+  N3_OVER,
+  sameContent,
+} from "./cells.ts";
 import { formatValue, type GridField, type GridTable } from "./fixture.ts";
 import {
   C0_COLORS,
@@ -49,9 +58,12 @@ export class Reference {
   end: number;
   /** Whether grids show the looks scenarios' looks (looks.ts), which frames are then checked for. */
   readonly looks: boolean;
+  /** Whether grids draw the cells scenarios' cells (cells.ts), which frames are then checked for. */
+  readonly cells: boolean;
 
-  constructor(table: GridTable, looks = false) {
+  constructor(table: GridTable, looks = false, cells = false) {
     this.looks = looks;
+    this.cells = cells;
     this.fields = table.fields;
     this.chunks.push(table);
     this.overrides = table.fields.map(() => new Map());
@@ -200,6 +212,53 @@ export class Reference {
     return { fill, color };
   }
 
+  #extent: { key: string; extent: readonly [number, number] } | undefined;
+
+  /** n4's bar's domain: the extent of every live row's value, with 0 included. */
+  barExtent(): readonly [number, number] {
+    const key = `${this.start},${this.end},${this.#updates}`;
+    if (this.#extent?.key === key) return this.#extent.extent;
+    const n4 = this.fieldIndex("n4");
+    let low = 0;
+    let high = 0;
+    for (let id = this.start; id < this.end; id++) {
+      const value = this.value(id, n4) as number;
+      if (value < low) low = value;
+      if (value > high) high = value;
+    }
+    this.#extent = { key, extent: [low, high] };
+    return this.#extent.extent;
+  }
+
+  /**
+   * What a row's cell of `field` draws beyond its text (cells.ts' scenario),
+   * against n4's `extent`, worked out here apart from the adapters' code.
+   */
+  content(id: number, field: number, extent = this.barExtent()): CellContent | undefined {
+    const name = this.fields[field]!.name;
+    const value = this.value(id, field);
+    if (missing(value) || !(CELL_FIELDS as readonly string[]).includes(name)) return undefined;
+    const bar = (low: number, high: number) => {
+      const at = (x: number) => Math.min(1, Math.max(0, (x - low) / (high - low)));
+      const [start, end] = [at(0), at(value as number)].sort((a, b) => a - b);
+      return { kind: "bar" as const, start: start!, end: end! };
+    };
+    switch (name) {
+      case "c0":
+        return { kind: "chip", fill: CHIP_FILLS[value as string] };
+      case "n0":
+        return bar(N0_DOMAIN[0], N0_DOMAIN[1]);
+      case "n1":
+        return { kind: "link", href: `${LINK_URL}${value}` };
+      case "n3":
+        return { kind: "symbol", shape: (value as number) > N3_OVER ? "triangle" : "circle" };
+      case "n4":
+        return bar(extent[0], extent[1]);
+      default:
+        return undefined;
+    }
+  }
+
   private passes(id: number, filter: RowFilter, field: number): boolean {
     const value = this.value(id, field);
     if (missing(value)) return false;
@@ -274,6 +333,8 @@ export interface Expected {
   selected?: (id: number) => boolean;
   /** Cells' looks, when the scenario shows them. */
   look?: (id: number, field: number) => CellLook | undefined;
+  /** What cells draw beyond their text, when the scenario draws them. */
+  content?: (id: number, field: number) => CellContent | undefined;
   /** Requested scroll offsets; grids clamp them at the end of the content. */
   top: number;
   left: number;
@@ -334,6 +395,14 @@ export function verifyVisible(
         const got = v.looks?.[r]?.[c];
         if (!sameColor(got?.fill, want?.fill) || !sameColor(got?.color, want?.color))
           return `row ${id} column ${firstColumn + c} looks ${JSON.stringify(got ?? null)}, expected ${JSON.stringify(want ?? null)}`;
+      }
+    }
+    if (expected.content) {
+      for (let c = 0; c < columns; c++) {
+        const want = expected.content(id, firstColumn + c);
+        const got = v.content?.[r]?.[c];
+        if (!sameContent(got, want))
+          return `row ${id} column ${firstColumn + c} draws ${JSON.stringify(got ?? null)}, expected ${JSON.stringify(want ?? null)}`;
       }
     }
     const selected = expected.selected?.(id) ?? false;

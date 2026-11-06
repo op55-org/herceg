@@ -248,7 +248,9 @@ describe("grid looks", () => {
     const refused = (options: Partial<GridModelOptions<Requests>>) => () => grid(options);
     expect(
       refused({ columns: [{ field: "id", encode: { symbol: { value: "circle" } } as never }] }),
-    ).toThrow("grid columns[0].encode.symbol: unknown channel; cells take fill and color");
+    ).toThrow(
+      "grid columns[0].encode.symbol: symbol cells draw shapes; give the column cell: symbolCell(), or drop symbol",
+    );
     expect(
       refused({
         columns: [{ field: "id", encode: { fill: { series: true, scale: "hosts" } } as never }],

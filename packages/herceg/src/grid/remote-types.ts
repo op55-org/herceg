@@ -1,12 +1,17 @@
-import type { Expression, Fields } from "../data/expression.ts";
+import type { Expression } from "../data/expression.ts";
 import type { GroupKey } from "../data/groups.ts";
 import type { GridRef } from "./base.ts";
 import type { GridQuery, RowKey } from "./query.ts";
-import type { RowsWindow } from "./source.ts";
+import type { RowsWindow, WindowRows } from "./source.ts";
 
 /** One query's answer, as the model has read it. */
 export interface Revision {
   readonly number: number;
+  /**
+   * Names the query's rows in refs (`GridRef.scope`): light, so a ref kept
+   * (by a custom renderer, past the query or the model) holds no rows.
+   */
+  readonly token: { readonly revision: number };
   readonly query: GridQuery;
   snapshot: string | null;
   /** The first request is in flight: the others wait for the snapshot it starts. */
@@ -53,7 +58,7 @@ export interface Block {
   state: "loading" | "loaded" | "failed" | "aborted";
   controller: AbortController | null;
   data: RowsWindow | null;
-  fields: Fields | null;
+  fields: WindowRows | null;
   /** Each record's place in the block, by key. */
   keys: Map<RowKey, number> | null;
   version: number;

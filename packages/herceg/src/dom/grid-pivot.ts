@@ -15,20 +15,24 @@ import {
   arrange,
   Grid,
   type GridOptions,
+  type GridUpdate,
   type HeaderRows,
   placeCell,
   setAttribute,
   setText,
 } from "./grid.ts";
 
-export interface PivotGridOptions<S extends Schema = Schema> extends Omit<GridOptions, "model"> {
+export interface PivotGridOptions<S extends Schema = Schema>
+  extends Omit<GridOptions, "model" | "cells"> {
   /** What the grid shows, made with `createPivotGridModel`; the application owns it. */
   model: PivotGridModel<S>;
 }
 
 /** A pivot's grid (`createPivotGrid`): a `Grid` whose model is a pivot grid model. */
-export type PivotGrid<S extends Schema = Schema> = Omit<Grid, "model"> & {
+export type PivotGrid<S extends Schema = Schema> = Omit<Grid, "model" | "update"> & {
   readonly model: PivotGridModel<S>;
+  /** Changes options; one given as undefined goes back to its default. Pivot grids take no `cells`. */
+  update(options: Omit<GridUpdate, "cells">): void;
 };
 
 const CSS = `.herceg-grid .hg-band [role=columnheader]{border-inline-start:1px solid var(--hg-line)}
@@ -41,7 +45,11 @@ export function createPivotGrid<S extends Schema>(
 ): PivotGrid<S> {
   const model = options.model as unknown as GridModel;
   const headers = new ValueHeaders(container.ownerDocument, model);
-  const grid = new Grid(container, { ...options, model } as GridOptions, { headers });
+  const grid = new Grid(container, { ...options, model } as GridOptions, {
+    headers,
+    maker: "createPivotGrid",
+    refuseCells: "pivot grids take no custom renderers (their rows are combinations, not records)",
+  });
   return grid as unknown as PivotGrid<S>;
 }
 
