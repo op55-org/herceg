@@ -9,6 +9,7 @@
     "report": "node --experimental-strip-types src/report.ts",
     "grid": "node --experimental-strip-types src/grid/run.ts",
     "grid-remote": "node --experimental-strip-types src/grid/remote/run.ts",
+    "grid-sparklines": "node --experimental-strip-types src/grid/sparklines/run.ts",
     "first-hover": "node --experimental-strip-types src/first-hover/run.ts"
   },
   "devDependencies": {

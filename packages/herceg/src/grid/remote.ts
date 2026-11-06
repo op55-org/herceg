@@ -531,8 +531,14 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const row = ordinal - block.index * this.blockSize;
     const fields = block.fields!;
     if (list.leaf) {
-      // A column without a field has its text alone.
-      if (column.field === null) return cell(undefined, null);
+      // A column without a field has its text alone, and a sparkline's series.
+      if (column.field === null)
+        return {
+          ...cell(undefined, null),
+          ...(column.content.sparkline && {
+            sparkline: column.content.sparkline.read(fields, row),
+          }),
+        };
       const value = windowValue(fields, column.field, row);
       const binding = column.content.cell && this.#cells.get(column.id);
       return {
@@ -566,11 +572,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     return this.#looks!.scales.revision;
   }
 
-  /** Remote bars' ends are given, so only the columns move it. */
-  get cellsRevision(): number {
-    let sum = 0;
-    for (const binding of this.#cells.values()) sum += binding.revision;
-    return sum;
+  /** Remote bars' ends are given, so only the columns move theirs; sparklines' data moves theirs. */
+  cellsRevision(columnIndex: number): number {
+    const column = this.columnLayout[columnIndex] as PlacedColumn | undefined;
+    if (!column) throw new RangeError(`Column ${columnIndex} is not shown`);
+    return column.content.sparkline?.revision ?? this.#cells.get(column.id)?.revision ?? 0;
   }
 
   askFields(asker: object, fields: readonly (readonly [field: string, at: string])[]): void {

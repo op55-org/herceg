@@ -30,6 +30,7 @@ import {
   widthOf,
 } from "./columns.ts";
 import { type CellEncodings, type CellLook, type GridScales, plain } from "./looks.ts";
+import type { SparklineRead } from "./sparklines.ts";
 
 /** Options every grid model takes. */
 export interface GridSettings {
@@ -103,6 +104,8 @@ export interface GridCellRead {
    * the cell's width from its start; undefined where it draws none.
    */
   readonly bar?: readonly [number, number] | undefined;
+  /** A sparkline cell's series (`sparklineCell`): what it draws, its window, and its domain. */
+  readonly sparkline?: SparklineRead | undefined;
 }
 
 /** How a grid's clicks select its rows. */
@@ -265,6 +268,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   #revision = 0;
   /** What a plain click on the one row selected does (`selection.click`). */
   readonly #clicks: "toggle" | "only";
+  /**
+   * What sparklines call as their data changes: tells listeners, and says
+   * whether the model is still kept. Holds it weakly, as its view's
+   * listener does.
+   */
+  readonly #redraw: () => boolean;
 
   /**
    * `surface` names the grid in messages ("grid", "remote grid", "pivot
@@ -272,6 +281,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
    * or a remote source's name.
    */
   constructor(options: GridSettings, surface: string, source: Table | string) {
+    const ref = new WeakRef(this);
+    this.#redraw = () => {
+      const model = ref.deref();
+      model?.notify();
+      return model !== undefined;
+    };
     this.rowHeight = options.rowHeight ?? ROW_HEIGHT;
     if (!(Number.isFinite(this.rowHeight) && this.rowHeight > 0))
       throw new RangeError(`A grid's rowHeight must be positive, not ${this.rowHeight}`);
@@ -507,11 +522,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   abstract get looksRevision(): number;
 
   /**
-   * Counts changes of what cells' kinds draw that a row's own version does
-   * not count: a bar's domain found from the records. Renderers draw
-   * mounted cells' kinds again when it moves.
+   * Counts changes of what the kind of shown column `columnIndex` draws
+   * that a row's own version does not count: a bar's domain found from the
+   * records, a sparkline's data. Renderers draw that column's mounted cells
+   * again when it moves; 0 for a column without a kind.
    */
-  abstract get cellsRevision(): number;
+  abstract cellsRevision(columnIndex: number): number;
 
   /**
    * A reader of the record at `rowIndex`'s raw values, bound to that record
@@ -787,6 +803,7 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   /** Stops listeners; models stop following what they show too. */
   dispose(): void {
     this.#listeners.clear();
+    this.#follow(false);
   }
 
   protected notify() {
@@ -880,7 +897,11 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /** Takes these as the columns (with what they show, when given), placed anew. */
   protected takeColumns(columns: readonly Column<S>[], contents?: Map<string, ColumnContent>) {
-    if (contents) this.#contents = contents;
+    if (contents) {
+      this.#follow(false);
+      this.#contents = contents;
+      this.#follow(true);
+    }
     // The focus moves to the columns as they are now: catch up with the rows first.
     if (this.#display) this.current();
     this.#columns = Object.freeze(columns.map((column) => Object.freeze(column) as Column<S>));
@@ -888,6 +909,11 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     this.#left = this.#clampLeft(this.#left);
     this.#resolveFocus();
     this.notify();
+  }
+
+  /** Has the columns' sparklines follow their data, or (false) let go of it and of their indexes. */
+  #follow(follow: boolean) {
+    for (const { sparkline } of this.#contents.values()) sparkline?.follow(follow && this.#redraw);
   }
 
   /**

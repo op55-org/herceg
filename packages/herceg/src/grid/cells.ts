@@ -5,11 +5,15 @@
 // column and finds what the kind reads of the rows (a bar's domain), and
 // its DOM part runs only when a grid mounts it, reaching the page only
 // through the cell element it is given, so models and exports work
-// without a document.
+// without a document. Sparklines, which draw another table's rows in
+// columns without a field, are grid/sparklines.ts's.
 
+import type { Fields } from "../data/expression.ts";
 import type { MarkRows } from "../data/row-view.ts";
 import { type SymbolName, vertices } from "../draw/symbol-shapes.ts";
 import { nextRevision } from "../encoding/channel-scales.ts";
+import type { FormatSettings, PlacedColumn } from "./columns.ts";
+import type { Sparkline, SparklineCellSpec, SparklineRead } from "./sparklines.ts";
 
 /** The kinds of field a cell can draw. */
 export type CellFieldKind = "number" | "time" | "category";
@@ -42,7 +46,8 @@ export interface SymbolCellOptions {
 export type GridCellSpec =
   | ({ readonly kind: "bar" } & Readonly<BarCellOptions>)
   | { readonly kind: "chip" }
-  | ({ readonly kind: "symbol" } & Readonly<SymbolCellOptions>);
+  | ({ readonly kind: "symbol" } & Readonly<SymbolCellOptions>)
+  | SparklineCellSpec;
 
 /**
  * What a column's cells draw besides their text: made by `barCell`,
@@ -53,6 +58,17 @@ export type GridCellSpec =
 export interface GridCell<K extends CellFieldKind = CellFieldKind> {
   readonly spec: GridCellSpec;
   readonly draws?: (kind: K) => void;
+  readonly reads?: never;
+}
+
+/**
+ * What a column without a field draws: made by `sparklineCell`. `reads` is
+ * the grid's field it matches rows by (types only).
+ */
+export interface UnboundCell<K extends string = string> {
+  readonly spec: GridCellSpec;
+  readonly reads?: K;
+  readonly draws?: never;
 }
 
 /** Where a descriptor keeps its implementation, apart from what it serializes. */
@@ -73,8 +89,11 @@ export interface CellPaint {
 
 /** A cell element's drawing of a kind, made when the element is given its column and kept across rows. */
 export interface CellView {
-  /** Draws a row's cell (see `KindRead`); null for a row the kind draws nothing for (a group's). */
-  write(cell: KindRead | null, paint: CellPaint): void;
+  /**
+   * Draws a row's cell (see `KindRead`; null for a row the kind draws
+   * nothing for, a group's) of `column`, in a row `height` CSS pixels tall.
+   */
+  write(cell: KindRead | null, paint: CellPaint, column: PlacedColumn, height: number): void;
   /** Takes its parts out of the element, leaving it as it was given. */
   remove(): void;
 }
@@ -91,15 +110,41 @@ export interface KindRead {
     | undefined;
   /** A bar's ends, as fractions of the cell from its start; undefined for none. */
   readonly bar?: readonly [number, number] | undefined;
+  /** A sparkline's series, as the model read it; undefined for none. */
+  readonly sparkline?: SparklineRead | undefined;
 }
 
-/** A kind's implementation: its model part (`check`, `bind`) and its DOM part (`css`, `mount`). */
+/**
+ * A kind's implementation: its model part (`check` and `bind` for columns
+ * of a field, `describe` for columns without one) and its DOM part (`css`,
+ * `mount`).
+ */
 export interface CellKind {
   readonly name: GridCellSpec["kind"];
   /** Whether its cells show their text; without, the text names them only. */
   readonly text: boolean;
-  /** Refuses a field of kind `kind` (named `field`), at `at`, that it does not draw. */
+  /**
+   * Whether what it draws depends on the cell's size or the pixel ratio:
+   * its view is then given every frame its cell is drawn in, with the last
+   * read when nothing else changed, and keeps what it drew at.
+   */
+  readonly sized?: boolean;
+  /**
+   * Refuses a field of kind `kind` (named `field`), at `at`, that it does
+   * not draw; a kind of columns without a field refuses every field.
+   */
   check(field: string, kind: CellFieldKind, at: string): void;
+  /**
+   * For a kind of columns without a field (a sparkline): checks the column
+   * (at `at`) against the grid's fields (`table`) as `settings` say, and
+   * says what its cells write and draw from.
+   */
+  describe?(
+    table: Pick<Fields, "has" | "kind">,
+    column: { readonly text?: unknown },
+    settings: FormatSettings,
+    at: string,
+  ): UnboundContent;
   /**
    * What it reads of the rows for a column of `field`, where it reads any
    * (a bar's domain): its bounds from the field's display, and the records
@@ -115,6 +160,17 @@ export interface CellKind {
   readonly css: string;
   /** Draws in `element`, a cell element holding the cell's `text`. */
   mount(element: HTMLElement, text: Text): CellView;
+}
+
+/**
+ * What a kind of columns without a field makes of one grid's column: its
+ * cells' text, the grid's fields that text reads (which remote grids ask
+ * for), and the sparkline it draws from.
+ */
+export interface UnboundContent {
+  text(fields: Fields, position: number): string;
+  readonly reads: readonly string[];
+  readonly sparkline: Sparkline;
 }
 
 /** What a kind reads of the rows for one column, brought up to date as they change (`update`), never as cells are read. */

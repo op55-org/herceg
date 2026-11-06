@@ -14,6 +14,7 @@ npm run bench -- --browser firefox --out results/browser-firefox.json   # the su
 npm run bench:react                  # herceg vs herceg through @herceg/react -> results/react.json
 npm run bench:grid                   # grid suite (see "Grids") -> tmp/benchmarks/grid-<time>.json
 npm run bench:grid-remote            # remote grids (see "Remote grids") -> tmp/benchmarks/grid-remote-<time>.json
+npm run bench:grid-sparklines        # sparkline cells (see "Sparklines") -> tmp/benchmarks/grid-sparklines-<time>.json
 npm run bench:first-hover -- --out results/first-hover.json   # first hover (see "First hover")
 npm run bench:report                 # regenerate the tables in docs/comparison.md
 npm run bench:express -- --out results/express.json   # herceg.express timings (Python)
@@ -278,7 +279,8 @@ could load for some chart, not what its own chart downloads.
   embedded-font support (font bytes excluded), `herceg-spec-pdf` a portable
   spec with its loader, and `herceg-pdf-document` a two-chart A4 report.
 - `herceg-grid`, `herceg-grid-pivot`, `herceg-grid-remote`, `herceg-pivot`,
-  `herceg-image`, and `herceg-web` measure those subpaths; the other
+  `herceg-image`, and `herceg-web` measure those subpaths, and
+  `herceg-grid-sparklines` a grid with a sparkline column; the other
   libraries have no counterparts.
 
 ### React integration
@@ -566,6 +568,40 @@ answer after 0, 20, or 100 ms (`--latency`).
 These are a client's costs: the synthetic source answers any offset at
 once; a database paging by offset can take much longer to reach row nine
 million.
+
+## Sparklines
+
+`npm run bench:grid-sparklines` (`src/grid/sparklines/`) draws a sparkline
+per row of a 1,000-row grid (an id, the key, and a 160 px sparkline
+column) from a table of a million series rows: 1,000 keys of 1,000 points
+each, interleaved in time order, each key's values a random walk; run
+again with every other value of each series missing (`--gaps
+none,alternate`), which keeps half the points of an M4 that breaks the
+line at every gap. Herceg draws with `sparklineCell` over a Herceg table
+of the series. TanStack Table (with TanStack Virtual, its `cell` an SVG
+path) and Glide Data Grid (a custom cell on its canvas) draw with adapter
+code (`series.ts`): each key's rows kept as rows arrive, M4 per device
+pixel with gaps narrower than a pixel joined, and the same path data,
+cached per key and data version. AG Grid's sparklines are Enterprise
+(Community has none), so it is not compared.
+
+- **Correct frames.** Every row crossing the viewport shows its line
+  ending where its last value is (within 0.11 px, path data's rounding),
+  read just before the frame paints; Glide's from what its `drawCell` drew.
+- **Mount and steps** (frame rate limit off): ten mounts after two, from
+  creating the grid (Herceg's table included) to the first correct frame;
+  thirty steps of a screen after five.
+- **Trace** (vsync on): three seconds at 100 rows a second, the offset set
+  every frame, two trials: frame intervals, dropped frames (an interval
+  spanning k refreshes misses k − 1), and incomplete frames.
+- **Stream** (vsync on): a point for every key (1,000 rows) at 10 Hz for
+  five seconds, two trials: each tick's latency to the first frame whose
+  check saw it, ticks a later one overtook, and dropped frames, apart.
+- **Memory**: CDP heap after forced GC with the grid mounted and ten
+  screens visited, over the same fresh page before mounting (code loaded
+  once and what a library keeps are counted), and a second after
+  destroying it; three pages each. Herceg's grid with the column empty
+  measures the sparklines' index and paths apart.
 
 ## Layouts of panels
 

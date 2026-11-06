@@ -4,9 +4,10 @@
 // `onRender` after the commit, boundaries for throwing and suspending cells,
 // focus into React controls (after scrolling, and as a suspended cell
 // reveals), effects changing the model or unmounting the grid, StrictMode,
-// new models and props, remote and pivot grids, and what is left behind.
-import { count, rowView, type Table, table } from "herceg";
-import { createGridModel, type Grid as HercegGrid } from "herceg/grid";
+// new models and props, remote and pivot grids, React cells beside and over
+// sparklines, and what is left behind.
+import { category, count, rowView, type Table, table, time } from "herceg";
+import { createGridModel, type Grid as HercegGrid, sparklineCell } from "herceg/grid";
 import { memorySource } from "herceg/grid/memory";
 import { createPivotGridModel } from "herceg/grid/pivot";
 import { createRemoteGridModel, type GridSource } from "herceg/grid/remote";
@@ -1423,6 +1424,93 @@ describe("<Grid> cells", () => {
     await frames();
     await collectGarbage();
     expect(refs.flatMap((ref, i) => (ref.deref() !== undefined ? [i] : []))).toEqual([]);
+  });
+});
+
+describe("<Grid> with sparklines", () => {
+  it("draws sparklines as their data streams, React cells of other columns rendering only as their rows change", async () => {
+    const names = Array.from({ length: 50 }, (_, i) => `svc${i}`);
+    const points = table({
+      service: category(names),
+      time: time(names.map(() => 0)),
+      latency: names.map((_, i) => i),
+    });
+    const model = createGridModel({
+      data: rowView(table({ service: category(names), owner: names.map((_, i) => `own${i % 3}`) })),
+      columns: [
+        { field: "owner" },
+        {
+          id: "trend",
+          width: 116,
+          cell: sparklineCell({ data: points, key: "service", x: "time", y: "latency" }),
+        },
+      ],
+    });
+    let renders = 0;
+    function Owner({ name }: { name: string }) {
+      renders++;
+      return <b>{name}</b>;
+    }
+    act(() =>
+      root.render(
+        <Grid
+          model={model}
+          ariaLabel="Services"
+          style={{ height: 300 }}
+          cells={{ owner: (cell) => <Owner name={cell.text} /> }}
+        />,
+      ),
+    );
+    await frames();
+    const before = renders;
+    expect(before).toBeGreaterThan(0);
+    for (let tick = 1; tick <= 5; tick++) {
+      points.append({ service: ["svc0"], time: [tick], latency: [tick * 10] });
+      await frames();
+    }
+    const trend = cellsOf(2)[0]!;
+    expect(trend.getAttribute("aria-label")).toBe("6 values, 0 to 50, last 50");
+    expect(trend.querySelector(".hg-spark-line")!.getAttribute("d")).toMatch(/^M0 17\.5/);
+    // Five appends: the sparklines drew again, the owners' React cells did not.
+    expect(renders).toBe(before);
+    expect(cellsOf(1)[0]!.textContent).toBe("own0");
+  });
+
+  it("gives a React cell drawn over a sparkline column the sparkline's read, as its data streams", async () => {
+    const points = table({ service: category(["web"]), time: time([0]), latency: [5] });
+    const model = createGridModel({
+      data: rowView(table({ service: category(["web", "api"]) })),
+      columns: [
+        { field: "service" },
+        {
+          id: "trend",
+          cell: sparklineCell({ data: points, key: "service", x: "time", y: "latency" }),
+        },
+      ],
+    });
+    const lasts: (number | undefined)[] = [];
+    act(() =>
+      root.render(
+        <Grid
+          model={model}
+          ariaLabel="Services"
+          style={{ height: 300 }}
+          cells={{
+            trend: (cell) => {
+              if (cell.row.ref.id === 0) lasts.push(cell.sparkline?.last);
+              return <i>{cell.text}</i>;
+            },
+          }}
+        />,
+      ),
+    );
+    await frames();
+    points.append({ service: ["web"], time: [1], latency: [9] });
+    await until(() => lasts.at(-1) === 9);
+    expect(cellsOf(2)[0]!.textContent).toBe("2 values, 5 to 9, last 9");
+    expect(cellsOf(2)[1]!.textContent).toBe("No values");
+    // The engine's sparkline is not drawn under the renderer's content.
+    expect(host.querySelector(".hg-spark")).toBeNull();
   });
 });
 

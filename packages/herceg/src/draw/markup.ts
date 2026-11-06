@@ -4,7 +4,13 @@ import type { SvgElement } from "../scene/scene.ts";
 
 /** Rounds to 0.1 px: invisible at any pixel ratio and keeps paths short. */
 export function n(value: number): string {
-  return String(Math.round(value * 10) / 10);
+  const tenths = Math.round(value * 10);
+  const size = Math.abs(tenths);
+  // The text of `tenths / 10` with one decimal, written from integers:
+  // several times faster than writing a fraction.
+  return tenths % 10 && size < 2147483648
+    ? `${tenths < 0 ? "-" : ""}${(size / 10) | 0}.${size % 10}`
+    : String(tenths / 10);
 }
 
 export function escapeXml(text: string): string {

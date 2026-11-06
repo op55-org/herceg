@@ -150,6 +150,8 @@ const MOVES = {
 interface Cell extends HostedCell {
   /** What column's content its text was written for. */
   content: ColumnContent | null;
+  /** Its column's cells revision as its kind was last drawn (see `cellsRevision`). */
+  kinds: number;
   /** The fill and text color its look was written with, as the page reads them, and the theme's count then. */
   fill: string | undefined;
   color: string | undefined;
@@ -231,8 +233,6 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   readonly #host: CellHost;
   /** What hosted cells' looks and kinds are painted with. */
   readonly #hostPaint: HostPaint;
-  /** The model's cells revision as hosted cells were last drawn. */
-  #kinds = Number.NaN;
   #options: GridOptions<S, M>;
   readonly #extras: GridExtras;
   /** Header rows: the columns' own and those `#headers` draws. */
@@ -603,7 +603,6 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         // Cells left unwritten, and looks and kinds unread, are the next frame's.
         for (const row of this.#rows) row.written = null;
         this.#looks = Number.NaN;
-        this.#kinds = Number.NaN;
         if (requested) this.#focusRequested = true;
         // Out of view no frame comes: what was handed over goes now, hosts let go of too.
         if (!this.#visible && this.#host.pending) this.#host.hand(false);
@@ -844,11 +843,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const revision = looks ? model.looksRevision : -1;
     const relook = revision !== this.#looks;
     this.#looks = revision;
-    // And their kinds again when what kinds read of the rows moved (a bar's domain).
+    // And a column's kinds again when what its kind reads besides its rows
+    // moved (a bar's domain, a sparkline's data), for that column alone.
     const hosted = this.#host.hosted(layout);
-    const kinds = model.cellsRevision;
-    const redraw = kinds !== this.#kinds;
-    this.#kinds = kinds;
+    const kinds = layout.map((column, c) =>
+      hosted[c] && column.content.cell ? model.cellsRevision(c) : 0,
+    );
     for (let k = 0; k < rows.length; k++) {
       const row = rows[k]!;
       const index = indices[k]!;
@@ -900,6 +900,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         const decorated = this.#decorate(cell, controls, selected, grouped);
         const write = stale || decorated || cell.content !== column.content;
         if (host) {
+          const redraw = cell.kinds !== kinds[cell.column];
+          cell.kinds = kinds[cell.column]!;
           cell.content = column.content;
           this.#host.draw(
             cell,
@@ -1134,6 +1136,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const cell: Cell = {
       held: null,
       content: null,
+      kinds: Number.NaN,
       fill: undefined,
       color: undefined,
       themed: 0,

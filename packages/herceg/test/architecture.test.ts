@@ -3,8 +3,10 @@ import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC = join(import.meta.dirname, "..", "src");
-// Symbols' shapes, which import nothing: symbol cells (grid/cells.ts) draw them too.
-const SHAPES = join(SRC, "draw", "symbol-shapes.ts");
+// What grid cells draw with of charts' drawing: symbols' shapes, which import
+// nothing (symbol cells, grid/cells.ts), and lines' paths, which write path
+// data without a page (sparklines, grid/sparklines.ts).
+const DRAWN = ["symbol-shapes.ts", "line.ts", "markup.ts"].map((file) => join(SRC, "draw", file));
 // The chart engine must run without a DOM (servers, workers, Python exports).
 const CORE = [
   "data",
@@ -221,14 +223,17 @@ describe("architecture", () => {
       if (seen.has(file)) return;
       seen.add(file);
       const source = readFileSync(file, "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
-      for (const [, path] of source.matchAll(/from "(\.[^"]+)"/g))
+      // Types load no code.
+      for (const [, path] of source.matchAll(
+        /^(?:import|export) (?!type )[^;]*?from "(\.[^"]+)"/gm,
+      ))
         visit(resolve(dirname(file), path!));
     };
     visit(join(SRC, "grid", "model.ts"));
     for (const file of seen) {
       const directory = file.slice(SRC.length + 1).split("/")[0]!;
-      // Symbol cells draw symbols' shapes, which import nothing.
-      if (file === SHAPES) continue;
+      // Symbol cells and sparklines draw shapes and paths as charts do.
+      if (DRAWN.includes(file)) continue;
       expect(CORE, `herceg/grid/model reaches ${file}`).toContain(directory);
     }
   });
@@ -250,7 +255,7 @@ describe("architecture", () => {
     };
     for (const entry of ["grid.ts", "grid-pivot.ts", "grid-remote.ts"]) visit(join(SRC, entry));
     for (const file of seen)
-      if (file !== SHAPES)
+      if (!DRAWN.includes(file))
         expect(file.slice(SRC.length + 1), "a grid entry loads it").not.toMatch(/^(marks|draw)\//);
   });
 
@@ -271,14 +276,14 @@ describe("architecture", () => {
     }
   });
 
-  // Cell kinds' drawings (grid/cells.ts) run only when a grid mounts them:
+  // Cell kinds' drawings (grid/cells.ts, grid/sparklines.ts) run only when a grid mounts them:
   // they name the element they are given, and reach the page only through it.
-  const KINDS = join(SRC, "grid", "cells.ts");
+  const KINDS = ["cells.ts", "sparklines.ts"].map((file) => join(SRC, "grid", file));
   for (const directory of CORE) {
     it(`src/${directory} does not use the DOM or import browser code`, () => {
       for (const file of files(join(SRC, directory))) {
         const source = readFileSync(file, "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
-        const kinds = file === KINDS;
+        const kinds = KINDS.includes(file);
         expect(
           DOM.test(kinds ? source.replace(/\bHTMLElement\b/g, "") : source),
           `${file} uses a DOM API`,
