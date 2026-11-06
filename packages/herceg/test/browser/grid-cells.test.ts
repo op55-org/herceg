@@ -2220,8 +2220,9 @@ describe("remote grids", () => {
     expect(Object.keys(before)).toEqual(["scope", "id"]);
     // Far away and back: the first block was evicted and loaded again, its rows the same rows.
     model.scrollTo({ top: ROW * 1500 });
-    await until(() => model.row(1500).kind === "row");
-    expect(model.row(0).kind).toBe("placeholder");
+    // The first block goes once the new window's blocks have loaded, which
+    // may be after row 1500's own block.
+    await until(() => model.row(1500).kind === "row" && model.row(0).kind === "placeholder");
     const seen = contexts.length;
     model.scrollTo({ top: 0 });
     await until(
