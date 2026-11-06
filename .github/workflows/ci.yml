@@ -44,7 +44,9 @@ jobs:
       - run: npx playwright install --with-deps firefox webkit
       # Firefox has WebGL only with a display: Xvfb's, drawn by Mesa's
       # software renderer (llvmpipe), as Chrome draws with SwiftShader.
+      # It takes about 10 minutes; a browser that hangs fails it at 30.
       - run: xvfb-run --auto-servernum npm run test:browser
+        timeout-minutes: 30
       # The suites' reports, which the contracts job checks.
       - uses: actions/upload-artifact@v7
         if: always()
