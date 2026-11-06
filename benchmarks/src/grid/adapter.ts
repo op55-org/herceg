@@ -56,6 +56,8 @@ export interface Visible {
    * like `text`), undefined for a cell drawing only text.
    */
   content?: (CellContent | undefined)[][];
+  /** With the summary on: the totals row's text under each of `columns`. */
+  totals?: string[];
   /** Scroll offset of the shown body content and the body viewport's size. */
   top: number;
   left: number;
@@ -111,9 +113,10 @@ export interface Adapter {
   processing: { sort: string; filter: string };
   /**
    * Operations the library cannot do, with the reason; "react-cells":
-   * cells drawn by React components (the React cells scenarios).
+   * cells drawn by React components (the React cells scenarios);
+   * "summary": headings and a totals row (the summary scenarios).
    */
-  unsupported?: Partial<Record<Operation | "react-cells", string>>;
+  unsupported?: Partial<Record<Operation | "react-cells" | "summary", string>>;
   /**
    * Converts the shared columnar fixture into the library's native input
    * (row objects, or nothing for grids that read columns through a callback).
@@ -140,6 +143,8 @@ export interface MountOptions {
    * library's React cells.
    */
   cells?: boolean | "react";
+  /** Showing the summary scenarios' headings and totals row (summary.ts), read back in `visible`. */
+  summary?: boolean;
 }
 
 /** Row objects for libraries that take them: `id` plus one property per field. */

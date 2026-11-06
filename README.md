@@ -13,7 +13,7 @@ whose data is large or changes often.
   range navigator.
 - **Data.** Columnar, typed-array tables with streaming appends and rolling
   windows, derived tables, row views, linked row selections, row groups,
-  and pivots.
+  totals, and pivots.
 - **Large data.** Level-of-detail reduction for lines and areas, Canvas for
   dense marks, and WebGL for large point clouds and 3D, chosen per chart.
 - **Interaction.** Zoom, pan, brushes and lassos, items and series selected
@@ -26,11 +26,11 @@ whose data is large or changes often.
 - **Output.** SVG, PNG, JPEG, WebP, and PDF, server rendering with
   hydration, a portable JSON spec with binary columns, and page fragments
   for server-rendered sites.
-- **Grids.** A virtualized analytical grid with grouped rows, pivots, and
-  remote data, cells colored through the same encodings as charts and
-  drawing links, bars, chips, symbols, sparklines, or custom renderers'
-  content, sharing tables and selections with charts, reporting clicks by
-  row identity.
+- **Grids.** A virtualized analytical grid with grouped rows, a totals
+  row, column headings, pivots, and remote data, cells colored through the
+  same encodings as charts and drawing links, bars, chips, symbols,
+  sparklines, or custom renderers' content, sharing tables and selections
+  with charts, reporting clicks by row identity.
 - **Python.** A Pythonic API over pandas, Polars, PyArrow, and NumPy, with
   notebook widgets, Streamlit, Seaborn-style statistics
   (`herceg.express`), and Flask, Django, and FastAPI pages.

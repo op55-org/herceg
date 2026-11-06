@@ -15,7 +15,7 @@
 
 import { type ColumnInput, category, time } from "./column.ts";
 import type { Expression } from "./expression.ts";
-import { GroupLevel, GroupTable, type LevelAggregate } from "./group-levels.ts";
+import { checkAggregates, GroupLevel, GroupTable } from "./group-levels.ts";
 import { MemberRuns } from "./group-members.ts";
 import { rowComparator } from "./order.ts";
 import { fieldsOf, type RowSnapshot, type RowView } from "./row-view.ts";
@@ -147,6 +147,13 @@ const RADIX = 2 ** 26;
 
 /** Each groups' table keeps its groups following; the source holds them only weakly. */
 const keepers = new WeakMap<Table, RowGroups>();
+/** Each groups' levels, for a pivot's totals row (data/pivot-totals.ts): never exported from `herceg`. */
+const levels = new WeakMap<RowGroups, readonly GroupLevel[]>();
+
+/** The levels of groups, which a pivot's totals row folds; never to be changed. */
+export function levelsOf(groups: RowGroups): readonly GroupLevel[] {
+  return levels.get(groups)!;
+}
 const followers = new FinalizationRegistry<() => void>((stop) => stop());
 
 /**
@@ -243,11 +250,15 @@ export class RowGroups<
   readonly #stop: () => void;
   readonly #listeners = new Set<() => void>();
 
-  /** `bounds` limits how far the groups grow; row pivots (data/pivot.ts) give them. */
+  /**
+   * `bounds` limits how far the groups grow; row pivots (data/pivot.ts)
+   * give them, and `at`, what names the aggregates in messages.
+   */
   constructor(
     view: RowView<S>,
     options: GroupOptions<FieldName<S>, Record<string, GroupAggregate>>,
     bounds?: GroupBounds,
+    at = "groupRows ops",
   ) {
     const source = view.source as unknown as Table;
     this.view = view;
@@ -264,38 +275,12 @@ export class RowGroups<
     });
     this.by = Object.freeze(by);
     this.#lookups = by.map(() => new Map());
-    const aggregates = Object.entries(options.ops ?? {}).map(([name, { op, field }]) => {
-      if (by.includes(name as FieldName<S>))
-        throw new Error(`Aggregate "${name}" has the name of a grouping field`);
-      if (!["count", "sum", "mean", "min", "max"].includes(op))
-        throw new TypeError(`Aggregate "${name}": groups have no "${op}"`);
-      if (field === undefined) {
-        if (op !== "count") throw new TypeError(`Aggregate "${name}" (${op}) needs a field`);
-      } else {
-        if (!source.has(field)) throw new Error(`Aggregate "${name}": unknown field "${field}"`);
-        const kind = source.kind(field);
-        if (kind !== "number" && kind !== "time")
-          throw new TypeError(`Aggregate "${name}": field "${field}" is a ${kind}, not numbers`);
-      }
-      return Object.freeze({ name, op, field });
-    });
-    this.aggregates = Object.freeze(aggregates);
-    const read = [
-      ...new Set(aggregates.flatMap(({ field }) => (field === undefined ? [] : [field]))),
-    ];
+    const { aggregates, read, times, leveled } = checkAggregates(source, options.ops ?? {}, at, by);
+    this.aggregates = aggregates;
     this.#read = read;
-    this.#times = new Set(
-      aggregates
-        .filter(({ op, field }) => op !== "count" && op !== "sum" && field !== undefined)
-        .filter(({ field }) => source.kind(field!) === "time")
-        .map(({ name }) => name),
-    );
-    const leveled: LevelAggregate[] = aggregates.map(({ name, op, field }) => ({
-      name,
-      op,
-      field: field === undefined ? -1 : read.indexOf(field),
-    }));
+    this.#times = times;
     this.#levels = by.map((_, depth) => new GroupLevel(depth, depth === by.length - 1, leveled));
+    levels.set(this as unknown as RowGroups, this.#levels);
     this.#dropping = source.maxRows !== Number.POSITIVE_INFINITY;
 
     if (bounds) {
@@ -979,8 +964,9 @@ export class RowGroups<
     if (leaves.length > 1 || this.view.query.sort?.length) rows.sort();
     level.recompute(
       group,
-      rows,
       this.#read.map((field) => source.numbers(field)),
+      rows,
+      size,
     );
   }
 

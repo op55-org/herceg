@@ -7,6 +7,7 @@ import { createRemoteGrid } from "../../src/dom/grid-remote.ts";
 import { memorySource } from "../../src/grid/memory.ts";
 import type { GridAggregate } from "../../src/grid/query.ts";
 import { createRemoteGridModel, type RemoteGridModel } from "../../src/grid/remote.ts";
+import type { RemoteTotal, TotalsAnswer, TotalsRequest } from "../../src/grid-remote.ts";
 
 const requests = table({
   id: new Float64Array(3),
@@ -65,3 +66,37 @@ createRemoteGridModel({
   // @ts-expect-error unknown field
   columns: [{ field: "host", encode: { fill: { field: "missing" } } }],
 });
+
+// Remote totals: aggregates of number and time fields, asked of the source.
+{
+  const totaled = createRemoteGridModel({
+    source,
+    totals: [
+      { op: "count", as: "n" },
+      { op: "mean", field: "at", as: "at" },
+    ],
+    columns: [{ field: "at", aggregate: "at" }],
+  });
+  totaled.update({ totals: [{ op: "max", field: "id", as: "last" }] });
+  totaled.update({ totals: null });
+  // @ts-expect-error a total of a category field
+  totaled.update({ totals: [{ op: "mean", field: "host", as: "host" }] });
+  // @ts-expect-error a total needs a name
+  totaled.update({ totals: [{ op: "count" }] });
+}
+
+// A source's totals typed through the public entry, `herceg/grid/remote`.
+{
+  const answer = async (request: TotalsRequest): Promise<TotalsAnswer> => ({
+    revision: request.revision,
+    snapshot: request.snapshot,
+    columns: Object.fromEntries(request.aggregate.map(({ as }) => [as, Float64Array.of(0)])),
+  });
+  const total: RemoteTotal<{ id: "number"; at: "time"; host: "category" }> = {
+    op: "max",
+    field: "at",
+    as: "latest",
+  };
+  void answer;
+  void total;
+}

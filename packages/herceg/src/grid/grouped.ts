@@ -11,7 +11,12 @@ import type { RowView } from "../data/row-view.ts";
 import type { DataSelection } from "../data/selection.ts";
 import type { Table } from "../data/table.ts";
 import { numberFormatter } from "../format/format.ts";
-import { type FormatSettings, keyFormatter, type PlacedColumn, valueFormatter } from "./columns.ts";
+import {
+  aggregateWriter,
+  type FormatSettings,
+  keyFormatter,
+  type PlacedColumn,
+} from "./columns.ts";
 
 /**
  * The groups as shown: the headers shown in order, where each one is, and
@@ -154,12 +159,7 @@ export function headerTexts(
     const aggregate = groups.aggregates.find(({ name }) => name === column.content.aggregate);
     if (!aggregate) return () => "";
     const { name, op, field } = aggregate;
-    const kind = groups.table.kind(name) as "number" | "time";
-    // The column's format suits aggregates of its own field that keep its kind, not counts.
-    const format =
-      field === column.field && kind === column.kind && op !== "count"
-        ? column.content.amount
-        : valueFormatter(kind, settings);
+    const format = aggregateWriter(column, op, field, groups.table.kind(name), settings);
     return (group, depth) => format(tables[depth]!.numbers(name)[group]!);
   });
 }

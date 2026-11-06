@@ -118,22 +118,8 @@ export function validateGridQuery<S extends Schema>(
     }
     if (new Set(by).size < by.length) throw new Error("A query groups by a field once");
     if (!Array.isArray(g.aggregate)) throw new TypeError("A query's group needs an aggregate list");
-    const names = new Set<string>();
-    const aggregate = g.aggregate.map((value: unknown) => {
-      const a = record(value, "An aggregate", AGGREGATE_KEYS);
-      if (typeof a.op !== "string" || !OPS.has(a.op))
-        throw new TypeError(`Unknown aggregate operation ${show(a.op)}`);
-      if (typeof a.as !== "string" || a.as === "")
-        throw new TypeError("An aggregate needs a name (`as`)");
-      if (names.has(a.as) || by.includes(a.as))
-        throw new Error(`Two fields of the groups are named "${a.as}"`);
-      names.add(a.as);
-      if (a.field === undefined && a.op !== "count")
-        throw new TypeError(`"${a.op}" needs a field (aggregate "${a.as}")`);
-      if (a.field !== undefined && (!has(a.field) || schema.fields[a.field] === "category"))
-        throw new Error(`Aggregate "${a.as}" needs a number or time field, not ${show(a.field)}`);
-      return Object.freeze({ ...a }) as GridAggregate;
-    });
+    const aggregate = aggregatesOf(g.aggregate, schema, by);
+    const names = new Set(aggregate.map(({ as }) => as));
     const groupSort = sortKeys(
       g.sort,
       "group sort",
@@ -152,6 +138,38 @@ export function validateGridQuery<S extends Schema>(
     ...(sort && { sort }),
     ...(group && { group }),
   }) as GridQueryOf<S>;
+}
+
+/**
+ * Aggregates as a query's groups (grouped by `by`) or a remote grid's
+ * totals take them, checked against a source's schema and frozen.
+ */
+export function aggregatesOf(
+  given: readonly unknown[],
+  schema: GridSchema,
+  by: readonly string[] = [],
+): GridAggregate[] {
+  const names = new Set<string>(by);
+  return given.map((value: unknown) => {
+    const a = record(value, "An aggregate", AGGREGATE_KEYS);
+    if (typeof a.op !== "string" || !OPS.has(a.op))
+      throw new TypeError(`Unknown aggregate operation ${show(a.op)}`);
+    if (typeof a.as !== "string" || a.as === "")
+      throw new TypeError("An aggregate needs a name (`as`)");
+    if (names.has(a.as)) throw new Error(`Two fields of the groups are named "${a.as}"`);
+    names.add(a.as);
+    if (a.field === undefined && a.op !== "count")
+      throw new TypeError(`"${a.op}" needs a field (aggregate "${a.as}")`);
+    const field = a.field;
+    if (
+      field !== undefined &&
+      (typeof field !== "string" ||
+        !Object.hasOwn(schema.fields, field) ||
+        schema.fields[field] === "category")
+    )
+      throw new Error(`Aggregate "${a.as}" needs a number or time field, not ${show(a.field)}`);
+    return Object.freeze({ ...a }) as GridAggregate;
+  });
 }
 
 /**

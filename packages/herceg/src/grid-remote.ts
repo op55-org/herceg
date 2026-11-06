@@ -42,6 +42,7 @@ export {
   type RemoteGridModelOptions,
   type RemoteGridRow,
   type RemoteGridStatus,
+  type RemoteTotal,
 } from "./grid/remote.ts";
 export {
   type RemoteSelection,
@@ -65,5 +66,7 @@ export {
   type RowAddress,
   type RowsRequest,
   type RowsWindow,
+  type TotalsAnswer,
+  type TotalsRequest,
   type WindowColumn,
 } from "./grid/source.ts";

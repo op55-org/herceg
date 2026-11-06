@@ -757,8 +757,8 @@ const LAYOUTS = new WeakMap<PlacedColumn, GridColumnLayout>();
 function layoutOf(column: PlacedColumn): GridColumnLayout {
   let layout = LAYOUTS.get(column);
   if (!layout) {
-    const { id, field, kind, title, x, width, align, pinned } = column;
-    layout = Object.freeze({ id, field, kind, title, x, width, align, pinned });
+    const { id, field, kind, title, headings, x, width, align, pinned } = column;
+    layout = Object.freeze({ id, field, kind, title, headings, x, width, align, pinned });
     LAYOUTS.set(column, layout);
   }
   return layout;

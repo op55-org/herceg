@@ -11,7 +11,14 @@ import { type GroupKey, groupId, groupRows, type RowGroups } from "../data/group
 import { rowComparator, type SortKey } from "../data/order.ts";
 import { type RowView, rowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
-import { type GridQuery, type GridSchema, validateGridQuery } from "./query.ts";
+import { rowTotals } from "../data/totals.ts";
+import {
+  aggregatesOf,
+  type GridAggregate,
+  type GridQuery,
+  type GridSchema,
+  validateGridQuery,
+} from "./query.ts";
 import {
   decodeGroupPath,
   encodeGroupPath,
@@ -22,6 +29,8 @@ import {
   type RowAddress,
   type RowsRequest,
   type RowsWindow,
+  type TotalsAnswer,
+  type TotalsRequest,
   type WindowColumn,
 } from "./source.ts";
 
@@ -31,7 +40,7 @@ export interface MemorySourceOptions {
   /** The field whose values are each row's key: unique, never missing. None by default. */
   key?: string | null;
   /** Milliseconds each answer waits, or a function of the request; none by default (answers still arrive later). */
-  latency?: number | ((request: RowsRequest | LocateRequest) => number);
+  latency?: number | ((request: RowsRequest | LocateRequest | TotalsRequest) => number);
   /** Snapshots kept at once; older ones expire. 8 by default. */
   snapshots?: number;
   /** The most rows a request may ask for; 10,000 by default. */
@@ -60,7 +69,7 @@ export class MemorySource<S extends Schema = Schema> implements GridSource<S> {
   readonly table: Table<S>;
   readonly schema: GridSchema<S>;
   readonly stats: MemorySourceStats = { requests: 0, answered: 0, failed: 0, aborted: 0 };
-  readonly #latency: (request: RowsRequest | LocateRequest) => number;
+  readonly #latency: (request: RowsRequest | LocateRequest | TotalsRequest) => number;
   readonly #keep: number;
   readonly #maxLimit: number;
   readonly #snapshots = new Map<string, Snapshot>();
@@ -137,6 +146,33 @@ export class MemorySource<S extends Schema = Schema> implements GridSource<S> {
       address: { parent: encodeGroupPath(path), offset: groups.memberIndex(position) },
       ancestors,
     };
+  }
+
+  /** The totals of a snapshot's rows, as `rowTotals` computes them over its view. */
+  async totals(request: TotalsRequest, signal: AbortSignal): Promise<TotalsAnswer> {
+    await wait(this.#latency(request), signal);
+    if (request.schemaVersion !== this.schema.version)
+      throw new GridSourceError("schema-changed", "The source's fields changed");
+    const snapshot = this.#snapshot(request.snapshot, request.query);
+    let aggregates: GridAggregate[];
+    try {
+      aggregates = aggregatesOf(request.aggregate, this.schema);
+    } catch (error) {
+      throw new GridSourceError("invalid-query", (error as Error).message);
+    }
+    const totals = rowTotals(snapshot.view, { ops: opsOf(aggregates) } as never);
+    try {
+      const table = totals.table as unknown as Table;
+      return {
+        revision: request.revision,
+        snapshot: snapshot.id,
+        columns: Object.fromEntries(
+          aggregates.map(({ as }) => [as, Float64Array.of(table.numbers(as)[0]!)]),
+        ),
+      };
+    } finally {
+      totals.dispose();
+    }
   }
 
   release(snapshot: string): void {
@@ -250,12 +286,7 @@ export class MemorySource<S extends Schema = Schema> implements GridSource<S> {
     const groups = group
       ? (groupRows(view, {
           by: group.by,
-          ops: Object.fromEntries(
-            group.aggregate.map(({ op, field, as }) => [
-              as,
-              field === undefined ? { op } : { op, field },
-            ]),
-          ),
+          ops: opsOf(group.aggregate),
         } as never) as unknown as RowGroups)
       : null;
     const snapshot: Snapshot = {
@@ -336,6 +367,13 @@ export class MemorySource<S extends Schema = Schema> implements GridSource<S> {
   #expire() {
     for (const snapshot of [...this.#snapshots.values()]) this.#forget(snapshot);
   }
+}
+
+/** A query's aggregates as groups' and totals' `ops`. */
+function opsOf(aggregates: readonly GridAggregate[]) {
+  return Object.fromEntries(
+    aggregates.map(({ op, field, as }) => [as, field === undefined ? { op } : { op, field }]),
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ using them, see the [data guide](../guide/data.md).
 - [Derived tables](#derived-tables)
 - [Row views, row sets, and selection stores](#row-views-row-sets-and-selection-stores)
 - [Row groups](#row-groups)
+- [Row totals](#row-totals)
 - [Row pivots](#row-pivots)
 - [Level of detail](#level-of-detail)
 
@@ -393,6 +394,32 @@ million rows into a thousand groups take 4 MiB and about 20 ms to group, and
 the maps dominates; nearly unique keys (groups vanishing with every batch)
 are the slow case.
 
+## Row totals
+
+Row totals (`data/totals.ts`, `rowTotals`) are a view's aggregates over
+every row it shows, in a one-row table that grids show as their totals row
+and charts read as any table. They are a group level of one group
+(`data/group-levels.ts`), so sums are compensated and checked as groups'
+are, without groups' ids, maps, or member lists.
+
+**Following changes.** Appended rows the view shows are added, and rows a
+rolling window drops taken away, reading no other row: O((appended +
+dropped) × aggregates). A minimum or maximum that leaves is found again
+from the rows shown. Anything else (a value the totals or the view's
+filter read changed in place, a new query or restriction, rows inserted, a
+reset) computes them again: O(rows). The table is written once per change,
+after the totals are current, and its listeners hear it then. The source
+holds the totals weakly; `dispose()` stops them.
+
+**Membership.** Taking a dropped row away needs its values and whether the
+view showed it after the table dropped both. Totals over tables that drop
+rows keep 8 bytes per row per aggregated field, and over views that leave
+rows out (a filter or a row set) 1 byte per row more, saying whether the
+view showed it. Totals over tables that only append keep nothing per row.
+1,000 appended rows take about 0.04 ms on 100,000 rows and 0.07 ms on a
+million (Node, Apple M6); a value changed in place, recomputing, about
+10 ms per million rows.
+
 ## Row pivots
 
 A row pivot (`data/pivot.ts`, `herceg/pivot`) is row groups by its rows
@@ -444,6 +471,23 @@ A million rows by 100 row keys and 10 or 100 values builds in about 40 ms,
 about as long as grouping by the two fields; the index takes at most about
 5 ms. 100,000 row keys of two values each (about 200,000 combinations) take
 0.16–0.28 s and 73 MiB, 39 MiB of it typed arrays (Node, Apple M6).
+
+**Totals row.** A pivot made with `totals: { row: true }` has a row of
+each pivot value's aggregates over every row with that value, and of every
+row (`columnTotal`), folded from its own groups (`data/pivot-totals.ts`):
+its combinations by their pivot values, and its rows into one. Running
+sums, counts of finite values, and extremes fold into the aggregates of
+the rows themselves (a mean is never a mean of means), so the row is of the
+same state as the crosstab and holds nothing per row; a sum that folding
+left beyond its accuracy is summed again exactly from its rows. It is
+folded again when read after the groups changed (their revision, which
+moves with every change of their running aggregates, published or not):
+O(combinations): about 0.5 ms for an append of 1,000 rows to a pivot of
+4,000 combinations and a read of its totals row. A pivot folds it as it is
+disposed, while its groups still hold their rows; one stopped at a limit
+before its totals row was read folds its groups as they were, keeping the
+compensated sums, since the table's values are no longer theirs. The
+folds are counted in the pivot's bounds and `byteLength`.
 
 ## Level of detail
 

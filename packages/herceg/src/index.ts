@@ -78,6 +78,7 @@ export type {
   TableOptions,
 } from "./data/table.ts";
 export { fromRows, Table, table } from "./data/table.ts";
+export { RowTotals, rowTotals } from "./data/totals.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
 export type {

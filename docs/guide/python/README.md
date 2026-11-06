@@ -160,6 +160,6 @@ arrows, second x scale (`twiny`), formatter callbacks (write an
 - In Streamlit, a chart that changes between runs is sent whole, engine
   included (about 430 KiB gzipped); unchanged charts are not resent. Hover
   is not reported, nor pan and zoom without `on_viewport`.
-- Row groups, pivots, and grids are TypeScript only. `hg.view` sends a
-  filter and sort for the browser to apply; Python does not compute the
-  view's rows.
+- Row groups, row totals, pivots, and grids are TypeScript only.
+  `hg.view` sends a filter and sort for the browser to apply; Python does
+  not compute the view's rows.

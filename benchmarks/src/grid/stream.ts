@@ -58,6 +58,7 @@ function topWindow(reference: Reference, order: readonly number[] | null): Expec
     idAt: (i) => ids[i]!,
     text: (id, field) => text[ids.indexOf(id)]?.[field] ?? "(outside the checked window)",
     ...(looks && { look: (id: number, field: number) => looks[ids.indexOf(id)]?.[field] }),
+    ...(reference.summary && { totals: reference.totalTexts() }),
     top: 0,
     left: 0,
   };
@@ -71,7 +72,7 @@ function topWindow(reference: Reference, order: readonly number[] | null): Expec
  * offset, the call changes nothing.
  */
 function buildTicks(s: GridScenario, table: GridTable, count: number): Tick[] {
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const sort = s.sort ?? [];
   const filter = s.filter ?? null;
   let order = sort.length > 0 || filter ? reference.order(sort, filter) : null;
@@ -319,10 +320,15 @@ export async function runStream(adapter: Adapter, s: GridScenario): Promise<Grid
   const ticks = buildTicks(s, table, offered);
   const trials: Trial[] = [];
   for (let i = 0; i < s.warmup + s.samples; i++) {
-    const grid = await mount(adapter, table, new Reference(table, s.looks, s.cells));
+    const grid = await mount(adapter, table, new Reference(table, s.looks, s.cells, s.summary));
     try {
       if (queried)
-        await applyQuery(grid.handle, new Reference(table, s.looks, s.cells), sort, filter);
+        await applyQuery(
+          grid.handle,
+          new Reference(table, s.looks, s.cells, s.summary),
+          sort,
+          filter,
+        );
       await settle();
       const trial = await pacedTrial(grid.handle, ticks, s, slots);
       // The end state, from the ticks this trial delivered.

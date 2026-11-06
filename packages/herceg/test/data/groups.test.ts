@@ -163,7 +163,7 @@ describe("row groups", () => {
     expect(make({ by: ["host"], ops: { host: count() } })).toThrow(/name of a grouping field/);
     expect(make({ by: ["host"], ops: { s: { op: "sum" } } })).toThrow(/needs a field/);
     expect(make({ by: ["host"], ops: { s: { op: "median", field: "ms" } } })).toThrow(
-      /no "median"/,
+      /no operation "median"/,
     );
     expect(make({ by: ["host"], ops: { s: sum("host") } })).toThrow(/is a category/);
     expect(make({ by: ["host"], ops: { s: sum("nope") } })).toThrow(/unknown field "nope"/);

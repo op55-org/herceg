@@ -3,7 +3,7 @@
 Charts and grids read **tables**: named columns of equal length, stored as
 typed arrays. This guide covers building tables, changing them while charts
 show them, preparing data with derived tables, and choosing, grouping, and
-pivoting rows without copying them.
+totalling, and pivoting rows without copying them.
 
 - [Tables](#tables)
 - [Field kinds](#field-kinds)
@@ -13,6 +13,7 @@ pivoting rows without copying them.
 - [Row views](#row-views)
 - [Row sets and selection stores](#row-sets-and-selection-stores)
 - [Row groups](#row-groups)
+- [Totals](#totals)
 - [Row pivots](#row-pivots)
 - [Data in Python](#data-in-python)
 
@@ -467,6 +468,42 @@ bytes per row for each aggregated field (the values to take away). Grouping
 a million rows into a thousand groups takes about 20 ms; 1,000 appended
 rows update them in about 0.1 ms (Node, Apple M6).
 
+## Totals
+
+`rowTotals` keeps one row of aggregates over every row a view shows, with
+row groups' operations and semantics: a grid's totals row, a KPI tile, a
+rule at the mean.
+
+```ts
+import { col, count, gauge, mean, rowTotals, rowView, sum } from "herceg";
+
+const view = rowView(requests, { filter: col("region").eq("eu") });
+const totals = rowTotals(view, { ops: { n: count(), latency: mean("latency"), bytes: sum("bytes") } });
+totals.table.value("latency", 0); // the mean latency of the rows the view shows
+gauge(totals.table, { value: "latency" });
+```
+
+- **Over no rows**, counts and sums are 0, the others missing.
+- **The table** has one row, its fields named by the ops and typed as
+  groups' tables are (a mean of times is a time); `aggregates` lists them.
+  Reading `revision` (or the table, through a grid) brings the totals up to
+  date with the view.
+- **Following the view** works as groups' does: appends add their rows,
+  rows a rolling window drops are taken away (a minimum or maximum that
+  left is found again from the rows), and anything else (a value changed
+  in place, a new filter, a reset) computes the totals again. Sums are
+  compensated, and summed again exactly from the rows where cancelling
+  values leave them beyond their accuracy.
+- `subscribe(listener)` hears each change; `dispose()` stops following. Held
+  weakly by what they follow, totals no one keeps stop on their own.
+
+Memory: one row; for tables that drop rows, 8 bytes per row for each field
+the totals read (the values to take away), and for a view that leaves rows
+out (a filter or restriction) a byte per row saying which rows it showed.
+1,000 rows appended to a million update the totals in about 0.07 ms, and
+drops from a rolling window in about 0.09 ms; one value changed in place
+computes them again, about 10 ms over a million rows (Node, Apple M6).
+
 ## Row pivots
 
 `pivotRows`, from `herceg/pivot`, shows a view's rows as a crosstab: a row
@@ -503,7 +540,22 @@ The aggregates are row groups by the two fields:
 | `cell(row, index)` | The combination's position in `table`, or -1 where it is absent. |
 | `value(row, index, aggregate)` | An aggregate; `undefined` where absent. With `zeroFill: "count"`, absent counts read 0. |
 | `members(row)`, `cellMembers(row, value)` | The rows behind a row or a combination, to drill down. |
-| `columns` | The generated columns: each value's aggregates, then a total per aggregate with `totals`. Ids are JSON of the field, the value with its kind, and the aggregate, so they stay stable as values come and go. |
+| `columns` | The generated columns: each value's aggregates, then a total per aggregate with total columns. Ids are JSON of the field, the value with its kind, and the aggregate, so they stay stable as values come and go. |
+| `columnTotal(index, aggregate)` | With a totals row: an aggregate of every row with value `index` (-1: of every row). |
+
+**Totals.** `totals: true` gives both kinds; `{ columns: true }` or
+`{ row: true }` gives one:
+
+- **Total columns**: a column per aggregate with each row's aggregates over
+  all its values (`rowTable`).
+- **A totals row**: each value's aggregates over every row with that value,
+  and every row's, folded from the pivot's own combinations and rows. A
+  mean is the sum of its rows over their count, never a mean of means; a
+  sum folding left beyond its accuracy is summed again from its rows. It
+  holds nothing per row, is counted in the pivot's limits, and stops with
+  the pivot. Folded again when read after the pivot changed, in
+  O(combinations): 1,000 rows appended to a pivot of 200 × 20
+  combinations and its totals row read take about 0.5 ms.
 
 The pivot follows its view as groups do; combinations and values left
 without rows go.

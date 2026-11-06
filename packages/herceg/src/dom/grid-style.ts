@@ -57,7 +57,10 @@ ${G} .hg-scroller{position:absolute;inset:0;overflow:auto;overflow-anchor:none;s
 ${G} .hg-scroller:focus-visible{outline:2px solid var(--hg-accent)}
 ${G} .hg-header{position:sticky;top:0;z-index:2;width:max-content;min-width:100%;background:var(--hg-surface)}
 ${G} .hg-header [role=row]{position:relative;display:flex;height:var(--hg-header-height);box-sizing:border-box;border-bottom:1px solid var(--hg-rule)}
+${G} .hg-band [role=columnheader]{border-inline-start:1px solid var(--hg-line)}
 ${G} .hg-body{position:relative;overflow:clip}
+${G} .hg-footer{position:sticky;bottom:0;z-index:2;width:max-content;min-width:100%;background:var(--hg-surface)}
+${G} .hg-totals{position:relative;display:flex;height:var(--hg-row-height);box-sizing:border-box;border-top:1px solid var(--hg-rule);font-weight:600}
 ${G} .hg-body [role=row]{position:absolute;display:flex;left:0;top:0;height:var(--hg-row-height);box-sizing:border-box;border-bottom:1px solid var(--hg-line)}
 ${G} [role=gridcell],${G} [role=columnheader]{position:absolute;top:0;height:100%;box-sizing:border-box;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 ${G} [role=gridcell]{line-height:calc(var(--hg-row-height) - 1px)}

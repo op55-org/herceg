@@ -20,7 +20,7 @@ export function start(
     query,
     snapshot: null,
     starting: false,
-    expired: false,
+    expired: null,
     lists: new Map(),
     root: undefined as unknown as List,
   };

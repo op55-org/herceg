@@ -188,6 +188,25 @@ function expectMatches(pivot: RowPivot, t: Table, ordered = true) {
     for (const [name, value] of Object.entries(total))
       expect((pivot.rowTable as unknown as Table).numbers(name)[r]).toBe(value);
   });
+  if (!pivot.totals.row) return;
+  // The totals row: each value's aggregates over every row with it, and every row's.
+  const close = (actual: number, value: number, what: string) => {
+    if (Number.isFinite(value)) expect(actual, what).toBeCloseTo(value, 9);
+    else expect(actual, what).toBe(value);
+  };
+  expected.values.forEach((value, index) => {
+    const members = positions.filter(
+      (p) =>
+        pair(
+          null,
+          (t.value("key", p) as PivotValue) === 0 ? 0 : (t.value("key", p) as PivotValue),
+        ) === pair(null, value),
+    );
+    for (const [name, want] of Object.entries(aggregates(t, members)))
+      close(snapshot.columnTotal(index, name), want, `${name} of ${value}`);
+  });
+  for (const [name, want] of Object.entries(aggregates(t, positions)))
+    close(snapshot.columnTotal(-1, name), want, `${name} of every row`);
 }
 
 /** A pivot made within the least byte budget it can be made in, and that budget. */
@@ -1047,5 +1066,81 @@ describe("row pivots", () => {
     expect(() => make({ ops: {} })).toThrow("at least one aggregate");
     expect(() => make({ zeroFill: "sum" })).toThrow(TypeError);
     expect(() => make({ ops: { region: count() } })).toThrow("grouping field");
+    expect(() => make({ totals: "both" })).toThrow(
+      'pivotRows totals: expected true, false, or { columns, row }; received "both"',
+    );
+    expect(() => make({ totals: { rows: true } })).toThrow("pivotRows totals.rows: unknown option");
+  });
+});
+
+describe("a pivot's totals row", () => {
+  const traffic = () =>
+    table({
+      region: category(["eu", "eu", "us", "us", "us"]),
+      key: category(["api", "web", "api", "api", "db"]),
+      ms: [10, 20, 30, Number.NaN, 50],
+    });
+
+  it("take total columns, a totals row, or both", () => {
+    const t = traffic();
+    const ops = { n: count(), avg: mean("ms") };
+    const row = pivotRows(rowView(t), { rows: "region", pivot: "key", ops, totals: { row: true } });
+    expect(row.totals).toEqual({ columns: false, row: true });
+    const crosstab = row.read();
+    expect(crosstab.columns.map(({ kind }) => kind)).not.toContain("total");
+    // api: 10, 30, and a missing value; every row: 10, 20, 30, 50.
+    expect(crosstab.columnTotal(crosstab.indexOf("api"), "n")).toBe(3);
+    expect(crosstab.columnTotal(crosstab.indexOf("api"), "avg")).toBe(20);
+    expect(crosstab.columnTotal(-1, "avg")).toBe(27.5);
+    expect(crosstab.columnTotal(-1, "n")).toBe(5);
+    const columns = pivotRows(rowView(t), {
+      rows: "region",
+      pivot: "key",
+      ops,
+      totals: { columns: true },
+    });
+    expect(columns.totals).toEqual({ columns: true, row: false });
+    expect(() => columns.read().columnTotal(0, "n")).toThrow(
+      "pivot columnTotal: the pivot has no totals row; give totals: { row: true }",
+    );
+    expect(() => crosstab.columnTotal(9, "n")).toThrow("pivot columnTotal: no value at 9");
+    expect(() => crosstab.columnTotal(0, "nope")).toThrow('The pivot has no aggregate "nope"');
+  });
+
+  it("sum again exactly what folding the combinations left beyond its accuracy", () => {
+    const t = table({
+      region: category(["a", "b", "c", "d"]),
+      key: category(["k", "k", "k", "k"]),
+      ms: [1e40, 1, -1e40, 2],
+    });
+    const pivot = pivotRows(rowView(t), {
+      rows: "region",
+      pivot: "key",
+      ops: { s: sum("ms") },
+      totals: true,
+    });
+    const crosstab = pivot.read();
+    expect(crosstab.columnTotal(0, "s")).toBe(3);
+    expect(crosstab.columnTotal(-1, "s")).toBe(3);
+  });
+
+  it("stop with the pivot at a limit, holding what it held", () => {
+    const t = table({ region: category(["eu", "us"]), key: category(["api", "web"]), ms: [1, 2] });
+    const pivot = pivotRows(rowView(t), {
+      rows: "region",
+      pivot: "key",
+      ops: { n: count() },
+      totals: { row: true },
+      limits: { generatedColumns: 2 },
+    });
+    t.append({ region: ["eu"], key: ["api"], ms: [3] });
+    expect(pivot.read().columnTotal(-1, "n")).toBe(3);
+    t.append({ region: ["eu"], key: ["db"], ms: [4] });
+    expect(pivot.failure?.limit).toBe("generatedColumns");
+    const crosstab = pivot.read();
+    expect(crosstab.columnTotal(-1, "n")).toBe(3);
+    expect(crosstab.columnTotal(crosstab.indexOf("api"), "n")).toBe(2);
+    t.append({ region: ["us"], key: ["api"], ms: [5] });
+    expect(pivot.read().columnTotal(-1, "n")).toBe(3);
   });
 });

@@ -61,7 +61,8 @@ export interface GridSettings {
 
 /**
  * What a grid model's `update` takes: what is given changes (undefined
- * clears it), what is left out stays.
+ * clears it), what is left out stays. Local and remote models take
+ * `totals` too.
  */
 export interface GridPresentation<S extends Schema = Schema> {
   /** Field displays, as the model's option takes them (see `GridSettings.fields`). */
@@ -107,6 +108,102 @@ export interface GridCellRead {
   /** A sparkline cell's series (`sparklineCell`): what it draws, its window, and its domain. */
   readonly sparkline?: SparklineRead | undefined;
 }
+
+/**
+ * The totals row a grid shows under its rows, sticky at its bottom: each
+ * column's `aggregate` of the grid's totals (`totals`), and "Total" in the
+ * first shown column without one. It is no row of the table: `rowCount`
+ * does not count it, it selects nothing, and its focus is `rowIndex:
+ * rowCount`, kept there as rows come and go.
+ */
+export interface GridTotalsRow {
+  /** Counts changes of what its cells show (values, texts, looks), apart from the columns' layout. */
+  readonly version: number;
+  /** The shown column whose cell says "Total"; -1 where every shown column has an aggregate (the row is named "Total"). */
+  readonly label: number;
+  /** A remote grid's totals while they load, or if they failed; "loaded" for local ones. */
+  readonly state: "loaded" | "loading" | "failed";
+  /** The text of shown column `columnIndex`'s cell. */
+  textAt(columnIndex: number): string;
+  /** The look of shown column `columnIndex`'s cell (its column's `aggregateEncode` of the totals). */
+  lookAt(columnIndex: number): CellLook | undefined;
+  /** Shown column `columnIndex`'s cell read whole: its total's value and kind (`empty` without one), text, and look. */
+  cellAt(columnIndex: number): GridCellRead;
+}
+
+/** The text of a totals row's label (`GridTotalsRow.label`), and its name where it has none. */
+export const TOTAL = "Total";
+
+/** What a model's totals row reads: local, a pivot's, or remote. */
+export interface TotalsSource {
+  /** Says what its cells show (values, state, looks) apart from the columns: changes as they do. */
+  key(): string;
+  state(): GridTotalsRow["state"];
+  /** What the totals are: the writers are made again when it changes, or the columns do. */
+  totals(): unknown;
+  /** What writes shown column `column`'s total, as group rows write aggregates; null where it shows none. */
+  writer(column: PlacedColumn): ((value: number) => string) | null;
+  /** Shown column `columnIndex`'s total, where it shows one: its value and kind, or why it has none. */
+  read(columnIndex: number): Pick<GridCellRead, "state" | "value" | "kind">;
+  look(columnIndex: number): CellLook | undefined;
+}
+
+/**
+ * The totals row of `model`, reading `of`: each shown column's total, and
+ * "Total" in the first shown column without one.
+ */
+export function totalsRow(
+  model: { readonly columnLayout: readonly GridColumnLayout[] },
+  of: TotalsSource,
+): GridTotalsRow {
+  let seen = { key: "", version: 0 };
+  let written: {
+    layout: readonly GridColumnLayout[];
+    totals: unknown;
+    texts: (((value: number) => string) | null)[];
+    label: number;
+  } | null = null;
+  const writers = () => {
+    const layout = model.columnLayout;
+    const totals = of.totals();
+    if (written?.layout !== layout || written.totals !== totals) {
+      const texts = (layout as readonly PlacedColumn[]).map((column) => of.writer(column));
+      written = { layout, totals, texts, label: texts.indexOf(null) };
+    }
+    return written;
+  };
+  const cellAt = (columnIndex: number): GridCellRead => {
+    const { texts, label } = writers();
+    const write = texts[columnIndex];
+    const read = write ? of.read(columnIndex) : NO_TOTAL;
+    const text =
+      columnIndex === label
+        ? TOTAL
+        : write && read.kind
+          ? write((read.value as number | null) ?? Number.NaN)
+          : "";
+    return { ...read, text, look: of.look(columnIndex), link: undefined };
+  };
+  return {
+    get version() {
+      const key = of.key();
+      if (seen.key !== key) seen = { key, version: seen.version + 1 };
+      return seen.version;
+    },
+    get label() {
+      return writers().label;
+    },
+    get state() {
+      return of.state();
+    },
+    textAt: (columnIndex) => cellAt(columnIndex).text,
+    lookAt: (columnIndex) => of.look(columnIndex),
+    cellAt,
+  };
+}
+
+/** A totals row's cell without a total. */
+const NO_TOTAL = { state: "empty", value: undefined, kind: null } as const;
 
 /** How a grid's clicks select its rows. */
 export interface GridSelectionOptions {
@@ -220,8 +317,8 @@ export interface GridDisplay {
 export type Column<S extends Schema = Schema> = GridColumn<S> & { readonly id: string };
 
 interface Focus {
-  /** The focused body row; null for the header row. */
-  row: GridRef | null;
+  /** The focused body row; null for the header row, `TOTALS` for the totals row. */
+  row: GridRef | null | typeof TOTALS;
   /** Where the row was, for when it leaves. */
   rowIndex: number;
   column: string;
@@ -229,6 +326,8 @@ interface Focus {
 }
 
 const ROW_HEIGHT = 28;
+/** The focus's row while it is on the totals row, which no ref names. */
+const TOTALS = "totals";
 
 /**
  * The state every grid model has: columns, viewport, scrolling, and focus,
@@ -319,6 +418,7 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
       encode: plain((options as { encode?: CellEncodings | undefined }).encode) as
         | CellEncodings
         | undefined,
+      totals: totalsCopied((options as { totals?: unknown }).totals),
     };
   }
 
@@ -356,19 +456,22 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /**
    * Changes how the grid presents its columns: `fields` (field displays),
-   * `scales`, and `encode` (whole rows' looks), as given, or cleared with
-   * undefined; what is left out stays. The whole update is checked and
-   * compiled before any of it applies, so a refused one changes nothing;
-   * listeners are told once. The columns' layout, the sort, groups,
-   * selection, and scroll stay.
+   * `scales`, `encode` (whole rows' looks), and in local and remote grids
+   * `totals` (a totals row; null or undefined drops it), as given, or
+   * cleared with undefined; what is left out stays. The whole update is
+   * checked and compiled before any of it applies, so a refused one changes
+   * nothing; listeners are told once. The columns' layout, the sort,
+   * groups, selection, and scroll stay.
    */
   update(options: GridPresentation<S>): void {
     const { surface } = this.settings;
     if (typeof options !== "object" || options === null)
       throw new TypeError(`${surface} update: expected options such as { fields }`);
     for (const key of Object.keys(options))
-      if (key !== "fields" && key !== "scales" && key !== "encode")
-        throw new Error(`${surface} update.${key}: unknown option; use fields, scales, or encode`);
+      if (key !== "fields" && key !== "scales" && key !== "encode" && key !== "totals")
+        throw new Error(
+          `${surface} update.${key}: unknown option; use fields, scales, encode, or totals`,
+        );
     if (Object.keys(options).length === 0) return;
     const settings =
       "fields" in options
@@ -383,6 +486,10 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
         "encode" in options
           ? (plain(options.encode) as CellEncodings | undefined)
           : this.presentation.encode,
+      totals:
+        "totals" in options
+          ? totalsCopied((options as { totals?: unknown }).totals)
+          : this.presentation.totals,
     };
     const apply = this.restyle(settings, presentation);
     this.#batch(() => {
@@ -394,16 +501,16 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   }
 
   /**
-   * What column `id`, shown or hidden, is called in menus and announcements:
-   * its title, else its field's label, else its field; a pivot's value
-   * column with its value ("api, Latency (ms)").
+   * What column `id`, shown or hidden, is called in menus, announcements,
+   * and its header's accessible name: its title (else its field's label,
+   * else its field) after its headings ("Latency, p99"; a pivot's value
+   * column: "api, Latency (ms)").
    */
   columnTitle(id: string): string {
     this.generated();
     const content = this.#contents.get(id);
     if (!content) return id;
-    const { title, heading } = content;
-    return heading ? `${heading.title}, ${title}` : title;
+    return [...content.headings.map(({ title }) => title), content.title].join(", ");
   }
 
   /**
@@ -509,6 +616,9 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /** A cell read whole: its state, raw value and kind, text, look, and link. */
   abstract cellAt(rowIndex: number, columnIndex: number): GridCellRead;
+
+  /** The totals row under the rows, or null without totals (see `GridTotalsRow`). */
+  abstract get totalsRow(): GridTotalsRow | null;
 
   /** Whether the grid's columns or rows have looks: without them, every cell's look is undefined. */
   abstract get hasLooks(): boolean;
@@ -676,21 +786,26 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     return { rowIndex: focus.rowIndex, columnIndex: focus.columnIndex, column: focus.column };
   }
 
-  /** Focuses a cell (row -1 for the header row), scrolling it into view unless `reveal` is false. */
+  /**
+   * Focuses a cell (row -1 for the header row, `rowCount` for the totals
+   * row), scrolling it into view unless `reveal` is false.
+   */
   focusCell(rowIndex: number, column: string, { reveal = true }: { reveal?: boolean } = {}): void {
     const count = this.rowCount;
-    if (!(Number.isInteger(rowIndex) && rowIndex >= -1 && rowIndex < count))
+    const last = this.totalsRow ? count : count - 1;
+    if (!(Number.isInteger(rowIndex) && rowIndex >= -1 && rowIndex <= last))
       throw new RangeError(`Row ${rowIndex} is not among the grid's ${count} rows`);
     const columnIndex = this.columnIndex(column);
     if (columnIndex < 0) throw new Error(`No shown grid column "${column}"`);
     this.#focus = {
-      row: rowIndex < 0 ? null : this.refAt(rowIndex),
+      row: rowIndex < 0 ? null : rowIndex === count ? TOTALS : this.refAt(rowIndex),
       rowIndex,
       column,
       columnIndex,
     };
     if (reveal) {
-      const [top, left] = this.#revealed(rowIndex, columnIndex);
+      // The totals row is always in view: only its column scrolls into view.
+      const [top, left] = this.#revealed(rowIndex === count ? -1 : rowIndex, columnIndex);
       this.#scroll(top, left, true);
     }
     this.notify();
@@ -701,7 +816,10 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
    * between rows with `extend` (Shift) selects the rows from the anchor to
    * the new focus. In grouped grids, on a row's first cell, right expands a
    * collapsed group, left collapses an expanded one, and left from a
-   * collapsed group or a group's row goes to the group holding it.
+   * collapsed group or a group's row goes to the group holding it. The
+   * totals row is under the last row: down from it, page down from it (or
+   * from the header of a grid without rows), and the grid's last cell go
+   * there; moves onto or off it select nothing.
    */
   moveFocus(move: FocusMove, { extend = false }: { extend?: boolean } = {}): void {
     // Listeners hear once the focus, the scroll, and a range are all in place.
@@ -711,35 +829,44 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   #moveFocus(move: FocusMove, extend: boolean) {
     const focus = this.focus;
     if (!focus) return;
+    const rows = this.rowCount;
+    // Rows of the table: the totals row is none.
+    const body = (row: number) => row >= 0 && row < rows;
     if (
-      focus.rowIndex >= 0 &&
+      body(focus.rowIndex) &&
       focus.columnIndex === 0 &&
       (move === "left" || move === "right") &&
       this.moveInTree(focus, move === "left")
     )
       return;
-    const rows = this.rowCount;
     const columns = this.#layout.length;
     const page = Math.max(1, Math.floor(this.#viewHeight / this.rowHeight));
+    const last = this.totalsRow ? rows : rows - 1;
     let { rowIndex: row, columnIndex: column } = focus;
     if (move === "up") row = Math.max(-1, row - 1);
-    else if (move === "down") row = Math.min(rows - 1, row + 1);
+    else if (move === "down") row = Math.min(last, row + 1);
     else if (move === "left") column = Math.max(0, column - 1);
     else if (move === "right") column = Math.min(columns - 1, column + 1);
-    else if (move === "pageUp") row = row < 0 ? -1 : Math.max(0, row - page);
-    else if (move === "pageDown") row = Math.min(rows - 1, row + page);
-    else if (move === "rowStart") column = 0;
+    else if (move === "pageUp") row = row < 0 || rows === 0 ? -1 : Math.max(0, row - page);
+    else if (move === "pageDown") {
+      // From the last row (or the header of a grid without rows) to the totals row, and no further.
+      const next = Math.min(rows - 1, row + page);
+      if (row < rows) row = next === row ? Math.min(last, row + 1) : next;
+    } else if (move === "rowStart") column = 0;
     else if (move === "rowEnd") column = columns - 1;
     else if (move === "first") [row, column] = [-1, 0];
-    else [row, column] = [rows - 1, columns - 1];
+    else [row, column] = [last, columns - 1];
     // The first Shift move starts its range at the row it leaves.
     const from =
-      extend && focus.rowIndex >= 0 && this.rangeAnchorIndex() === null ? focus.rowIndex : -1;
+      extend && body(focus.rowIndex) && body(row) && this.rangeAnchorIndex() === null
+        ? focus.rowIndex
+        : -1;
     if (from >= 0) this.rangeAnchor = this.refAt(from);
     this.focusCell(row, this.#layout[column]!.id);
     // The header row is always in view; going to the grid's first cell goes to the top of its rows too.
     if (move === "first") this.#scroll(0, 0);
-    if (extend && row >= 0 && this.rangeAnchorIndex() !== null) this.select(row, "range");
+    if (extend && body(focus.rowIndex) && body(row) && this.rangeAnchorIndex() !== null)
+      this.select(row, "range");
   }
 
   // Selection
@@ -1027,6 +1154,16 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     }
     if (!focus.row) return;
     const length = this.#display.length;
+    if (focus.row === TOTALS) {
+      // Kept on the totals row while there is one, wherever rows come and go; else to the last row.
+      if (this.totalsRow) {
+        focus.rowIndex = length;
+        return;
+      }
+      focus.rowIndex = length - 1;
+      focus.row = length > 0 ? this.refAt(length - 1) : null;
+      return;
+    }
     let index = this.find(focus.row, true);
     if (index < 0 && length > 0) index = Math.min(focus.rowIndex, length - 1);
     focus.rowIndex = index;
@@ -1034,10 +1171,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   }
 }
 
-/** The scales and row encodings a model's looks read, as given. */
+/** The scales and row encodings a model's looks read, and its totals, as given. */
 export interface LookPresentation {
   readonly scales: GridScales | undefined;
   readonly encode: CellEncodings | undefined;
+  /** A local model's `RowTotals`, a remote model's aggregates, or null: checked by the model. */
+  readonly totals: unknown;
 }
 
 /** Sort keys after a header click on `field`: going to `order`, or off without one. */
@@ -1066,4 +1205,13 @@ export function nextOrder(
   const at = keys.findIndex((key) => key.field === field);
   const current = at < 0 ? undefined : (keys[at]!.order ?? "ascending");
   return current === undefined ? "ascending" : current === "ascending" ? "descending" : undefined;
+}
+
+/**
+ * Totals as a presentation keeps them: a remote grid's list of aggregates
+ * copied, so a caller's later changes reach it only when given again; a
+ * local grid's `rowTotals` as given.
+ */
+function totalsCopied(given: unknown): unknown {
+  return Array.isArray(given) ? plain(given) : (given ?? null);
 }

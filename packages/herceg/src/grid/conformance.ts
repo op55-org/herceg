@@ -7,11 +7,12 @@
 //
 // Topics: missing values and NaN; string order (UTF-16 code units, no
 // normalization); time zones and bins (epoch milliseconds; local days as
-// data, never derived from a fixed duration); group versus leaf sorts; and
-// pagination within one snapshot.
+// data, never derived from a fixed duration); group versus leaf sorts;
+// pagination within one snapshot; and totals of a snapshot's rows.
 
-import type { GridFieldKind, GridQuery } from "./query.ts";
+import type { GridAggregate, GridFieldKind, GridQuery } from "./query.ts";
 import {
+  checkTotals,
   checkWindow,
   type GridSource,
   type GridSourceErrorCode,
@@ -58,6 +59,18 @@ export interface FixtureInsert {
   readonly insert: Readonly<Record<string, readonly FixtureValue[]>>;
 }
 
+/**
+ * A request for the totals of a query's rows (`totals`, as a remote grid's
+ * totals row asks), from the snapshot of the fixture's last request of the
+ * query, and each aggregate's value in order. Sources without `totals`
+ * skip it.
+ */
+export interface FixtureTotals {
+  readonly query: Omit<GridQuery, "version" | "source">;
+  readonly totals: readonly GridAggregate[];
+  readonly expect: readonly FixtureValue[];
+}
+
 export interface SourceFixture {
   readonly name: string;
   readonly topic: "missing" | "strings" | "time" | "groups" | "pagination";
@@ -65,7 +78,7 @@ export interface SourceFixture {
   /** The key field: unique, unchanging. */
   readonly key: string;
   readonly columns: Readonly<Record<string, FixtureColumn>>;
-  readonly steps: readonly (FixtureRequest | FixtureInsert)[];
+  readonly steps: readonly (FixtureRequest | FixtureInsert | FixtureTotals)[];
 }
 
 /** Where a server's tests install a fixture's rows, as a source named as they like. */
@@ -86,6 +99,21 @@ export interface ConformanceReport {
     readonly problem: string;
   }[];
 }
+
+/** Every operation, of field `v` but the first count. */
+const EVERY_OP: readonly GridAggregate[] = [
+  { op: "count", as: "n" },
+  { op: "count", field: "v", as: "values" },
+  { op: "sum", field: "v", as: "sum" },
+  { op: "mean", field: "v", as: "mean" },
+  { op: "min", field: "v", as: "min" },
+  { op: "max", field: "v", as: "max" },
+];
+const SUMS: readonly GridAggregate[] = [
+  { op: "count", as: "n" },
+  { op: "sum", field: "v", as: "sum" },
+  { op: "mean", field: "v", as: "mean" },
+];
 
 const INF = { number: "+infinity" } as const;
 const NEG = { number: "-infinity" } as const;
@@ -123,6 +151,8 @@ const missing: SourceFixture = {
         ],
       },
     },
+    // Totals read the rows' finite values, as groups do.
+    { query: { sort: [{ field: "v" }] }, totals: EVERY_OP, expect: [8, 4, 4, 1, -1, 3] },
     {
       query: { sort: [{ field: "v", order: "descending" }] },
       offset: 0,
@@ -158,6 +188,8 @@ const missing: SourceFixture = {
       fields: ["id"],
       expect: { total: 3, rows: [[1], [4], [8]] },
     },
+    // Totals are of the rows the query keeps.
+    { query: { filter: [">", ["field", "v"], 0] }, totals: EVERY_OP, expect: [3, 2, 5, 2.5, 2, 3] },
     {
       query: { filter: ["==", ["field", "host"], null] },
       offset: 0,
@@ -632,6 +664,8 @@ const pagination: SourceFixture = {
       fields: ["id"],
       expect: { total: 0, rows: [] },
     },
+    // Over no rows, counts and sums are 0 and the others missing.
+    { query: { filter: false }, totals: SUMS, expect: [0, 0, null] },
     // A full window ending the list may leave its total unsaid.
     {
       query: {},
@@ -649,6 +683,7 @@ const pagination: SourceFixture = {
       fields: ["id"],
       expect: { total: 10, rows: [[0], [3], [6], [9], [1]] },
     },
+    { query: { sort: [{ field: "v" }] }, totals: SUMS, expect: [10, 9, 0.9] },
   ],
 };
 
@@ -691,8 +726,15 @@ export async function checkGridSource(
           } else skipped++;
           continue;
         }
+        if ("totals" in step && !source.totals) {
+          skipped++;
+          continue;
+        }
         checked++;
-        const problem = await checkStep(source, step, snapshots, totals, opened, inserted);
+        const problem =
+          "totals" in step
+            ? await checkTotalsStep(source, step, snapshots, inserted)
+            : await checkStep(source, step, snapshots, totals, opened, inserted);
         if (problem) failures.push({ fixture: fixture.name, step: index, problem });
       }
     } finally {
@@ -808,6 +850,36 @@ async function checkStep(
       return `row ${row} is ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`;
   }
   return null;
+}
+
+async function checkTotalsStep(
+  source: GridSource,
+  step: FixtureTotals,
+  snapshots: Map<string, string>,
+  inserted: boolean,
+): Promise<string | null> {
+  const query: GridQuery = { ...step.query, version: 1, source: source.schema.source };
+  const snapshot = snapshots.get(JSON.stringify(query));
+  if (snapshot === undefined) return "the fixture asks totals before the query's rows";
+  const request = {
+    query,
+    revision: 1,
+    schemaVersion: source.schema.version,
+    snapshot,
+    aggregate: step.totals,
+  };
+  try {
+    const answer = await source.totals!(request, new AbortController().signal);
+    checkTotals(answer, request);
+    const actual = step.totals.map(({ as }) => valueAt(answer.columns[as]!, 0));
+    return actual.every((value, k) => same(value, step.expect[k]!))
+      ? null
+      : `totals are ${JSON.stringify(actual)}, expected ${JSON.stringify(step.expect)}`;
+  } catch (error) {
+    // A snapshot read after an insert may be refused as expired.
+    if (inserted && (error as { code?: string }).code === "snapshot-expired") return null;
+    return `refused totals: ${(error as Error).message}`;
+  }
 }
 
 function valueAt(column: WindowColumn, row: number): FixtureValue {

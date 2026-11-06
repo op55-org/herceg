@@ -8,7 +8,7 @@ Python. Start with [Getting started](guide/getting-started.md).
 | Guide | Covers |
 | --- | --- |
 | [Getting started](guide/getting-started.md) | Install, a first chart, chart options, the chart handle, updates, errors |
-| [Data](guide/data.md) | Tables, field kinds, streaming, derived tables, row views, selections, row groups, pivots, data in Python |
+| [Data](guide/data.md) | Tables, field kinds, streaming, derived tables, row views, selections, row groups, row totals, pivots, data in Python |
 | [Marks](guide/marks.md) | Lines, areas, bars, points, heatmaps, annotations, encodings, custom marks |
 | [Statistical charts](guide/statistical-charts.md) | Histograms, box plots, boxen, violins, error bars, rugs, contours, dendrograms |
 | [Hierarchy and flow](guide/hierarchy-and-flow.md) | Pies, treemaps, sunbursts, gauges, funnels, radars, Sankey diagrams, networks |

@@ -363,7 +363,7 @@ describe("grid looks", () => {
       'grid columns[0].encode.fill.scale: no scale "heat"; the grid has no scales; add it to scales',
     );
     expect(() => model.update({ rowHeight: 20 } as never)).toThrow(
-      "grid update.rowHeight: unknown option; use fields, scales, or encode",
+      "grid update.rowHeight: unknown option; use fields, scales, encode, or totals",
     );
     expect(fills(model)).toEqual(before);
     expect(model.looksRevision).toBe(revision);
@@ -753,7 +753,18 @@ describe("pivot cells' looks", () => {
         (_, row) => model.lookAt(row, index)?.fill ?? null,
       );
     };
-    return { t, model, column };
+    /** The totals row's fill in the column of `value` (null for the totals) and aggregate. */
+    const totalsRow = (value: string | null, aggregate: "avg" | "total") => {
+      const op = aggregate === "avg" ? "mean" : "sum";
+      const id = JSON.stringify(
+        value === null
+          ? ["pivot", "service", "total", aggregate, op, "ms"]
+          : ["pivot", "service", "category", value, aggregate, op, "ms"],
+      );
+      return model.totalsRow!.lookAt(model.columnLayout.findIndex((placed) => placed.id === id))
+        ?.fill;
+    };
+    return { t, model, column, totalsRow };
   };
 
   it("color each combination's cell by its aggregates, ranking within a pivot value's column", () => {
@@ -781,8 +792,8 @@ describe("pivot cells' looks", () => {
     expect(column("api", "avg").map((fill) => fill === "#ffd700")).toEqual([false, false, true]);
   });
 
-  it("color totals columns by their row's totals, without what reads the pivot field", () => {
-    const { column } = pivoted(
+  it("color totals columns by their row's totals, without what reads the pivot field, and the totals row by its totals", () => {
+    const { column, totalsRow } = pivoted(
       {
         avg: {
           encode: { fill: { condition: { when: { top: 1, field: "avg" }, then: "#ffd700" } } },
@@ -799,11 +810,18 @@ describe("pivot cells' looks", () => {
       true,
     );
     expect(column("api", "total")).toEqual(["#0000ff", "#0000ff", "#0000ff"]);
-    // Cells' totals and rows' totals share the domain: 3 to 53.
-    expect(column("web", "total")).toEqual(["#ff4242", "#ffa8a8", null]);
-    expect(column(null, "total")).toEqual(["#ff0000", "#ff8585", "#fff5f5"]);
+    // Cells', rows', and the totals row's totals share the domain: 3 to 85.
+    expect(column("web", "total")).toEqual(["#ff8c8c", "#ffcaca", null]);
+    expect(column(null, "total")).toEqual(["#ff6464", "#ffb4b4", "#fff9f9"]);
     // Rows' means ranked among the rows' totals: eu's 17.67 tops 13.5 and 5.
     expect(column(null, "avg")).toEqual(["#ffd700", null, null]);
+    // The totals row: each service's totals (api 22, web 60, db 3) and every row's (85),
+    // with the service on each service's row; ranks among the services' means.
+    expect(totalsRow("api", "total")).toBe("#0000ff");
+    expect(totalsRow("web", "total")).toBe("#ff4e4e");
+    expect(totalsRow(null, "total")).toBe("#ff0000");
+    expect(totalsRow("web", "avg")).toBe("#ffd700");
+    expect(totalsRow("api", "avg")).toBeUndefined();
   });
 
   it("keep aggregates' options as taken, encodings added after included", () => {

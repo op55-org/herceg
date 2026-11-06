@@ -18,8 +18,23 @@
 // and n1's display a link; the grid finds n4's bar's domain from the rows.
 // With React cells (herceg-react), columns draw only text here, and the
 // component's `cells` draw the content.
+// With the summary, columns take headings, and the model the view's totals
+// (`rowTotals`), which follow appends and drops as the table streams.
 
-import { col, encodedCategory, rowView, type Schema, Table, time } from "herceg";
+import {
+  col,
+  count,
+  encodedCategory,
+  max,
+  mean,
+  min,
+  rowTotals,
+  rowView,
+  type Schema,
+  sum,
+  Table,
+  time,
+} from "herceg";
 import { compileFields } from "herceg/fields";
 import {
   barCell,
@@ -63,6 +78,7 @@ import {
   N4_OVER,
   ROW_FILL,
 } from "../looks.ts";
+import { headingsOf, TOTALS } from "../summary.ts";
 
 export const THEME = { extends: "light", font: "Arial, sans-serif", fontSize: 13 } as const;
 
@@ -165,6 +181,22 @@ function lookOf(cell: Element): CellLook | undefined {
   return { fill: fill || undefined, color: getComputedStyle(cell).color };
 }
 
+/** The summary's totals as the view's ops: the count as "rows", the others by their field. */
+const TOTAL_OPS = Object.fromEntries(
+  Object.entries(TOTALS).map(([field, op]) => [
+    op === "count" ? "rows" : field,
+    op === "count"
+      ? count()
+      : op === "sum"
+        ? sum(field)
+        : op === "mean"
+          ? mean(field)
+          : op === "min"
+            ? min(field)
+            : max(field),
+  ]),
+);
+
 /** A Herceg table over the fixture's arrays: numbers and times adopted, categories by code. */
 export function hercegTable(fixture: GridTable): Table<Schema> {
   const columns = Object.fromEntries(
@@ -206,15 +238,24 @@ export function hercegHandle(
   // React cells draw the cells scenarios' content in place of cell kinds and the link.
   const react = options.cells === "react";
   const cells = options.cells === true;
-  const columns: GridColumn<Schema>[] = fixture.fields.map((field) => ({
+  const summary = options.summary === true;
+  const columns: GridColumn<Schema>[] = fixture.fields.map((field, f) => ({
     field: field.name,
     width: COLUMN_WIDTH,
     align: "start",
     ...(looks && ENCODE[field.name] && { encode: ENCODE[field.name] }),
     ...(cells && (CELL_FIELDS as readonly string[]).includes(field.name) && CELLS[field.name]),
+    ...(summary && {
+      heading: headingsOf(f),
+      ...(TOTALS[field.name] && {
+        aggregate: TOTALS[field.name] === "count" ? "rows" : field.name,
+      }),
+    }),
   }));
+  const totals = summary ? rowTotals(view, { ops: TOTAL_OPS }) : null;
   const model = createGridModel({
     data: view,
+    totals,
     columns,
     rowHeight: ROW_HEIGHT,
     locale: FORMAT.locale,
@@ -228,8 +269,13 @@ export function hercegHandle(
   });
   const grid = attach(model);
   const scroller = () => container.querySelector<HTMLElement>(".hg-scroller")!;
-  /** Rows the grid last drew a row count for (its aria-rowcount counts the header row too). */
-  const drawnRows = (element: Element) => Number(element.getAttribute("aria-rowcount")) - 1;
+  /** The totals row while the grid shows it. */
+  const footer = () => container.querySelector<HTMLElement>(".hg-footer:not([hidden])");
+  /** Header rows: the columns' own and the headings'. */
+  const headerRows = () => container.querySelectorAll(".hg-header > [role=row]").length;
+  /** Rows the grid last drew a row count for (its aria-rowcount counts header rows and the totals row too). */
+  const drawnRows = (element: Element) =>
+    Number(element.getAttribute("aria-rowcount")) - headerRows() - (footer() ? 1 : 0);
   /**
    * Content pixels per scroller pixel: above 1 when rows are taller than the
    * browser allows. Read from the DOM, so reading it does no work in the grid.
@@ -237,7 +283,8 @@ export function hercegHandle(
   const ratio = () => {
     const element = scroller();
     const range = element.scrollHeight - element.clientHeight;
-    const content = drawnRows(element) * ROW_HEIGHT - (element.clientHeight - HEADER_HEIGHT);
+    const around = HEADER_HEIGHT * headerRows() + (footer() ? ROW_HEIGHT : 0);
+    const content = drawnRows(element) * ROW_HEIGHT - (element.clientHeight - around);
     return range > 0 ? Math.max(1, content / range) : 1;
   };
 
@@ -248,7 +295,8 @@ export function hercegHandle(
       const body = container.querySelector(".hg-body");
       if (!element || !header || !body) return undefined;
       const rows = body.querySelectorAll("[role=row]");
-      const index = (row: Element) => Number(row.getAttribute("aria-rowindex")) - 2;
+      const levels = headerRows();
+      const index = (row: Element) => Number(row.getAttribute("aria-rowindex")) - 1 - levels;
       // Rows sit at their logical offset less a shift when scrolling is scaled.
       const first = rows[0];
       const shift = first
@@ -257,24 +305,30 @@ export function hercegHandle(
         : 0;
       const view = scrollport(element);
       view.top = header.getBoundingClientRect().bottom;
-      return {
-        ...readDomVisible({
-          count: drawnRows(element),
-          view,
-          top: element.scrollTop + shift,
-          left: element.scrollLeft,
-          rows,
-          // Rows carry no identity in the DOM; they are checked by their cells' text.
-          rowId: () => undefined,
-          cells: (row) => row.querySelectorAll("[role=gridcell]"),
-          cellField: (cell) => Number(cell.getAttribute("aria-colindex")) - 1,
-          selected: (row) => row.getAttribute("aria-selected") === "true",
-          ...(looks && { look: lookOf }),
-          ...(cells && { content: contentOf }),
-          ...(react && { content: domContent }),
-        }),
-        scrollStep: ratio(),
-      };
+      const totalsRow = footer();
+      if (totalsRow) view.bottom = totalsRow.getBoundingClientRect().top;
+      const shown = readDomVisible({
+        count: drawnRows(element),
+        view,
+        top: element.scrollTop + shift,
+        left: element.scrollLeft,
+        rows,
+        // Rows carry no identity in the DOM; they are checked by their cells' text.
+        rowId: () => undefined,
+        cells: (row) => row.querySelectorAll("[role=gridcell]"),
+        cellField: (cell) => Number(cell.getAttribute("aria-colindex")) - 1,
+        selected: (row) => row.getAttribute("aria-selected") === "true",
+        ...(looks && { look: lookOf }),
+        ...(cells && { content: contentOf }),
+        ...(react && { content: domContent }),
+      });
+      if (totalsRow) {
+        const texts = new Map<number, string>();
+        for (const cell of totalsRow.querySelectorAll("[role=gridcell]"))
+          texts.set(Number(cell.getAttribute("aria-colindex")) - 1, cell.textContent ?? "");
+        shown.totals = shown.columns.map((field) => texts.get(field) ?? "");
+      }
+      return { ...shown, scrollStep: ratio() };
     },
     rowCount: () => model.rowCount,
     order() {
@@ -342,6 +396,7 @@ export function hercegHandle(
     destroy() {
       grid.destroy();
       model.dispose();
+      totals?.dispose();
       view.dispose();
     },
   };

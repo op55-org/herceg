@@ -7,7 +7,9 @@
 // cell, logical row and column indexes on what is mounted, and a polite live
 // region saying what sorting, selecting, expanding, collapsing, and changing
 // columns did. Headers resize and move their columns by dragging, or by keys
-// and a column menu.
+// and a column menu. Headings span header rows over the columns' own
+// (grid-headings.ts); a model's totals row is a footer rowgroup, sticky at
+// the bottom.
 
 import type { Schema } from "../data/table.ts";
 import type {
@@ -15,9 +17,11 @@ import type {
   GridFocus,
   GridRange,
   GridRef,
+  GridTotalsRow,
   SelectionState,
   ShownRow,
 } from "../grid/base.ts";
+import { TOTAL } from "../grid/base.ts";
 import type { ColumnContent, GridColumnLayout, PlacedColumn } from "../grid/columns.ts";
 import type { CellLook } from "../grid/looks.ts";
 import type { GridModel } from "../grid/model.ts";
@@ -31,6 +35,8 @@ import {
   type HostPaint,
 } from "./grid-cells.ts";
 import { ColumnControls } from "./grid-columns.ts";
+import { Headings } from "./grid-headings.ts";
+import { arrange, placeCell, setAttribute, setText } from "./grid-place.ts";
 import { contrastOf, faintOf, GRID_CSS, PAGE_INKS, themeProperties } from "./grid-style.ts";
 import { readPage, watchPage } from "./page-theme.ts";
 import { observeVisibility, report, type Scheduled, schedule, unschedule } from "./scheduler.ts";
@@ -88,28 +94,6 @@ export interface GridEvents {
   cellClick: GridInputEvent;
   /** The grid drew a frame of its model, as of the model's `revision`. */
   render: { readonly revision: number };
-}
-
-/**
- * Header rows over the columns' own, for grids that need them
- * (dom/grid-pivot.ts: a pivot's values over their aggregates).
- */
-export interface HeaderRows {
-  /** How many rows it draws for this layout. */
-  rows(layout: readonly PlacedColumn[]): number;
-  /**
-   * Draws them at the top of the header rowgroup, over the shown columns
-   * mounted (`columns`, indices into `layout`, whose header cells are
-   * `cells`), in a grid of columns `width` wide whose rows are `span` wide.
-   */
-  draw(
-    header: HTMLElement,
-    columns: readonly number[],
-    cells: readonly { readonly element: HTMLElement }[],
-    layout: readonly PlacedColumn[],
-    width: number,
-    span: number,
-  ): void;
 }
 
 /**
@@ -188,12 +172,11 @@ interface Row {
 }
 
 /**
- * What grids of other kinds add to the DOM grid: a pivot's header rows
+ * What grids of other kinds add to the DOM grid: a pivot's limit notice
  * (dom/grid-pivot.ts), a remote grid's loading and failed rows
  * (dom/grid-remote.ts).
  */
 export interface GridExtras {
-  readonly headers?: HeaderRows;
   /** The keyboard instructions, in place of the plain grid's. */
   instructions?(grouped: boolean): string;
   /** The rows there are for assistive technology, null when unknown; the model's row count by default. */
@@ -224,6 +207,18 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   readonly #scroller: HTMLDivElement;
   readonly #headerRow: HTMLDivElement;
   readonly #body: HTMLDivElement;
+  /** The footer rowgroup and its one row, the totals row's, while the model has one. */
+  readonly #footer: HTMLDivElement;
+  readonly #totals: Row;
+  /** What the totals row was last written for: its reader, version, columns, and theme. */
+  #totalsWritten: {
+    row: GridTotalsRow;
+    version: number;
+    layout: readonly GridColumnLayout[];
+    themes: number;
+  } | null = null;
+  /** The header rows over the columns' own. */
+  readonly #headings: Headings;
   readonly #description: HTMLDivElement;
   readonly #live: HTMLDivElement;
   /** What the headers do to their columns: drags, keys, and the column menu. */
@@ -235,8 +230,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   readonly #hostPaint: HostPaint;
   #options: GridOptions<S, M>;
   readonly #extras: GridExtras;
-  /** Header rows: the columns' own and those `#headers` draws. */
+  /** Header rows: the columns' own and the headings' over them. */
   #levels = 1;
+  /** Whether the footer shows the totals row, which the rows' viewport leaves room for. */
+  #footed = false;
   #headerHeight = HEADER_HEIGHT;
   #rows: Row[] = [];
   #headerCells: Cell[] = [];
@@ -301,7 +298,15 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     header.append(this.#headerRow);
     this.#body = element(document, "hg-body");
     this.#body.setAttribute("role", "rowgroup");
-    this.#scroller.append(header, this.#body);
+    this.#footer = element(document, "hg-footer");
+    this.#footer.hidden = true;
+    this.#totals = this.#newRow();
+    this.#totals.element.className = "hg-totals";
+    // Named for what it is, whether or not the cell saying "Total" is mounted.
+    this.#totals.element.setAttribute("aria-label", TOTAL);
+    this.#footer.append(this.#totals.element);
+    this.#headings = new Headings(document);
+    this.#scroller.append(header, this.#body, this.#footer);
     const description = element(document);
     description.id = `herceg-grid-${++nextId}-keys`;
     description.hidden = true;
@@ -553,10 +558,11 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     if (this.root.style.height !== value) this.root.style.height = value;
   }
 
-  /** Takes the scroller's content box: the rows' viewport is what the header leaves. */
+  /** Takes the scroller's content box: the rows' viewport is what the header and the totals row leave. */
   #measured(width: number, height: number) {
     this.#box = { width, height };
-    this.model.setViewport(width, Math.max(0, height - this.#headerHeight * this.#levels));
+    const footer = this.#footed ? this.model.rowHeight : 0;
+    this.model.setViewport(width, Math.max(0, height - this.#headerHeight * this.#levels - footer));
   }
 
   #draw() {
@@ -579,11 +585,15 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       const count = model.rowCount;
       // The model's layout is of placed columns, which say what they show.
       const layout = model.columnLayout as readonly PlacedColumn[];
-      const levels = 1 + (this.#extras.headers?.rows(layout) ?? 0);
-      if (levels !== this.#levels) {
-        this.#levels = levels;
-        // Rows' indexes count the header rows: every mounted row writes its own again.
-        for (const row of this.#rows) row.index = -1;
+      const levels = 1 + this.#headings.rows(layout);
+      const footed = model.totalsRow !== null && layout.length > 0;
+      if (levels !== this.#levels || footed !== this.#footed) {
+        if (levels !== this.#levels) {
+          this.#levels = levels;
+          // Rows' indexes count the header rows: every mounted row writes its own again.
+          for (const row of this.#rows) row.index = -1;
+        }
+        this.#footed = footed;
         if (this.#box) this.#measured(this.#box.width, this.#box.height);
         // The model's subscribers heard of the viewport, and one may have destroyed the grid.
         if (this.#destroyed) return;
@@ -609,6 +619,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         this.#invalidate();
         return;
       }
+      this.#drawTotals(shown, keep, layout);
       this.#describe(count, layout.length);
       // Framework cells, before the focus: a draw in the grid's frame hands
       // them over at once, as does the first, and any while the grid is out
@@ -659,6 +670,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       [this.#headerRow.parentElement!, "rowgroup"],
       [this.#headerRow, "row"],
       [this.#body, "rowgroup"],
+      [this.#footer, "rowgroup"],
+      [this.#totals.element, "row"],
     ] as const) {
       if (grid) setAttribute(element, "role", role);
       else element.removeAttribute("role");
@@ -666,8 +679,13 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     if (grid) setAttribute(this.#headerRow, "aria-rowindex", String(this.#levels));
     else this.#headerRow.removeAttribute("aria-rowindex");
     const known = extras.rowCount ? extras.rowCount() : rows;
+    const totals = this.#footed ? 1 : 0;
+    // The totals row comes after the rows: its index is known with their count.
+    const footer = this.#totals.element;
+    if (known === null || !this.#footed) footer.removeAttribute("aria-rowindex");
+    else setAttribute(footer, "aria-rowindex", String(known + this.#levels + 1));
     for (const [name, value] of [
-      ["aria-rowcount", String(known === null ? -1 : known + this.#levels)],
+      ["aria-rowcount", String(known === null ? -1 : known + this.#levels + totals)],
       ["aria-colcount", String(columns)],
       ["aria-multiselectable", "true"],
       ["aria-readonly", "true"],
@@ -688,7 +706,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const span = this.#span();
     if (span !== this.#spacer.width) {
       this.#spacer.width = span;
-      this.#body.style.width = this.#headerRow.style.width = `${span}px`;
+      this.#body.style.width =
+        this.#headerRow.style.width =
+        this.#totals.element.style.width =
+          `${span}px`;
     }
     return height;
   }
@@ -735,8 +756,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const columns = columnsOf(shown, keep?.rowIndex === -1 ? keep : null, layout);
     const cells = this.#mountCells(this.#headerRow, null, this.#headerCells, columns, layout);
     this.#headerCells = cells;
-    this.#extras.headers?.draw(
+    this.#headings.draw(
       this.#headerRow.parentElement!,
+      this.#headerRow,
       columns,
       cells,
       layout,
@@ -780,8 +802,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const model = this.model;
     const drawing = model.revision;
     const { rowStart, rowEnd } = shown;
+    // The focused row stays mounted wherever it is scrolled (not the totals row, always in view).
     const outside =
-      keep && keep.rowIndex >= 0 && (keep.rowIndex < rowStart || keep.rowIndex >= rowEnd)
+      keep &&
+      keep.rowIndex >= 0 &&
+      keep.rowIndex < model.rowCount &&
+      (keep.rowIndex < rowStart || keep.rowIndex >= rowEnd)
         ? keep.rowIndex
         : -1;
     const indices: number[] = [];
@@ -917,15 +943,79 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
           if (this.#destroyed || model.revision !== drawing) return false;
           continue;
         }
-        if (write) {
-          cell.content = column.content;
-          setText(cell.text, model.textAt(index, cell.column));
-        }
-        if (write || relook)
-          this.#paint(cell, looks ? model.lookAt(index, cell.column) : undefined);
+        this.#write(
+          cell,
+          column,
+          write,
+          relook,
+          (c) => model.textAt(index, c),
+          (c) => (looks ? model.lookAt(index, c) : undefined),
+        );
       }
     }
     return true;
+  }
+
+  /**
+   * Writes a cell of text, of a table row, a group's, or the totals row:
+   * its text (`textAt`) where `write`, and its look (`lookAt`) where that
+   * or `relook`.
+   */
+  #write(
+    cell: Cell,
+    column: PlacedColumn,
+    write: boolean,
+    relook: boolean,
+    textAt: (column: number) => string,
+    lookAt: (column: number) => CellLook | undefined,
+  ) {
+    if (write) {
+      cell.content = column.content;
+      setText(cell.text, textAt(cell.column));
+    }
+    if (write || relook) this.#paint(cell, lookAt(cell.column));
+  }
+
+  /**
+   * Draws the totals row in the footer, over the columns mounted (and the
+   * focused one), writing its cells where its values, looks, or columns
+   * changed; with no totals or no column shown, the footer is hidden.
+   */
+  #drawTotals(shown: GridRange, keep: GridFocus | null, layout: readonly PlacedColumn[]) {
+    const model = this.model;
+    const totals = this.#totals;
+    const row = model.totalsRow;
+    if (this.#footer.hidden === this.#footed) this.#footer.hidden = !this.#footed;
+    if (!row || !this.#footed) {
+      if (totals.cells.length > 0) {
+        for (const cell of totals.cells) cell.element.remove();
+        totals.cells = [];
+      }
+      this.#totalsWritten = null;
+      return;
+    }
+    const count = model.rowCount;
+    const columns = columnsOf(shown, keep?.rowIndex === count ? keep : null, layout);
+    totals.cells = this.#mountCells(totals.element, totals, totals.cells, columns, layout);
+    const version = row.version;
+    const themes = this.#themes;
+    const written = this.#totalsWritten;
+    const stale =
+      written?.row !== row ||
+      written.version !== version ||
+      written.layout !== layout ||
+      written.themes !== themes;
+    this.#totalsWritten = { row, version, layout, themes };
+    for (const cell of totals.cells) {
+      const column = layout[cell.column]!;
+      this.#place(cell, column, layout);
+      const write = stale || cell.content !== column.content;
+      this.#write(cell, column, write, false, row.textAt, row.lookAt);
+    }
+    const element = totals.element;
+    if (row.state === "loading") setAttribute(element, "aria-busy", "true");
+    else element.removeAttribute("aria-busy");
+    setAttribute(element, "data-state", row.state === "loaded" ? "" : row.state);
   }
 
   /**
@@ -1250,7 +1340,11 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
 
   #cellAt({ rowIndex, columnIndex }: GridFocus): Cell | null {
     const cells =
-      rowIndex < 0 ? this.#headerCells : this.#rows.find(({ index }) => index === rowIndex)?.cells;
+      rowIndex < 0
+        ? this.#headerCells
+        : rowIndex >= this.model.rowCount
+          ? this.#totals.cells
+          : this.#rows.find(({ index }) => index === rowIndex)?.cells;
     return cells?.find(({ column }) => column === columnIndex) ?? null;
   }
 
@@ -1348,6 +1442,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       if (model.columnLayout[focus.columnIndex]?.field === null) return;
       model.cycleSort(focus.column, { additive: event.shiftKey });
       this.#announceSort();
+    } else if ((key === " " || key === "Enter") && focus.rowIndex >= model.rowCount) {
+      // The totals row neither selects nor is clicked.
     } else if (key === "Enter" && this.#groupAt(focus.rowIndex)) {
       const { key: groupKey, expanded } = this.#groupAt(focus.rowIndex)!;
       const expansion = this.#expansion(focus.rowIndex);
@@ -1408,6 +1504,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         model.cycleSort(column, { additive: event.shiftKey });
         this.#announceSort();
       }
+    } else if (rowIndex >= model.rowCount) {
+      // The totals row is focused, never selected or clicked.
     } else if (group && clicked.closest(".hg-toggle")) {
       const expansion = this.#expansion(rowIndex);
       model.setExpanded(group.key, !group.expanded);
@@ -1484,13 +1582,15 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     if (!cell || !column || column.field !== cell.placed?.field) return null;
     const { row } = cell;
     if (!row) return { rowIndex: -1, column: cell.id };
+    if (row === this.#totals)
+      return this.model.totalsRow ? { rowIndex: this.model.rowCount, column: cell.id } : null;
     const rowIndex = row.ref ? this.model.indexOf(row.ref) : -1;
     return rowIndex < 0 ? null : { rowIndex, column: cell.id };
   }
 
   /** The group whose header is at `rowIndex`, as it is now; null for other rows. */
   #groupAt(rowIndex: number): (ShownRow & { kind: "group" }) | null {
-    if (rowIndex < 0 || !this.model.grouped) return null;
+    if (rowIndex < 0 || rowIndex >= this.model.rowCount || !this.model.grouped) return null;
     const row = this.model.row(rowIndex);
     return row.kind === "group" ? row : null;
   }
@@ -1559,54 +1659,6 @@ function element(document: Document, className?: string): HTMLDivElement {
 }
 
 /**
- * Places a cell over shown columns `start` to `end` (one column's, or a
- * header's over several) at `column`'s offset, width, and edge, in a grid of
- * columns `width` wide: cells of columns held at an edge are in the row's
- * flow and stick there (sticky offsets are their distances from the edge);
- * the others are placed absolutely, and scroll under them.
- */
-export function placeCell(
-  element: HTMLElement,
-  column: Pick<GridColumnLayout, "x" | "width" | "pinned" | "align">,
-  layout: readonly GridColumnLayout[],
-  start: number,
-  end: number,
-  width: number,
-) {
-  const style = element.style;
-  const { pinned } = column;
-  // The first cell held at the right goes after the others in the row's flow.
-  const first = pinned === "right" && layout[start - 1]?.pinned !== "right";
-  const last = pinned === "left" && layout[end]?.pinned !== "left";
-  // Most cells keep their place when one column resizes: write only what changed.
-  const set = (name: "left" | "right" | "marginLeft" | "width", value: string) => {
-    if (style[name] !== value) style[name] = value;
-  };
-  set("left", pinned === "right" ? "" : `${column.x}px`);
-  set("right", pinned === "right" ? `${width - column.x - column.width}px` : "");
-  set("marginLeft", first ? "auto" : "");
-  set("width", `${column.width}px`);
-  setAttribute(element, "data-pin", pinned ?? "");
-  // The boundary between held columns and those scrolling under them.
-  setAttribute(element, "data-edge", first || last ? pinned! : "");
-  setAttribute(element, "data-align", column.align);
-}
-
-/**
- * Sets an attribute unless it has the value; no value, or an empty one for
- * `data-` attributes, removes it.
- */
-export function setAttribute(target: Element, name: string, value: string | undefined) {
-  if (value === undefined || (value === "" && name.startsWith("data-"))) {
-    if (target.hasAttribute(name)) target.removeAttribute(name);
-  } else if (target.getAttribute(name) !== value) target.setAttribute(name, value);
-}
-
-export function setText(text: Text, value: string) {
-  if (text.data !== value) text.data = value;
-}
-
-/**
  * The shown columns to mount, in order: those held at the left edge, the
  * scrolling ones in range (with the focused cell's column when outside it),
  * and those held at the right edge.
@@ -1628,24 +1680,4 @@ function columnsOf(
   if (extra >= end) indices.push(extra);
   for (let i = right; i < layout.length; i++) indices.push(i);
   return indices;
-}
-
-/**
- * Puts `elements` in `parent` in this order, with no other children. The
- * element `fixed` holds the page's focus and stays put; the others move
- * around it, each only if it is out of place.
- */
-export function arrange(parent: Element, elements: readonly Element[], fixed: Element | null) {
-  if (elements.length === 0) return;
-  let pivot = fixed ? elements.indexOf(fixed) : -1;
-  if (pivot < 0) {
-    pivot = 0;
-    if (parent.firstElementChild !== elements[0]) parent.prepend(elements[0]!);
-  }
-  for (let k = pivot + 1; k < elements.length; k++)
-    if (elements[k]!.previousElementSibling !== elements[k - 1])
-      elements[k - 1]!.after(elements[k]!);
-  for (let k = pivot - 1; k >= 0; k--)
-    if (elements[k]!.nextElementSibling !== elements[k + 1])
-      parent.insertBefore(elements[k]!, elements[k + 1]!);
 }

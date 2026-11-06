@@ -60,7 +60,20 @@ narrower than a pixel joined, its text a summary that screen readers and
 id, typed by the model's fields: rendered through portals in the
 component's tree, their state kept per row, each in an error and
 Suspense boundary drawing the cell's text, and committed before the grid
-paints; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows pivots. Series marks' `label`
+paints; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows pivots.
+`rowTotals(view, { ops })` keeps one row of aggregates over every row a view
+shows, as row groups keep theirs (appends and rolling windows' drops
+followed, sums compensated), for a grid's totals row (`totals`), a KPI, or
+a chart; grids show it in a sticky footer row ("Total" in the first column
+without an aggregate, looks by `aggregateEncode`, the focus kept on it as
+rows stream), with groups as the grand total under their subtotals;
+`pivotRows`' `totals` takes `{ columns, row }` for a pivot's totals row,
+folded from its own combinations; remote grids ask their source
+(`GridSource.totals`, which `memorySource` and the conformance fixtures
+answer). Grid columns take `heading` (a title, `{ id, title }`, or a path of
+them): runs of adjacent columns under the same path share a header, in as
+many header rows as the longest path, and columns' names carry their
+headings. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,

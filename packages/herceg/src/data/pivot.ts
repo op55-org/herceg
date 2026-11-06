@@ -19,12 +19,13 @@ import {
   RowGroups,
 } from "./groups.ts";
 import { buildIndex, type CrosstabIndex, indexBytes, released } from "./pivot-index.ts";
+import { PivotTotals } from "./pivot-totals.ts";
 import type { RowView } from "./row-view.ts";
 import type { NumericField, PositionField, Schema, Table } from "./table.ts";
 
 /** How far a pivot may grow; it stops when one is passed (see `PivotLimitError`). */
 export interface PivotLimits {
-  /** Columns generated: pivot values × aggregates, and a total per aggregate. 1,024 by default. */
+  /** Columns generated: pivot values × aggregates, and a total per aggregate with total columns. 1,024 by default. */
   generatedColumns?: number;
   /** Combinations of a row and a pivot value that the view's rows hold. 1,000,000 by default. */
   observedCombinations?: number;
@@ -121,6 +122,21 @@ export interface PivotSnapshot {
    * which are 0 there when the pivot fills them (`zeroFill`).
    */
   value(row: number, index: number, aggregate: string): number | undefined;
+  /**
+   * With a totals row (`totals: { row: true }`): an aggregate of every row
+   * with the value at `index` of `values` (the column's total), or of every
+   * row with -1 (the grand total); NaN where its values are missing.
+   */
+  columnTotal(index: number, aggregate: string): number;
+}
+
+/**
+ * A pivot's totals: a column per aggregate with each row's total
+ * (`columns`), and a row of each column's total (`row`).
+ */
+export interface PivotTotalsOptions {
+  columns?: boolean;
+  row?: boolean;
 }
 
 export interface PivotOptions<R extends string, P extends string, O> {
@@ -130,8 +146,13 @@ export interface PivotOptions<R extends string, P extends string, O> {
   pivot: P;
   /** The aggregates of each combination, by name: `count()`, `sum("bytes")`, and so on; at least one. */
   ops: O;
-  /** Adds a column per aggregate with each row's total: the aggregate of all its rows. */
-  totals?: boolean;
+  /**
+   * Totals: a column per aggregate with each row's total, the aggregate of
+   * all its rows (`columns`), and a row with each column's total, the
+   * aggregate of every row with its value, and the grand totals (`row`);
+   * `true` for both.
+   */
+  totals?: boolean | PivotTotalsOptions;
   /** Absent combinations' counts read 0 rather than nothing. */
   zeroFill?: "count";
   limits?: PivotLimits;
@@ -184,7 +205,8 @@ export class RowPivot<
   readonly rows: R;
   readonly pivot: P;
   readonly aggregates: readonly NamedAggregate[];
-  readonly totals: boolean;
+  /** Which totals the pivot has: total columns, and a totals row. */
+  readonly totals: { readonly columns: boolean; readonly row: boolean };
   readonly zeroFill: "count" | undefined;
   readonly limits: Readonly<Required<PivotLimits>>;
   /** One row per observed combination: the rows field, the pivot field, and each aggregate. */
@@ -194,6 +216,8 @@ export class RowPivot<
   readonly #groups: RowGroups;
   readonly #bounds: PivotBounds;
   readonly #kind: "number" | "time" | "category";
+  /** The totals row, with `totals.row`. */
+  readonly #totalsRow: PivotTotals | null;
   #built: Built | null = null;
   #crosstab: Crosstab | null = null;
   #disposed = false;
@@ -217,10 +241,23 @@ export class RowPivot<
     const limits = { ...PIVOT_LIMITS, ...options.limits };
     for (const [name, value] of Object.entries(limits))
       if (!(value > 0)) throw new RangeError(`limits.${name} must be positive, not ${value}`);
+    const totals = options.totals ?? false;
+    if (typeof totals !== "boolean" && (typeof totals !== "object" || totals === null))
+      throw new TypeError(
+        `pivotRows totals: expected true, false, or { columns, row }; received ${JSON.stringify(totals)}`,
+      );
+    if (typeof totals === "object")
+      for (const key of Object.keys(totals))
+        if (key !== "columns" && key !== "row")
+          throw new TypeError(`pivotRows totals.${key}: unknown option; give columns or row`);
     this.view = view;
     this.rows = rows;
     this.pivot = pivot;
-    this.totals = options.totals ?? false;
+    this.totals = Object.freeze(
+      typeof totals === "boolean"
+        ? { columns: totals, row: totals }
+        : { columns: totals.columns === true, row: totals.row === true },
+    );
     this.zeroFill = options.zeroFill;
     this.limits = Object.freeze(limits);
     this.#kind = source.kind(pivot) as "number" | "time" | "category";
@@ -231,12 +268,16 @@ export class RowPivot<
       view as unknown as RowView,
       { by: [rows, pivot], ops },
       this.#bounds,
+      "pivotRows ops",
     );
     this.#groups = groups;
     groupsOf.set(erased, groups);
     this.aggregates = groups.aggregates;
     this.table = groups.table as unknown as Table<GroupSchema<S, R | P, O>>;
     this.rowTable = groups.tableOf(rows) as unknown as Table<GroupSchema<S, R, O>>;
+    this.#totalsRow = this.totals.row
+      ? new PivotTotals(groups, () => this.failure !== null || this.#disposed)
+      : null;
     // Listeners hear of a change once the groups followed it, with any their
     // tables' listeners made meanwhile, or refused it. Held weakly by the
     // groups (which their tables keep): a pivot no one keeps is let go.
@@ -259,7 +300,8 @@ export class RowPivot<
 
   /**
    * Bytes of the typed arrays the pivot holds beyond its view and tables:
-   * its groups' (see `RowGroups.byteLength`) and the crosstab's.
+   * its groups' (see `RowGroups.byteLength`), the crosstab's, and the
+   * totals row's.
    */
   get byteLength(): number {
     const built = this.#built;
@@ -270,7 +312,7 @@ export class RowPivot<
         built.codeSlots.byteLength +
         2 * built.order.byteLength
       : 0;
-    return this.#groups.byteLength + own;
+    return this.#groups.byteLength + own + (this.#totalsRow?.byteLength ?? 0);
   }
 
   /**
@@ -326,6 +368,8 @@ export class RowPivot<
   /** Stops following the view; the tables keep their last values. The view stays the application's. */
   dispose(): void {
     if (this.#disposed) return;
+    // The totals row folds the groups now, while they hold their rows; it reads that fold after.
+    if (this.#totalsRow) this.read().columnTotal(-1, this.aggregates[0]!.name);
     this.#disposed = true;
     this.#groups.dispose();
     this.#stop();
@@ -410,7 +454,18 @@ export class RowPivot<
     built.rows = rows;
     built.count = count;
     this.#built = built;
-    return new Crosstab(this as unknown as RowPivot, built, this.failure);
+    const totals = this.#totalsRow;
+    return new Crosstab(
+      this as unknown as RowPivot,
+      built,
+      this.failure,
+      totals &&
+        ((k, slot) => {
+          // Of the pivot's current state: the crosstab read is the current one.
+          const current = this.#built!;
+          return totals.read(k, slot, current.slots, current.values.length);
+        }),
+    );
   }
 
   /** Gives the combinations from `from` to `to` their values' slots, adding slots for new values. */
@@ -535,11 +590,19 @@ class Crosstab implements PivotSnapshot {
   readonly #slotOf: ReadonlyMap<PivotValue, number>;
   /** Each slot's place in `values`. */
   readonly #places: Int32Array;
+  /** Aggregate `k` of the totals row at a slot (-1 for the grand total), with one. */
+  readonly #totals: ((k: number, slot: number) => number) | null;
   #columns: readonly PivotColumn[] | null = null;
   #byId: Map<string, PivotColumn> | null = null;
 
-  constructor(pivot: RowPivot, built: Built, failure: PivotLimitError | null) {
+  constructor(
+    pivot: RowPivot,
+    built: Built,
+    failure: PivotLimitError | null,
+    totals: ((k: number, slot: number) => number) | null,
+  ) {
     this.#pivot = pivot;
+    this.#totals = totals;
     this.#index = built.index;
     this.#order = built.order;
     this.#slotOf = built.slotOf;
@@ -573,7 +636,7 @@ class Crosstab implements PivotSnapshot {
           }),
         );
     });
-    if (pivot.totals)
+    if (pivot.totals.columns)
       for (const aggregate of pivot.aggregates)
         columns.push(
           Object.freeze({
@@ -609,9 +672,28 @@ class Crosstab implements PivotSnapshot {
     const position = this.cell(row, index);
     const pivot = this.#pivot;
     if (position >= 0) return (pivot.table as unknown as Table).numbers(aggregate)[position];
-    const op = pivot.aggregates.find(({ name }) => name === aggregate)?.op;
-    if (op === undefined) throw new Error(`The pivot has no aggregate "${aggregate}"`);
+    const op = pivot.aggregates[this.#aggregate(aggregate)]!.op;
     return op === "count" && pivot.zeroFill === "count" ? 0 : undefined;
+  }
+
+  columnTotal(index: number, aggregate: string): number {
+    const k = this.#aggregate(aggregate);
+    const totals = this.#totals;
+    if (!totals)
+      throw new Error("pivot columnTotal: the pivot has no totals row; give totals: { row: true }");
+    if (index === -1) return totals(k, -1);
+    if (!(Number.isInteger(index) && index >= 0 && index < this.#order.length))
+      throw new RangeError(
+        `pivot columnTotal: no value at ${index}; there are ${this.#order.length}`,
+      );
+    return totals(k, this.#order[index]!);
+  }
+
+  /** The place of an aggregate among the pivot's, by name. */
+  #aggregate(name: string): number {
+    const k = this.#pivot.aggregates.findIndex((one) => one.name === name);
+    if (k < 0) throw new Error(`The pivot has no aggregate "${name}"`);
+    return k;
   }
 }
 
@@ -623,11 +705,15 @@ class Crosstab implements PivotSnapshot {
 class PivotBounds implements GroupBounds {
   failure: PivotLimitError | null = null;
   readonly #limits: Readonly<Required<PivotLimits>>;
-  readonly #totals: boolean;
+  readonly #totals: { readonly columns: boolean; readonly row: boolean };
   readonly #aggregates: number;
 
   /** Of the pivot's values, not the pivot: the groups keep their bounds, and must not keep it. */
-  constructor(limits: Readonly<Required<PivotLimits>>, totals: boolean, aggregates: number) {
+  constructor(
+    limits: Readonly<Required<PivotLimits>>,
+    totals: { readonly columns: boolean; readonly row: boolean },
+    aggregates: number,
+  ) {
     this.#limits = limits;
     this.#totals = totals;
     this.#aggregates = aggregates;
@@ -635,7 +721,7 @@ class PivotBounds implements GroupBounds {
 
   check(groups: readonly number[], values: readonly number[], bytes: number): Error | null {
     const [limits, totals] = [this.#limits, this.#totals];
-    const columns = (values[1]! + (totals ? 1 : 0)) * this.#aggregates;
+    const columns = (values[1]! + (totals.columns ? 1 : 0)) * this.#aggregates;
     if (columns > limits.generatedColumns)
       return this.#refuse("generatedColumns", columns, limits.generatedColumns);
     const [rows, combinations] = groups as [number, number];
@@ -649,17 +735,19 @@ class PivotBounds implements GroupBounds {
   /**
    * Bytes the pivot would own beside its groups' typed arrays (which the
    * groups count): the index, each combination's slot and the long
-   * table's codes' slots, the groups' tables with their room, and by fixed
-   * estimates the JavaScript objects of the groups and tables (a group's key
-   * value, map entry, and cached key and id; category entries) and of the
-   * generated columns.
+   * table's codes' slots, the groups' tables with their room, the totals
+   * row's folds (each value's and every row's running aggregates, as a
+   * level of groups holds them), and by fixed estimates the JavaScript
+   * objects of the groups and tables (a group's key value, map entry, and
+   * cached key and id; category entries) and of the generated columns.
    */
   #bytes(rows: number, combinations: number, values: number, columns: number) {
     const aggregates = this.#aggregates;
     const room = (count: number) => Math.max(64, Math.ceil(count * 1.5));
     const own = indexBytes(rows, values, combinations) + 4 * room(combinations) + 4 * combinations;
     const tables = room(rows) * (8 + 8 * aggregates) + room(combinations) * (16 + 8 * aggregates);
-    return own + tables + rows * 240 + combinations * 64 + 256 * columns;
+    const folds = this.#totals.row ? (room(values) + 64) * (14 + 33 * aggregates) : 0;
+    return own + tables + folds + rows * 240 + combinations * 64 + 256 * columns;
   }
 
   #refuse(limit: keyof PivotLimits, observed: number, budget: number): PivotLimitError {
