@@ -447,6 +447,7 @@ export interface GridBench {
   id: string;
   renderer: string;
   processing: Adapter["processing"];
+  unsupported: NonNullable<Adapter["unsupported"]>;
   run(s: GridScenario): Promise<GridResult>;
   /** The wheel trial that wants wheel events now, or null. */
   readonly wheelTrial: number | null;
@@ -482,6 +483,7 @@ export function installGridHarness(adapter: Adapter): void {
     id: adapter.id,
     renderer: adapter.renderer,
     processing: adapter.processing,
+    unsupported: adapter.unsupported ?? {},
     get wheelTrial() {
       return wheelTrial;
     },
@@ -490,7 +492,9 @@ export function installGridHarness(adapter: Adapter): void {
     },
     async run(s) {
       const operation = OPERATION[s.operation];
-      const reason = operation && adapter.unsupported?.[operation];
+      const reason =
+        (s.cells === "react" && adapter.unsupported?.["react-cells"]) ||
+        (operation && adapter.unsupported?.[operation]);
       if (reason) return { status: "unsupported", reason, metrics: {} };
       try {
         switch (s.operation) {

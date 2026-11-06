@@ -8,6 +8,10 @@
     "paths": {
       "herceg": ["../herceg/src/index.ts"],
       "herceg/grid": ["../herceg/src/grid.ts"],
+      "herceg/grid/remote": ["../herceg/src/grid-remote.ts"],
+      "herceg/grid/pivot": ["../herceg/src/grid-pivot.ts"],
+      "herceg/grid/memory": ["../herceg/src/grid-memory.ts"],
+      "herceg/pivot": ["../herceg/src/pivot.ts"],
       "herceg/fields": ["../herceg/src/fields.ts"],
       "herceg/layout": ["../herceg/src/layout.ts"]
     }

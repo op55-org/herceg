@@ -58,10 +58,13 @@ export class Reference {
   end: number;
   /** Whether grids show the looks scenarios' looks (looks.ts), which frames are then checked for. */
   readonly looks: boolean;
-  /** Whether grids draw the cells scenarios' cells (cells.ts), which frames are then checked for. */
-  readonly cells: boolean;
+  /**
+   * Whether grids draw the cells scenarios' cells (cells.ts), which frames
+   * are then checked for; "react": drawn by React components (react-cells.tsx).
+   */
+  readonly cells: boolean | "react";
 
-  constructor(table: GridTable, looks = false, cells = false) {
+  constructor(table: GridTable, looks = false, cells: boolean | "react" = false) {
     this.looks = looks;
     this.cells = cells;
     this.fields = table.fields;

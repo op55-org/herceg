@@ -94,6 +94,7 @@ export function inkOver(fill: string): string {
  * behind the text within the cell's padding, a chip, a link, a symbol.
  */
 export const DOM_CELL_CSS = `
+.bc-react{width:100%;height:100%}
 .bc-cell{position:relative;display:flex;align-items:center;width:100%;height:100%;min-width:0}
 .bc-text{position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bc-bar{position:absolute;top:4px;bottom:4px;left:calc(var(--bc-start)*100%);width:calc((var(--bc-end) - var(--bc-start))*100%);background:#2196f3;opacity:0.4}

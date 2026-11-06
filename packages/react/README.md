@@ -31,7 +31,9 @@ export function Latency() {
 | `@herceg/react` | `Chart` and a component per mark (`Line`, `Area`, `Bar`, `Point`, `Heatmap`, `Pie`, `Graph`, `GeoShape`, `Surface`, `Rule`, `Custom`, ...) |
 | `@herceg/react/layout` | `Columns`, `Rows`, `Grid`, `Cell`, `Panel`, `Inset` for subplots |
 | `@herceg/react/guides` | `Legend`, a panel's own legend |
-| `@herceg/react/grid` | `Grid`, the data grid over a `herceg/grid` model |
+| `@herceg/react/grid` | `Grid`, the data grid over a `herceg/grid` model, with React cells |
+| `@herceg/react/grid/remote` | `RemoteGrid`, over a remote grid model, with React cells |
+| `@herceg/react/grid/pivot` | `PivotGrid`, over a pivot grid model |
 
 ## In brief
 
@@ -57,6 +59,13 @@ export function Latency() {
   `renderToSnapshot` without drawing again.
 - Mark elements cannot sit inside components of your own; pass reusable
   groups as `marks` or return them from a function.
+- **Grids** take a model the application owns; data and scrolling bypass
+  React. `cells={{ status: (cell) => <Badge value={cell.value} /> }}`
+  draws columns' cells with React components, keeping your app's
+  context: each cell's state is its row's, a cell that throws or suspends
+  draws its text, and cells commit before the grid paints. Each mounted
+  React cell is a portal, which costs about 17 KB of React's event
+  listeners, growing with the cells on screen, not with the rows.
 
 ## Documentation
 

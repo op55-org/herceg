@@ -12,8 +12,8 @@
 // a domain kept by adapter code (looks.ts); appends render every row in view
 // again, so cells follow the domain. With cells, the cell-bearing columns'
 // `cell` renders a React component drawing cells.ts' bars, chips, links,
-// and symbols; n4's bar's domain is adapter code, found from the rows at
-// mount.
+// and symbols (react-cells.tsx; in the React cells scenarios, the one with
+// state); n4's bar's domain is adapter code, found from the rows at mount.
 
 import {
   type ColumnFiltersState,
@@ -33,7 +33,7 @@ import {
   useTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type CSSProperties, type RefObject, useCallback, useRef } from "react";
+import { type RefObject, useCallback, useRef } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
@@ -51,22 +51,10 @@ import {
   rowObjects,
   scrollport,
 } from "../adapter.ts";
-import {
-  barEnds,
-  CELL_FIELDS,
-  CHIP_FILLS,
-  DOM_CELL_CSS,
-  domContent,
-  extentOf,
-  inkOver,
-  LINK_URL,
-  N0_DOMAIN,
-  SHAPE_PATHS,
-  SYMBOL_BOX,
-  shapeOf,
-} from "../cells.ts";
+import { CELL_FIELDS, DOM_CELL_CSS, domContent, extentOf } from "../cells.ts";
 import { formatValue, type GridField, type GridTable } from "../fixture.ts";
 import { type CellLook, cellLook, type LookDomain, LookTracker } from "../looks.ts";
+import { CellView, ReactCell } from "../react-cells.tsx";
 
 const features = tableFeatures({
   rowSortingFeature,
@@ -85,83 +73,25 @@ const helper = createColumnHelper<Features, RowObject>();
 const inLabels: FilterFn<Features, RowObject> = (row, id, labels: Set<string>) =>
   labels.has(row.getValue(id) as string);
 
-/** A cell of the cells scenario (cells.ts): what `fillDomCell` draws, as React elements. */
-function Cell({
-  field,
-  value,
-  text,
-  extent,
-}: {
-  field: string;
-  value: number | string | undefined;
-  text: string;
-  extent: readonly [number, number];
-}) {
-  if (value === undefined) return <div className="bc-cell">{text}</div>;
-  if (field === "c0") {
-    const fill = CHIP_FILLS[value as string];
-    return (
-      <div className="bc-cell">
-        <span className="bc-chip" style={fill ? { background: fill, color: inkOver(fill) } : {}}>
-          {text}
-        </span>
-      </div>
-    );
-  }
-  if (field === "n1")
-    return (
-      <div className="bc-cell">
-        <a
-          className="bc-link"
-          href={`${LINK_URL}${encodeURIComponent(String(value))}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {text}
-        </a>
-      </div>
-    );
-  if (field === "n3")
-    return (
-      <div className="bc-cell">
-        <svg
-          className="bc-symbol"
-          width={SYMBOL_BOX}
-          height={SYMBOL_BOX}
-          viewBox={`${-SYMBOL_BOX / 2} ${-SYMBOL_BOX / 2} ${SYMBOL_BOX} ${SYMBOL_BOX}`}
-          aria-hidden="true"
-        >
-          <path d={SHAPE_PATHS[shapeOf(value as number)!]} />
-        </svg>
-        <span className="bc-text">{text}</span>
-      </div>
-    );
-  const [start, end] = barEnds(value as number, field === "n0" ? N0_DOMAIN : extent)!;
-  return (
-    <div className="bc-cell">
-      <span className="bc-bar" style={{ "--bc-start": start, "--bc-end": end } as CSSProperties} />
-      <span className="bc-text">{text}</span>
-    </div>
-  );
-}
-
-function columnsFor(fields: GridField[], extent: readonly [number, number] | undefined) {
+function columnsFor(
+  fields: GridField[],
+  cells: { extent: readonly [number, number]; react: boolean } | undefined,
+) {
   return helper.columns(
     fields.map((field) =>
       helper.accessor(field.name, {
         header: field.name,
         cell:
-          extent && (CELL_FIELDS as readonly string[]).includes(field.name)
+          cells && (CELL_FIELDS as readonly string[]).includes(field.name)
             ? (info) => {
                 const value = info.getValue() as number | string | undefined;
-                return (
-                  <Cell
-                    field={field.name}
-                    value={value}
-                    text={formatValue(field.kind, value)}
-                    extent={extent}
-                  />
-                );
+                const props = {
+                  field: field.name,
+                  value,
+                  text: formatValue(field.kind, value),
+                  extent: cells.extent,
+                };
+                return cells.react ? <ReactCell {...props} /> : <CellView {...props} />;
               }
             : (info) => formatValue(field.kind, info.getValue() as number | string | undefined),
         sortFn: "basic",
@@ -329,7 +259,7 @@ function mount(
     document.head.append(style);
   }
   const fields = gridTable.fields;
-  const cells = options.cells === true;
+  const cells = options.cells !== undefined && options.cells !== false;
   if (cells && !document.getElementById("bc-cells-style")) {
     const style = document.createElement("style");
     style.id = "bc-cells-style";
@@ -337,7 +267,10 @@ function mount(
     document.head.append(style);
   }
   // Adapter code: the rows' extent, which n4's bars are drawn within.
-  const columns = columnsFor(fields, cells ? extentOf(gridTable, "n4") : undefined);
+  const columns = columnsFor(
+    fields,
+    cells ? { extent: extentOf(gridTable, "n4"), react: options.cells === "react" } : undefined,
+  );
   const table: RefObject<Table | null> = { current: null };
   const scroller: RefObject<HTMLDivElement | null> = { current: null };
   const root = createRoot(container);

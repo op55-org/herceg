@@ -86,7 +86,7 @@ The long-term target covers the major chart families. Not yet available:
 
 - Column groups (headers over several columns) beyond pivots, sizing
   columns to their content, and moving columns by touch.
-- Custom cells in React, Vue, and Svelte, and sparkline cells.
+- Custom cells in Vue and Svelte, and sparkline cells.
 - Editing and copying.
 - Pivots and binned times in remote grids, a SQL generator for grid
   queries, and remote grids from Python.

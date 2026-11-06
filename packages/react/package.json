@@ -32,6 +32,16 @@
       "types": "./dist/grid.d.ts",
       "import": "./dist/grid.js",
       "default": "./dist/grid.js"
+    },
+    "./grid/remote": {
+      "types": "./dist/grid/remote.d.ts",
+      "import": "./dist/grid/remote.js",
+      "default": "./dist/grid/remote.js"
+    },
+    "./grid/pivot": {
+      "types": "./dist/grid/pivot.d.ts",
+      "import": "./dist/grid/pivot.js",
+      "default": "./dist/grid/pivot.js"
     }
   },
   "files": [
