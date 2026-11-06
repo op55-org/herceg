@@ -53,8 +53,12 @@ export interface GridScenario {
   timeout?: number;
   /** Grids show the looks scenarios' conditional formatting (looks.ts), checked in every frame. */
   looks?: boolean;
-  /** Grids draw the cells scenarios' bars, chips, links, and symbols (cells.ts), checked in every frame. */
-  cells?: boolean;
+  /**
+   * Grids draw the cells scenarios' bars, chips, links, and symbols
+   * (cells.ts), checked in every frame; "react": through React components
+   * holding state (react-cells.tsx) in each grid's React cells.
+   */
+  cells?: boolean | "react";
   description: string;
 }
 
@@ -382,15 +386,18 @@ function looksFor(name: SizeName): GridScenario[] {
 /**
  * Cells at one size: bars on two columns, chips, links, and symbols
  * (cells.ts), mounted, scrolled, traced, and held in memory, each frame's
- * content checked with its text.
+ * content checked with its text. With `react`, drawn by React components
+ * (react-cells.tsx) through each React grid's cells.
  */
-function cellsFor(name: SizeName): GridScenario[] {
+function cellsFor(name: SizeName, react = false): GridScenario[] {
   const size = SIZES[name];
   const shape = `${size.rows.toLocaleString("en-US")} x ${size.groups * 20}`;
   const big = size.rows >= 1_000_000;
-  const id = (suffix: string) => `grid-${name}-cells-${suffix}`;
+  const kind = react ? "react-cells" : "cells";
+  const id = (suffix: string) => `grid-${name}-${kind}-${suffix}`;
   const timeout = big ? 900 : 300;
-  const common = { sizeName: name, size, cells: true, timeout };
+  const common = { sizeName: name, size, cells: react ? ("react" as const) : true, timeout };
+  const cells = react ? "React cells" : "cells";
   return [
     {
       ...common,
@@ -398,7 +405,7 @@ function cellsFor(name: SizeName): GridScenario[] {
       operation: "mount",
       samples: big ? 5 : 20,
       warmup: big ? 1 : 3,
-      description: `${shape} with cells: mount to the first correct frame`,
+      description: `${shape} with ${cells}: mount to the first correct frame`,
     },
     ...(["vertical", "diagonal"] as const).map((direction) => ({
       ...common,
@@ -407,7 +414,7 @@ function cellsFor(name: SizeName): GridScenario[] {
       direction,
       samples: big ? 10 : 40,
       warmup: big ? 2 : 5,
-      description: `${shape} with cells: ${direction} scroll steps of a screen`,
+      description: `${shape} with ${cells}: ${direction} scroll steps of a screen`,
     })),
     ...(["vertical", "diagonal"] as const).map((direction) => ({
       ...common,
@@ -417,7 +424,7 @@ function cellsFor(name: SizeName): GridScenario[] {
       durationMs: 3000,
       samples: big ? 1 : 2,
       warmup: big ? 0 : 1,
-      description: `${shape} with cells: 3 s of ${direction} scrolling, offsets set every frame`,
+      description: `${shape} with ${cells}: 3 s of ${direction} scrolling, offsets set every frame`,
     })),
     {
       ...common,
@@ -426,7 +433,7 @@ function cellsFor(name: SizeName): GridScenario[] {
       sort: SORT_NUMBER_DESC,
       samples: big ? 1 : 3,
       warmup: 0,
-      description: `${shape} with cells: heap, DOM, and canvas footprint; destroy and repeated mounts`,
+      description: `${shape} with ${cells}: heap, DOM, and canvas footprint; destroy and repeated mounts`,
     },
   ];
 }
@@ -436,8 +443,10 @@ export const GRID_SCENARIOS: GridScenario[] = [
   ...scenariosFor("100k", false),
   ...looksFor("100k"),
   ...cellsFor("100k"),
+  ...cellsFor("100k", true),
   ...scenariosFor("1m", true),
   ...looksFor("1m"),
   ...cellsFor("1m"),
+  ...cellsFor("1m", true),
   ...scenariosFor("1m-wide", true),
 ];

@@ -16,6 +16,8 @@
 // the rank as rows stream, and picks black or white text over fills.
 // With cells, columns take cell kinds (`barCell`, `chipCell`, `symbolCell`)
 // and n1's display a link; the grid finds n4's bar's domain from the rows.
+// With React cells (herceg-react), columns draw only text here, and the
+// component's `cells` draw the content.
 
 import { col, encodedCategory, rowView, type Schema, Table, time } from "herceg";
 import { compileFields } from "herceg/fields";
@@ -42,6 +44,7 @@ import {
   CELL_FIELDS,
   type CellContent,
   CHIP_FILLS,
+  domContent,
   LINK_URL,
   N0_DOMAIN,
   N3_OVER,
@@ -199,6 +202,8 @@ export function hercegHandle(
 ): GridHandle {
   const view = rowView(source);
   const looks = options.looks === true;
+  // React cells draw the cells scenarios' content in place of cell kinds and the link.
+  const react = options.cells === "react";
   const cells = options.cells === true;
   const columns: GridColumn<Schema>[] = fixture.fields.map((field) => ({
     field: field.name,
@@ -265,6 +270,7 @@ export function hercegHandle(
           selected: (row) => row.getAttribute("aria-selected") === "true",
           ...(looks && { look: lookOf }),
           ...(cells && { content: contentOf }),
+          ...(react && { content: domContent }),
         }),
         scrollStep: ratio(),
       };
@@ -344,6 +350,9 @@ export const adapter: Adapter = {
   id: "herceg",
   renderer: "DOM rows and cells written through field displays (10 rows and 2 columns of overscan)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
+  unsupported: {
+    "react-cells": "no React: herceg-react draws React cells; here custom cells are DOM renderers",
+  },
   prepare: hercegTable,
   mount: (container, fixture, input, options) =>
     hercegHandle(

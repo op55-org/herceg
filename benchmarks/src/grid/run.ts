@@ -327,6 +327,10 @@ async function main() {
       processing: window.gridBench.processing,
     }));
     if (s.operation === "memory") {
+      const unsupported =
+        s.cells === "react" &&
+        (await page.evaluate(() => window.gridBench.unsupported["react-cells"]));
+      if (unsupported) return { status: "unsupported", reason: unsupported, metrics: {} };
       const metrics: Record<string, Metric> = {};
       for (let i = 0; i < s.samples; i++) {
         if (i > 0) {

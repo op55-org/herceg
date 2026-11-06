@@ -481,6 +481,25 @@ The other grids find `n4`'s extent in adapter code when they mount
 (the scenarios do not stream), and draw bars, chips, and symbols with the
 same styles (`DOM_CELL_CSS`, or the canvas's equivalents).
 
+### React cells
+
+`react-cells` scenarios (the same sizes and operations as `cells`) draw
+the same five columns with one React component (`ReactCell`,
+`src/grid/react-cells.tsx`): the cells scenarios' DOM under state of its
+own (whether it was pressed), as a cell holding a control has, so a grid
+pays for mounting, recycling, and tearing down stateful components. The
+checks are the cells scenarios'.
+
+| Grid | How it draws React cells |
+| --- | --- |
+| Herceg (`herceg-react`) | `<Grid cells>`: a render function per column from each cell's `value` and `text` (`n1` a control cell), through portals; `n4`'s extent in adapter code, as the others find it |
+| TanStack Table | Each column's `cell` renders `ReactCell` |
+| AG Grid | Not measured: its React cell renderers need `ag-grid-react`, which the suite does not install; its `cellRenderer` components are in the cells scenarios |
+| Glide | Not comparable: it draws cells on a canvas, with drawing callbacks rather than components |
+
+Herceg without React (`herceg`) draws custom cells with DOM renderers
+and is not run in these scenarios.
+
 ### Memory
 
 Heap readings are the chart suite's, one fresh page per sample. Reserved

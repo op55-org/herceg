@@ -415,13 +415,19 @@ createGrid(element, {
   goes back to the cell, and Tab leaves the grid. Presses on controls are
   theirs: the grid neither selects nor reports a click. A disabled or
   hidden control is passed over; with none left, the cell takes the focus.
+  A grid in a composite cell is one of its controls: Enter moves into it,
+  and it keeps no tab stop of its own while inside another grid.
 - **Errors.** A view that throws is reported once (`reportError`), and its
   cell writes its text until it leaves the column; the rest of the grid
   draws on.
 - **Frameworks.** A renderer with `framework` instead of `create` is a
   framework adapter's: in each draw the grid hands it the cells to draw
-  and the hosts to let go of, and shows each cell's text until it says
-  the cell's content is drawn. React, Vue, and Svelte have no cells yet.
+  (each with the renderer it was drawn for, whose `fields` its context
+  reads) and the hosts to let go of, and shows each cell's text until it
+  says the cell's content is drawn (the host waiting meanwhile is laid
+  out unseen, so content measuring itself as it mounts finds the cell's
+  size). React's `<Grid>` and `<RemoteGrid>` take cells as render
+  functions ([In React](#in-react)); Vue and Svelte have no cells yet.
 - Pivot grids take no renderers: their rows are combinations, not
   records.
 
@@ -740,12 +746,51 @@ function Requests({ data }: { data: typeof requests }) {
 }
 ```
 
-A new `model` makes a new grid; `ariaLabel`, `theme`, and `headerHeight`
-change in place. `onRowClick`, `onCellClick`, and `onRender` hear the
-grid's [events](#events), the latest handler each time. A model no one keeps stops following its view, so one
-made with `useMemo` needs no cleanup. Cell kinds and links come with the
-model's columns; `<Grid>` takes no custom renderers yet. Vue and Svelte
-have no grid component; call `createGrid` on an element.
+A new `model` makes a new grid; `ariaLabel`, `theme`, `headerHeight`, and
+`cells` change in place. `onRowClick`, `onCellClick`, and `onRender` hear
+the grid's [events](#events), the latest handler each time. The `ref` is
+the grid (`grid.current.model` keeps the model's type). A model no one
+keeps stops following its view, so one made with `useMemo` needs no
+cleanup. Cell kinds and links come with the model's columns.
+
+**React cells.** `cells` draws columns' cells with React, by column id: a
+render function of the cell (`GridCellContext`: its `text`, `value`,
+`look`, `row`, `selected`, and `read` of the fields it names), or `{
+render, fields, interaction }` as [custom renderers](#cells) take them.
+
+```tsx
+<Grid
+  model={model}
+  ariaLabel="Services"
+  cells={{
+    status: (cell) => <StatusBadge status={cell.value} />,
+    open: {
+      fields: ["service"],
+      interaction: "control",
+      render: (cell) => (
+        <button type="button" onClick={() => openService(cell.read("service"))}>Open</button>
+      ),
+    },
+  }}
+/>
+```
+
+Cells render in the component's tree, keeping its providers and context.
+A cell's state is its row's: a cell element showing another row mounts its
+component again. Each cell is in a boundary of its own: one that throws
+or suspends draws its text (an error is reported once, `reportError`)
+while the rest of the grid draws. Data changes and scrolling still bypass
+React for built-in cells; React renders only the custom cells that
+changed, committed in the grid's frame before it paints, so no frame
+shows a row's text under another row's content. See
+[React, Vue, and Svelte](frameworks.md#grids) for when cells commit and
+what they cost.
+
+`<RemoteGrid>` (`@herceg/react/grid/remote`) shows a [remote
+grid](#remote-grids)'s model and takes `cells` too, asking the source for
+the fields they read; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows a
+[pivot](#pivots)'s, without cells. Vue and Svelte have no grid component;
+call `createGrid` on an element.
 
 ## Limits
 
@@ -754,10 +799,14 @@ have no grid component; call `createGrid` on an element.
   scaled (a pixel scrolled moves more than one).
 - Not available: column groups other than a pivot's values, sizing columns
   to content, moving columns by touch (the menu moves them), editing,
-  copying, custom renderers in React, Vue, and Svelte, and in pivot grids.
+  copying, custom cells in Vue and Svelte, and custom renderers in pivot
+  grids.
   Remote grids have no pivots and no bins in queries.
 - Custom renderers update every mounted cell of their columns when any row
   of a local grid's table changes, as a table's rows share one version.
+- A grid notices it was moved into or out of another grid's cell as it
+  next draws; a move that changes neither its size nor its visibility
+  takes effect at `render()`.
 - Only mounted rows are in the DOM, so text selection, the browser's find,
   and screen readers reach only those. Announcements are in English, and
   grids have not been tried with screen readers themselves.

@@ -40,6 +40,9 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-heatmap": "herceg",
   "herceg-contour": "herceg",
   "herceg-react-line": "@herceg/react",
+  "herceg-react-grid": "@herceg/react",
+  "herceg-react-grid-remote": "@herceg/react",
+  "herceg-react-grid-pivot": "@herceg/react",
   "herceg-vue-line": "@herceg/vue",
   "herceg-svelte-line": "@herceg/svelte",
   "echarts-line": "echarts",
@@ -71,6 +74,9 @@ interface Bundle {
 /** Frameworks are shared by the whole application, so adapter entries leave them out. */
 const FRAMEWORKS: Record<string, string[]> = {
   "herceg-react-line": ["react", "react-dom", "react/jsx-runtime"],
+  "herceg-react-grid": ["react", "react-dom", "react/jsx-runtime"],
+  "herceg-react-grid-remote": ["react", "react-dom", "react/jsx-runtime"],
+  "herceg-react-grid-pivot": ["react", "react-dom", "react/jsx-runtime"],
   "herceg-vue-line": ["vue"],
   "herceg-svelte-line": ["svelte", "svelte/*"],
 };

@@ -109,8 +109,11 @@ export interface Adapter {
   renderer: string;
   /** Who sorts and filters: the library, or code in the adapter (labeled in reports). */
   processing: { sort: string; filter: string };
-  /** Operations the library cannot do, with the reason. */
-  unsupported?: Partial<Record<Operation, string>>;
+  /**
+   * Operations the library cannot do, with the reason; "react-cells":
+   * cells drawn by React components (the React cells scenarios).
+   */
+  unsupported?: Partial<Record<Operation | "react-cells", string>>;
   /**
    * Converts the shared columnar fixture into the library's native input
    * (row objects, or nothing for grids that read columns through a callback).
@@ -131,8 +134,12 @@ export interface Adapter {
 
 export interface MountOptions {
   looks?: boolean;
-  /** Drawing the cells scenarios' cells (cells.ts), read back in `visible`. */
-  cells?: boolean;
+  /**
+   * Drawing the cells scenarios' cells (cells.ts), read back in `visible`;
+   * "react": drawn by `ReactCell` components (react-cells.tsx) in the
+   * library's React cells.
+   */
+  cells?: boolean | "react";
 }
 
 /** Row objects for libraries that take them: `id` plus one property per field. */

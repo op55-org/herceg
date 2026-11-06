@@ -51,7 +51,12 @@ kinds (`barCell`, `chipCell`, and `symbolCell`, whose shapes `encode.symbol`
 gives), `createGrid`'s `cells` takes custom renderers by column id (text,
 control, or composite cells, with signals and declared fields), and columns
 without fields write their `text` (literal text and fields), which a
-renderer draws more for. Series marks' `label`
+renderer draws more for. React's `<Grid>` and `<RemoteGrid>`
+(`@herceg/react/grid/remote`) take `cells` as render functions by column
+id, typed by the model's fields: rendered through portals in the
+component's tree, their state kept per row, each in an error and
+Suspense boundary drawing the cell's text, and committed before the grid
+paints; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows pivots. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,

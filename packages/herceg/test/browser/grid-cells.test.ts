@@ -1802,6 +1802,78 @@ describe("framework cells", () => {
     }
   });
 
+  it("keep the page's focus in the grid as a framework hides or removes what held it", async () => {
+    const model = createGridModel({
+      data: rowView(services()),
+      columns: [{ field: "id" }, { field: "service" }, { field: "latency" }],
+    });
+    const draws: FrameworkCell[][] = [];
+    const commit = (cells: readonly FrameworkCell[]) => {
+      for (const cell of cells) {
+        const button = document.createElement("button");
+        button.textContent = cell.context.text;
+        cell.host.replaceChildren(button);
+        cell.drawn();
+      }
+    };
+    const grid = mount(model, {
+      cells: {
+        service: {
+          interaction: "control",
+          framework: { draw: (cells) => void draws.push([...cells]) },
+        },
+        latency: {
+          interaction: "composite",
+          framework: { draw: (cells) => void draws.push([...cells]) },
+        },
+      },
+    });
+    for (const cells of draws) commit(cells);
+    // A control hidden as its content suspends again: the cell takes the focus.
+    grid.focusCell(1, "service");
+    const control = cellAt(grid, 1, 2);
+    const button = control.querySelector("button")!;
+    expect(document.activeElement).toBe(button);
+    button.style.display = "none";
+    draws[0]!.find((cell) => control.contains(cell.host))!.drawn();
+    expect(document.activeElement).toBe(control);
+    // A control disabled, made invisible, or inert: the cell takes the focus.
+    const ways: ((button: HTMLButtonElement) => void)[] = [
+      (one) => {
+        one.disabled = true;
+      },
+      (one) => {
+        one.style.visibility = "hidden";
+      },
+      (one) => {
+        one.inert = true;
+      },
+    ];
+    for (const way of ways) {
+      grid.focusCell(3, "service");
+      const other = cellAt(grid, 3, 2);
+      const held = other.querySelector("button")!;
+      expect(document.activeElement).toBe(held);
+      way(held);
+      draws[0]!.find((cell) => other.contains(cell.host))!.drawn();
+      expect(document.activeElement).toBe(other);
+      held.disabled = false;
+      held.style.visibility = "";
+      held.inert = false;
+    }
+    // A composite cell's control the user entered, removed.
+    grid.focusCell(2, "latency");
+    const composite = cellAt(grid, 2, 3);
+    await userEvent.keyboard("{Enter}");
+    expect(document.activeElement).toBe(composite.querySelector("button"));
+    composite.querySelector("button")!.remove();
+    draws
+      .flat()
+      .find((cell) => composite.contains(cell.host))!
+      .drawn();
+    expect(document.activeElement).toBe(composite);
+  });
+
   it("hand framework cells over as part of drawing: a commit asking for a draw has the next", async () => {
     const view = rowView(services());
     const model = createGridModel({ data: view, columns: [{ field: "id" }, { field: "service" }] });

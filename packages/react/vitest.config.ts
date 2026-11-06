@@ -15,6 +15,10 @@ export default defineConfig({
     alias: [
       { find: /^herceg$/, replacement: engine("index.ts") },
       { find: /^herceg\/grid$/, replacement: engine("grid.ts") },
+      { find: /^herceg\/grid\/remote$/, replacement: engine("grid-remote.ts") },
+      { find: /^herceg\/grid\/pivot$/, replacement: engine("grid-pivot.ts") },
+      { find: /^herceg\/grid\/memory$/, replacement: engine("grid-memory.ts") },
+      { find: /^herceg\/pivot$/, replacement: engine("pivot.ts") },
       { find: /^herceg\/fields$/, replacement: engine("fields.ts") },
       { find: /^herceg\/layout$/, replacement: engine("layout.ts") },
     ],

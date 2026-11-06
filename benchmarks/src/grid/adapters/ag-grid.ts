@@ -312,6 +312,9 @@ export const adapter: Adapter = {
     sort: "native (comparator keeping missing values last, delta sort)",
     filter: "native number filter; external filter for category membership",
   },
+  unsupported: {
+    "react-cells": "AG Grid's React cell renderers need ag-grid-react, which is not installed",
+  },
   prepare: rowObjects,
   mount,
 };

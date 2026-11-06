@@ -23,7 +23,13 @@ import type { CellLook } from "../grid/looks.ts";
 import type { GridModel } from "../grid/model.ts";
 import type { ThemeName, ThemeSpec } from "../spec/spec.ts";
 import { resolveTokens, themeReadsPage } from "../theme.ts";
-import { CellHost, type GridCellRenderers, type HostedCell, type HostPaint } from "./grid-cells.ts";
+import {
+  CellHost,
+  canFocus,
+  type GridCellRenderers,
+  type HostedCell,
+  type HostPaint,
+} from "./grid-cells.ts";
 import { ColumnControls } from "./grid-columns.ts";
 import { contrastOf, faintOf, GRID_CSS, PAGE_INKS, themeProperties } from "./grid-style.ts";
 import { readPage, watchPage } from "./page-theme.ts";
@@ -249,6 +255,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   #active: HTMLElement | null = null;
   /** Whether the page's focus is in the grid, as focus events last said. */
   #focused = false;
+  /** The element that last took the page's focus in the grid, while it holds it. */
+  #lastFocused: Element | null = null;
   /** Content box of the scroller, from the resize observer. */
   #box: { width: number; height: number } | null = null;
   #spacer = { height: -1, width: -1 };
@@ -305,7 +313,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     this.#live.style.cssText = HIDDEN_TEXT;
     this.root.append(style, this.#scroller, description, this.#live);
     container.append(this.root);
-    this.#host = new CellHost(this.root, "grid", (cell) => this.#shown(cell as Cell));
+    this.#host = new CellHost(
+      this.root,
+      "grid",
+      (cell) => this.#shown(cell as Cell),
+      () => this.#active,
+    );
     this.#hostPaint = {
       // A kind's color is its own paint (a bar's, a chip's): the cell keeps only the fill.
       look: (cell, look, color) =>
@@ -338,7 +351,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       this.#stops.push(
         observeVisibility(this.root, (visible) => {
           this.#visible = visible;
-          if (visible && (this.#dirty || this.#pageChanged)) schedule(this);
+          if (visible && (this.#dirty || this.#pageChanged || this.#host.pending)) schedule(this);
         }),
       );
       if (typeof ResizeObserver !== "undefined") {
@@ -558,6 +571,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const model = this.model;
     // What the frame draws: changes made as it draws (by a focus listener) are the next frame's.
     const revision = model.revision;
+    // A request to move the focus in made as it draws (by a framework's commit) is the next's too.
+    let requested = this.#focusRequested;
+    this.#focusRequested = false;
     this.#rendering = true;
     try {
       const count = model.rowCount;
@@ -573,12 +589,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         if (this.#destroyed) return;
       }
       // A column's menu closing with its column gives the focus back to the grid.
-      if (this.#controls.sync()) this.#focusRequested = true;
+      if (this.#controls.sync()) requested = true;
       const shift = this.#scroll();
       const shown = model.visibleRange(OVERSCAN);
       const focus = model.focus;
       const root = this.root.getRootNode() as Document | ShadowRoot;
-      const holding = this.#scroller.contains(root.activeElement) || this.#focusRequested;
+      const holding = this.#scroller.contains(root.activeElement) || requested;
       // While it holds the page's focus, the focused cell stays mounted wherever it is scrolled.
       const keep = holding ? focus : null;
       this.#drawHeader(shown, keep, layout);
@@ -588,24 +604,35 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         for (const row of this.#rows) row.written = null;
         this.#looks = Number.NaN;
         this.#kinds = Number.NaN;
+        if (requested) this.#focusRequested = true;
+        // Out of view no frame comes: what was handed over goes now, hosts let go of too.
+        if (!this.#visible && this.#host.pending) this.#host.hand(false);
         this.#invalidate();
         return;
       }
       this.#describe(count, layout.length);
       // Framework cells, before the focus: a draw in the grid's frame hands
-      // them over at once, as does the first; one called from code (which
-      // may be a framework's render or effect) leaves them to the next frame.
+      // them over at once, as does the first, and any while the grid is out
+      // of view (whose frames wait, and nothing of it paints); one called from
+      // code (which may be a framework's render or effect) leaves them to the
+      // next frame.
       if (this.#host.pending) {
-        if (this.#frame || this.#drawn < 0) this.#host.hand(this.#frame);
+        if (this.#frame || this.#drawn < 0 || !this.#visible) this.#host.hand(this.#frame);
         else schedule(this);
         // A framework's draw destroyed the grid.
         if (this.#destroyed) return;
       }
-      this.#placeFocus(focus, holding);
+      // A framework's commit may have moved the page's focus out (to a dialog
+      // it opened): the grid takes it back only when asked to.
+      const page = this.root.ownerDocument.activeElement;
+      const away =
+        page !== null &&
+        page !== this.root.ownerDocument.body &&
+        !this.#scroller.contains(root.activeElement);
+      this.#placeFocus(focus, requested || (holding && !away));
       this.#extras.drawn?.(this.#scroller, (text) => this.#say(text));
     } finally {
       this.#rendering = false;
-      this.#focusRequested = false;
     }
     this.#drawn = revision;
     if (this.#listeners.get("render")?.size) this.#emit("render", { revision });
@@ -1147,6 +1174,15 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   }
 
   /**
+   * The tab stop's tab index: in the page's tab order, but not inside
+   * another grid's cell, whose keys move into it and out of it (as a
+   * composite cell's), and which takes its controls out of the order.
+   */
+  #tabStop(): number {
+    return this.root.parentElement?.closest(".herceg-grid") ? -1 : 0;
+  }
+
+  /**
    * Gives the focused cell the tab stop, and the page's focus when the grid
    * holds it: its element, or what in it takes the focus (a link, a control).
    */
@@ -1157,10 +1193,11 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       this.#active?.setAttribute("tabindex", "-1");
       this.#active = target;
     }
+    const stop = this.#tabStop();
     // A renderer's update may have taken its control out of the tab order.
-    if (target && target.tabIndex !== 0) target.tabIndex = 0;
+    if (target && target.tabIndex !== stop) target.tabIndex = stop;
     // Without a mounted focused cell, the grid itself is the tab stop.
-    this.#scroller.tabIndex = target ? -1 : 0;
+    this.#scroller.tabIndex = target ? -1 : stop;
     if (!holding) return;
     const root = this.root.getRootNode() as Document | ShadowRoot;
     const active = root.activeElement;
@@ -1179,8 +1216,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
    * A framework drew a focused cell's content: what takes its focus now
    * (a control cell's control, which may be another element than before)
    * takes the tab stop, and the page's focus where the cell had it: on the
-   * cell, or lost as the framework replaced what held it; not where the
-   * user has gone since.
+   * cell, or lost as the framework removed or hid what held it (a control,
+   * a composite's control, content suspending again); not where the user
+   * has gone since.
    */
   #shown(cell: Cell) {
     const focus = this.model.focus;
@@ -1189,17 +1227,20 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const before = this.#active;
     const root = this.root.getRootNode() as Document | ShadowRoot;
     const active = root.activeElement;
-    // Lost with what the framework replaced: no focusout says the focus left the grid.
+    // No focusout says the focus left the grid: what held it went, or is
+    // hidden and about to lose it.
+    const away = active === null || active === cell.element.ownerDocument.body;
     const lost =
       this.#focused &&
-      before !== null &&
-      !before.isConnected &&
-      (active === null || active === cell.element.ownerDocument.body);
+      [before, this.#lastFocused].some(
+        (one) => one !== null && (one === active || away) && !canFocus(one),
+      );
     if (before !== target) {
-      if (before?.isConnected) before.tabIndex = -1;
+      if (before?.isConnected && before.tabIndex !== -1) before.tabIndex = -1;
       this.#active = target;
     }
-    target.tabIndex = 0;
+    const stop = this.#tabStop();
+    if (target.tabIndex !== stop) target.tabIndex = stop;
     if ((active === cell.element || lost) && active !== target)
       target.focus({ preventScroll: true });
   }
@@ -1389,6 +1430,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
 
   #onFocusIn = (event: FocusEvent) => {
     this.#focused = true;
+    this.#lastFocused = event.target as Element;
     if (this.#rendering) return;
     const model = this.model;
     // The focus on a cell's link or control is its cell's.
@@ -1406,19 +1448,27 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
 
   #onFocusOut = (event: FocusEvent) => {
     const to = event.relatedTarget as Node | null;
-    if (to !== null) this.#focused = this.#scroller.contains(to);
-    else {
-      // Chrome says the focus went out as a focused element is removed (a
-      // framework replacing a control), which is not the user leaving: they
-      // left only if the element is still in the page.
+    if (to !== null) {
+      if (!this.#scroller.contains(to)) this.#leave();
+    } else {
+      // Chrome says the focus went out as a focused element is removed,
+      // hidden, or disabled (a framework replacing a control, content
+      // suspending), which is not the user leaving: they left only if the
+      // element can still hold the focus.
       const from = event.target as Element;
       queueMicrotask(() => {
-        if (from.isConnected) this.#focused = false;
+        if (canFocus(from)) this.#leave();
       });
     }
     // Once the focus has left, the focused cell need not stay mounted.
     if (!this.#rendering) this.#invalidate();
   };
+
+  /** The user took the page's focus out of the grid. */
+  #leave() {
+    this.#focused = false;
+    this.#lastFocused = null;
+  }
 
   /**
    * The cell an element shows, as the model has it now, which may have

@@ -667,6 +667,10 @@ export const adapter: Adapter = {
     sort: "external: adapter code (typed-array index sort, merge on append)",
     filter: "external: adapter code (typed-array scan)",
   },
+  unsupported: {
+    "react-cells":
+      "cells are drawn on a canvas: custom cells (the cells scenarios) are drawing callbacks, not React components",
+  },
   prepare: (table) => new Store(table),
   mount,
 };

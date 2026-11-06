@@ -265,14 +265,19 @@ row and a spacer as tall as the rows.
   each draw, after DOM renderers' updates and before the focus is placed:
   at once in the grid's own frame and on the first draw, in the next
   frame for draws called from code (a framework's render). Each cell shows
-  its text until the framework acknowledges that update's content
+  its text, its host laid out unseen, until the framework acknowledges
+  that update's content
   (`drawn`, by generation: an update superseded makes its acknowledgement
   stale, and once the view goes one reaches nothing), and a focused cell's
   controls are taken out of the tab order but the one its focus gives,
   which takes the page's focus where the cell had it, unless the user has
   taken it elsewhere. Every host a framework lets go of reaches it once:
   destroying the grid hands each framework its hosts, those of batches
-  not yet handed too.
+  not yet handed too. React's grids (`@herceg/react/grid`) draw their
+  cells through it: portals into the hosts, keyed by host and row,
+  committed with `flushSync` in the grid's frame and as state set in the
+  layout effect that makes the grid ([React, Vue, and
+  Svelte](../guide/frameworks.md#grids)).
 - **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
   model's `GridRef`, taken before the click selects (listeners of the
   selection may move or restrict rows), and give its index after; Enter on

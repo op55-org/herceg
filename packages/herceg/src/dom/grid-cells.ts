@@ -103,6 +103,11 @@ export interface FrameworkCell<S extends Schema = Schema> {
   readonly host: HTMLElement;
   readonly context: GridCellContext<S>;
   /**
+   * The renderer the grid drew the cell for: its column's as it drew, whose
+   * `fields` the context reads (a framework's renderers may since differ).
+   */
+  readonly renderer: GridFrameworkRenderer;
+  /**
    * Tells the grid what the framework drew for `context` is in the host
    * (committed, or revealed after suspending): the cell shows it, and a
    * control cell focused takes the focus into it. Ignored once the cell
@@ -175,7 +180,9 @@ const G = ".herceg-grid";
 /**
  * What links and renderers' hosts draw with, added as the first mounts, so
  * grids without them match none of it. A cell holding one (`data-held`)
- * shows the focus its link or controls take.
+ * shows the focus its link or controls take. A host waiting for its
+ * framework's content is laid out under the cell's text, unseen, so content
+ * measuring itself as it mounts finds the cell's size.
  */
 const HOST_CSS = `${G} .hg-link{color:var(--hg-look-color,var(--hg-accent));text-decoration:underline}
 ${G} [data-look~=fill] .hg-link{color:inherit}
@@ -183,6 +190,7 @@ ${G} .hg-link:not([href]){color:inherit;text-decoration:none}
 ${G} .hg-link:focus{outline:none}
 ${G} [data-held]:focus-within{outline:2px solid var(--hg-accent);outline-offset:-2px}
 ${G} .hg-host{height:100%}
+${G} .hg-host[hidden]{display:block;visibility:hidden}
 @media (forced-colors:active){${G} [data-held]:focus-within{outline-color:CanvasText}}`;
 
 /**
@@ -197,6 +205,8 @@ export class CellHost {
   readonly #surface: string;
   /** Called as a framework's content of a cell is in its host. */
   readonly #shown: (cell: HostedCell) => void;
+  /** The grid's tab stop, which stays one as hosts' other controls leave the tab order. */
+  readonly #stop: () => Element | null;
   #renderers: ReadonlyMap<string, Renderer> = new Map();
   /** Framework cells to hand over, by framework. */
   readonly #batches = new Map<
@@ -214,10 +224,16 @@ export class CellHost {
   /** Whether each shown column is hosted, for the layout and renderers it was found for. */
   #hosts: { layout: readonly PlacedColumn[]; renderers: unknown; hosted: boolean[] } | null = null;
 
-  constructor(root: HTMLElement, surface: string, shown: (cell: HostedCell) => void) {
+  constructor(
+    root: HTMLElement,
+    surface: string,
+    shown: (cell: HostedCell) => void,
+    stop: () => Element | null,
+  ) {
     this.#root = root;
     this.#surface = surface;
     this.#shown = shown;
+    this.#stop = stop;
   }
 
   /**
@@ -439,7 +455,7 @@ export class CellHost {
       held.shown &&
       held.renderer.interaction === "control"
     )
-      return firstControl(held.host) ?? cell.element;
+      return firstControl(held.host, true) ?? cell.element;
     return cell.element;
   }
 
@@ -471,7 +487,7 @@ export class CellHost {
       held.renderer.interaction !== "composite"
     )
       return false;
-    const control = firstControl(held.host);
+    const control = firstControl(held.host, false);
     control?.focus({ preventScroll: true });
     return control !== null;
   }
@@ -589,7 +605,7 @@ export class CellHost {
     const interaction = held.renderer.interaction;
     if (interaction === "control" || interaction === "composite") {
       cell.element.removeAttribute("aria-label");
-      quiet(held.host);
+      quiet(held.host, this.#stop());
     } else setLabel(cell.element, cell.text.data);
     this.#shown(cell);
   }
@@ -658,13 +674,14 @@ export class CellHost {
     } catch (error) {
       this.#failed(cell, held, error);
     }
-    if (interactive) quiet(held.host);
+    if (interactive) quiet(held.host, this.#stop());
   }
 
   #hand(framework: FrameworkCells, held: Custom, context: GridCellContext) {
     this.#batch(framework).cells.push({
       host: held.host,
       context,
+      renderer: held.renderer as GridFrameworkRenderer,
       drawn: acknowledge(held.ack, held.handed),
     });
   }
@@ -748,21 +765,39 @@ function setLabel(element: HTMLElement, text: string) {
 const FOCUSABLE =
   "a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]";
 
-/** A host's first control that can take the focus, which takes its cell's. */
-function firstControl(host: HTMLElement): HTMLElement | null {
+/**
+ * A host's first control that can take the focus, which takes its cell's;
+ * with `own`, not one of a grid in the host, whose tab indexes are that
+ * grid's to write.
+ */
+function firstControl(host: HTMLElement, own: boolean): HTMLElement | null {
+  const grid = host.closest(G);
   for (const control of host.querySelectorAll<HTMLElement>(FOCUSABLE))
-    if (
-      !control.matches(":disabled") &&
-      !control.closest("[inert]") &&
-      // Hidden by CSS (or `hidden`): a control not drawn takes no focus.
-      control.checkVisibility?.({ visibilityProperty: true }) !== false
-    )
-      return control;
+    if ((!own || control.closest(G) === grid) && canFocus(control)) return control;
   return null;
 }
 
-/** Takes a host's controls out of the page's tab order: the grid keeps one tab stop. */
-function quiet(host: HTMLElement) {
+/**
+ * Whether an element in the page can hold the focus: not disabled, inert,
+ * or hidden (by CSS too: an element not drawn takes no focus).
+ */
+export function canFocus(element: Element): boolean {
+  return (
+    element.isConnected &&
+    !element.matches(":disabled") &&
+    !element.closest("[inert]") &&
+    element.checkVisibility?.({ visibilityProperty: true }) !== false
+  );
+}
+
+/**
+ * Takes a host's controls out of the page's tab order but the grid's tab
+ * stop (`stop`): the grid keeps one. The focused control too, which keeps
+ * the focus, and a grid's in the host, which keeps none of its own there.
+ * Writes only what changes, so frameworks watching their content see none
+ * of the grid's own writes again.
+ */
+function quiet(host: HTMLElement, stop: Element | null) {
   for (const control of host.querySelectorAll<HTMLElement>(FOCUSABLE))
-    if (control.tabIndex !== -1 && focused(control) !== control) control.tabIndex = -1;
+    if (control.tabIndex !== -1 && control !== stop) control.tabIndex = -1;
 }

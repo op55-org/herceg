@@ -22,6 +22,8 @@
       "herceg/web": ["../packages/herceg/src/web.ts"],
       "@herceg/react": ["../packages/react/src/index.ts"],
       "@herceg/react/grid": ["../packages/react/src/grid.tsx"],
+      "@herceg/react/grid/remote": ["../packages/react/src/grid/remote.tsx"],
+      "@herceg/react/grid/pivot": ["../packages/react/src/grid/pivot.tsx"],
       "@herceg/react/layout": ["../packages/react/src/layout.tsx"],
       "@herceg/vue": ["../packages/vue/src/index.ts"],
       "@herceg/svelte": ["../packages/svelte/src/index.ts"]

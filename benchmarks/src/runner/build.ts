@@ -22,6 +22,8 @@ export const HERCEG_ALIAS = {
   "herceg/web": join(ROOT, "..", "packages", "herceg", "src", "web.ts"),
   "@herceg/react": join(ROOT, "..", "packages", "react", "src", "index.ts"),
   "@herceg/react/grid": join(ROOT, "..", "packages", "react", "src", "grid.tsx"),
+  "@herceg/react/grid/remote": join(ROOT, "..", "packages", "react", "src", "grid", "remote.tsx"),
+  "@herceg/react/grid/pivot": join(ROOT, "..", "packages", "react", "src", "grid", "pivot.tsx"),
   "@herceg/react/layout": join(ROOT, "..", "packages", "react", "src", "layout.tsx"),
   "@herceg/vue": join(ROOT, "..", "packages", "vue", "src", "index.ts"),
   "@herceg/svelte": join(ROOT, "..", "packages", "svelte", "src", "index.ts"),

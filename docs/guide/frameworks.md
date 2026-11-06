@@ -376,5 +376,61 @@ and Svelte's server render and `hydrate` (as SvelteKit does).
 
 ## Grids
 
-React has `<Grid>` in `@herceg/react/grid`; Vue and Svelte call
-`createGrid` on an element. See [Grids](grids.md#in-react).
+React has `<Grid>` in `@herceg/react/grid`, `<RemoteGrid>` in
+`@herceg/react/grid/remote`, and `<PivotGrid>` in
+`@herceg/react/grid/pivot`, each over a model the application makes; Vue
+and Svelte call `createGrid` on an element. See [Grids](grids.md#in-react).
+
+```tsx
+import { Grid } from "@herceg/react/grid";
+
+<Grid
+  model={model}
+  ariaLabel="Services"
+  cells={{
+    trend: { fields: ["service"], render: (cell) => <Sparkline service={cell.read("service")} /> },
+  }}
+/>;
+```
+
+`<Grid>` and `<RemoteGrid>` take `cells`, React cells by column id, typed
+by the model's fields (`fields` and `read` take only names the model has,
+and `read` gives each field's kind):
+
+- **Where they render.** Each cell renders through a portal into the
+  element the grid gives it, inside the component's tree: providers and
+  context reach it. Only mounted cells render; built-in cells, data
+  changes, and scrolling never go through React.
+- **State.** A cell's component is its row's: it keeps its state while the
+  cell shows that row (as the row's selection or values change) and
+  mounts again when the cell's element shows another row, as scrolling
+  recycles elements. Keep state that must outlive scrolling outside the
+  cell.
+- **When they commit.** The grid's first frame commits its cells in the
+  layout effect that makes the grid, before the page paints; later frames
+  commit theirs at once (`flushSync`) in the grid's own animation frame,
+  before it places the focus and paints. A cell whose row changed shows
+  its text until its content commits, never another row's content.
+  `onRender` hears of the first frame once its cells are committed, and
+  of the grid's own frames after their commits; a frame drawn by a call
+  (`render()`, `focusCell`, from an effect or a handler) is heard at once,
+  and its cells commit in the grid's next frame.
+- **Reading the row.** Read fields in the render function
+  (`cell.read("service")`), which renders again with each update; a
+  component holding `cell` can read it until its update is superseded
+  (`cell.signal`), after which `read` throws.
+- **Boundaries.** Each cell has an error boundary and a Suspense boundary
+  of its own, both drawing the cell's text: an error is reported once
+  (`reportError`) until the cell shows another row, and a suspended cell
+  reveals on its own; a focused control cell takes the focus as it
+  reveals, unless the user has moved it elsewhere.
+- **Keys.** `interaction: "control"` and `"composite"` work as for
+  [custom renderers](grids.md#cells): a cell's button takes the grid's
+  focus, or Enter moves into its controls.
+- **Cost.** A cell is a portal, and React listens for every event it
+  handles on each portal's element: about 17 KB of memory per mounted
+  React cell (a few MB for a screen of five React columns), held while
+  the element shows its column and let go of with it. It grows with the
+  cells mounted, not with the rows. Mounting, scrolling, and memory
+  against TanStack Table's React cells are in the
+  [comparison](../comparison.md#react-cells).
