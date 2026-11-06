@@ -19,17 +19,20 @@
 // since collapsed are dropped; requests nothing needs any more are aborted.
 
 import type { Fields } from "../data/expression.ts";
-import { type GroupKey, groupId } from "../data/groups.ts";
+import { type GroupKey, groupId, type NamedAggregate } from "../data/groups.ts";
 import type { SortKey } from "../data/order.ts";
 import type { PositionField, Schema } from "../data/table.ts";
+import { missingValue } from "../fields/display.ts";
 import { numberFormatter } from "../format/format.ts";
 import {
   BaseGridModel,
   type Column,
   cycled,
+  type GridCellRead,
   type GridDisplay,
   type GridFocus,
   type GridRef,
+  type LookPresentation,
   nextOrder,
   type SelectionState,
   type SelectMode,
@@ -43,6 +46,18 @@ import {
   type PlacedColumn,
   valueFormatter,
 } from "./columns.ts";
+import {
+  type CellLook,
+  compileEncodings,
+  type Look,
+  LookScales,
+  type LookSettings,
+  type LookTable,
+  lookFields,
+  lookOf,
+  plain,
+  withEncodingsCopied,
+} from "./looks.ts";
 import {
   expressionFields,
   type GridQuery,
@@ -112,6 +127,33 @@ const JUMP = 2;
 const MOUNTED = 10;
 const LOADING = "Loading…";
 const FAILED = "Couldn't load rows";
+/** Why a remote grid's looks take no rank tests. */
+const RANKS = "a rank reads every row, which a remote grid does not hold; compare with a value";
+
+/** A column's looks, copied as given: what it is named by, and its encodings. */
+interface ColumnLooks {
+  readonly key: string;
+  readonly encode: unknown;
+  readonly aggregateEncode: unknown;
+}
+
+/** A remote grid's looks, compiled for each block's fields as blocks are read (see grid/looks.ts). */
+interface RemoteLooks {
+  readonly scales: LookScales;
+  readonly settings: LookSettings;
+  /**
+   * The columns' and the rows' encodings, copied as given (blocks compile
+   * them later, so a caller's later changes reach them only through
+   * `update`), and whether any has channels.
+   */
+  readonly columns: readonly ColumnLooks[];
+  readonly rows: unknown;
+  readonly any: boolean;
+  /** The fields channels on table rows read, which blocks of rows are asked for. */
+  readonly fields: readonly string[];
+  /** Each block's channels, by its fields: each column's (by id) and the rows'. */
+  readonly blocks: WeakMap<Fields, { columns: Map<string, Look>; rows: Look | undefined }>;
+}
 /**
  * The state of one grid over a remote source. Reads are synchronous over
  * what is loaded; rows not loaded are placeholders, and the model asks for
@@ -177,6 +219,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   #textLayout: readonly PlacedColumn[] | null = null;
   #textQuery: GridQuery | null = null;
   #textWriters: ((block: Block, row: number, path: GroupKey) => string)[] | null = null;
+  #looks: RemoteLooks | null = null;
   readonly #stop: () => void;
 
   constructor(options: RemoteGridModelOptions<S>) {
@@ -306,26 +349,33 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   // Columns
 
   setColumns(columns: readonly GridColumn<S>[]): void {
-    const contents = describeColumns(
-      schemaFields(this.schema),
-      columns as readonly GridColumn[],
-      this.settings,
-    );
-    // Blocks lacking a field a column shows go before the column does.
-    this.#readFields(columns);
+    // Encodings copied, so a caller's later changes reach looks only through `setColumns`.
+    const given = (columns as unknown as readonly GridColumn[]).map(withEncodingsCopied);
+    const contents = describeColumns(schemaFields(this.schema), given, this.settings);
+    this.#looks = this.#compileLooks(given, this.settings, this.presentation, this.#revision.query);
+    // Blocks lacking a field a column shows (or its looks read) go before the column does.
+    this.#readFields(given);
     this.takeColumns(
-      columns.map((column) => ({ ...column, id: column.id ?? column.field })) as Column<S>[],
+      given.map((column) => ({
+        ...column,
+        id: column.id ?? column.field,
+      })) as unknown as Column<S>[],
       contents,
     );
   }
 
-  protected restyle(settings: FormatSettings): () => void {
-    const columns = this.columnList;
+  protected restyle(settings: FormatSettings, presentation: LookPresentation): () => void {
+    const columns = this.columnList as unknown as readonly GridColumn[];
     const fields = schemaFields(this.schema);
-    const contents = describeColumns(fields, columns as readonly GridColumn[], settings);
+    const contents = describeColumns(fields, columns, settings);
     // Group rows write keys of grouping fields no column shows too.
     checkKeys(fields, this.#revision.query.group?.by ?? [], settings);
-    return () => this.takeColumns(columns, contents);
+    const looks = this.#compileLooks(columns, settings, presentation, this.#revision.query);
+    return () => {
+      this.#looks = looks;
+      this.#readFields();
+      this.takeColumns(this.columnList, contents);
+    };
   }
 
   // Rows
@@ -414,6 +464,73 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const row = ordinal - block.index * this.blockSize;
     if (list.leaf) return column.content.text(block.fields!, row);
     return this.#groupTexts(layout)[columnIndex]!(block, row, list.parent);
+  }
+
+  lookAt(rowIndex: number, columnIndex: number): CellLook | undefined {
+    const { list, ordinal } = this.#at(rowIndex);
+    const column = this.columnLayout[columnIndex];
+    if (!column) throw new RangeError(`Column ${columnIndex} is not shown`);
+    const looks = this.#looks!;
+    if (!looks.any) return undefined;
+    const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
+    if (block?.state !== "loaded") return undefined;
+    const row = ordinal - block.index * this.blockSize;
+    const fields = block.fields!;
+    let compiled = looks.blocks.get(fields);
+    if (!compiled) {
+      compiled = this.#blockLooks(looks, list.leaf, fields);
+      looks.blocks.set(fields, compiled);
+    }
+    return lookOf(fields, row, compiled.columns.get(column.id), compiled.rows);
+  }
+
+  cellAt(rowIndex: number, columnIndex: number): GridCellRead {
+    const text = this.textAt(rowIndex, columnIndex);
+    const look = this.lookAt(rowIndex, columnIndex);
+    const { list, ordinal } = this.#at(rowIndex);
+    const column = this.columnLayout[columnIndex] as PlacedColumn;
+    const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
+    const cell = (value: GridCellRead["value"], kind: GridCellRead["kind"]) => {
+      const missing = kind !== null && missingValue(kind, value ?? null);
+      return {
+        state:
+          kind === null ? ("empty" as const) : missing ? ("missing" as const) : ("value" as const),
+        value: kind === null ? undefined : missing ? null : value,
+        kind,
+        text,
+        look,
+        link: undefined,
+      };
+    };
+    if (block?.state !== "loaded") {
+      const failed = block ? block.state === "failed" : list.revision.expired;
+      return { ...cell(undefined, null), state: failed ? "failed" : "loading" };
+    }
+    const row = ordinal - block.index * this.blockSize;
+    const fields = block.fields!;
+    if (list.leaf) return cell(windowValue(fields, column.field, row), column.kind);
+    // A group's header: its key's values, and its aggregates.
+    const by = this.#by();
+    const k = columnIndex === 0 ? list.depth : by.indexOf(column.field);
+    if (k >= 0 && k <= list.depth)
+      return cell(
+        k < list.depth ? list.parent[k]! : groupValue(block, list.depth, row, by),
+        this.schema.fields[by[k]! as keyof S] as "number" | "time" | "category",
+      );
+    const name = column.content.aggregate;
+    const kind = name !== undefined && fields.has(name) ? fields.kind(name) : null;
+    return kind === null || kind === "geometry"
+      ? cell(undefined, null)
+      : cell(windowValue(fields, name!, row), kind);
+  }
+
+  get hasLooks(): boolean {
+    return this.#looks?.any ?? false;
+  }
+
+  /** Remote looks' domains are given, so only what they are compiled from moves it. */
+  get looksRevision(): number {
+    return this.#looks!.scales.revision;
   }
 
   // Sorting and groups
@@ -750,7 +867,136 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       this.schema,
     );
     checkKeys(schemaFields(this.schema), query.group?.by ?? [], this.settings);
+    // Columns' looks of group rows read the query's aggregates.
+    if (this.#looks) this.#groupLooks(this.#looks, query);
     return query;
+  }
+
+  /**
+   * Looks of `columns` and of `presentation`'s rows as `settings` say,
+   * checked against the source's fields and `query`'s groups; throws where
+   * any is refused, changing nothing.
+   */
+  #compileLooks(
+    columns: readonly GridColumn[],
+    settings: FormatSettings,
+    presentation: LookPresentation,
+    query: GridQuery,
+  ): RemoteLooks {
+    const { surface } = settings;
+    const kinds = schemaFields(this.schema);
+    const scales = new LookScales(presentation.scales, surface, true, this.#looks?.scales);
+    const looks: LookSettings = {
+      surface,
+      scales,
+      fields: settings.fields,
+      source: settings.source,
+      kinds,
+    };
+    const records: LookTable = { table: kinds, rank: RANKS };
+    const fields = new Set<string>();
+    let any = false;
+    const copied = columns.map(
+      (column): ColumnLooks => ({
+        key: column.id ?? column.field,
+        encode: plain(column.encode),
+        aggregateEncode: plain(column.aggregateEncode),
+      }),
+    );
+    copied.forEach((column, i) => {
+      if (compileEncodings(column.encode, records, looks, `${surface} columns[${i}].encode`))
+        any = true;
+      if (column.aggregateEncode !== undefined) any = true;
+      for (const field of lookFields(column.encode)) fields.add(field);
+    });
+    const rows = plain(presentation.encode);
+    if (compileEncodings(rows, records, looks, `${surface} encode`)) any = true;
+    for (const field of lookFields(rows)) fields.add(field);
+    const compiled: RemoteLooks = {
+      scales,
+      settings: looks,
+      columns: copied,
+      rows,
+      any,
+      fields: [...fields],
+      blocks: new WeakMap(),
+    };
+    this.#groupLooks(compiled, query);
+    // Remote domains are given, so the scales are read once: gradients' ramps.
+    scales.update();
+    return compiled;
+  }
+
+  /**
+   * Checks the columns' looks of group rows against `query`'s groups,
+   * which they read by the names of its grouping fields and aggregates
+   * (names a level lacks give its rows no look).
+   */
+  #groupLooks(looks: RemoteLooks, query: GridQuery) {
+    const group = query.group;
+    if (!group) return;
+    const of = this.#groupTable(query, group.by.length - 1);
+    looks.columns.forEach((column, i) => {
+      compileEncodings(
+        column.aggregateEncode,
+        of,
+        looks.settings,
+        `${looks.settings.surface} columns[${i}].aggregateEncode`,
+        true,
+      );
+    });
+  }
+
+  /** What group rows of `depth` read, as looks compile against them: their grouping fields and aggregates. */
+  #groupTable(query: GridQuery, depth: number, table?: Fields): LookTable {
+    const group = query.group!;
+    const fields = this.schema.fields as Record<string, string>;
+    const kinds: Record<string, string> = Object.create(null);
+    for (const field of group.by.slice(0, depth + 1)) kinds[field] = fields[field]!;
+    for (const aggregate of group.aggregate) kinds[aggregate.as] = aggregateKind(aggregate, fields);
+    const aggregates: NamedAggregate[] = group.aggregate.map(({ op, field, as }) => ({
+      name: as,
+      op,
+      field,
+    }));
+    return {
+      table: table ?? schemaFields({ ...this.schema, fields: kinds } as unknown as GridSchema),
+      rank: RANKS,
+      aggregates,
+    };
+  }
+
+  /** The looks of a block's rows (`leaf`) or groups, compiled against its fields. */
+  #blockLooks(
+    looks: RemoteLooks,
+    leaf: boolean,
+    fields: Fields,
+  ): { columns: Map<string, Look>; rows: Look | undefined } {
+    const columns = new Map<string, Look>();
+    const { settings } = looks;
+    const at = (i: number, option: string) => `${settings.surface} columns[${i}].${option}`;
+    if (leaf) {
+      const records: LookTable = { table: fields, rank: RANKS };
+      looks.columns.forEach((column, i) => {
+        const look = compileEncodings(column.encode, records, settings, at(i, "encode"));
+        if (look) columns.set(column.key, look);
+      });
+      const rows = compileEncodings(looks.rows, records, settings, `${settings.surface} encode`);
+      return { columns, rows };
+    }
+    const query = this.#revision.query;
+    const of = this.#groupTable(query, query.group!.by.length - 1, fields);
+    looks.columns.forEach((column, i) => {
+      const look = compileEncodings(
+        column.aggregateEncode,
+        of,
+        settings,
+        at(i, "aggregateEncode"),
+        true,
+      );
+      if (look) columns.set(column.key, look);
+    });
+    return { columns, rows: undefined };
   }
 
   /** Shows a new revision of `query`, keeping the scroll offset and the focus's record. */
@@ -820,10 +1066,16 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     if (controller) later(() => controller.abort());
   }
 
-  /** The fields row blocks hold: the columns', the key, the grouping fields, and the filter's. */
-  #readFields(columns: readonly GridColumn<S>[] = this.columnList) {
+  /**
+   * The fields row blocks hold: the columns', those their looks and the
+   * rows' read, the key, the grouping fields, and the filter's.
+   */
+  #readFields(
+    columns: readonly GridColumn[] = this.columnList as unknown as readonly GridColumn[],
+  ) {
     const { query } = this.#revision;
     const fields = new Set<string>(columns.map(({ field }) => field));
+    for (const field of this.#looks?.fields ?? []) fields.add(field);
     if (this.schema.key !== null) fields.add(this.schema.key);
     for (const field of query.group?.by ?? []) fields.add(field);
     for (const field of expressionFields(query.filter)) fields.add(field);
@@ -1495,6 +1747,17 @@ export function createRemoteGridModel<S extends Schema>(
   options: RemoteGridModelOptions<S>,
 ): RemoteGridModel<S> {
   return new RemoteGridModel(options);
+}
+
+/** Row `row`'s value of `field` in a window: a label, a number, or a time; null where missing. */
+function windowValue(fields: Fields, field: string, row: number): number | string | null {
+  if (fields.kind(field) === "category") {
+    const { codes, dictionary } = fields.categories(field);
+    const code = codes[row]!;
+    return code < 0 ? null : dictionary[code]!;
+  }
+  const value = fields.numbers(field)[row]!;
+  return Number.isNaN(value) ? null : value;
 }
 
 const followers = new FinalizationRegistry<() => void>((stop) => stop());

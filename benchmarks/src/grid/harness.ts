@@ -46,10 +46,26 @@ const PAGE_RIGHT = 3 * COLUMN_WIDTH;
 /** Scripted scrolling speed, CSS pixels per second. */
 const TRACE_SPEED = { vertical: 3000, horizontal: 1500 };
 
+/**
+ * The same rows with every category field's dictionary in another order
+ * (reversed) and the codes following it: a table whose labels' codes differ
+ * from the one mounted before, which caches by code must not mistake for it.
+ */
+function reorderDictionaries(table: GridTable): GridTable {
+  const dictionaries = table.dictionaries.map((dictionary) => [...dictionary].reverse());
+  const columns = table.columns.map((column, f) => {
+    if (table.fields[f]!.kind !== "category") return column;
+    const last = table.dictionaries[f]!.length - 1;
+    return Int32Array.from(column, (code) => (code < 0 ? code : last - code));
+  });
+  return { ...table, dictionaries, columns };
+}
+
 async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const expected = expectation(reference, null);
+  const looks = { looks: s.looks };
   const metrics = {
     fromNative: metric("ms"),
     fromColumnar: metric("ms"),
@@ -60,6 +76,8 @@ async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> 
     columnarUnobservedFrames: metric("count"),
     checkTime: metric("ms"),
     destroy: metric("ms"),
+    // The page's first mount, before any warmup: caches and code cold.
+    ...(s.looks && { coldFromNative: metric("ms"), reorderedFromNative: metric("ms") }),
   };
   for (let i = 0; i < s.warmup + s.samples; i++) {
     for (const from of ["native", "columnar"] as const) {
@@ -69,7 +87,7 @@ async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> 
       const start = performance.now();
       if (from === "columnar") input = adapter.prepare(table);
       const converted = performance.now();
-      const handle = await adapter.mount(element, table, input);
+      const handle = await adapter.mount(element, table, input, looks);
       const called = performance.now();
       const correct = await untilCorrect(handle, expected, start);
       if (i === 0 && from === "native") verifyModel(handle, sourceOrder(reference));
@@ -78,6 +96,7 @@ async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> 
       element.remove();
       const destroyed = (await nextFrame()) - destroyStart;
       input = undefined;
+      if (i === 0 && from === "native") metrics.coldFromNative?.samples.push(correct.toFrame);
       if (i < s.warmup) continue;
       if (from === "native") {
         metrics.fromNative.samples.push(correct.toFrame);
@@ -91,6 +110,23 @@ async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> 
         metrics.columnarUnobservedFrames.samples.push(correct.unobserved);
         metrics.conversion.samples.push(converted - start);
       }
+    }
+  }
+  if (metrics.reorderedFromNative) {
+    // Warm, then a table of the same labels under other codes.
+    const reordered = reorderDictionaries(table);
+    const want = expectation(new Reference(reordered, true), null);
+    for (let i = 0; i < Math.min(5, s.samples); i++) {
+      await settle();
+      const input = adapter.prepare(reordered);
+      const element = box();
+      const start = performance.now();
+      const handle = await adapter.mount(element, reordered, input, looks);
+      const correct = await untilCorrect(handle, want, start);
+      handle.destroy();
+      element.remove();
+      await nextFrame();
+      metrics.reorderedFromNative.samples.push(correct.toFrame);
     }
   }
   return { status: "measured", metrics };
@@ -109,7 +145,7 @@ function scrollStep(s: GridScenario, i: number, rows: number, fields: number): [
 
 async function runScroll(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const grid = await mount(adapter, table, reference);
   const stepToFrame = metric("ms");
   const frames = metric("count");
@@ -158,7 +194,7 @@ const WHEEL_DRAIN_MS = 300;
  */
 async function runScrollTrace(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const grid = await mount(adapter, table, reference);
   const refresh = await refreshInterval();
   const wheel = s.direction === "wheel";
@@ -282,7 +318,7 @@ async function runScrollTrace(adapter: Adapter, s: GridScenario): Promise<GridRe
 /** Sort or filter: from source order to the query's result, each sample from a reset grid. */
 async function runQuery(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const grid = await mount(adapter, table, reference);
   const { handle } = grid;
   const sort = s.sort ?? [];
@@ -328,7 +364,7 @@ async function runQuery(adapter: Adapter, s: GridScenario): Promise<GridResult> 
 /** Selects one displayed row or a displayed-order range under a sort, then reads the selection back. */
 async function runSelect(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table);
+  const reference = new Reference(table, s.looks);
   const grid = await mount(adapter, table, reference);
   const { handle } = grid;
   const range = s.select! < 1;

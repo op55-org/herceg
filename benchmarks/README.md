@@ -422,6 +422,37 @@ vsync.
 Streaming ticks keep the grid at the top (`scrollTo(0, 0)` after each
 change), as a live view of the top of its order does.
 
+### Looks
+
+`looks` scenarios (100,000 x 20 and 1,000,000 x 20: mount, vertical and
+diagonal scroll steps and traces, and the rolling append) show conditional
+formatting on six presented columns of the first screen
+(`src/grid/looks.ts`): two threshold fills (`n0`, `n1`), a gradient along
+`n2` over the extent of the rows shown, a fill for the 100 largest `n3`
+(ties in), a text color by `c0`'s label, and a row condition (`n4` over
+900) filling every cell without a fill of its own; text over a fill is
+black or white by WCAG contrast. Each frame's check compares every cell's
+background and text color with the reference's (gradients within 3 of 255
+per channel, as libraries quantize differently), so a grid that has not
+recolored cells after the domain or the 100th value moved is not counted
+as showing the frame.
+
+| Grid | How it shows looks |
+| --- | --- |
+| Herceg | Columns' `encode` (thresholds and the label's colors through field displays, the gradient through a scale of the grid's, a rank test) and the grid's `encode` (the row condition); the grid keeps the domain and the rank as rows stream, and picks the text's ink |
+| TanStack Table | Each cell's `style` (background, color) computed while rendering |
+| AG Grid | `cellStyle` on every column (styles set empty where a cell has none, as AG Grid keeps a style a cell stops returning); `refreshCells({ force: true })` after an append moved the domain |
+| Glide | `themeOverride` (`bgCell`, `textDark`) in `getCellContent` |
+
+The other grids compute looks in adapter code (`LookState`,
+`LookTracker`): the extent and the 100 largest values kept as rows arrive
+and leave, every live row read again only when a row leaving held an end
+or one of the 100, and the contrast computed per fill. Mounts also report
+the page's first mount (`coldFromNative`, before warmup) and, after the
+warm samples, mounts over the same rows with every dictionary reversed
+(`reorderedFromNative`), which a cache of outputs by code must not mistake
+for the table before.
+
 ### Memory
 
 Heap readings are the chart suite's, one fresh page per sample. Reserved

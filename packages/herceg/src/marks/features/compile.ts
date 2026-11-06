@@ -8,6 +8,18 @@
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
+import { type CategoryScale, OrdinalScale } from "../../encoding/category-scales.ts";
+import { ChannelScale, channelScaleProblem, wholeTable } from "../../encoding/channel-scales.ts";
+import {
+  checkOutputs,
+  compileChannel,
+  fieldsOf,
+  IDENTITY,
+  keyPath,
+  type ScaleOf,
+  scalePath,
+} from "../../encoding/channels.ts";
+import { Rank } from "../../encoding/ranks.ts";
 import type { ChartFields } from "../../fields/chart.ts";
 import { formatWriter, formed } from "../../format/patterns.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
@@ -46,21 +58,12 @@ import { keyLegendWith } from "../key-legend.ts";
 import type { LayoutMark } from "../layout-mark.ts";
 import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
-import { ChannelScale, channelScaleProblem, wholeTable } from "./channel-scales.ts";
-import {
-  checkOutputs,
-  compileChannel,
-  fieldsOf,
-  IDENTITY,
-  keyPath,
-  outputCheck,
-  type ScaleOf,
-  scalePath,
-} from "./channels.ts";
+import { outputCheck } from "./channels.ts";
 import { writeContent } from "./content.ts";
 import { bandRuns, indexedBand, Topology } from "./continuity.ts";
 import { encodedChannels } from "./encoded.ts";
 import { type MarkScope, scalePrefix, scopeOfMark, sourceOf, tableNames } from "./identity.ts";
+import { IdentityColors } from "./identity-colors.ts";
 import {
   checkAt,
   checkContent,
@@ -84,7 +87,6 @@ import {
   type TracedEdge,
   tableRow,
 } from "./provenance.ts";
-import { Rank } from "./ranks.ts";
 import { type RowStyleSpec, RowStyles, rowLooks } from "./row-styles.ts";
 import {
   fillPieces,
@@ -99,7 +101,6 @@ import {
   tracedEnds,
 } from "./run-paths.ts";
 import type { Look } from "./runs.ts";
-import { type CategoryScale, IdentityColors, OrdinalScale } from "./scales.ts";
 import { type SeriesPaint, SeriesStyles } from "./series-styles.ts";
 import { type TreeTextUser, treeText } from "./tree-text.ts";
 

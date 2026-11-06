@@ -10,6 +10,10 @@
 // Scrolling sets the grid's scroll offset as a user's scroll would; when the
 // scroller is already at the offset, it tells the model (`scrollTo`), which
 // matters after Herceg kept the rows in view in place across a change.
+// With looks, columns and rows take `encode` (thresholds and the label's
+// colors through field displays, a gradient through a scale of the grid's,
+// a rank test, a row condition); the grid finds the gradient's domain and
+// the rank as rows stream, and picks black or white text over fills.
 
 import { col, encodedCategory, rowView, type Schema, Table, time } from "herceg";
 import { compileFields } from "herceg/fields";
@@ -19,20 +23,65 @@ import {
   COLUMN_WIDTH,
   type GridHandle,
   HEADER_HEIGHT,
+  type MountOptions,
   ROW_HEIGHT,
   readDomVisible,
   scrollport,
 } from "../adapter.ts";
 import { FORMAT, type GridTable } from "../fixture.ts";
+import {
+  C0_COLORS,
+  type CellLook,
+  N0_STEPS,
+  N1_STEPS,
+  N2_RANGE,
+  N3_FILL,
+  N3_TOP,
+  N4_OVER,
+  ROW_FILL,
+} from "../looks.ts";
 
 export const THEME = { extends: "light", font: "Arial, sans-serif", fontSize: 13 } as const;
 
-/** Every column's display: the shared formats by kind, and the shared missing text. */
-const FIELDS = compileFields([
+const RULES = [
   { missing: FORMAT.missing },
   { match: { kind: "number" }, format: FORMAT.number },
   { match: { kind: "time" }, format: FORMAT.time },
+] as const;
+
+/** Every column's display: the shared formats by kind, and the shared missing text. */
+const FIELDS = compileFields(RULES);
+
+const steps = (thresholds: { steps: readonly (readonly [number, string])[] }) =>
+  thresholds.steps.map(([value, color]) => ({ value, color }));
+
+/** The same, and the looks' display colors: thresholds of n0 and n1, and c0's labels. */
+const LOOK_FIELDS = compileFields([
+  ...RULES,
+  { match: "n0", thresholds: { base: N0_STEPS.base, steps: steps(N0_STEPS) } },
+  { match: "n1", thresholds: { steps: steps(N1_STEPS) } },
+  {
+    match: "c0",
+    mappings: Object.entries(C0_COLORS).map(([value, color]) => ({ value, color })),
+  },
 ]);
+
+/** Each look-bearing column's channels (looks.ts). */
+const ENCODE: Record<string, GridColumn<Schema>["encode"]> = {
+  n0: { fill: { field: "n0" } },
+  n1: { fill: { field: "n1" } },
+  n2: { fill: { field: "n2", scale: "gradient" } },
+  // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+  n3: { fill: { condition: { when: { top: N3_TOP, field: "n3" }, then: N3_FILL } } },
+  c0: { color: { field: "c0" } },
+};
+
+/** A cell's look as drawn: its fill as given, and its text's color as the page computed it. */
+function lookOf(cell: Element): CellLook | undefined {
+  if (!cell.hasAttribute("data-look")) return undefined;
+  const fill = (cell as HTMLElement).style.getPropertyValue("--hg-look-fill");
+  return { fill: fill || undefined, color: getComputedStyle(cell).color };
+}
 
 /** A Herceg table over the fixture's arrays: numbers and times adopted, categories by code. */
 export function hercegTable(fixture: GridTable): Table<Schema> {
@@ -68,12 +117,15 @@ export function hercegHandle(
   fixture: GridTable,
   source: Table<Schema>,
   attach: (model: GridModel<Schema>) => { destroy(): void },
+  options: MountOptions = {},
 ): GridHandle {
   const view = rowView(source);
+  const looks = options.looks === true;
   const columns: GridColumn<Schema>[] = fixture.fields.map((field) => ({
     field: field.name,
     width: COLUMN_WIDTH,
     align: "start",
+    ...(looks && ENCODE[field.name] && { encode: ENCODE[field.name] }),
   }));
   const model = createGridModel({
     data: view,
@@ -81,7 +133,12 @@ export function hercegHandle(
     rowHeight: ROW_HEIGHT,
     locale: FORMAT.locale,
     timeZone: FORMAT.timeZone,
-    fields: FIELDS,
+    fields: looks ? LOOK_FIELDS : FIELDS,
+    ...(looks && {
+      scales: { gradient: { type: "linear", range: [...N2_RANGE] } },
+      // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+      encode: { fill: { condition: { when: col("n4").gt(N4_OVER), then: ROW_FILL } } },
+    }),
   });
   const grid = attach(model);
   const scroller = () => container.querySelector<HTMLElement>(".hg-scroller")!;
@@ -126,6 +183,7 @@ export function hercegHandle(
           cells: (row) => row.querySelectorAll("[role=gridcell]"),
           cellField: (cell) => Number(cell.getAttribute("aria-colindex")) - 1,
           selected: (row) => row.getAttribute("aria-selected") === "true",
+          ...(looks && { look: lookOf }),
         }),
         scrollStep: ratio(),
       };
@@ -206,13 +264,18 @@ export const adapter: Adapter = {
   renderer: "DOM rows and cells written through field displays (10 rows and 2 columns of overscan)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
   prepare: hercegTable,
-  mount: (container, fixture, input) =>
-    hercegHandle(container, fixture, input as Table<Schema>, (model) =>
-      createGrid(container, {
-        model,
-        ariaLabel: "Benchmark grid",
-        headerHeight: HEADER_HEIGHT,
-        theme: THEME,
-      }),
+  mount: (container, fixture, input, options) =>
+    hercegHandle(
+      container,
+      fixture,
+      input as Table<Schema>,
+      (model) =>
+        createGrid(container, {
+          model,
+          ariaLabel: "Benchmark grid",
+          headerHeight: HEADER_HEIGHT,
+          theme: THEME,
+        }),
+      options,
     ),
 };

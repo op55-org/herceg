@@ -11,10 +11,12 @@ import { checkFormat, holds, misfit } from "../fields/check.ts";
 import { KIT } from "../fields/compiled.ts";
 import type { CompiledFields } from "../fields/display.ts";
 import { columnDisplay } from "../fields/grid.ts";
+import type { LinkRows, RowLink } from "../fields/links.ts";
 import { type Formatter, FULL_TIME, numberFormatter, timeFormatter } from "../format/format.ts";
 import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { FormatSpec, NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
+import type { CellEncodings } from "./looks.ts";
 
 /** The formats a field of kind `K` takes: every number or time form, as axes take them; none for categories. */
 export type FormatOf<K> = K extends "number"
@@ -27,14 +29,55 @@ export type FormatOf<K> = K extends "number"
 export type PinSide = "left" | "right";
 
 /**
+ * What a grid's columns read on group rows: the fields of the groups'
+ * tables (`schema`: grouping fields and aggregates), and the names of the
+ * aggregates a column may show (`names`).
+ */
+export interface AggregateScope {
+  readonly schema: Schema;
+  readonly names: string;
+}
+
+/**
+ * Groups not known as a model is made (chosen later, as a user picks them),
+ * or erased (`RowGroups<S>`): any names and fields, which the model checks
+ * when groups arrive.
+ */
+export interface AnyAggregates {
+  // biome-ignore lint/suspicious/noExplicitAny: fields named at run time, as erased groups' are.
+  readonly schema: any;
+  readonly names: string;
+}
+
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** A schema's field names, spelled out in errors. */
+type NameOf<S extends Schema> = S extends unknown ? Extract<keyof S, string> : never;
+
+/**
+ * The scope of a model's groups (their last level's table `G`, grouped by
+ * `B`), fixed as it is made: precise for inferred groups, any names for
+ * erased ones or none.
+ */
+export type ScopeOf<G extends Schema, B extends readonly string[]> =
+  IsAny<G> extends true
+    ? AnyAggregates
+    : [keyof G] extends [never]
+      ? AnyAggregates
+      : string extends B[number]
+        ? { readonly schema: G; readonly names: string }
+        : { readonly schema: G; readonly names: Exclude<NameOf<G>, B[number]> };
+
+/**
  * A field shown in a grid. `format` writes its values in any form axes
  * take, by the field's kind: Intl options, `{ number }` patterns with
  * `prefix` and `suffix`, durations, SI and binary prefixes for numbers;
  * Intl date options and `{ time }` patterns (with fiscal years) for times;
  * none for categories. With the grid's `fields`, it replaces the field's
- * format, while the field's mappings and missing text stay.
+ * format, while the field's mappings and missing text stay. `X` is what it
+ * reads on group rows (see `AggregateScope`).
  */
-export type GridColumn<S extends Schema = Schema> = {
+export type GridColumn<S extends Schema = Schema, X extends AggregateScope = AnyAggregates> = {
   [F in PositionField<S>]: {
     field: F;
     /** Names the column in focus, sort, and layout calls; the field by default. Unique in a grid. */
@@ -54,11 +97,30 @@ export type GridColumn<S extends Schema = Schema> = {
     pin?: PinSide;
     /**
      * In grouped grids: the name of an aggregate of the groups that group
-     * rows show in this column. Without one, group rows leave it empty.
+     * rows show in this column (not a grouping field). Without one, group
+     * rows leave it empty.
      */
-    aggregate?: string;
+    aggregate?: X["names"];
+    /** How its cells look on table rows, read from the row (see `CellEncodings`). */
+    encode?: CellEncodings<S>;
+    /**
+     * How its cells look on group rows, read from their groups' tables:
+     * grouping fields and aggregates by name. A field without a scale
+     * colors an aggregate by its field's display only for a mean, a
+     * minimum, or a maximum; a name a level's table lacks (a grouping field
+     * of a deeper level) gives that level's rows no look.
+     */
+    aggregateEncode?: CellEncodings<X["schema"]>;
   };
 }[PositionField<S>];
+
+/** What placing a column reads of it: its field, id, width, pin, and whether it is hidden. */
+export interface ColumnPlace {
+  readonly field: string;
+  readonly width?: number | undefined;
+  readonly pin?: PinSide | undefined;
+  readonly hidden?: boolean | undefined;
+}
 
 /** A shown column, placed: what renderers draw. */
 export interface GridColumnLayout {
@@ -109,6 +171,8 @@ export interface ColumnContent {
   readonly key: (value: string | number | null) => string;
   /** With field displays: the field's description, the header's title and accessible description. */
   readonly description?: string | undefined;
+  /** With field displays: row `row`'s link of the field (a table's, or a remote window's rows). */
+  readonly link?: ((table: LinkRows, row: number) => RowLink | undefined) | undefined;
   readonly aggregate: string | undefined;
   /** A header over the column and its neighbors with the same one: a pivot's value over its aggregates. */
   readonly heading?: { readonly id: string; readonly title: string };
@@ -187,7 +251,7 @@ export function describeColumn(
  * `MIN_SCROLLING_WIDTH` of a `room` pixels wide (0: not measured yet).
  */
 export function placeColumns(
-  columns: readonly (GridColumn & { id: string })[],
+  columns: readonly (ColumnPlace & { id: string })[],
   contents: ReadonlyMap<string, ColumnContent>,
   room: number,
 ): PlacedColumn[] {
@@ -220,7 +284,7 @@ export function placeColumns(
 }
 
 /** Width of the shown pinned columns together. */
-export function pinnedWidth(columns: readonly GridColumn[]): number {
+export function pinnedWidth(columns: readonly ColumnPlace[]): number {
   let width = 0;
   for (const column of columns)
     if (column.pin !== undefined && !column.hidden) width += column.width ?? WIDTH;
@@ -233,7 +297,7 @@ export function pinsHold(width: number, room: number): boolean {
 }
 
 /** A column's width, given or the default. */
-export function widthOf(column: GridColumn): number {
+export function widthOf(column: ColumnPlace): number {
   return column.width ?? WIDTH;
 }
 

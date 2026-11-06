@@ -2,6 +2,7 @@
 // layout every grid is configured with.
 
 import type { GridTable } from "./fixture.ts";
+import type { CellLook } from "./looks.ts";
 
 /** Same geometry for every grid, in CSS pixels. */
 export const GRID_WIDTH = 1200;
@@ -44,6 +45,11 @@ export interface Visible {
   text: string[][];
   /** Whether each of `rows` is shown as selected. */
   selected: boolean[];
+  /**
+   * With looks on: each cell's background and text color as drawn
+   * (`looks[r][c]`, like `text`), undefined for a cell drawn without one.
+   */
+  looks?: (CellLook | undefined)[][];
   /** Scroll offset of the shown body content and the body viewport's size. */
   top: number;
   left: number;
@@ -104,8 +110,21 @@ export interface Adapter {
    * (row objects, or nothing for grids that read columns through a callback).
    */
   prepare(table: GridTable): unknown;
-  /** Mounts a grid in `container` (GRID_WIDTH x GRID_HEIGHT) from `prepare`'s output. */
-  mount(container: HTMLElement, table: GridTable, input: unknown): GridHandle | Promise<GridHandle>;
+  /**
+   * Mounts a grid in `container` (GRID_WIDTH x GRID_HEIGHT) from `prepare`'s
+   * output; with `looks`, showing the looks scenarios' conditional
+   * formatting (looks.ts) and reading it back in `visible`.
+   */
+  mount(
+    container: HTMLElement,
+    table: GridTable,
+    input: unknown,
+    options?: MountOptions,
+  ): GridHandle | Promise<GridHandle>;
+}
+
+export interface MountOptions {
+  looks?: boolean;
 }
 
 /** Row objects for libraries that take them: `id` plus one property per field. */
@@ -166,6 +185,8 @@ export interface DomGrid {
   cells(row: Element): Iterable<Element>;
   cellField(cell: Element): number;
   selected(row: Element): boolean;
+  /** With looks on: a cell's look as drawn. */
+  look?(cell: Element): CellLook | undefined;
 }
 
 /**
@@ -183,18 +204,26 @@ export function readDomVisible(grid: DomGrid): Visible {
   shown.sort((a, b) => a.y - b.y);
   const columns: number[] = [];
   const text: string[][] = [];
+  const looks: (CellLook | undefined)[][] = [];
+  const look = grid.look;
   shown.forEach(({ row }, r) => {
-    const cells: { x: number; field: number; text: string }[] = [];
+    const cells: { x: number; field: number; text: string; look: CellLook | undefined }[] = [];
     for (const cell of grid.cells(row)) {
       const rect = cell.getBoundingClientRect();
       if (rect.right > view.left + 0.5 && rect.left < view.right - 0.5)
-        cells.push({ x: rect.left, field: grid.cellField(cell), text: cell.textContent ?? "" });
+        cells.push({
+          x: rect.left,
+          field: grid.cellField(cell),
+          text: cell.textContent ?? "",
+          look: look?.(cell),
+        });
     }
     cells.sort((a, b) => a.x - b.x);
     if (r === 0) columns.push(...cells.map((cell) => cell.field));
     // Align every row with the first row's columns; a missing cell reads as blank.
-    const byField = new Map(cells.map((cell) => [cell.field, cell.text]));
-    text.push(columns.map((field) => byField.get(field) ?? ""));
+    const byField = new Map(cells.map((cell) => [cell.field, cell]));
+    text.push(columns.map((field) => byField.get(field)?.text ?? ""));
+    if (look) looks.push(columns.map((field) => byField.get(field)?.look));
   });
   return {
     count: grid.count,
@@ -202,6 +231,7 @@ export function readDomVisible(grid: DomGrid): Visible {
     columns,
     text,
     selected: shown.map(({ row }) => grid.selected(row)),
+    ...(look && { looks }),
     top: grid.top,
     left: grid.left,
     width: view.right - view.left,

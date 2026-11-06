@@ -44,9 +44,9 @@ by name, regular expression, kind, and table.
 - Displays color values ([Colors](#colors)): thresholds and mapping colors
   color bars, lines, areas, and regions colored by a number field without a
   scale, points and heatmaps without a ramp of their own, series and bars
-  of a category field, gauges' bands and dials, and tooltip fields'
-  swatches; legends show a key of the colors; rules and regions stand at a
-  field's thresholds.
+  of a category field, gauges' bands and dials, tooltip fields' swatches,
+  and grid cells' looks; legends show a key of the colors; rules and
+  regions stand at a field's thresholds.
 - Displays link values ([Links](#links)): pinned tooltips draw tooltip
   fields' links, events carry them, and `displayOf` gives them to
   application code. Grid cells do not draw links yet.
@@ -171,6 +171,7 @@ are for number fields; categories take colors from mappings.
 | Series and bars of a category field | Mapping colors give their values' colors (`series: "status"`, `color: "status"`) where no declared scale colors the field; values without a mapping color take the palette's, and bars and regions missing the value `missing`'s color. |
 | Gauges | Without `bands`, a band per step within the gauge's ends, and the dial in its value's step's color. |
 | Tooltips | A tooltip field's value color, as a swatch beside it, and `InspectedField.color`. |
+| Grid cells | `encode.fill` or `encode.color` `: { field: "p99" }` without a scale ([Looks](grids.md#looks)); group rows' means, minimums, and maximums take their field's colors, sums and counts none. Cells without a display color have no look. |
 | Legends | A mark coloring by display colors lists a key of them (below). |
 | Application code | `displayOf(...).color(value)` (see [Reading displays](#reading-displays-in-typescript)). |
 
@@ -453,8 +454,9 @@ from `herceg/fields`, compiled once and shared among grids and charts
 read fields' labels and descriptions, cells write through the displays,
 group rows write keys and aggregates by operation and kind, and pivot
 grids write their rows column, value headings, and cells through them.
-See [Grids](grids.md#field-displays). Grid cells do not draw links or
-display colors yet ([Links](#links)).
+See [Grids](grids.md#field-displays). Cells take display colors through
+their looks ([Looks](grids.md#looks)); they do not draw links yet
+([Links](#links)).
 
 ```ts
 const fields = compileFields([{ match: "latency", format: { duration: "millisecond" } }]);

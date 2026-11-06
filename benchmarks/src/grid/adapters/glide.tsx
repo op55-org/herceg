@@ -16,6 +16,9 @@
 // cells what Glide last drew there: the row identity and text the cell
 // carried and whether Glide highlighted it, recorded through `drawCell`
 // (which then draws the cell as usual). The canvas pixels are not read.
+// With looks, a cell's `themeOverride` carries its background (`bgCell`)
+// and text color (`textDark`), from the store's columns and a domain kept
+// by adapter code (looks.ts), recorded with the cell as drawn.
 
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
@@ -40,12 +43,14 @@ import {
   GRID_WIDTH,
   type GridHandle,
   HEADER_HEIGHT,
+  type MountOptions,
   ROW_HEIGHT,
   type RowFilter,
   type SortKey,
   type Visible,
 } from "../adapter.ts";
 import { formatValue, type GridField, type GridTable } from "../fixture.ts";
+import { type CellLook, cellLook, LookTracker } from "../looks.ts";
 
 const THEME = {
   fontFamily: "Arial, sans-serif",
@@ -122,6 +127,13 @@ class Store {
     if (this.#owned[field]) return;
     this.columns[field] = this.columns[field]!.slice();
     this.#owned[field] = true;
+  }
+
+  /** A number or time (NaN when missing), or a category label (undefined when missing). */
+  value(id: number, field: number): number | string | undefined {
+    const value = this.columns[field]![id - this.base]!;
+    if (this.fields[field]!.kind !== "category") return value;
+    return value < 0 ? undefined : this.dictionaries[field]![value];
   }
 
   text(id: number, field: number): string {
@@ -238,8 +250,8 @@ interface Drawn {
   ty: number;
 }
 
-/** A text cell that also carries its row's identity, so drawing can record it. */
-type RowCell = TextCell & { readonly rowId: number };
+/** A text cell that also carries its row's identity and look, so drawing can record them. */
+type RowCell = TextCell & { readonly rowId: number; readonly look?: CellLook | undefined };
 
 interface GridProps {
   shown: Shown;
@@ -276,8 +288,15 @@ function Grid({ shown, columns, editor, drawn, drawCell }: GridProps) {
   );
 }
 
-function mount(container: HTMLElement, table: GridTable, input: unknown): GridHandle {
+function mount(
+  container: HTMLElement,
+  table: GridTable,
+  input: unknown,
+  options: MountOptions = {},
+): GridHandle {
   const store = input as Store;
+  const tracker = options.looks ? new LookTracker(table) : undefined;
+  const fieldIndex = new Map(table.fields.map((field, f) => [field.name, f]));
   const columns: GridColumn[] = table.fields.map((field) => ({
     id: field.name,
     title: field.name,
@@ -291,13 +310,17 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
   let selection: { start: number; end: number } | null = null;
   let version = 0;
   /** What Glide last drew in each cell (row * columns + column). */
-  const painted = new Map<number, { id: number; text: string; highlighted: boolean }>();
+  const painted = new Map<
+    number,
+    { id: number; text: string; highlighted: boolean; look: CellLook | undefined }
+  >();
   const drawCell: DrawCellCallback = (args, drawContent) => {
     const cell = args.cell as RowCell;
     painted.set(args.row * columns.length + args.col, {
       id: cell.rowId,
       text: cell.displayData,
       highlighted: args.highlighted,
+      look: cell.look,
     });
     drawContent();
   };
@@ -307,9 +330,13 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
   const root = createRoot(container);
   const render = () => {
     version++;
+    const domain = tracker?.domain;
     const getCellContent = ([col, row]: Item): GridCell => {
       const id = idAt(row);
       const text = store.text(id, col);
+      const look =
+        domain &&
+        cellLook(table.fields[col]!.name, (name) => store.value(id, fieldIndex.get(name)!), domain);
       const cell: RowCell = {
         kind: GridCellKind.Text,
         data: text,
@@ -317,6 +344,13 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
         allowOverlay: false,
         readonly: true,
         rowId: id,
+        ...(look && {
+          look,
+          themeOverride: {
+            ...(look.fill && { bgCell: look.fill }),
+            ...(look.color && { textDark: look.color }),
+          },
+        }),
       };
       return cell;
     };
@@ -375,6 +409,7 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
         columns: fields,
         text: rows.map((row) => fields.map((col) => at(row, col)?.text ?? "(not drawn)")),
         selected: rows.map((row) => at(row, fields[0]!)?.highlighted ?? false),
+        ...(tracker && { looks: rows.map((row) => fields.map((col) => at(row, col)?.look)) }),
         top,
         left,
         width,
@@ -403,6 +438,7 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
     append(batch, evict) {
       const firstNew = batch.firstId;
       store.append(batch, evict);
+      tracker?.append(batch, evict);
       if (order) {
         const kept = evict > 0 ? order.filter((id) => id >= store.firstId) : order;
         const added = Uint32Array.from(store.matching(query.filter, firstNew));

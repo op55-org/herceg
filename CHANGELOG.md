@@ -39,7 +39,13 @@ radars) through them, grids take them as charts do (headers, cells,
 group rows, and pivots; `model.update({ fields })` changes them), a
 `compileFields(rules)` result is one compilation charts and grids share,
 and `herceg/fields` reads them for application code. Grid columns take
-every format form, by their field's kind. Series marks' `label`
+every format form, by their field's kind. Grid cells take looks: a
+column's `encode`, a grid's `encode` of whole rows, and a column's
+`aggregateEncode` of group rows color backgrounds and text through the
+channels marks' colors take (display colors, the grid's `scales` with
+gradients and scales of categories, conditions, rank tests, and lists),
+with black or white text over fills by WCAG contrast, in pivots and remote
+grids too; `model.update({ scales, encode })` changes them. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,

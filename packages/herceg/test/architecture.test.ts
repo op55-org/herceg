@@ -6,6 +6,7 @@ const SRC = join(import.meta.dirname, "..", "src");
 // The chart engine must run without a DOM (servers, workers, Python exports).
 const CORE = [
   "data",
+  "encoding",
   "fields",
   "geo",
   "grid",
@@ -113,13 +114,14 @@ describe("architecture", () => {
 
   // The feature compiler follows the same rule. What it imports besides its
   // own modules no line chart's module imports: expression compilation (the
-  // builders `col` and `when` are data/expr.ts), symbols' shapes, automatic
+  // builders `col` and `when` are data/expr.ts), channels' compilation,
+  // scales, and rank tests (encoding/), symbols' names and shapes, automatic
   // padding's solver (for lines' markers), the guide compiler's pattern
   // formats, what channels draw (`outputProblem`), the placement of labels
   // following series and of text blocks, and the boxes bars' labels that
   // hide keep apart by (layout/label-boxes.ts), and keys' layout. Charts
-  // that import these themselves (grids the first, points the second, third,
-  // and last) get them in a chunk of their own.
+  // that import these themselves (grids the first two, points symbols,
+  // padding, and keys) get them in a chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
   it("the feature compiler imports only types from the line chart's modules", () => {
     const features = join(SRC, "marks/features");
@@ -127,7 +129,12 @@ describe("architecture", () => {
       ...FORMATS,
       KEYS,
       "data/expression.ts",
+      "encoding/category-scales.ts",
+      "encoding/channel-scales.ts",
+      "encoding/channels.ts",
+      "encoding/ranks.ts",
       "draw/symbol-shapes.ts",
+      "spec/symbols.ts",
       "model/clearance.ts",
       "spec/channels.ts",
       "layout/attached.ts",
@@ -158,7 +165,7 @@ describe("architecture", () => {
     for (const file of ["index.ts", "draw/text.ts", "draw/symbols.ts"])
       expect(
         runtime(file).filter(
-          (path) => allowed.includes(path) && !path.endsWith("symbol-shapes.ts"),
+          (path) => allowed.includes(path) && !/(symbol-shapes|spec\/symbols)\.ts$/.test(path),
         ),
         file,
       ).toEqual([]);
@@ -220,6 +227,26 @@ describe("architecture", () => {
       const directory = file.slice(SRC.length + 1).split("/")[0]!;
       expect(CORE, `herceg/grid/model reaches ${file}`).toContain(directory);
     }
+  });
+
+  // Grids compile their looks with the code charts share (encoding/), not
+  // charts' own: nothing a grid entry loads, however indirectly, is a mark's
+  // or a shape's.
+  it("grids load no code of marks or shapes", () => {
+    const seen = new Set<string>();
+    const visit = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const source = readFileSync(file, "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
+      // Types load no code.
+      for (const [, path] of source.matchAll(
+        /^(?:import|export) (?!type )[^;]*?from "(\.[^"]+)"/gm,
+      ))
+        visit(resolve(dirname(file), path!));
+    };
+    for (const entry of ["grid.ts", "grid-pivot.ts", "grid-remote.ts"]) visit(join(SRC, entry));
+    for (const file of seen)
+      expect(file.slice(SRC.length + 1), "a grid entry loads it").not.toMatch(/^(marks|draw)\//);
   });
 
   // `herceg/pivot` is data: charts read its tables, and grids load it only to show one.

@@ -8,10 +8,9 @@
 // scale cannot take (missing, a log's zero or less, a square root's
 // negatives) have no output: the channel's fallback paints them.
 
-import type { MarkRows } from "../../data/row-view.ts";
-import type { Table } from "../../data/table.ts";
-import type { ChannelScaleSpec } from "../../spec/encoding.ts";
-import type { PaintReader } from "../../theme.ts";
+import type { MarkRows } from "../data/row-view.ts";
+import type { Table } from "../data/table.ts";
+import type { ChannelScaleSpec } from "../spec/encoding.ts";
 
 /** Colors a ramp is read at: one more than a byte's last index, so its ends are exact. */
 const STEPS = 256;
@@ -69,10 +68,11 @@ export class ChannelScale {
 
   /**
    * Brings the domain up to date with the rows its fields' marks draw, and
-   * reads a ramp's colors through `paint` (CSS variables), checked as
-   * color ramps are: "#rgb" or "#rrggbb".
+   * reads a ramp's colors through `paint` (a theme's `PaintReader`, which
+   * resolves CSS variables; grids, whose models hold no theme, take them as
+   * they are), checked as color ramps are: "#rgb" or "#rrggbb".
    */
-  update(paint: PaintReader, path: string): void {
+  update(paint: (value: string, path: string) => string, path: string): void {
     let changed = false;
     if (this.colors) {
       const stops = (this.spec.range as readonly string[]).map((stop, i) => {

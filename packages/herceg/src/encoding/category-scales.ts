@@ -1,15 +1,23 @@
-// Categorical scales with fixed outputs: the chart's `scales` of type
-// "ordinal", and the default ones an unnamed field reads ("symbol",
-// "dash", and "color" where the chart declares it). A value's place in the
-// domain is kept for the chart's life, so a value keeps its output as data
-// streams, leaves, and comes back, in every mark and panel reading the
-// scale. Without a declared "color", a field's values take the chart's
-// colors of what they stand for (`IdentityColors`).
+// Scales of categories with fixed outputs: a chart's or a grid's `scales`
+// of type "ordinal", and the default ones an unnamed field reads ("symbol",
+// "dash", and "color" where the chart or grid declares it). A value's
+// place in the domain is kept for the scale's life, so a value keeps its
+// output as data streams, leaves, and comes back, in every mark, panel, or
+// cell reading the scale. Without a declared "color", a chart's field
+// takes the chart's colors of what its values stand for
+// (marks/features/identity-colors.ts).
 
-import type { Table } from "../../data/table.ts";
-import type { OrdinalScaleSpec } from "../../spec/encoding.ts";
+import type { Table } from "../data/table.ts";
+import type { OrdinalScaleSpec } from "../spec/encoding.ts";
 
-/** What channels read a field's values through: a scale of the chart's, or its colors by identity. */
+/**
+ * The outputs values take by their place in a scale's domain where its
+ * `map` gives none: a list cycled (a theme's palette), or an output per
+ * place (a grid's palette references, which its renderer cycles).
+ */
+export type Defaults<V> = readonly V[] | ((place: number) => V);
+
+/** What channels read a field's values through: a scale of the chart's or grid's, or a chart's colors by identity. */
 export interface CategoryScale {
   readonly name: string;
   readonly spec: OrdinalScaleSpec | undefined;
@@ -18,7 +26,7 @@ export interface CategoryScale {
   /** A value's place in the domain; undefined outside an explicit domain. */
   place(value: string): number | undefined;
   /** A value's output, as `OrdinalScale.output`. */
-  output<V>(value: string, defaults: readonly V[], fallback: V): V;
+  output<V>(value: string, defaults: Defaults<V>, fallback: V): V;
   /** The output of missing values, where the scale gives them one. */
   missing?(): string | undefined;
 }
@@ -91,69 +99,18 @@ export class OrdinalScale implements CategoryScale {
    * `defaults` (cycled), else (outside an explicit domain, or with no
    * defaults) `unknown`, or `fallback` without one.
    */
-  output<V>(value: string, defaults: readonly V[], fallback: V): V {
+  output<V>(value: string, defaults: Defaults<V>, fallback: V): V {
     const map = this.spec?.map;
     const mapped = map && Object.hasOwn(map, value) ? map[value] : undefined;
     if (mapped !== undefined) return mapped as V;
     const place = this.place(value);
-    if (place !== undefined && defaults.length > 0) return defaults[place % defaults.length]!;
-    return (this.spec?.unknown as V | undefined) ?? fallback;
+    const output = place === undefined ? undefined : defaultAt(defaults, place);
+    return output ?? (this.spec?.unknown as V | undefined) ?? fallback;
   }
 }
 
-/**
- * A field's values' colors where the chart declares no "color" scale: the
- * chart's colors of what each value stands for (see model/identity.ts), by
- * the identity keys `prefix` starts, so a bar or point colored by a field
- * has the color the series of that value have: the color the chart's field
- * displays give the value, else the color at the chart's palette slot for
- * its key, which the compilation hands over before each scene.
- */
-export class IdentityColors implements CategoryScale {
-  readonly name = "color";
-  readonly spec = undefined;
-  readonly #prefix: string;
-  readonly #chart: { slot: ((key: string) => number) | undefined };
-  /** A value's display color (null: missing values'), which it takes over the palette's (fields/colors.ts). */
-  readonly #shown: ((value: string | null) => string | undefined) | undefined;
-  /** Values in the order first colored, which keys of colors list them in. */
-  readonly #places = new Map<string, number>();
-
-  constructor(
-    prefix: string,
-    chart: { slot: ((key: string) => number) | undefined },
-    shown?: (value: string | null) => string | undefined,
-  ) {
-    this.#prefix = prefix;
-    this.#chart = chart;
-    this.#shown = shown;
-  }
-
-  read(): void {}
-
-  place(value: string): number {
-    let place = this.#places.get(value);
-    if (place === undefined) {
-      place = this.#places.size;
-      this.#places.set(value, place);
-    }
-    return place;
-  }
-
-  /** The identity key of a value. */
-  key(value: string): string {
-    return `${this.#prefix}${JSON.stringify(value)}}`;
-  }
-
-  output<V>(value: string, defaults: readonly V[], fallback: V): V {
-    this.place(value);
-    const shown = this.#shown?.(value);
-    if (shown !== undefined) return shown as V;
-    const slot = this.#chart.slot?.(this.key(value));
-    return slot !== undefined && defaults.length > 0 ? defaults[slot % defaults.length]! : fallback;
-  }
-
-  missing(): string | undefined {
-    return this.#shown?.(null);
-  }
+/** The default output at `place`: the list's, cycled; undefined for an empty list. */
+export function defaultAt<V>(defaults: Defaults<V>, place: number): V | undefined {
+  if (typeof defaults === "function") return defaults(place);
+  return defaults.length > 0 ? defaults[place % defaults.length] : undefined;
 }

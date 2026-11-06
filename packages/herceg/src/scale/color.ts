@@ -129,6 +129,25 @@ export function contrastingText(
   return luminance(mixed as [number, number, number]) > 0.3 ? "#000000" : "#ffffff";
 }
 
+/**
+ * Channels from 0 to 255 and alpha from 0 to 1 of a hex, `rgb()`, or
+ * `hsl()` color, where they are read exactly; undefined for others (names,
+ * variables, hues signed or in other units than degrees, saturations and
+ * lightnesses without "%", values CSS clamps), which only the page reads
+ * exactly.
+ */
+export function colorChannels(color: string): [number, number, number, number] | undefined {
+  const c = color.trim().toLowerCase();
+  const hsl = /^hsla?\((.*)\)$/.exec(c)?.[1];
+  if (hsl !== undefined) {
+    const [, s, l] = hsl.split(/[\s,/]+/).filter(Boolean);
+    if (/[^\d.,%/\s]/.test(hsl.replace("deg", "")) || !s?.endsWith("%") || !l?.endsWith("%"))
+      return undefined;
+  }
+  const channels = parseColor(c);
+  return channels?.every((v, i) => v >= 0 && v <= (i < 3 ? 255 : 1)) ? channels : undefined;
+}
+
 /** WCAG relative luminance of an sRGB color with channels from 0 to 255. */
 function luminance([r, g, b]: [number, number, number]): number {
   const linear = (c: number) => {

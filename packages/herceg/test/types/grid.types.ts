@@ -1,4 +1,5 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
+// biome-ignore-all lint/suspicious/noThenProperty: conditions' branches, as specs name them.
 import { expectTypeOf } from "vitest";
 import { count, max, mean, median, min, sum } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
@@ -10,7 +11,12 @@ import { type Schema, Table, table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid, type Grid } from "../../src/dom/grid.ts";
 import { compileFields } from "../../src/fields.ts";
-import { createGridModel, type GridColumn, type GridModel } from "../../src/grid/model.ts";
+import {
+  type CellLook,
+  createGridModel,
+  type GridColumn,
+  type GridModel,
+} from "../../src/grid/model.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { point } from "../../src/marks/point.ts";
 
@@ -276,4 +282,93 @@ focusFirst(grid);
     ],
   });
   bar(grouped.table, { x: "service", y: "latency" });
+}
+
+// Looks: channels of fill and color over the rows' fields, as marks' colors
+// take them, without the series' names; aggregate looks over the groups'
+// aggregates by name.
+{
+  const view = rowView(requests);
+  const looked = createGridModel({
+    data: view,
+    columns: [
+      { field: "latency", encode: { fill: { field: "latency", scale: "heat" } } },
+      { field: "latency", id: "shown", encode: { fill: { field: "latency" } } },
+      { field: "host", encode: { color: [{ field: "host", scale: "hosts" }, { value: "#333" }] } },
+      {
+        field: "at",
+        encode: { fill: { condition: { when: { top: 3, field: "latency" }, then: "gold" } } },
+      },
+    ],
+    scales: {
+      heat: { type: "linear", range: ["#ffffff", "#ff0000"] },
+      hosts: { type: "ordinal", map: { a: "#00aa00" } },
+    },
+    encode: { fill: { condition: { when: col("latency").gt(100), then: "#fdd" } } },
+  });
+  expectTypeOf(looked.lookAt(0, 0)).toEqualTypeOf<CellLook | undefined>();
+  looked.update({ scales: {}, encode: { color: { value: "#000" } } });
+  createGridModel({
+    data: view,
+    // @ts-expect-error unknown field
+    columns: [{ field: "host", encode: { fill: { field: "missing" } } }],
+  });
+  createGridModel({
+    data: view,
+    // @ts-expect-error a grid has no series
+    columns: [{ field: "host", encode: { fill: { series: true, scale: "s" } } }],
+  });
+  createGridModel({
+    data: view,
+    // @ts-expect-error cells take fill and color
+    columns: [{ field: "host", encode: { symbol: { value: "circle" } } }],
+  });
+  createGridModel({
+    data: view,
+    columns: [
+      {
+        field: "host",
+        // @ts-expect-error ranks are of numbers and times
+        encode: { fill: { condition: { when: { top: 1, field: "host" }, then: "red" } } },
+      },
+    ],
+  });
+  createGridModel({
+    data: view,
+    columns: [{ field: "host" }],
+    // @ts-expect-error scales of categories have no panels in a grid
+    scales: { hosts: { type: "ordinal", scope: "panel" } },
+  });
+
+  const groups = groupRows(view, { by: ["host"], ops: { n: count(), slow: max("latency") } });
+  createGridModel({
+    data: view,
+    groups,
+    columns: [
+      { field: "host" },
+      {
+        field: "latency",
+        aggregate: "slow",
+        aggregateEncode: {
+          fill: [
+            { field: "slow", scale: "heat" },
+            { field: "n", scale: "heat" },
+          ],
+        },
+      },
+    ],
+    scales: { heat: { type: "linear", range: ["#ffffff", "#ff0000"] } },
+  });
+  createGridModel({
+    data: view,
+    groups,
+    columns: [
+      {
+        field: "latency",
+        aggregate: "slow",
+        // @ts-expect-error aggregate looks read the groups' table, which has no "latency"
+        aggregateEncode: { fill: { field: "latency" } },
+      },
+    ],
+  });
 }

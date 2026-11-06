@@ -1,14 +1,14 @@
-// Channel scales (marks/features/channel-scales.ts): continuous scales of
+// Channel scales (encoding/channel-scales.ts): continuous scales of
 // the chart's `scales` mapping number fields onto widths, opacities,
 // sizes, and colors, for every mark whose channels read rows; their
 // domains span every field read through them, and values out of the
 // domain or missing take each channel's rule.
 import { describe, expect, it } from "vitest";
 import { type Table, table } from "../../src/data/table.ts";
+import { ChannelScale } from "../../src/encoding/channel-scales.ts";
+import { rowReader } from "../../src/encoding/channels.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
-import { ChannelScale } from "../../src/marks/features/channel-scales.ts";
-import { rowReader } from "../../src/marks/features/channels.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";

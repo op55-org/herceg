@@ -7,7 +7,10 @@
 // change data. State changes render synchronously (flushSync), as React does
 // for a click. Sorting uses the `basic` comparator with missing values
 // last; filters are the built-in `inNumberRange` and, for category
-// membership (no built-in), a filter function on the column.
+// membership (no built-in), a filter function on the column. With looks,
+// each cell's style carries its background and text color, from the row and
+// a domain kept by adapter code (looks.ts); appends render every row in view
+// again, so cells follow the domain.
 
 import {
   type ColumnFiltersState,
@@ -37,6 +40,7 @@ import {
   GRID_WIDTH,
   type GridHandle,
   HEADER_HEIGHT,
+  type MountOptions,
   OVERSCAN_ROWS,
   ROW_HEIGHT,
   type RowObject,
@@ -45,6 +49,7 @@ import {
   scrollport,
 } from "../adapter.ts";
 import { formatValue, type GridField, type GridTable } from "../fixture.ts";
+import { type CellLook, cellLook, type LookDomain, LookTracker } from "../looks.ts";
 
 const features = tableFeatures({
   rowSortingFeature,
@@ -100,9 +105,24 @@ interface GridProps {
   columns: ReturnType<typeof columnsFor>;
   table: RefObject<Table | null>;
   scroller: RefObject<HTMLDivElement | null>;
+  /** With looks: the fields' names and the rows' domain. */
+  looks: { fields: GridField[]; domain: LookDomain } | undefined;
 }
 
-function Grid({ state, columns, table: tableRef, scroller }: GridProps) {
+/** A row object's value of a looks field: NaN for missing numbers. */
+function rowValue(row: RowObject, field: string): number | string | undefined {
+  const value = row[field];
+  return value === undefined && field !== "c0" ? Number.NaN : value;
+}
+
+/** A styled cell's look, from its inline style. */
+function styledLook(cell: Element): CellLook | undefined {
+  const { backgroundColor, color } = (cell as HTMLElement).style;
+  if (!backgroundColor && !color) return undefined;
+  return { fill: backgroundColor || undefined, color: color || undefined };
+}
+
+function Grid({ state, columns, table: tableRef, scroller, looks }: GridProps) {
   const table = useTable({
     features,
     columns,
@@ -179,8 +199,19 @@ function Grid({ state, columns, table: tableRef, scroller }: GridProps) {
                 {pad(paddingLeft, "td")}
                 {virtualColumns.map((column) => {
                   const cell = cells[column.index]!;
+                  const look =
+                    looks &&
+                    cellLook(
+                      looks.fields[column.index]!.name,
+                      (name) => rowValue(row.original, name),
+                      looks.domain,
+                    );
                   return (
-                    <td key={cell.id} data-field={column.index} style={{ width: COLUMN_WIDTH }}>
+                    <td
+                      key={cell.id}
+                      data-field={column.index}
+                      style={{ width: COLUMN_WIDTH, background: look?.fill, color: look?.color }}
+                    >
                       <table.FlexRender cell={cell} />
                     </td>
                   );
@@ -195,7 +226,12 @@ function Grid({ state, columns, table: tableRef, scroller }: GridProps) {
   );
 }
 
-function mount(container: HTMLElement, gridTable: GridTable, input: unknown): GridHandle {
+function mount(
+  container: HTMLElement,
+  gridTable: GridTable,
+  input: unknown,
+  options: MountOptions = {},
+): GridHandle {
   if (!document.getElementById("tt-grid-style")) {
     const style = document.createElement("style");
     style.id = "tt-grid-style";
@@ -213,10 +249,14 @@ function mount(container: HTMLElement, gridTable: GridTable, input: unknown): Gr
     columnFilters: [],
     rowSelection: {},
   };
+  const tracker = options.looks ? new LookTracker(gridTable) : undefined;
   const render = (change: Partial<State>) => {
     state = { ...state, ...change };
+    const looks = tracker && { fields, domain: tracker.domain };
     flushSync(() =>
-      root.render(<Grid state={state} columns={columns} table={table} scroller={scroller} />),
+      root.render(
+        <Grid state={state} columns={columns} table={table} scroller={scroller} looks={looks} />,
+      ),
     );
   };
   render({});
@@ -240,6 +280,7 @@ function mount(container: HTMLElement, gridTable: GridTable, input: unknown): Gr
         cells: (row) => row.querySelectorAll("td[data-field]"),
         cellField: (cell) => Number(cell.getAttribute("data-field")),
         selected: (row) => row.getAttribute("aria-selected") === "true",
+        ...(tracker && { look: styledLook }),
       });
     },
     rowCount: () => table.current!.getRowModel().rows.length,
@@ -260,6 +301,7 @@ function mount(container: HTMLElement, gridTable: GridTable, input: unknown): Gr
       else render({ columnFilters: [{ id: filter.field, value: new Set(filter.labels) }] });
     },
     append(batch, evict) {
+      tracker?.append(batch, evict);
       const kept = evict > 0 ? state.data.slice(evict) : state.data;
       render({ data: kept.concat(rowObjects(batch)) });
     },

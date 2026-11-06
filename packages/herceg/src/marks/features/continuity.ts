@@ -11,6 +11,7 @@
 import type { Expression } from "../../data/expression.ts";
 import { compileExpression } from "../../data/expression.ts";
 import type { Table } from "../../data/table.ts";
+import { categoryField, predicate } from "../../encoding/channels.ts";
 import type { Breaks } from "../../lod/m4.ts";
 import type { RangeExtremes, RangeIndex } from "../../lod/minmax-index.ts";
 import type { PointSink } from "../../lod/polyline.ts";
@@ -19,7 +20,6 @@ import type { CalendarBreak, ContinuitySpec } from "../../spec/encoding.ts";
 import type { Curve } from "../../spec/spec.ts";
 import type { Series } from "../series.ts";
 import type { TraceFrame } from "../trace.ts";
-import { categoryField, predicate } from "./channels.ts";
 import { crossingOwner } from "./provenance.ts";
 
 /** A row left out, drawn, or left out by `where` alone (its values place a crossing). */

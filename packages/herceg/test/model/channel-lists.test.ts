@@ -1046,6 +1046,27 @@ describe("channel lists' edges", () => {
     expect(read).toEqual([0.5, 0.25]);
   });
 
+  it("take an output of 0 from a list's entry, as any other", () => {
+    const rows = table({ t: [0, 1], v: [1, 2] });
+    const read: (number | undefined)[] = [];
+    build({
+      marks: [
+        custom(rows, {
+          x: "t",
+          y: "v",
+          encode: {
+            opacity: [{ condition: { when: col("v").gt(1), then: 0 } }, { value: 0.5 }],
+          },
+          draw({ series, encoded }) {
+            for (const s of series)
+              for (let k = 0; k < 2; k++) read.push(encoded("opacity", s.rowAt(k), s));
+          },
+        }),
+      ],
+    });
+    expect(read).toEqual([0.5, 0]);
+  });
+
   it("refuse points' sizes and shapes by the series' names in a list too", () => {
     expect(() =>
       build({

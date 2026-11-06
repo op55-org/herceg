@@ -9,6 +9,19 @@
 
 import { COLUMN_WIDTH, ROW_HEIGHT, type RowFilter, type SortKey, type Visible } from "./adapter.ts";
 import { formatValue, type GridField, type GridTable } from "./fixture.ts";
+import {
+  C0_COLORS,
+  type CellLook,
+  type LookDomain,
+  N0_STEPS,
+  N1_STEPS,
+  N2_RANGE,
+  N3_FILL,
+  N3_TOP,
+  N4_OVER,
+  ROW_FILL,
+  sameColor,
+} from "./looks.ts";
 
 type Value = number | string | undefined;
 
@@ -34,8 +47,11 @@ export class Reference {
   /** Live row identities are [start, end). */
   start: number;
   end: number;
+  /** Whether grids show the looks scenarios' looks (looks.ts), which frames are then checked for. */
+  readonly looks: boolean;
 
-  constructor(table: GridTable) {
+  constructor(table: GridTable, looks = false) {
+    this.looks = looks;
     this.fields = table.fields;
     this.chunks.push(table);
     this.overrides = table.fields.map(() => new Map());
@@ -65,6 +81,7 @@ export class Reference {
 
   update(field: number, ids: ArrayLike<number>, values: Float64Array): void {
     for (let i = 0; i < ids.length; i++) this.overrides[field]!.set(ids[i]!, values[i]!);
+    this.#updates++;
   }
 
   private chunkOf(id: number): GridTable {
@@ -91,6 +108,96 @@ export class Reference {
   text(id: number, field: number): string {
     const value = this.value(id, field);
     return formatValue(this.fields[field]!.kind, missing(value) ? undefined : value);
+  }
+
+  #domain: { key: string; domain: LookDomain } | undefined;
+  /** Counts updates, which may move the looks' domain. */
+  #updates = 0;
+
+  /** The looks' domain over every live row (looks.ts), scanned again whenever the rows change. */
+  lookDomain(): LookDomain {
+    const key = `${this.start},${this.end},${this.#updates}`;
+    if (this.#domain?.key === key) return this.#domain.domain;
+    const n2 = this.fieldIndex("n2");
+    const n3 = this.fieldIndex("n3");
+    let min = Infinity;
+    let max = -Infinity;
+    const finite = new Float64Array(this.length);
+    let count = 0;
+    for (let id = this.start; id < this.end; id++) {
+      const a = this.value(id, n2) as number;
+      if (Number.isFinite(a)) {
+        if (a < min) min = a;
+        if (a > max) max = a;
+      }
+      const b = this.value(id, n3) as number;
+      if (Number.isFinite(b)) finite[count++] = b;
+    }
+    const values = finite.subarray(0, count).sort();
+    const domain: LookDomain = {
+      extent: min <= max ? [min, max] : undefined,
+      nth: count === 0 ? Number.NaN : values[Math.max(0, count - N3_TOP)]!,
+    };
+    this.#domain = { key, domain };
+    return domain;
+  }
+
+  #indices: Map<string, number> | undefined;
+
+  /**
+   * The look of a row's cell of `field` (looks.ts' scenario), against
+   * `domain`, worked out here apart from the adapters' code: a column's own
+   * fill or color, the row's fill under cells without one, and black or
+   * white text over a fill by the ratio of their contrasts.
+   */
+  look(id: number, field: number, domain = this.lookDomain()): CellLook | undefined {
+    this.#indices ??= new Map(this.fields.map((f, i) => [f.name, i]));
+    const indices = this.#indices;
+    const read = (name: string) => this.value(id, indices.get(name)!);
+    const name = this.fields[field]!.name;
+    let fill: string | undefined;
+    let color: string | undefined;
+    const stepped = (
+      value: number,
+      steps: readonly (readonly [number, string])[],
+      base?: string,
+    ) => {
+      if (missing(value)) return undefined;
+      const passed = steps.filter(([at]) => value >= at);
+      return passed.length > 0 ? passed[passed.length - 1]![1] : base;
+    };
+    if (name === "n0") fill = stepped(read("n0") as number, N0_STEPS.steps, N0_STEPS.base);
+    else if (name === "n1") fill = stepped(read("n1") as number, N1_STEPS.steps);
+    else if (name === "n2") {
+      const value = read("n2") as number;
+      if (!missing(value) && domain.extent) {
+        const [lo, hi] = domain.extent;
+        const t = lo === hi ? 1 : Math.max(0, Math.min(1, (value - lo) / (hi - lo)));
+        const [from, to] = N2_RANGE.map((c) =>
+          [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)),
+        );
+        fill = `#${from!
+          .map((c, i) =>
+            Math.round(c + (to![i]! - c) * t)
+              .toString(16)
+              .padStart(2, "0"),
+          )
+          .join("")}`;
+      }
+    } else if (name === "n3") {
+      const value = read("n3") as number;
+      if (Number.isFinite(value) && value >= domain.nth) fill = N3_FILL;
+    } else if (name === "c0") {
+      const label = read("c0") as string | undefined;
+      if (label !== undefined && Object.hasOwn(C0_COLORS, label)) color = C0_COLORS[label];
+    }
+    if (fill === undefined && (read("n4") as number) > N4_OVER) fill = ROW_FILL;
+    if (fill === undefined && color === undefined) return undefined;
+    if (color === undefined && fill !== undefined) {
+      const l = luminanceOf(fill);
+      color = (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? "#000000" : "#ffffff";
+    }
+    return { fill, color };
   }
 
   private passes(id: number, filter: RowFilter, field: number): boolean {
@@ -146,6 +253,15 @@ export class Reference {
   }
 }
 
+/** WCAG's relative luminance of "#rrggbb". */
+function luminanceOf(color: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(color.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
 /** What a correct frame shows. */
 export interface Expected {
   /** Displayed rows. */
@@ -156,6 +272,8 @@ export interface Expected {
   text(id: number, field: number): string;
   /** Selection, when the scenario selects rows. */
   selected?: (id: number) => boolean;
+  /** Cells' looks, when the scenario shows them. */
+  look?: (id: number, field: number) => CellLook | undefined;
   /** Requested scroll offsets; grids clamp them at the end of the content. */
   top: number;
   left: number;
@@ -209,6 +327,14 @@ export function verifyVisible(
       const got = v.text[r]?.[c];
       if (got !== want)
         return `row ${id} column ${firstColumn + c} shows "${got}", expected "${want}"`;
+    }
+    if (expected.look) {
+      for (let c = 0; c < columns; c++) {
+        const want = expected.look(id, firstColumn + c);
+        const got = v.looks?.[r]?.[c];
+        if (!sameColor(got?.fill, want?.fill) || !sameColor(got?.color, want?.color))
+          return `row ${id} column ${firstColumn + c} looks ${JSON.stringify(got ?? null)}, expected ${JSON.stringify(want ?? null)}`;
+      }
     }
     const selected = expected.selected?.(id) ?? false;
     if (v.selected[r] !== selected)

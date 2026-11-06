@@ -8,24 +8,22 @@
 
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
+import {
+  type Channel,
+  type Check,
+  channelRevision,
+  compileChannel,
+  type RowReader,
+  rowReader,
+  type ScaleOf,
+} from "../../encoding/channels.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { ChannelName } from "../../spec/channels.ts";
 import type { EncodingsSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { CustomSeries } from "../custom.ts";
 import type { GlyphKey } from "../mark.ts";
-import {
-  type Channel,
-  type Check,
-  channelRevision,
-  compileChannel,
-  displayFields,
-  outputCheck,
-  type RowReader,
-  rowReader,
-  type ScaleOf,
-  seriesTail,
-} from "./channels.ts";
+import { displayFields, outputCheck, seriesTail } from "./channels.ts";
 import { categoryKey, keyedFields } from "./row-styles.ts";
 
 /** The channels a custom mark's `draw` reads. */

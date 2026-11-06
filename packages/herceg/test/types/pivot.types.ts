@@ -1,4 +1,5 @@
 // Compile-time tests of pivots: checked by `npm run typecheck`, never executed.
+// biome-ignore-all lint/suspicious/noThenProperty: conditions' branches, as specs name them.
 import { expectTypeOf } from "vitest";
 import { count, max, mean, median, sum } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
@@ -122,3 +123,29 @@ model.rowAt(0);
 
 const grid = createPivotGrid(document.body, { model, ariaLabel: "Requests" });
 expectTypeOf(grid.model).toEqualTypeOf(model);
+
+// Cells' looks by aggregate read their combination's row: the rows and
+// pivot fields, and every aggregate.
+createPivotGridModel({
+  data: pivot,
+  aggregates: {
+    avg: {
+      encode: {
+        fill: [
+          { condition: { when: { top: 1, field: "avg" }, then: "#ffd700" } },
+          { field: "total", scale: "heat" },
+        ],
+        color: { field: "host", scale: "hosts" },
+      },
+    },
+  },
+  scales: {
+    heat: { type: "linear", range: ["#ffffff", "#ff0000"] },
+    hosts: { type: "ordinal", map: { a: "#00aa00" } },
+  },
+});
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error cells read the pivot's table, which has no "latency"
+  aggregates: { avg: { encode: { fill: { field: "latency", scale: "heat" } } } },
+});

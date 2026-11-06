@@ -170,7 +170,7 @@ export function displayed<K extends DisplayedKind>(
     missingValue(kind, value) ? missing : typeof value === "string" ? value : write!(value!);
   const text = (value: ReadValue<K>) =>
     (missingValue(kind, value) ? undefined : mapped?.(value!)?.text) ?? format(value);
-  const color = colorer(kind, display, mapped) ?? (() => undefined);
+  const color = colorer(kind, display, mapped) ?? uncolored;
   const linked = display.link && linker(display.link, name, `${surface} ${from.link}.link`, textOf);
   return {
     field: name,
@@ -185,6 +185,14 @@ export function displayed<K extends DisplayedKind>(
     link: (table, row) =>
       linked?.("source" in table ? table.source : table, row, text as LinkWrite),
   };
+}
+
+/** The colors of a display giving none. */
+const uncolored = () => undefined;
+
+/** Whether a display gives any value a color (its missing value's, mappings', or thresholds'). */
+export function hasColors(display: DisplayedField): boolean {
+  return display.color !== uncolored;
 }
 
 /** The text of missing values a display's `missing` gives, if it gives one. */

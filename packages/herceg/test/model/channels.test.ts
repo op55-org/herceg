@@ -1,4 +1,4 @@
-// Channels compiled through one compiler (marks/features/channels.ts):
+// Channels compiled through one compiler (encoding/channels.ts):
 // identity scales, a field's values drawn as they are, checked per channel
 // and standing for nothing (no series, no legend entries); points' colors,
 // sizes, opacities, and shapes through named scales, identity scales, and

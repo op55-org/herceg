@@ -8,8 +8,13 @@
 // values last in both directions (AG Grid's default puts them first when
 // ascending). The number range filter is the native number filter; category
 // membership uses the external filter, since Community has no set filter.
+// With looks, every column takes a `cellStyle` (background and text color,
+// set explicitly empty where a cell has none, as AG Grid keeps styles a
+// cell no longer returns), the domain is adapter code (looks.ts), and cells
+// are refreshed (`refreshCells({ force: true })`) when it moves.
 
 import {
+  CellStyleModule,
   ClientSideRowModelApiModule,
   ClientSideRowModelModule,
   type ColDef,
@@ -29,6 +34,7 @@ import {
   COLUMN_WIDTH,
   type GridHandle,
   HEADER_HEIGHT,
+  type MountOptions,
   OVERSCAN_ROWS,
   ROW_HEIGHT,
   type RowFilter,
@@ -38,8 +44,10 @@ import {
   scrollport,
 } from "../adapter.ts";
 import { formatValue, type GridTable } from "../fixture.ts";
+import { type CellLook, cellLook, LookTracker } from "../looks.ts";
 
 ModuleRegistry.registerModules([
+  CellStyleModule,
   ClientSideRowModelModule,
   ClientSideRowModelApiModule,
   ColumnApiModule,
@@ -80,8 +88,27 @@ function missingLast(
   return a! < b! ? -1 : a! > b! ? 1 : 0;
 }
 
-function mount(container: HTMLElement, table: GridTable, input: unknown): GridHandle {
+/** A row object's value of a looks field: NaN for missing numbers. */
+function rowValue(row: RowObject, field: string): number | string | undefined {
+  const value = row[field];
+  return value === undefined && field !== "c0" ? Number.NaN : value;
+}
+
+/** A styled cell's look, from its inline style. */
+function styledLook(cell: Element): CellLook | undefined {
+  const { backgroundColor, color } = (cell as HTMLElement).style;
+  if (!backgroundColor && !color) return undefined;
+  return { fill: backgroundColor || undefined, color: color || undefined };
+}
+
+function mount(
+  container: HTMLElement,
+  table: GridTable,
+  input: unknown,
+  options: MountOptions = {},
+): GridHandle {
   const fields = table.fields;
+  const tracker = options.looks ? new LookTracker(table) : undefined;
   let membership: { field: string; labels: Set<string> } | null = null;
   const columnDefs: ColDef<RowObject>[] = fields.map((field) => ({
     field: field.name,
@@ -94,6 +121,13 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
     valueFormatter: (params) => formatValue(field.kind, params.value as Value),
     filter: field.kind === "number" ? "agNumberColumnFilter" : false,
     filterParams: { inRangeInclusive: true },
+    ...(tracker && {
+      cellStyle: (params: { data: RowObject | undefined }) => {
+        const row = params.data!;
+        const look = cellLook(field.name, (name) => rowValue(row, name), tracker.domain);
+        return { backgroundColor: look?.fill ?? "", color: look?.color ?? "" };
+      },
+    }),
   }));
   const api: GridApi<RowObject> = createGrid(container, {
     theme,
@@ -140,6 +174,7 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
         cellField: (cell) =>
           fields.findIndex((field) => field.name === cell.getAttribute("col-id")),
         selected: (row) => row.classList.contains("ag-row-selected"),
+        ...(tracker && { look: styledLook }),
       });
     },
     rowCount: () => api.getDisplayedRowCount(),
@@ -188,7 +223,11 @@ function mount(container: HTMLElement, table: GridTable, input: unknown): GridHa
     append(batch, evict) {
       const remove = Array.from({ length: evict }, (_, i) => ({ id: oldest + i }) as RowObject);
       oldest += evict;
+      const revision = tracker?.revision;
+      tracker?.append(batch, evict);
       api.applyTransaction({ add: rowObjects(batch), remove });
+      // Cells already drawn keep their style until refreshed.
+      if (tracker && tracker.revision !== revision) api.refreshCells({ force: true });
     },
     update(field, ids, values) {
       const name = fields[field]!.name;

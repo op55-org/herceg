@@ -8,8 +8,8 @@
 // n)); a dropped row among the n, a view's rows, values replaced, or a
 // reset read every row again (O(rows × log n)).
 
-import type { MarkRows } from "../../data/row-view.ts";
-import type { Table } from "../../data/table.ts";
+import type { MarkRows } from "../data/row-view.ts";
+import type { Table } from "../data/table.ts";
 import { nextRevision } from "./channel-scales.ts";
 
 export class Rank {

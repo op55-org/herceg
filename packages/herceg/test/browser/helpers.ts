@@ -16,6 +16,7 @@ declare module "vitest/browser" {
     accessibilityTree(root: string, states: readonly string[]): Promise<string[]>;
     bundleHerceg(format: "esm" | "iife"): Promise<string>;
     collectGarbage(): Promise<void>;
+    forcedColors(active: boolean): Promise<boolean>;
     mouse(input: MouseInput): Promise<void>;
   }
 }

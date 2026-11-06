@@ -102,7 +102,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "node ../../scripts/contracts/run.mjs herceg-unit -- vitest run --project unit",
     "test:browser": "node ../../scripts/contracts/run.mjs herceg-browser -- vitest run --project browser",
-    "bench": "node --experimental-strip-types bench/core.ts"
+    "bench": "node --expose-gc --experimental-strip-types bench/core.ts"
   },
   "devDependencies": {
     "axe-core": "^4.14.0"

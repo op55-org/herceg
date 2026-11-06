@@ -4,17 +4,28 @@
 // value and aggregate (each value heading its aggregates), then the totals.
 // Generated columns are named by their ids, which the model's layout
 // (order, widths, pins, hidden columns) and sorting are keyed by, so values
-// coming and going never take another column's width or focus. The model
-// takes this through `GridPivot`, so grids that show no pivot load none of it.
+// coming and going never take another column's width or focus. A cell's
+// look reads its combination's row of the pivot's table (a total column's,
+// its row's totals). The model takes this through `GridPivot`, so grids
+// that show no pivot load none of it.
 
 import type { Fields } from "../data/expression.ts";
 import type { GroupSchema, NamedAggregate } from "../data/groups.ts";
-import { type PivotColumn, type PivotValue, pivotGroups, type RowPivot } from "../data/pivot.ts";
-import type { RowView } from "../data/row-view.ts";
+import {
+  type PivotColumn,
+  type PivotSnapshot,
+  type PivotValue,
+  pivotGroups,
+  type RowPivot,
+} from "../data/pivot.ts";
+import type { MarkRows, RowView } from "../data/row-view.ts";
 import type { SelectionStore } from "../data/selection.ts";
 import type { Schema, Table } from "../data/table.ts";
+import { nextRevision, wholeTable } from "../encoding/channel-scales.ts";
+import type { RankRead } from "../encoding/channels.ts";
+import { Rank } from "../encoding/ranks.ts";
 import { keyPath } from "../fields/check.ts";
-import type { CompiledFields } from "../fields/display.ts";
+import { type CompiledFields, missingValue } from "../fields/display.ts";
 import { columnDisplay } from "../fields/grid.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
@@ -29,7 +40,19 @@ import {
   MIN_COLUMN_WIDTH,
   valueFormatter,
 } from "./columns.ts";
-import { GridModel, type GridPivot } from "./model.ts";
+import {
+  type CellEncodings,
+  compileEncodings,
+  type GridScales,
+  type Look,
+  type LookSettings,
+  type LookTable,
+  lookOf,
+  rankOf,
+  type Updating,
+  withEncodingsCopied,
+} from "./looks.ts";
+import { GridModel, type GridPivot, type PivotLooks } from "./model.ts";
 
 /**
  * How a pivot grid's column shows: its title, width (120 pixels by
@@ -42,6 +65,25 @@ export interface PivotColumnOptions<K = "number" | "time"> {
   align?: "start" | "center" | "end";
   format?: FormatOf<K>;
 }
+
+/**
+ * How an aggregate's columns show, and how their cells look (`encode`),
+ * read from each cell's combination: its row of the pivot's table (the
+ * rows' and the pivot's values, and every aggregate), a total column's
+ * from its row's totals (the rows' value and every aggregate). `S` is that
+ * table's schema.
+ */
+export interface PivotAggregateOptions<S extends Schema = Schema, K = "number" | "time">
+  extends PivotColumnOptions<K> {
+  encode?: CellEncodings<S> | undefined;
+}
+
+/** The fields a pivot's cells' looks read: the rows and pivot fields, and every aggregate. */
+export type PivotCellSchema<S extends Schema, R extends string, P extends string, O> = GroupSchema<
+  S,
+  (R | P) & keyof S,
+  O
+>;
 
 /** The kind of a pivot's aggregate `K`: what its operation gives; either, where the aggregates are not known. */
 type AggregateKind<S extends Schema, O, K extends keyof O> = unknown extends O[K]
@@ -58,8 +100,16 @@ export interface PivotGridModelOptions<
   data: RowPivot<S, R, P, O>;
   /** The rows field's column, titled by the field's label (with `fields`), else the field, by default. */
   rowColumn?: PivotColumnOptions<S[R & keyof S]>;
-  /** Each aggregate's columns, by its name, titled by it by default; formats of its result's kind. */
-  aggregates?: { readonly [K in keyof O]?: PivotColumnOptions<AggregateKind<S, O, K>> };
+  /**
+   * Each aggregate's columns, by its name, titled by it by default: formats
+   * of its result's kind, and looks read from each cell's combination.
+   */
+  aggregates?: {
+    readonly [K in keyof O]?: PivotAggregateOptions<
+      PivotCellSchema<S, R, P, O>,
+      AggregateKind<S, O, K>
+    >;
+  };
   /** The format of the pivot field's values over their columns, over its display's: numbers' or times' forms. */
   valueFormat?: FormatOf<S[P & keyof S]>;
   /**
@@ -70,6 +120,8 @@ export interface PivotGridModelOptions<
    * missing keys read "(missing)".
    */
   fields?: FieldDisplays | CompiledFields | undefined;
+  /** Scales the aggregates' looks read values through (see `GridScales`). */
+  scales?: GridScales | undefined;
   /** Where the selected rows go; a store of the grid's own when left out. */
   selectionStore?: SelectionStore<S>;
   /** The store's channel for the selected rows; "grid-rows" by default. */
@@ -133,7 +185,13 @@ export function createPivotGridModel<S extends Schema, R extends string, P exten
   const layout = new PivotLayout(pivot, {
     // Typed by kind for callers; checked by kind as the grid is made.
     rowColumn: (rowColumn ?? {}) as PivotColumnOptions,
-    aggregates: (aggregates ?? {}) as Record<string, PivotColumnOptions | undefined>,
+    // Encodings copied, so a caller's later changes do not reach looks.
+    aggregates: Object.fromEntries(
+      Object.entries(aggregates ?? {}).map(([name, given]) => [
+        name,
+        given && withEncodingsCopied(given as PivotAggregateOptions),
+      ]),
+    ) as Record<string, PivotAggregateOptions | undefined>,
     valueFormat: valueFormat as NumberFormatSpec | TimeFormatSpec | undefined,
   });
   const model: GridModel = new GridModel(
@@ -159,7 +217,7 @@ type Column = GridColumn & { readonly id: string };
 
 interface LayoutOptions {
   readonly rowColumn: PivotColumnOptions;
-  readonly aggregates: Record<string, PivotColumnOptions | undefined>;
+  readonly aggregates: Record<string, PivotAggregateOptions | undefined>;
   readonly valueFormat: NumberFormatSpec | TimeFormatSpec | undefined;
 }
 
@@ -308,6 +366,68 @@ class PivotLayout implements GridPivot {
 
   check(settings: FormatSettings): void {
     this.#staged = this.#writtenFor(settings);
+  }
+
+  looks(settings: LookSettings): PivotLooks {
+    const pivot = this.#pivot;
+    const table = pivot.table as unknown as Table;
+    const totals = pivot.rowTable as unknown as Table;
+    const { aggregates } = pivot;
+    const cells: LookTable = {
+      table,
+      rows: () => wholeTable(table),
+      rank: (field, count, top) => columnRanks(pivot, field, count, top),
+      aggregates,
+    };
+    const rows = () => wholeTable(totals);
+    const total: LookTable = { table: totals, rows, rank: rankOf(rows), aggregates };
+    const ofValues = new Map<string, Look>();
+    const ofTotals = new Map<string, Look>();
+    for (const { name } of aggregates) {
+      const encode = this.#options.aggregates[name]?.encode;
+      const at = `${settings.surface} aggregates${keyPath(name)}.encode`;
+      const look = compileEncodings(encode, cells, settings, at);
+      if (look) ofValues.set(name, look);
+      // A row's totals lack the pivot field, which gives them no look.
+      const totalLook = pivot.totals && compileEncodings(encode, total, settings, at, true);
+      if (totalLook) ofTotals.set(name, totalLook);
+    }
+    return {
+      any: ofValues.size > 0 || ofTotals.size > 0,
+      lookAt(id, row) {
+        const crosstab = pivot.read();
+        const column = crosstab.column(id);
+        if (!column) return undefined;
+        const { name } = column.aggregate;
+        if (column.kind === "total") return lookOf(totals, row, ofTotals.get(name));
+        const look = ofValues.get(name);
+        const position = look ? crosstab.cell(row, crosstab.indexOf(column.value)) : -1;
+        return position < 0 ? undefined : lookOf(table, position, look);
+      },
+    };
+  }
+
+  read(id: string, row: number): ReturnType<GridPivot["read"]> {
+    const pivot = this.#pivot;
+    const crosstab = pivot.read();
+    const column = crosstab.column(id);
+    const read = (value: number | string | null, kind: "number" | "time" | "category") =>
+      missingValue(kind, value)
+        ? { state: "missing" as const, value: null, kind }
+        : { state: "value" as const, value, kind };
+    if (!column) {
+      const value = crosstab.rowKey(row);
+      return read(value, this.rows.kind(pivot.rows) as "number" | "time" | "category");
+    }
+    const { name } = column.aggregate;
+    const kind = (pivot.table as unknown as Table).kind(name) as "number" | "time";
+    const value =
+      column.kind === "total"
+        ? (pivot.rowTable as unknown as Table).numbers(name as never)[row]!
+        : crosstab.value(row, crosstab.indexOf(column.value), name);
+    return value === undefined
+      ? { state: "absent", value: undefined, kind: null }
+      : read(value, kind);
   }
 
   /**
@@ -538,6 +658,81 @@ function layoutOf({ width, pin, hidden }: GridColumn): Layout {
     ...(pin !== undefined && { pin }),
     ...(hidden !== undefined && { hidden }),
   };
+}
+
+/**
+ * A rank test of a pivot's cells: each value column's own, over the
+ * combinations holding its pivot value (positions of the pivot's table), so
+ * "the top 3" are a column's three largest.
+ */
+function columnRanks(
+  pivot: RowPivot,
+  field: string,
+  count: number,
+  top: boolean,
+): RankRead & Updating {
+  const table = pivot.table as unknown as Table;
+  /** Each value column's test, and its revision as `update` last saw it. */
+  const ranks = new Map<PivotValue, { rank: Rank; seen: number }>();
+  let revision = 0;
+  let seen: PivotSnapshot | undefined;
+  /** Each pivot value's combinations, found in one pass over the table for each crosstab. */
+  let columns = new Map<PivotValue, Uint32Array>();
+  const rowsOf = (value: PivotValue) => (): MarkRows => {
+    const crosstab = pivot.read();
+    if (crosstab !== seen) {
+      seen = crosstab;
+      columns = combinationsByValue(table, pivot.pivot);
+    }
+    const positions = columns.get(value) ?? NO_POSITIONS;
+    return { table, positions, revision: String(table.version) };
+  };
+  return {
+    holds(position) {
+      const value = table.value(pivot.pivot, position) as PivotValue;
+      let held = ranks.get(value);
+      if (!held) {
+        held = { rank: new Rank(rowsOf(value), field, count, top), seen: Number.NaN };
+        ranks.set(value, held);
+      }
+      return held.rank.holds(position);
+    },
+    get revision() {
+      return revision;
+    },
+    update() {
+      // Values gone take their ranks with them.
+      const values = new Set(pivot.read().values);
+      let changed = false;
+      for (const [value, held] of ranks) {
+        if (!values.has(value)) {
+          ranks.delete(value);
+          continue;
+        }
+        // Compared with what this saw last, as cells read may have brought it up to date.
+        held.rank.update();
+        if (held.rank.revision !== held.seen) {
+          held.seen = held.rank.revision;
+          changed = true;
+        }
+      }
+      if (changed) revision = nextRevision();
+    },
+  };
+}
+
+const NO_POSITIONS = new Uint32Array(0);
+
+/** The positions of `table`'s rows (a pivot's combinations) by their value of `field`. */
+function combinationsByValue(table: Table, field: string): Map<PivotValue, Uint32Array> {
+  const lists = new Map<PivotValue, number[]>();
+  for (let position = 0; position < table.length; position++) {
+    const value = table.value(field as never, position) as PivotValue;
+    const list = lists.get(value);
+    if (list) list.push(position);
+    else lists.set(value, [position]);
+  }
+  return new Map(Array.from(lists, ([value, list]) => [value, Uint32Array.from(list)]));
 }
 
 /** Throws unless a column's layout can be taken. */

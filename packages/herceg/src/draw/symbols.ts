@@ -3,7 +3,8 @@
 import { n } from "./markup.ts";
 import { type SymbolName, vertices } from "./symbol-shapes.ts";
 
-export { CYCLE, SYMBOLS, type SymbolName, symbolReach } from "./symbol-shapes.ts";
+export { CYCLE, SYMBOLS } from "../spec/symbols.ts";
+export { type SymbolName, symbolReach } from "./symbol-shapes.ts";
 
 const PI = Math.PI;
 
