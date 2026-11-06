@@ -5,7 +5,24 @@
 // over local tables load none of it.
 
 export type { GridEvents, GridInputEvent } from "./dom/grid.ts";
+export type {
+  FrameworkCell,
+  FrameworkCells,
+  GridCellContext,
+  GridCellRenderer,
+  GridCellRenderers,
+  GridCellView,
+  GridFrameworkRenderer,
+} from "./dom/grid-cells.ts";
 export { createRemoteGrid, type RemoteGrid, type RemoteGridOptions } from "./dom/grid-remote.ts";
+export {
+  type BarCellOptions,
+  barCell,
+  chipCell,
+  type GridCell,
+  type SymbolCellOptions,
+  symbolCell,
+} from "./grid/cells.ts";
 export {
   type GridAggregate,
   type GridFieldKind,

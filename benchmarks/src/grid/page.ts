@@ -56,6 +56,7 @@ export function expectation(
 ): Expected {
   // Scanned now, so the rows' domain is never found inside a timed frame check.
   const domain = reference.looks ? reference.lookDomain() : undefined;
+  const extent = reference.cells ? reference.barExtent() : undefined;
   return {
     count: order ? order.length : reference.length,
     fields: reference.fields.length,
@@ -63,6 +64,9 @@ export function expectation(
     text: (id, field) => reference.text(id, field),
     selected,
     ...(domain && { look: (id: number, field: number) => reference.look(id, field, domain) }),
+    ...(extent && {
+      content: (id: number, field: number) => reference.content(id, field, extent),
+    }),
     top,
     left,
   };
@@ -122,7 +126,10 @@ export async function mount(
   input: unknown = adapter.prepare(table),
 ): Promise<Mounted> {
   const element = box();
-  const handle = await adapter.mount(element, table, input, { looks: reference.looks });
+  const handle = await adapter.mount(element, table, input, {
+    looks: reference.looks,
+    cells: reference.cells,
+  });
   await untilCorrect(handle, expectation(reference, null), performance.now());
   return {
     handle,

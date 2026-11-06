@@ -12,6 +12,7 @@
 import type { Expression, Fields } from "../data/expression.ts";
 import { type GroupKey, groupId } from "../data/groups.ts";
 import type { Schema } from "../data/table.ts";
+import type { LinkRows } from "../fields/links.ts";
 import type { GridQuery, GridSchema, RowKey } from "./query.ts";
 
 /**
@@ -176,11 +177,14 @@ export function groupCondition(by: readonly string[], key: GroupKey): Expression
   return tests.length === 1 ? tests[0]! : ["and", ...tests];
 }
 
-/** A window's columns as expressions and cell readers read them, by the schema's kinds. */
+/** A window's columns as expressions, cell readers, and links read them. */
+export type WindowRows = Fields & LinkRows;
+
+/** A window's columns as expressions, cell readers, and links read them, by the schema's kinds. */
 export function windowFields(
   kinds: Readonly<Record<string, string>>,
   columns: Readonly<Record<string, WindowColumn>>,
-): Fields {
+): WindowRows {
   const names = Object.keys(columns);
   const column = (name: string) => {
     const values = columns[name];
@@ -193,6 +197,15 @@ export function windowFields(
     kind: (name) => (kinds[name] ?? "number") as "number" | "time" | "category",
     numbers: (name) => column(name) as Float64Array,
     categories: (name) => column(name) as { codes: Int32Array; dictionary: readonly string[] },
+    value(name, row) {
+      const values = column(name);
+      if (values instanceof Float64Array) {
+        const value = values[row]!;
+        return Number.isNaN(value) ? null : value;
+      }
+      const code = values.codes[row]!;
+      return code < 0 ? null : (values.dictionary[code] ?? null);
+    },
   };
 }
 

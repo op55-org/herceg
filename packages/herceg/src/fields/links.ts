@@ -36,6 +36,15 @@ export type LinkWrite = (value: number | string | null) => string;
  */
 export type LinkOf = (table: LinkRows, row: number, write: LinkWrite) => RowLink | undefined;
 
+/** The fields the links of field `field`'s `link` read: the field, and those its parts name. */
+export function linkFields(link: FieldLink, field: string): string[] {
+  const fields = new Set([field]);
+  for (const parts of [link.url, link.text])
+    if (typeof parts === "object")
+      for (const part of parts) if (typeof part === "object") fields.add(part.field ?? field);
+  return [...fields];
+}
+
 /**
  * The links `link` makes for field `field`'s values, its text parts
  * written with `textOf(table, name)` (field `name`'s display's writer);

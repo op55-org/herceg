@@ -141,7 +141,7 @@ describe("link text", () => {
       traces,
       { locale: "en-US" },
     );
-    expect(column.link(traces, 0)).toEqual({ url: "/l/1.5", text: "~2" });
+    expect(column.link!(traces, 0)).toEqual({ url: "/l/1.5", text: "~2" });
   });
 
   it("writes fields of the table the display is of, whatever reads the rows", () => {
@@ -162,7 +162,7 @@ describe("link text", () => {
       value: (field) => (field === "id" ? "r1" : "200"),
       fields: () => ["id", "status"],
     };
-    expect(column.link(rows, 0)).toEqual({ url: "/r", text: "OK" });
+    expect(column.link!(rows, 0)).toEqual({ url: "/r", text: "OK" });
   });
 
   it("reads a row view's table, and a later rule's false drops the link", () => {

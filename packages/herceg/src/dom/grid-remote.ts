@@ -45,6 +45,7 @@ export function createRemoteGrid<S extends Schema>(
 
 /** What loading adds to the DOM grid: busy and failed rows, the notice, and announcements. */
 class LoadingRows implements GridExtras {
+  readonly maker = "createRemoteGrid";
   readonly #model: RemoteGridModel;
   readonly #notice: HTMLDivElement;
   readonly #text: Text;

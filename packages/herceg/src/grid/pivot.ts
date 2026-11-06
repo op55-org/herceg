@@ -32,6 +32,7 @@ import type { TimeZone } from "../format/zone.ts";
 import type { NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
 import {
   type ColumnContent,
+  columnId,
   describeColumn,
   type FormatOf,
   type FormatSettings,
@@ -315,14 +316,14 @@ class PivotLayout implements GridPivot {
     for (const column of current) layouts.set(column.id, layoutOf(column));
     const named = new Set<string>();
     for (const column of given ?? []) {
-      const id = column.id ?? column.field;
+      const id = columnId(column);
       if (named.has(id)) throw new Error(`Two grid columns have the id "${id}"`);
       named.add(id);
       check(id, column);
       layouts.set(id, layoutOf(column));
     }
     const ids = [...described.keys()];
-    const idOf = (column: GridColumn) => column.id ?? column.field;
+    const idOf = (column: GridColumn) => columnId(column);
     const placed = (given ?? current).map(idOf).filter((id) => described.has(id));
     // Columns going keep their layout, and where they were in an order the
     // user chose: the current one once the user moved columns, or one given.

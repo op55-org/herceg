@@ -37,9 +37,11 @@ import {
   type SelectionState,
   type SelectMode,
 } from "./base.ts";
+import { type CellBinding, drawsSymbols } from "./cells.ts";
 import {
   type ColumnContent,
   checkKeys,
+  columnId,
   describeColumns,
   type FormatSettings,
   type GridColumn,
@@ -89,10 +91,23 @@ export {
   type ShownRow,
 } from "./base.ts";
 export {
+  type BarCellOptions,
+  barCell,
+  type CellFieldKind,
+  chipCell,
+  type GridCell,
+  type GridCellSpec,
+  type SymbolCellOptions,
+  symbolCell,
+} from "./cells.ts";
+export {
   type AggregateScope,
   type AnyAggregates,
+  type CellOf,
   type GridColumn,
   type GridColumnLayout,
+  type GridFieldColumn,
+  type GridTextColumn,
   MIN_COLUMN_WIDTH,
   MIN_SCROLLING_WIDTH,
   type PinSide,
@@ -279,6 +294,11 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   readonly channel: string;
   readonly #table: Table;
   #looks: ModelLooks | null = null;
+  /** What columns' cell kinds read of the rows, by column id, and the display they were brought up to date for. */
+  #cells: { bindings: Map<string, CellBinding>; seen: GridDisplay | undefined } = {
+    bindings: new Map(),
+    seen: undefined,
+  };
   /** The view's rows as looks last read them. */
   #recordRows: MarkRows | undefined;
 
@@ -378,11 +398,13 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     const contents = describeColumns(this.#table, given, this.settings);
     this.#checkGroups(this.#groups, given);
     const looks = this.#compileLooks(given, this.settings, this.presentation, this.#groups);
+    const cells = this.#bindCells(given, contents, this.settings);
     this.#looks = looks;
+    this.#cells = cells;
     this.takeColumns(
       given.map((column) => ({
         ...column,
-        id: column.id ?? column.field,
+        id: columnId(column),
       })) as unknown as Column<S>[],
       contents,
     );
@@ -405,8 +427,10 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     // Group rows write keys of grouping fields no column shows too.
     checkKeys(this.#table, this.#groups?.by ?? [], settings, this.#table);
     const looks = this.#compileLooks(columns, settings, presentation, this.#groups);
+    const cells = this.#bindCells(columns, contents, settings);
     return () => {
       this.#looks = looks;
+      this.#cells = cells;
       this.takeColumns(this.columnList, contents);
     };
   }
@@ -577,9 +601,13 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   textAt(rowIndex: number, columnIndex: number): string {
     // Catching up first: a pivot's columns follow its rows.
     const { group, depth, position } = this.#entry(rowIndex);
-    const column = this.#column(columnIndex);
-    if (position >= 0) return column.content.text(this.#table, position);
-    if (this.#pivot) return column.content.text(this.#pivot.rows, group);
+    const { content } = this.#column(columnIndex);
+    if (position >= 0) {
+      // A linked cell's text is its link's.
+      const link = content.link?.(this.#table, position);
+      return link ? link.text : content.text(this.#table, position);
+    }
+    if (this.#pivot) return content.text(this.#pivot.rows, group);
     return this.#textsOfGroups()[columnIndex]!(group, depth);
   }
 
@@ -594,10 +622,36 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   cellAt(rowIndex: number, columnIndex: number): GridCellRead {
-    const text = this.textAt(rowIndex, columnIndex);
-    const look = this.lookAt(rowIndex, columnIndex);
     const { group, depth, position } = this.#entry(rowIndex);
     const column = this.#column(columnIndex);
+    const look = this.lookAt(rowIndex, columnIndex);
+    if (position >= 0 && !this.#pivot) {
+      const { content } = column;
+      // A column without a field has its text alone.
+      if (column.field === null)
+        return {
+          state: "empty",
+          value: undefined,
+          kind: null,
+          text: content.text(this.#table, position),
+          look,
+          link: undefined,
+        };
+      const link = content.link?.(this.#table, position);
+      const value = this.#table.value(column.field as never, position) as number | string | null;
+      const missing = missingValue(column.kind!, value);
+      const binding = content.cell && this.#currentCells().get(column.id);
+      return {
+        state: missing ? "missing" : "value",
+        value: missing ? null : value,
+        kind: column.kind,
+        text: link ? link.text : content.text(this.#table, position),
+        look,
+        link,
+        ...(binding && { bar: binding.bar(missing ? null : (value as number)) }),
+      };
+    }
+    const text = this.textAt(rowIndex, columnIndex);
     const cell = (
       state: GridCellState,
       value: GridCellRead["value"],
@@ -611,18 +665,10 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       link: undefined,
     });
     if (this.#pivot) return { ...this.#pivot.read(column.id, group), text, look, link: undefined };
-    if (position >= 0) {
-      const value = this.#table.value(column.field as never, position) as number | string | null;
-      const missing = missingValue(column.kind, value);
-      return {
-        ...cell(missing ? "missing" : "value", missing ? null : value, column.kind),
-        link: column.content.link?.(this.#table, position),
-      };
-    }
     // A group's header: its key's values, and its aggregates.
     const groups = this.#groups!;
     const by = groups.by as readonly string[];
-    const k = columnIndex === 0 ? depth : by.indexOf(column.field);
+    const k = columnIndex === 0 ? depth : column.field === null ? -1 : by.indexOf(column.field);
     if (k >= 0 && k <= depth) {
       const value = groups.keyOf(group, depth)[k]!;
       const kind = this.#table.kind(by[k]!) as "number" | "time" | "category";
@@ -643,6 +689,40 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
 
   get looksRevision(): number {
     return this.#currentLooks().scales.revision;
+  }
+
+  get cellsRevision(): number {
+    let sum = 0;
+    for (const binding of this.#currentCells().values()) sum += binding.revision;
+    return sum;
+  }
+
+  askFields(_asker: object, fields: readonly (readonly [field: string, at: string])[]): void {
+    const table = this.#table;
+    for (const [field, at] of fields)
+      if (!table.has(field as never) || table.kind(field as never) === "geometry")
+        throw new Error(
+          `${at}: no field ${JSON.stringify(field)} in the grid's table; the table has ${table
+            .fields()
+            .map((one) => JSON.stringify(one))
+            .join(", ")}`,
+        );
+  }
+
+  rowValues(rowIndex: number): (field: string) => number | string | null {
+    const table = this.#table;
+    // By identity: a sort or a rolling window moves the row, not its values; a reset ends it.
+    const identity = table.identity(this.rowAt(rowIndex));
+    const generation = table.generation;
+    return (field) => {
+      if (!table.has(field as never))
+        throw new Error(`grid rowValues: no field ${JSON.stringify(field)}`);
+      const position = table.positionOf(identity, generation);
+      if (position < 0)
+        throw new RangeError(`grid rowValues: row ${identity} is no longer in the table`);
+      const value = table.value(field as never, position) as number | string | null;
+      return missingValue(table.kind(field as never) as "number", value) ? null : value;
+    };
   }
 
   // Sorting
@@ -675,6 +755,10 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    */
   cycleSort(column: string, { additive = false }: { additive?: boolean } = {}): void {
     const definition = this.column(column);
+    if (definition.field === undefined)
+      throw new TypeError(
+        `${this.settings.surface} cycleSort: column ${JSON.stringify(column)} has no field to sort by; sort by a field`,
+      );
     const field = definition.field as PositionField<S>;
     const keys = this.sort;
     const order = nextOrder(keys, field);
@@ -1004,8 +1088,9 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     }
     const of: LookTable = { table, rows: this.#records, rank: rankOf(this.#records) };
     columns.forEach((column, i) => {
-      const look = compileEncodings(column.encode, of, looks, `${surface} columns[${i}].encode`);
-      if (look) records.set(column.id ?? column.field, look);
+      const at = `${surface} columns[${i}].encode`;
+      const look = compileEncodings(column.encode, of, looks, at, false, drawsSymbols(column));
+      if (look) records.set(columnId(column), look);
     });
     const rows = compileEncodings(presentation.encode, of, looks, `${surface} encode`);
     // Group rows read their level's table; levels above the last lack the
@@ -1029,7 +1114,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
           `${surface} columns[${i}].aggregateEncode`,
           depth < by.length - 1,
         );
-        if (look) map.set(column.id ?? column.field, look);
+        if (look) map.set(columnId(column), look);
       });
       tables[depth] = level;
       levels[depth] = map;
@@ -1047,6 +1132,41 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       looks.scales.update();
     }
     return looks;
+  }
+
+  /** What `columns`' cell kinds read of the records, bound as `settings` say; throws where one is refused. */
+  #bindCells(
+    columns: readonly GridColumn[],
+    contents: ReadonlyMap<string, ColumnContent>,
+    settings: FormatSettings,
+  ): { bindings: Map<string, CellBinding>; seen: GridDisplay | undefined } {
+    const bindings = new Map<string, CellBinding>();
+    columns.forEach((column, i) => {
+      const id = columnId(column);
+      const content = contents.get(id)!;
+      if (content.cell?.bind)
+        bindings.set(
+          id,
+          content.cell.bind(
+            column.field!,
+            content,
+            this.#records,
+            `${settings.surface} columns[${i}].cell`,
+          ),
+        );
+    });
+    return { bindings, seen: undefined };
+  }
+
+  /** Cell kinds' bindings, brought up to date with what the grid shows. */
+  #currentCells(): ReadonlyMap<string, CellBinding> {
+    const cells = this.#cells;
+    const display = this.current();
+    if (cells.seen !== display) {
+      cells.seen = display;
+      for (const binding of cells.bindings.values()) binding.update();
+    }
+    return cells.bindings;
   }
 
   /** Throws unless the groups are of the view and have the aggregates the columns show. */

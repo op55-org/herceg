@@ -148,7 +148,7 @@ export function headerTexts(
     if (c === 0)
       return (group, depth) =>
         `${value(group, depth, depth)} (${count(groups.size(group, depth))})`;
-    const k = by.indexOf(column.field);
+    const k = column.field === null ? -1 : by.indexOf(column.field);
     if (k >= 0)
       return (group, depth) => (k <= depth ? value(group, depth, k, column.content.key) : "");
     const aggregate = groups.aggregates.find(({ name }) => name === column.content.aggregate);

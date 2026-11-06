@@ -12,7 +12,7 @@ import type { TimeZone } from "../format/zone.ts";
 import type { DisplayedKind, FieldDisplay, MissingDisplay, ValueMapping } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import { checkFormat, holds, misfit } from "./check.ts";
-import { type LinkRows, type LinkWrite, linker, type RowLink } from "./links.ts";
+import { type LinkRows, type LinkWrite, linker, linkFields, type RowLink } from "./links.ts";
 import type { FieldDisplays, FieldOf, Resolved } from "./rules.ts";
 
 /** The chart's code a display writes with (see `GuideKit`): its formatters and zone arithmetic. */
@@ -78,6 +78,8 @@ export interface DisplayedField<K extends DisplayedKind = DisplayedKind> {
    */
   // biome-ignore lint/suspicious/noExplicitAny: a table of any schema holding the field.
   link(table: Table<any> | RowView<any> | LinkRows, row: number): RowLink | undefined;
+  /** The fields its link reads, the field itself included; none without a link. */
+  readonly linkFields: readonly string[];
 }
 
 /**
@@ -182,13 +184,23 @@ export function displayed<K extends DisplayedKind>(
     text,
     format,
     color,
-    link: (table, row) =>
-      linked?.("source" in table ? table.source : table, row, text as LinkWrite),
+    link: linked
+      ? (table, row) => linked("source" in table ? table.source : table, row, text as LinkWrite)
+      : unlinked,
+    linkFields: display.link ? linkFields(display.link, name) : [],
   };
 }
 
 /** The colors of a display giving none. */
 const uncolored = () => undefined;
+
+/** The links of a display giving none. */
+const unlinked = () => undefined;
+
+/** Whether a display gives rows links (its `link`). */
+export function hasLink(display: DisplayedField): boolean {
+  return display.link !== unlinked;
+}
 
 /** Whether a display gives any value a color (its missing value's, mappings', or thresholds'). */
 export function hasColors(display: DisplayedField): boolean {

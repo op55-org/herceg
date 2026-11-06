@@ -45,7 +45,13 @@ column's `encode`, a grid's `encode` of whole rows, and a column's
 channels marks' colors take (display colors, the grid's `scales` with
 gradients and scales of categories, conditions, rank tests, and lists),
 with black or white text over fills by WCAG contrast, in pivots and remote
-grids too; `model.update({ scales, encode })` changes them. Series marks' `label`
+grids too; `model.update({ scales, encode })` changes them. Grid cells draw
+more than text: linked fields' cells hold their links, columns take cell
+kinds (`barCell`, `chipCell`, and `symbolCell`, whose shapes `encode.symbol`
+gives), `createGrid`'s `cells` takes custom renderers by column id (text,
+control, or composite cells, with signals and declared fields), and columns
+without fields write their `text` (literal text and fields), which a
+renderer draws more for. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,
@@ -55,9 +61,9 @@ bands, and tooltip fields' swatches, with a key in the legend; rules and
 regions stand at a field's thresholds (`{ thresholds: "p99" }`,
 `hg.AtThresholds` in Python). A display's `link` (`hg.Link` in Python)
 makes a link of each value from the row's values, URL-encoded: pinned
-tooltips draw tooltip fields' links (http, https, mailto, and relative
-URLs only), events carry them (`InspectedField.link`), and `displayOf`
-gives them to application code.
+tooltips draw tooltip fields' links and grid cells their fields' (http,
+https, mailto, and relative URLs only), events carry them
+(`InspectedField.link`), and `displayOf` gives them to application code.
 
 Channels in `encode` (and points' flat `color`, `size`, `fillOpacity`, and
 `symbol`) also take a list of channels tried in order, each drawn item

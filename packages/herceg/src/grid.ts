@@ -9,4 +9,13 @@ export {
   type GridOptions,
   type GridUpdate,
 } from "./dom/grid.ts";
+export type {
+  FrameworkCell,
+  FrameworkCells,
+  GridCellContext,
+  GridCellRenderer,
+  GridCellRenderers,
+  GridCellView,
+  GridFrameworkRenderer,
+} from "./dom/grid-cells.ts";
 export * from "./grid/model.ts";

@@ -16,6 +16,7 @@ import { type Formatter, FULL_TIME, numberFormatter, timeFormatter } from "../fo
 import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { FormatSpec, NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
+import { type CellFieldKind, type CellKind, type GridCell, kindOf } from "./cells.ts";
 import type { CellEncodings } from "./looks.ts";
 
 /** The formats a field of kind `K` takes: every number or time form, as axes take them; none for categories. */
@@ -24,6 +25,9 @@ export type FormatOf<K> = K extends "number"
   : K extends "time"
     ? TimeFormatSpec
     : never;
+
+/** The cell kinds a field of kind `K` takes (`barCell` numbers only); for a kind not known, any. */
+export type CellOf<K> = K extends CellFieldKind ? GridCell<K> : never;
 
 /** A side of the grid a column can be pinned to. */
 export type PinSide = "left" | "right";
@@ -68,6 +72,22 @@ export type ScopeOf<G extends Schema, B extends readonly string[]> =
         ? { readonly schema: G; readonly names: string }
         : { readonly schema: G; readonly names: Exclude<NameOf<G>, B[number]> };
 
+/** What every column takes, with a field or without. */
+interface ColumnPlacing {
+  /** The header's text; the field's label (with the grid's `fields`), else the field (or the id), by default. */
+  title?: string;
+  /** In CSS pixels, at least `MIN_COLUMN_WIDTH`; 120 by default. */
+  width?: number;
+  /** Numbers align to the end by default, so their digits line up; other values to the start. */
+  align?: "start" | "center" | "end";
+  hidden?: boolean;
+  /**
+   * Holds the column at the grid's left or right edge while the others
+   * scroll past. Pinned columns show first or last, in the columns' order.
+   */
+  pin?: PinSide;
+}
+
 /**
  * A field shown in a grid. `format` writes its values in any form axes
  * take, by the field's kind: Intl options, `{ number }` patterns with
@@ -77,24 +97,12 @@ export type ScopeOf<G extends Schema, B extends readonly string[]> =
  * format, while the field's mappings and missing text stay. `X` is what it
  * reads on group rows (see `AggregateScope`).
  */
-export type GridColumn<S extends Schema = Schema, X extends AggregateScope = AnyAggregates> = {
-  [F in PositionField<S>]: {
+export type GridFieldColumn<S extends Schema = Schema, X extends AggregateScope = AnyAggregates> = {
+  [F in PositionField<S>]: ColumnPlacing & {
     field: F;
     /** Names the column in focus, sort, and layout calls; the field by default. Unique in a grid. */
     id?: string;
-    /** The header's text; the field's label (with the grid's `fields`), else the field, by default. */
-    title?: string;
-    /** In CSS pixels, at least `MIN_COLUMN_WIDTH`; 120 by default. */
-    width?: number;
-    /** Numbers align to the end by default, so their digits line up; other values to the start. */
-    align?: "start" | "center" | "end";
     format?: FormatOf<S[F]>;
-    hidden?: boolean;
-    /**
-     * Holds the column at the grid's left or right edge while the others
-     * scroll past. Pinned columns show first or last, in the columns' order.
-     */
-    pin?: PinSide;
     /**
      * In grouped grids: the name of an aggregate of the groups that group
      * rows show in this column (not a grouping field). Without one, group
@@ -110,13 +118,46 @@ export type GridColumn<S extends Schema = Schema, X extends AggregateScope = Any
      * minimum, or a maximum; a name a level's table lacks (a grouping field
      * of a deeper level) gives that level's rows no look.
      */
-    aggregateEncode?: CellEncodings<X["schema"]>;
+    aggregateEncode?: Omit<CellEncodings<X["schema"]>, "symbol">;
+    /**
+     * What its cells draw besides their text on table rows: a bar
+     * (`barCell`), a chip (`chipCell`), or a symbol (`symbolCell`). Group
+     * rows write text.
+     */
+    cell?: CellOf<S[F]>;
+    text?: never;
   };
 }[PositionField<S>];
 
-/** What placing a column reads of it: its field, id, width, pin, and whether it is hidden. */
+/**
+ * A column without a field: it has no value, format, sort, or aggregate,
+ * and header clicks do not sort it. Its cells write its `text`, literal
+ * text and the row's fields as their displays write them (what the model's
+ * `textAt` gives, and copy and export write); without one, they write
+ * nothing. A custom renderer (the DOM grid's `cells`) draws more, the text
+ * naming its cells for assistive technology.
+ */
+export interface GridTextColumn<S extends Schema = Schema> extends ColumnPlacing {
+  /** Names the column: it has no field to be named by. Unique in a grid. */
+  id: string;
+  field?: never;
+  format?: never;
+  aggregate?: never;
+  aggregateEncode?: never;
+  cell?: never;
+  /** How its cells look on table rows, read from the row (see `CellEncodings`). */
+  encode?: Omit<CellEncodings<S>, "symbol">;
+  text?: readonly (string | { readonly field: PositionField<S> })[];
+}
+
+/** A column a grid shows: a field (`GridFieldColumn`), or a column without one (`GridTextColumn`). */
+export type GridColumn<S extends Schema = Schema, X extends AggregateScope = AnyAggregates> =
+  | GridFieldColumn<S, X>
+  | GridTextColumn<S>;
+
+/** What placing a column reads of it: its field (none for a column without one), id, width, pin, and whether it is hidden. */
 export interface ColumnPlace {
-  readonly field: string;
+  readonly field?: string | undefined;
   readonly width?: number | undefined;
   readonly pin?: PinSide | undefined;
   readonly hidden?: boolean | undefined;
@@ -125,8 +166,9 @@ export interface ColumnPlace {
 /** A shown column, placed: what renderers draw. */
 export interface GridColumnLayout {
   readonly id: string;
-  readonly field: string;
-  readonly kind: "number" | "time" | "category";
+  /** Its field, and the field's kind; null for a column without a field. */
+  readonly field: string | null;
+  readonly kind: "number" | "time" | "category" | null;
   readonly title: string;
   /** Left edge, from the first shown column, in CSS pixels, as if nothing were scrolled. */
   readonly x: number;
@@ -158,11 +200,14 @@ export interface FormatSettings {
 
 /** What a column shows, apart from where: made by `setColumns`, kept while columns only move, resize, pin, or hide. */
 export interface ColumnContent {
-  readonly kind: "number" | "time" | "category";
+  /** Its field's kind; null for a column without a field. */
+  readonly kind: "number" | "time" | "category" | null;
   readonly title: string;
   readonly align: "start" | "center" | "end";
   /** The cell text of row `position` of a table (or a remote grid's window of rows). */
   text(fields: Fields, position: number): string;
+  /** The fields its text and link read besides its own: a column without a field's `text`, a link's parts. */
+  readonly reads?: readonly string[] | undefined;
   /** A value of the column's field as text: a label, a number, or a time; null for missing. */
   format(value: string | number | null): string;
   /** An aggregate of the field's values in its units (a mean, a sum) as text: in its format, without mappings. */
@@ -171,8 +216,16 @@ export interface ColumnContent {
   readonly key: (value: string | number | null) => string;
   /** With field displays: the field's description, the header's title and accessible description. */
   readonly description?: string | undefined;
-  /** With field displays: row `row`'s link of the field (a table's, or a remote window's rows). */
+  /**
+   * With field displays whose display gives the field a link: row `row`'s
+   * link (of a table, or a remote window's rows), which its text cells draw.
+   */
   readonly link?: ((table: LinkRows, row: number) => RowLink | undefined) | undefined;
+  /** With field displays: the field's bounds, where its display gives them. */
+  readonly min?: number | undefined;
+  readonly max?: number | undefined;
+  /** What its cells draw besides their text (a bar), where the column says. */
+  readonly cell?: CellKind | undefined;
   readonly aggregate: string | undefined;
   /** A header over the column and its neighbors with the same one: a pivot's value over its aggregates. */
   readonly heading?: { readonly id: string; readonly title: string };
@@ -202,7 +255,11 @@ export function describeColumns(
 ): Map<string, ColumnContent> {
   const contents = new Map<string, ColumnContent>();
   columns.forEach((column, i) => {
-    const id = column.id ?? column.field;
+    if (column.field === undefined && typeof column.id !== "string")
+      throw new TypeError(
+        `${settings.surface} columns[${i}]: a column without a field needs an id; give id`,
+      );
+    const id = columnId(column);
     if (contents.has(id)) throw new Error(`Two grid columns have the id "${id}"`);
     contents.set(id, describeColumn(table, column, settings, `${settings.surface} columns[${i}]`));
   });
@@ -217,18 +274,18 @@ export function describeColumn(
   at: string,
 ): ColumnContent {
   const { field } = column;
+  if (field === undefined) return describeTextColumn(table, column, settings, at);
   if (!table.has(field)) throw new Error(`Unknown grid field "${field}"`);
   const kind = table.kind(field);
   if (kind === "geometry") throw new Error(`Grids cannot show geometry ("${field}")`);
-  const id = column.id ?? field;
-  const width = column.width ?? WIDTH;
-  if (!(Number.isFinite(width) && width >= MIN_COLUMN_WIDTH))
-    throw new RangeError(
-      `Column "${id}" needs a width of at least ${MIN_COLUMN_WIDTH} pixels, not ${width}`,
-    );
-  if (column.pin !== undefined && column.pin !== "left" && column.pin !== "right")
-    throw new TypeError(`Column "${id}" pins to "left" or "right", not "${column.pin}"`);
+  checkPlace(column.id ?? field, column);
   const format = valueFormatter(kind, settings, column.format, `${at}.format`, field);
+  const cell = column.cell === undefined ? undefined : kindOf(column.cell);
+  if (column.cell !== undefined && !cell)
+    throw new TypeError(
+      `${at}.cell: expected a cell kind such as barCell(); received ${JSON.stringify(column.cell)}`,
+    );
+  cell?.check(field, kind, `${at}.cell`);
   return {
     kind,
     title: column.title ?? field,
@@ -238,9 +295,61 @@ export function describeColumn(
     amount: format,
     key: (value) => (value === null ? "(missing)" : format(value)),
     aggregate: column.aggregate,
+    cell,
     // Written through the grid's field displays, where it has them.
     ...(settings.fields &&
       columnDisplay(settings.fields, column, kind, settings.source ?? (table as Table), settings)),
+  };
+}
+
+/** A column's id: its own, else its field's (a column without a field has one). */
+export function columnId(column: {
+  readonly id?: string | undefined;
+  readonly field?: string | undefined;
+}): string {
+  return (column.id ?? column.field)!;
+}
+
+/** What a column without a field shows: its `text`, checked against the table's fields. */
+function describeTextColumn(
+  table: Pick<Fields, "has" | "kind">,
+  column: GridTextColumn,
+  settings: FormatSettings,
+  at: string,
+): ColumnContent {
+  const { id, text } = column;
+  checkPlace(id, column);
+  for (const key of ["format", "aggregate", "aggregateEncode", "cell"] as const)
+    if (column[key] !== undefined)
+      throw new TypeError(
+        `${at}.${key}: a column without a field has no ${key === "cell" ? "cell kind (custom renderers draw it)" : key === "format" ? "value to format" : "aggregate"}; drop ${key}`,
+      );
+  if (text !== undefined && !Array.isArray(text))
+    throw new TypeError(
+      `${at}.text: expected text and { field } parts; received ${JSON.stringify(text)}`,
+    );
+  // Each field part as the field's own column writes it.
+  const parts = (text ?? []).map((part, i): string | ColumnContent["text"] => {
+    if (typeof part === "string") return part;
+    const where = `${at}.text[${i}]`;
+    if (typeof part !== "object" || part === null || typeof part.field !== "string")
+      throw new TypeError(`${where}: expected text or { field }; received ${JSON.stringify(part)}`);
+    if (!table.has(part.field) || table.kind(part.field) === "geometry")
+      throw new Error(`${where}.field: no field ${JSON.stringify(part.field)} in the grid's table`);
+    return describeColumn(table, { field: part.field }, settings, where).text;
+  });
+  const empty = () => "";
+  return {
+    kind: null,
+    title: column.title ?? id,
+    align: column.align ?? "start",
+    text: (fields, position) =>
+      parts.map((part) => (typeof part === "string" ? part : part(fields, position))).join(""),
+    reads: (text ?? []).flatMap((part) => (typeof part === "string" ? [] : [part.field])),
+    format: empty,
+    amount: empty,
+    key: empty,
+    aggregate: undefined,
   };
 }
 
@@ -269,7 +378,7 @@ export function placeColumns(
     const { kind, title, align } = content;
     placed.push({
       id,
-      field,
+      field: field ?? null,
       kind,
       title,
       x,
@@ -281,6 +390,17 @@ export function placeColumns(
     x += width;
   }
   return placed;
+}
+
+/** Refuses a column's width or pin, naming the column `id`. */
+function checkPlace(id: string, column: ColumnPlacing) {
+  const width = column.width ?? WIDTH;
+  if (!(Number.isFinite(width) && width >= MIN_COLUMN_WIDTH))
+    throw new RangeError(
+      `Column "${id}" needs a width of at least ${MIN_COLUMN_WIDTH} pixels, not ${width}`,
+    );
+  if (column.pin !== undefined && column.pin !== "left" && column.pin !== "right")
+    throw new TypeError(`Column "${id}" pins to "left" or "right", not "${column.pin}"`);
 }
 
 /** Width of the shown pinned columns together. */

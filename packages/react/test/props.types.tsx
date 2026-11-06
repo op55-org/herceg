@@ -174,7 +174,8 @@ true satisfies Takes<
 type GridListeners = {
   [E in keyof GridEvents as `on${Capitalize<E>}`]?: ((event: GridEvents[E]) => void) | undefined;
 };
+// React's grid takes no DOM renderers (`cells`).
 true satisfies Takes<
   Omit<PropsOf<typeof DataGrid<Mixed>>, "model" | "className" | "style" | "ref">,
-  Omit<DataGridOptions<Mixed>, "model"> & GridListeners
+  Omit<DataGridOptions<Mixed>, "model" | "cells"> & GridListeners
 >;

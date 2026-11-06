@@ -18,7 +18,8 @@ import {
   useRef,
 } from "react";
 
-export interface GridProps<S extends Schema = Schema> extends Omit<GridOptions<S>, "model"> {
+export interface GridProps<S extends Schema = Schema>
+  extends Omit<GridOptions<S>, "model" | "cells"> {
   /**
    * What the grid shows, made with `createGridModel` and owned by the
    * application. Data changes, scrolling, focus, and selection go through it

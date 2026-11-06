@@ -27,8 +27,10 @@ whose data is large or changes often.
   hydration, a portable JSON spec with binary columns, and page fragments
   for server-rendered sites.
 - **Grids.** A virtualized analytical grid with grouped rows, pivots, and
-  remote data, cells colored through the same encodings as charts, sharing
-  tables and selections with charts, reporting clicks by row identity.
+  remote data, cells colored through the same encodings as charts and
+  drawing links, bars, chips, symbols, or custom renderers' content,
+  sharing tables and selections with charts, reporting clicks by row
+  identity.
 - **Python.** A Pythonic API over pandas, Polars, PyArrow, and NumPy, with
   notebook widgets, Streamlit, Seaborn-style statistics
   (`herceg.express`), and Flask, Django, and FastAPI pages.

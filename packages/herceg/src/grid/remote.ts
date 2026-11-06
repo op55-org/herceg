@@ -37,8 +37,11 @@ import {
   type SelectionState,
   type SelectMode,
 } from "./base.ts";
+import { type CellBinding, drawsSymbols } from "./cells.ts";
 import {
+  type ColumnContent,
   checkKeys,
+  columnId,
   describeColumns,
   type FormatSettings,
   type GridColumn,
@@ -79,6 +82,7 @@ import {
   indexOf,
   isPrefix,
   keyOf,
+  locate,
   recount,
   refOf,
   start,
@@ -99,7 +103,7 @@ import {
   selectionMeets,
   selectionSets,
 } from "./remote-selection.ts";
-import type { Block, List, RemoteRef, RemoteSelection, Revision, Scope } from "./remote-types.ts";
+import type { Block, List, RemoteSelection, Revision, Scope } from "./remote-types.ts";
 import {
   checkWindow,
   decodeGroupPath,
@@ -110,6 +114,7 @@ import {
   type LocateResult,
   type RowsRequest,
   type RowsWindow,
+  type WindowRows,
   windowFields,
 } from "./source.ts";
 
@@ -135,6 +140,8 @@ interface ColumnLooks {
   readonly key: string;
   readonly encode: unknown;
   readonly aggregateEncode: unknown;
+  /** Whether its cells are a symbol cell's, which take `symbol`. */
+  readonly symbols: boolean;
 }
 
 /** A remote grid's looks, compiled for each block's fields as blocks are read (see grid/looks.ts). */
@@ -220,6 +227,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   #textQuery: GridQuery | null = null;
   #textWriters: ((block: Block, row: number, path: GroupKey) => string)[] | null = null;
   #looks: RemoteLooks | null = null;
+  /** What columns' cell kinds read, by column id: bars' ends, which remote grids are given. */
+  #cells = new Map<string, CellBinding>();
+  /** Fields custom renderers read, by the grid asking (`askFields`), and those columns' texts and links read. */
+  readonly #asked = new Map<object, readonly string[]>();
+  #reads: readonly string[] = [];
   readonly #stop: () => void;
 
   constructor(options: RemoteGridModelOptions<S>) {
@@ -352,13 +364,16 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     // Encodings copied, so a caller's later changes reach looks only through `setColumns`.
     const given = (columns as unknown as readonly GridColumn[]).map(withEncodingsCopied);
     const contents = describeColumns(schemaFields(this.schema), given, this.settings);
-    this.#looks = this.#compileLooks(given, this.settings, this.presentation, this.#revision.query);
+    const looks = this.#compileLooks(given, this.settings, this.presentation, this.#revision.query);
+    this.#cells = bindCells(given, contents, this.settings);
+    this.#looks = looks;
+    this.#reads = readsOf(contents);
     // Blocks lacking a field a column shows (or its looks read) go before the column does.
     this.#readFields(given);
     this.takeColumns(
       given.map((column) => ({
         ...column,
-        id: column.id ?? column.field,
+        id: columnId(column),
       })) as unknown as Column<S>[],
       contents,
     );
@@ -371,8 +386,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     // Group rows write keys of grouping fields no column shows too.
     checkKeys(fields, this.#revision.query.group?.by ?? [], settings);
     const looks = this.#compileLooks(columns, settings, presentation, this.#revision.query);
+    const cells = bindCells(columns, contents, settings);
     return () => {
       this.#looks = looks;
+      this.#cells = cells;
+      this.#reads = readsOf(contents);
       this.#readFields();
       this.takeColumns(this.columnList, contents);
     };
@@ -462,7 +480,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       return columnIndex > 0 ? "" : failed ? FAILED : LOADING;
     }
     const row = ordinal - block.index * this.blockSize;
-    if (list.leaf) return column.content.text(block.fields!, row);
+    if (list.leaf) {
+      // A linked cell's text is its link's.
+      const link = column.content.link?.(block.fields!, row);
+      return link ? link.text : column.content.text(block.fields!, row);
+    }
     return this.#groupTexts(layout)[columnIndex]!(block, row, list.parent);
   }
 
@@ -508,10 +530,21 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     }
     const row = ordinal - block.index * this.blockSize;
     const fields = block.fields!;
-    if (list.leaf) return cell(windowValue(fields, column.field, row), column.kind);
+    if (list.leaf) {
+      // A column without a field has its text alone.
+      if (column.field === null) return cell(undefined, null);
+      const value = windowValue(fields, column.field, row);
+      const binding = column.content.cell && this.#cells.get(column.id);
+      return {
+        ...cell(value, column.kind),
+        link: column.content.link?.(fields, row),
+        ...(binding && { bar: binding.bar(value as number | null) }),
+      };
+    }
     // A group's header: its key's values, and its aggregates.
     const by = this.#by();
-    const k = columnIndex === 0 ? list.depth : by.indexOf(column.field);
+    const k =
+      columnIndex === 0 ? list.depth : column.field === null ? -1 : by.indexOf(column.field);
     if (k >= 0 && k <= list.depth)
       return cell(
         k < list.depth ? list.parent[k]! : groupValue(block, list.depth, row, by),
@@ -533,6 +566,47 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     return this.#looks!.scales.revision;
   }
 
+  /** Remote bars' ends are given, so only the columns move it. */
+  get cellsRevision(): number {
+    let sum = 0;
+    for (const binding of this.#cells.values()) sum += binding.revision;
+    return sum;
+  }
+
+  askFields(asker: object, fields: readonly (readonly [field: string, at: string])[]): void {
+    const kinds = this.schema.fields as Readonly<Record<string, string>>;
+    for (const [field, at] of fields)
+      if (!Object.hasOwn(kinds, field))
+        throw new Error(
+          `${at}: no field ${JSON.stringify(field)}; the source has ${Object.keys(kinds)
+            .map((one) => JSON.stringify(one))
+            .join(", ")}`,
+        );
+    if (fields.length > 0) this.#asked.set(asker, [...new Set(fields.map(([field]) => field))]);
+    else if (!this.#asked.delete(asker)) return;
+    this.#readFields();
+    this.notify();
+  }
+
+  rowValues(rowIndex: number): (field: string) => number | string | null {
+    const { list, ordinal } = this.#at(rowIndex);
+    const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
+    if (!list.leaf || block?.state !== "loaded")
+      throw new RangeError(`remote grid rowValues: row ${rowIndex} is not a loaded record`);
+    // The window the row arrived in, held while the reader is.
+    const fields = block.fields!;
+    const row = ordinal - block.index * this.blockSize;
+    return (field) => {
+      if (!fields.has(field))
+        throw new Error(
+          `remote grid rowValues: the rows hold no field ${JSON.stringify(field)}; columns, looks, and renderers' fields are asked for`,
+        );
+      const value = windowValue(fields, field, row) ?? null;
+      // Missing as cells read it: a time out of range too.
+      return missingValue(fields.kind(field) as "number", value) ? null : value;
+    };
+  }
+
   // Sorting and groups
 
   get sort(): readonly SortKey<PositionField<S>>[] {
@@ -551,6 +625,10 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
    */
   cycleSort(column: string, { additive = false }: { additive?: boolean } = {}): void {
     const definition = this.column(column);
+    if (definition.field === undefined)
+      throw new TypeError(
+        `${this.settings.surface} cycleSort: column ${JSON.stringify(column)} has no field to sort by; sort by a field`,
+      );
     const field = definition.field as PositionField<S>;
     const keys = this.sort;
     const order = nextOrder(keys, field);
@@ -794,7 +872,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     return had;
   }
 
-  /** Stops asking the source for rows, aborts requests in flight, and releases the snapshot. */
+  /**
+   * Stops asking the source for rows, aborts requests in flight, releases
+   * the snapshot, and drops the rows loaded, which whatever still holds the
+   * model (a framework's state) would otherwise keep.
+   */
   override dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -802,6 +884,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     this.#stop();
     followers.unregister(this);
     this.#end(this.#revision);
+    for (const list of this.#revision.lists.values()) list.blocks.clear();
     if (this.#deferred?.timer) clearTimeout(this.#deferred.timer);
     super.dispose();
   }
@@ -828,8 +911,10 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   }
 
   protected find(ref: GridRef, collapsed: boolean): number {
-    let { list, ordinal } = ref as RemoteRef;
-    if (!list || list.revision !== this.#revision) return -1;
+    const at = locate(this.#revision, ref);
+    if (!at) return -1;
+    let { list, ordinal } = at;
+    if (list.revision !== this.#revision) return -1;
     while (!list.attached) {
       if (!collapsed || !list.holder) return -1;
       ({ list, ordinal } = list.holder);
@@ -898,14 +983,15 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     let any = false;
     const copied = columns.map(
       (column): ColumnLooks => ({
-        key: column.id ?? column.field,
+        key: columnId(column),
         encode: plain(column.encode),
         aggregateEncode: plain(column.aggregateEncode),
+        symbols: drawsSymbols(column),
       }),
     );
     copied.forEach((column, i) => {
-      if (compileEncodings(column.encode, records, looks, `${surface} columns[${i}].encode`))
-        any = true;
+      const at = `${surface} columns[${i}].encode`;
+      if (compileEncodings(column.encode, records, looks, at, false, column.symbols)) any = true;
       if (column.aggregateEncode !== undefined) any = true;
       for (const field of lookFields(column.encode)) fields.add(field);
     });
@@ -978,7 +1064,14 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     if (leaf) {
       const records: LookTable = { table: fields, rank: RANKS };
       looks.columns.forEach((column, i) => {
-        const look = compileEncodings(column.encode, records, settings, at(i, "encode"));
+        const look = compileEncodings(
+          column.encode,
+          records,
+          settings,
+          at(i, "encode"),
+          false,
+          column.symbols,
+        );
         if (look) columns.set(column.key, look);
       });
       const rows = compileEncodings(looks.rows, records, settings, `${settings.surface} encode`);
@@ -1074,8 +1167,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     columns: readonly GridColumn[] = this.columnList as unknown as readonly GridColumn[],
   ) {
     const { query } = this.#revision;
-    const fields = new Set<string>(columns.map(({ field }) => field));
+    const fields = new Set<string>();
+    for (const { field } of columns) if (field !== undefined) fields.add(field);
+    for (const field of this.#reads) fields.add(field);
     for (const field of this.#looks?.fields ?? []) fields.add(field);
+    for (const asked of this.#asked.values()) for (const field of asked) fields.add(field);
     if (this.schema.key !== null) fields.add(this.schema.key);
     for (const field of query.group?.by ?? []) fields.add(field);
     for (const field of expressionFields(query.filter)) fields.add(field);
@@ -1307,7 +1403,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     let held: {
       data: RowsWindow;
       keys: Map<RowKey, number> | null;
-      fields: Fields;
+      fields: WindowRows;
       bytes: number;
     };
     // Everything that can throw on a bad answer happens before the block changes.
@@ -1600,7 +1696,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         if (c === 0)
           return (block, row, parent) =>
             `${value(block, row, parent, parent.length)} (${count((block.data as RowsWindow & { kind: "groups" }).rowCounts[row]!)})`;
-        const k = by.indexOf(column.field);
+        const k = column.field === null ? -1 : by.indexOf(column.field);
         if (k >= 0)
           return (block, row, parent) =>
             k <= parent.length ? value(block, row, parent, k, column.content.key) : "";
@@ -1750,6 +1846,35 @@ export function createRemoteGridModel<S extends Schema>(
 }
 
 /** Row `row`'s value of `field` in a window: a label, a number, or a time; null where missing. */
+/** The fields columns' texts and links read besides their own. */
+function readsOf(contents: ReadonlyMap<string, ColumnContent>): string[] {
+  return [...contents.values()].flatMap((content) => content.reads ?? []);
+}
+
+/** What `columns`' cell kinds read, bound as `settings` say: remote grids hold no records. */
+function bindCells(
+  columns: readonly GridColumn[],
+  contents: ReadonlyMap<string, ColumnContent>,
+  settings: FormatSettings,
+): Map<string, CellBinding> {
+  const bindings = new Map<string, CellBinding>();
+  columns.forEach((column, i) => {
+    const id = columnId(column);
+    const content = contents.get(id)!;
+    if (content.cell?.bind)
+      bindings.set(
+        id,
+        content.cell.bind(
+          column.field!,
+          content,
+          undefined,
+          `${settings.surface} columns[${i}].cell`,
+        ),
+      );
+  });
+  return bindings;
+}
+
 function windowValue(fields: Fields, field: string, row: number): number | string | null {
   if (fields.kind(field) === "category") {
     const { codes, dictionary } = fields.categories(field);

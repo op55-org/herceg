@@ -453,6 +453,34 @@ warm samples, mounts over the same rows with every dictionary reversed
 (`reorderedFromNative`), which a cache of outputs by code must not mistake
 for the table before.
 
+### Cells
+
+`cells` scenarios (100,000 x 20 and 1,000,000 x 20: mount, vertical and
+diagonal scroll steps and traces, and memory) draw more than text in five
+columns of the first screen (`src/grid/cells.ts`): bars from 0 on `n0`
+(within 0 to 1,000) and `n4` (within the extent of every row, 0
+included), `c0`'s labels in chips filled by label ("active", "blocked"; a
+faint default otherwise) with black or white text by contrast, `n1`'s
+values as links to a URL made of the value (opening in a new tab), and a
+symbol before `n3`'s text (a triangle over 1,000, a circle otherwise).
+Every cell still writes its value's text; missing values write only
+that. Each frame's check compares what every cell draws (a bar's ends, a
+chip's fill, a link's URL, a symbol's shape) with the reference's, read
+from the DOM for the DOM grids and from what drawing was given for
+Glide's canvas, so a grid still drawing an earlier row's content is not
+counted as showing the frame.
+
+| Grid | How it draws cells |
+| --- | --- |
+| Herceg | Columns' `cell` (`barCell`, `chipCell` with the label's colors through field displays, `symbolCell` with a condition on `encode.symbol`) and `n1`'s field display's `link`; the grid finds `n4`'s extent |
+| TanStack Table | Each column's `cell` renders a React component drawing the same DOM as AG Grid's renderers |
+| AG Grid | A `cellRenderer` component (`init`, `getGui`, and `refresh` writing the element in place) on each of the five columns |
+| Glide | Bubble cells (chips, filled through `themeOverride`), URI cells (links, opened in a new tab through `onClickUri`), and custom cells whose renderers draw bars and symbols with Glide's `drawTextCell` |
+
+The other grids find `n4`'s extent in adapter code when they mount
+(the scenarios do not stream), and draw bars, chips, and symbols with the
+same styles (`DOM_CELL_CSS`, or the canvas's equivalents).
+
 ### Memory
 
 Heap readings are the chart suite's, one fresh page per sample. Reserved

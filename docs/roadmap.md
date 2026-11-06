@@ -73,11 +73,10 @@ The long-term target covers the major chart families. Not yet available:
 ## Axes, legends, and layout
 
 - **Field displays everywhere.** Charts, layout marks, and grids read
-  `fields` ([Field displays](guide/fields.md)), marks take their colors
-  and thresholds, and pinned tooltips draw their links; next are grid
-  cells colored by display colors and drawing links, links of
-  fields holding whole URLs, and axes agreeing on their fields per subplot
-  rather than over the chart.
+  `fields` ([Field displays](guide/fields.md)), marks and grid cells take
+  their colors and thresholds, and pinned tooltips and grid cells draw
+  their links; next are links of fields holding whole URLs, and axes
+  agreeing on their fields per subplot rather than over the chart.
 - Animation of categories that come and go.
 - More than one axis per side, log color scales, legend scrolling, and
   colorbar handles.
@@ -87,7 +86,8 @@ The long-term target covers the major chart families. Not yet available:
 
 - Column groups (headers over several columns) beyond pivots, sizing
   columns to their content, and moving columns by touch.
-- Custom cell content, editing, and copying.
+- Custom cells in React, Vue, and Svelte, and sparkline cells.
+- Editing and copying.
 - Pivots and binned times in remote grids, a SQL generator for grid
   queries, and remote grids from Python.
 - Grid components for Vue and Svelte.

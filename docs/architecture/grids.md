@@ -92,8 +92,10 @@ The column list is the one record of the layout, keyed by column id.
 one entry or reorder the list; `model.columns` returns it for
 `setColumns`.
 
-- What a column shows (title, alignment, formatter, reader) is made when
-  columns are set and kept by the commands. Placing columns is one pass
+- What a column shows (title, alignment, formatter, reader, link, kind,
+  and the fields they read) is made when columns are set and kept by the
+  commands. A column without a field writes its `text` parts through
+  their fields' displays, and has a null field and kind in the layout. Placing columns is one pass
   (O(columns)), and the DOM grid sees by identity that no cell text needs
   writing when columns only move, resize, pin, or hide.
 - Shown columns are placed pinned left, unpinned, pinned right, each in the
@@ -227,6 +229,50 @@ row and a spacer as tall as the rows.
   as numbers, so they follow the page, at a higher style cost. Forced
   colors drop looks. Frames go through the shared scheduler; grids out of
   view wait.
+- **The cell host** (`dom/grid-cells.ts`) is what a cell element holds
+  besides its text: a linked cell's anchor, a kind's view
+  (`grid/cells.ts`), or a custom renderer's view in a host element. A
+  view belongs to the element while it shows its column: created when the
+  element is first given it, updated as it shows other rows (or its row's
+  version, look, selection, or index moves), and destroyed when the
+  element leaves the column, shows a row of another kind, the renderer is
+  replaced, or the grid goes. Cells of columns drawing text alone take
+  none of this path. Each update has an `AbortController`, and a reader of
+  its row's values bound to the record (`rowValues`: by identity in a
+  local table, by the window it arrived in for a remote grid), so a sort
+  before the next draw does not move what `read` reads; the reader goes
+  just before the signal aborts. Contexts copy a row's ref as `{ scope, id }`
+  (which `indexOf` still finds) and give a column's layout without what it
+  draws with, so contexts a renderer keeps hold no remote blocks, table,
+  grid, or model. A view that throws is reported once and its cell writes
+  its text. A draw a renderer asks for while one runs is the next frame's.
+  A renderer's `create`, `update`, `destroy`, or abort listener that
+  changes the model or destroys the grid stops the draw, and the next
+  frame writes every mounted cell again; a destroyed grid takes no
+  updates.
+- **Cell kinds** are descriptors (`barCell()`): a frozen portable `spec`,
+  and through a symbol-keyed property an implementation whose model part
+  checks the field's kind and binds what the kind reads of the rows (a
+  bar's domain, kept with a revision the DOM grid redraws mounted cells
+  by, `cellsRevision`), and whose DOM part, run only when a cell mounts,
+  reaches the page only through the element it is given. Chips' text
+  takes black or white as cells' text over fills does, over the chip on
+  the cell's fill, in plain and selected rows. A kind's
+  stylesheet, and the host's for links and renderers, are added to the
+  grid's root as the first such cell mounts, so grids without them match
+  none of their rules.
+- **Framework cells.** A renderer with `framework` is handed its cells in
+  each draw, after DOM renderers' updates and before the focus is placed:
+  at once in the grid's own frame and on the first draw, in the next
+  frame for draws called from code (a framework's render). Each cell shows
+  its text until the framework acknowledges that update's content
+  (`drawn`, by generation: an update superseded makes its acknowledgement
+  stale, and once the view goes one reaches nothing), and a focused cell's
+  controls are taken out of the tab order but the one its focus gives,
+  which takes the page's focus where the cell had it, unless the user has
+  taken it elsewhere. Every host a framework lets go of reaches it once:
+  destroying the grid hands each framework its hosts, those of batches
+  not yet handed too.
 - **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
   model's `GridRef`, taken before the click selects (listeners of the
   selection may move or restrict rows), and give its index after; Enter on
