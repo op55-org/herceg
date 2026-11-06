@@ -13,7 +13,7 @@ import { createPivotGridModel, type PivotGridModel } from "../../src/grid/pivot.
 
 /** The headings over the shown columns, as the DOM grid draws them. */
 const headings = <S extends Schema>(model: PivotGridModel<S>) =>
-  (model.columnLayout as readonly PlacedColumn[]).map(({ content }) => content.heading?.title);
+  (model.columnLayout as readonly PlacedColumn[]).map(({ headings }) => headings[0]?.title);
 
 /** Requests by region and service. */
 const requests = () =>

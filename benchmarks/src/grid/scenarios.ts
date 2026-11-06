@@ -59,6 +59,8 @@ export interface GridScenario {
    * holding state (react-cells.tsx) in each grid's React cells.
    */
   cells?: boolean | "react";
+  /** Grids show the summary scenarios' headings and totals row (summary.ts), its text checked in every frame. */
+  summary?: boolean;
   description: string;
 }
 
@@ -438,15 +440,78 @@ function cellsFor(name: SizeName, react = false): GridScenario[] {
   ];
 }
 
+/**
+ * Headings and a totals row at one size (summary.ts): mounted, scrolled,
+ * traced, and streamed through appends and a rolling window, each frame's
+ * totals checked with its text.
+ */
+function summaryFor(name: SizeName): GridScenario[] {
+  const size = SIZES[name];
+  const shape = `${size.rows.toLocaleString("en-US")} x ${size.groups * 20}`;
+  const big = size.rows >= 1_000_000;
+  const id = (suffix: string) => `grid-${name}-summary-${suffix}`;
+  const common = { sizeName: name, size, summary: true, timeout: big ? 900 : 300 };
+  const what = "with headings and a totals row";
+  const paced = { rateHz: 10, durationMs: 5000, samples: big ? 1 : 2, warmup: big ? 0 : 1 };
+  return [
+    {
+      ...common,
+      id: id("mount"),
+      operation: "mount",
+      samples: big ? 5 : 20,
+      warmup: big ? 1 : 3,
+      description: `${shape} ${what}: mount to the first correct frame`,
+    },
+    ...(["vertical", "diagonal"] as const).map((direction) => ({
+      ...common,
+      id: id(`scroll-${direction}`),
+      operation: "scroll" as const,
+      direction,
+      samples: big ? 10 : 40,
+      warmup: big ? 2 : 5,
+      description: `${shape} ${what}: ${direction} scroll steps of a screen`,
+    })),
+    {
+      ...common,
+      id: id("trace-vertical"),
+      operation: "scroll-trace",
+      direction: "vertical",
+      durationMs: 3000,
+      samples: big ? 1 : 2,
+      warmup: big ? 0 : 1,
+      description: `${shape} ${what}: 3 s of vertical scrolling, offsets set every frame`,
+    },
+    {
+      ...common,
+      ...paced,
+      id: id("append"),
+      operation: "append",
+      batch: 1000,
+      description: `${shape} ${what}: append 1,000 rows at 10 Hz`,
+    },
+    {
+      ...common,
+      ...paced,
+      id: id("append-rolling"),
+      operation: "append",
+      batch: 1000,
+      evict: true,
+      description: `${shape} ${what}: append 1,000 rows and evict the oldest 1,000 at 10 Hz`,
+    },
+  ];
+}
+
 export const GRID_SCENARIOS: GridScenario[] = [
   ...scenariosFor("10k", false),
   ...scenariosFor("100k", false),
   ...looksFor("100k"),
   ...cellsFor("100k"),
   ...cellsFor("100k", true),
+  ...summaryFor("100k"),
   ...scenariosFor("1m", true),
   ...looksFor("1m"),
   ...cellsFor("1m"),
   ...cellsFor("1m", true),
+  ...summaryFor("1m"),
   ...scenariosFor("1m-wide", true),
 ];

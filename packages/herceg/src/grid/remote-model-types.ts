@@ -1,15 +1,18 @@
 import type { GroupKey } from "../data/groups.ts";
-import type { Schema } from "../data/table.ts";
+import type { NumericField, Schema } from "../data/table.ts";
 import type { GridRef, GridSettings } from "./base.ts";
 import type { GridColumn } from "./columns.ts";
 import type { CellEncodings } from "./looks.ts";
-import type { GridQuery, GridQueryOf, RowKey } from "./query.ts";
+import type { GridAggregate, GridQuery, GridQueryOf, RowKey } from "./query.ts";
 import type { RemoteSelectionStore } from "./remote-selection.ts";
 import type { GridSource } from "./source.ts";
 
 /** A query as `setQuery` takes it: its version and source may be left out. */
 export type GridQueryInput<S extends Schema = Schema> = Omit<GridQueryOf<S>, "version" | "source"> &
   Partial<Pick<GridQuery, "version" | "source">>;
+
+/** A remote grid's total: an aggregate of a number or time field, as a query's groups take it. */
+export type RemoteTotal<S extends Schema = Schema> = GridAggregate<NumericField<S>>;
 
 export interface RemoteGridModelOptions<S extends Schema = Schema> extends GridSettings {
   /** Where the rows are; the application owns it. */
@@ -25,6 +28,13 @@ export interface RemoteGridModelOptions<S extends Schema = Schema> extends GridS
   columns: readonly GridColumn<S>[];
   /** How whole rows look, where a cell's column gives no look of its own (see `CellEncodings`). */
   encode?: CellEncodings<S> | undefined;
+  /**
+   * A totals row under the rows: these aggregates (as the query's groups
+   * take them, named by `as`) of every row the query keeps, asked of the
+   * source (`GridSource.totals`) for each snapshot; a column shows one by
+   * its `aggregate`. At least one; none (null) by default.
+   */
+  totals?: readonly RemoteTotal<S>[] | null | undefined;
   /** Where the selection goes; a store of the grid's own when left out. */
   selectionStore?: RemoteSelectionStore;
   /** The store's channel for the selection; "grid-rows" by default. */
@@ -97,13 +107,19 @@ export interface RemoteGridStatus {
   readonly starting: boolean;
   /** Blocks that failed, shown as failed rows until `retry`. */
   readonly failed: number;
-  /** The last failure, until `retry` or a new query. */
+  /**
+   * The source's word that the snapshot expired, until a refresh (`retry`
+   * refreshes), whatever failed after; else the last failure, until
+   * `retry` or a new query.
+   */
   readonly error: Error | null;
   /** Rows of the query (groups of its first level), or null while the source has not said. */
   readonly total: number | null;
   /** Blocks held, and their bytes. */
   readonly blocks: number;
   readonly bytes: number;
+  /** Where the totals row's totals are, while the grid has `totals`: asked for, answered, or failed; null without totals. */
+  readonly totals: "loading" | "loaded" | "failed" | null;
 }
 
 /** What the model said about a command it refused, counted so a renderer announces each once. */

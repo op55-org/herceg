@@ -31,14 +31,18 @@ import {
   type GridCellRead,
   type GridDisplay,
   type GridFocus,
+  type GridPresentation,
   type GridRef,
+  type GridTotalsRow,
   type LookPresentation,
   nextOrder,
   type SelectionState,
   type SelectMode,
+  totalsRow,
 } from "./base.ts";
 import { type CellBinding, drawsSymbols } from "./cells.ts";
 import {
+  aggregateWriter,
   type ColumnContent,
   checkKeys,
   columnId,
@@ -47,7 +51,6 @@ import {
   type GridColumn,
   keyFormatter,
   type PlacedColumn,
-  valueFormatter,
 } from "./columns.ts";
 import {
   type CellLook,
@@ -62,7 +65,9 @@ import {
   withEncodingsCopied,
 } from "./looks.ts";
 import {
+  aggregatesOf,
   expressionFields,
+  type GridAggregate,
   type GridQuery,
   type GridQueryOf,
   type GridSchema,
@@ -93,6 +98,7 @@ import type {
   RemoteGridModelOptions,
   RemoteGridRow,
   RemoteGridStatus,
+  RemoteTotal,
 } from "./remote-model-types.ts";
 import { bytesOf, later, ownColumns } from "./remote-requests.ts";
 import {
@@ -105,6 +111,7 @@ import {
 } from "./remote-selection.ts";
 import type { Block, List, RemoteSelection, Revision, Scope } from "./remote-types.ts";
 import {
+  checkTotals,
   checkWindow,
   decodeGroupPath,
   encodeGroupPath,
@@ -114,6 +121,7 @@ import {
   type LocateResult,
   type RowsRequest,
   type RowsWindow,
+  type TotalsRequest,
   type WindowRows,
   windowFields,
 } from "./source.ts";
@@ -124,7 +132,11 @@ export type {
   RemoteGridModelOptions,
   RemoteGridRow,
   RemoteGridStatus,
+  RemoteTotal,
 } from "./remote-model-types.ts";
+
+/** What a request dropped before it asked the source fails with; its handlers find it no longer wanted. */
+const DROPPED = new Error("Dropped before it was asked");
 
 /** A jump farther than this many blocks waits for scrolling to settle. */
 const JUMP = 2;
@@ -227,6 +239,51 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   #textQuery: GridQuery | null = null;
   #textWriters: ((block: Block, row: number, path: GroupKey) => string)[] | null = null;
   #looks: RemoteLooks | null = null;
+  /** The totals the totals row shows (null for none), and the source's answer for one revision's snapshot. */
+  #totals: readonly GridAggregate[] | null = null;
+  #totalsAsked: Asked | null = null;
+  /**
+   * The last failures of blocks and of the totals: the grid's last
+   * (`#error`) is one of them, and a totals failure gone with its totals
+   * gives the blocks' back.
+   */
+  #rowsError: Error | null = null;
+  #totalsError: Error | null = null;
+  #totalsVersion = 0;
+  readonly #totalsRow = totalsRow(this, {
+    key: () => `${this.#totalsVersion} ${this.#totalsState()} ${this.looksRevision}`,
+    state: () => this.#totalsState(),
+    totals: () => this.#totals,
+    writer: (column) => {
+      const aggregate = this.#totals!.find(({ as }) => as === column.content.aggregate);
+      if (!aggregate) return null;
+      const { op, field } = aggregate;
+      const kind = aggregateKind(aggregate, this.schema.fields as Record<string, string>);
+      return aggregateWriter(column, op, field, kind, this.settings);
+    },
+    read: (columnIndex) => {
+      const state = this.#totalsState();
+      if (state !== "loaded") return { state, value: undefined, kind: null };
+      const name = (this.columnLayout[columnIndex] as PlacedColumn).content.aggregate!;
+      const fields = this.#totalsAsked!.fields!;
+      const value = windowValue(fields, name, 0) as number | null;
+      const kind = fields.kind(name) as "number" | "time";
+      return missingValue(kind, value)
+        ? { state: "missing", value: null, kind }
+        : { state: "value", value, kind };
+    },
+    look: (columnIndex) => {
+      const fields = this.#totalsAsked?.fields;
+      const looks = this.#looks;
+      if (!fields || this.#totalsState() !== "loaded" || !looks?.any) return undefined;
+      let compiled = looks.blocks.get(fields);
+      if (!compiled) {
+        compiled = this.#blockLooks(looks, false, fields, this.#totals!);
+        looks.blocks.set(fields, compiled);
+      }
+      return lookOf(fields, 0, compiled.columns.get(this.columnLayout[columnIndex]!.id));
+    },
+  });
   /** What columns' cell kinds read, by column id: bars' ends, which remote grids are given. */
   #cells = new Map<string, CellBinding>();
   /** Fields custom renderers read, by the grid asking (`askFields`), and those columns' texts and links read. */
@@ -270,6 +327,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       0,
       this.blockSize,
     );
+    this.#totals = this.#checkTotals(this.presentation.totals, this.#revision.query);
     this.setColumns(options.columns);
     // Rows wanted are asked for once whatever changed has settled. Bound, not
     // an arrow: an arrow's `this` would be shared with the store's listener
@@ -312,14 +370,16 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   /** Asks again for the blocks that failed; after a snapshot expired, refreshes. */
   retry(): void {
     const revision = this.#revision;
-    if (revision.expired || (revision.snapshot === null && !revision.starting)) {
+    if (revision.expired !== null || (revision.snapshot === null && !revision.starting)) {
       this.refresh();
       return;
     }
     for (const list of revision.lists.values())
       for (const [index, block] of list.blocks)
         if (block.state === "failed") list.blocks.delete(index);
-    this.#error = null;
+    this.#error = this.#rowsError = this.#totalsError = null;
+    if (this.#totalsAsked?.state === "failed") this.#totalsAsked = null;
+    this.#askTotals();
     this.#changed();
   }
 
@@ -336,14 +396,17 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         }
       }
     const revision = this.#revision;
+    // An expired snapshot is the grid's failure until a refresh, whatever failed after.
+    const error = revision.expired ?? this.#error;
     return {
       loading: this.#loading,
-      starting: revision.snapshot === null && !this.#error,
+      starting: revision.snapshot === null && !error,
       failed,
-      error: this.#error,
+      error,
       total: revision.root.total,
       blocks,
       bytes,
+      totals: this.#totals && this.#totalsState(),
     };
   }
 
@@ -364,7 +427,13 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     // Encodings copied, so a caller's later changes reach looks only through `setColumns`.
     const given = (columns as unknown as readonly GridColumn[]).map(withEncodingsCopied);
     const contents = describeColumns(schemaFields(this.schema), given, this.settings);
-    const looks = this.#compileLooks(given, this.settings, this.presentation, this.#revision.query);
+    const looks = this.#compileLooks(
+      given,
+      this.settings,
+      this.presentation,
+      this.#revision.query,
+      this.#totals,
+    );
     this.#cells = bindCells(given, contents, this.settings);
     this.#looks = looks;
     this.#reads = readsOf(contents);
@@ -385,13 +454,23 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const contents = describeColumns(fields, columns, settings);
     // Group rows write keys of grouping fields no column shows too.
     checkKeys(fields, this.#revision.query.group?.by ?? [], settings);
-    const looks = this.#compileLooks(columns, settings, presentation, this.#revision.query);
+    // Totals given again are asked again only where what they ask changed.
+    let totals = this.#totals;
+    if (presentation.totals !== this.presentation.totals) {
+      const checked = this.#checkTotals(presentation.totals, this.#revision.query);
+      if (!sameTotals(checked, totals)) totals = checked;
+    }
+    const looks = this.#compileLooks(columns, settings, presentation, this.#revision.query, totals);
     const cells = bindCells(columns, contents, settings);
     return () => {
       this.#looks = looks;
       this.#cells = cells;
       this.#reads = readsOf(contents);
       this.#readFields();
+      if (totals !== this.#totals) {
+        this.#totals = totals;
+        this.#askTotals();
+      }
       this.takeColumns(this.columnList, contents);
     };
   }
@@ -410,7 +489,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const level = list.depth + 1;
     if (block?.state !== "loaded") {
       // Rows not asked for of an expired snapshot will not load either.
-      const failed = block ? block.state === "failed" : list.revision.expired;
+      const failed = block ? block.state === "failed" : list.revision.expired !== null;
       return {
         kind: "placeholder",
         ref,
@@ -476,7 +555,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     if (!column) throw new RangeError(`Column ${columnIndex} is not shown`);
     const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
     if (block?.state !== "loaded") {
-      const failed = block ? block.state === "failed" : list.revision.expired;
+      const failed = block ? block.state === "failed" : list.revision.expired !== null;
       return columnIndex > 0 ? "" : failed ? FAILED : LOADING;
     }
     const row = ordinal - block.index * this.blockSize;
@@ -525,7 +604,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       };
     };
     if (block?.state !== "loaded") {
-      const failed = block ? block.state === "failed" : list.revision.expired;
+      const failed = block ? block.state === "failed" : list.revision.expired !== null;
       return { ...cell(undefined, null), state: failed ? "failed" : "loading" };
     }
     const row = ordinal - block.index * this.blockSize;
@@ -561,6 +640,21 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     return kind === null || kind === "geometry"
       ? cell(undefined, null)
       : cell(windowValue(fields, name!, row), kind);
+  }
+
+  /**
+   * Changes how the grid presents its rows (see `BaseGridModel.update`),
+   * and its totals row: aggregates to ask the source for, or null to drop it.
+   */
+  override update(
+    options: GridPresentation<S> & { totals?: readonly RemoteTotal<S>[] | null | undefined },
+  ): void {
+    super.update(options);
+  }
+
+  /** The totals row while the grid has `totals`: their values from the source, of the query's snapshot. */
+  get totalsRow(): GridTotalsRow | null {
+    return this.#totals ? this.#totalsRow : null;
   }
 
   get hasLooks(): boolean {
@@ -887,10 +981,13 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     if (this.#disposed) return;
     this.#disposed = true;
     this.#forgetRestore();
+    this.#totals = null;
+    this.#askTotals();
     this.#stop();
     followers.unregister(this);
     this.#end(this.#revision);
-    for (const list of this.#revision.lists.values()) list.blocks.clear();
+    this.#error = this.#rowsError = this.#totalsError = null;
+    this.#counts = null;
     if (this.#deferred?.timer) clearTimeout(this.#deferred.timer);
     super.dispose();
   }
@@ -960,7 +1057,131 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     checkKeys(schemaFields(this.schema), query.group?.by ?? [], this.settings);
     // Columns' looks of group rows read the query's aggregates.
     if (this.#looks) this.#groupLooks(this.#looks, query);
+    if (this.#totals) this.#checkTotals(this.#totals, query);
     return query;
+  }
+
+  /**
+   * `given` as the totals of `query`'s rows, checked: aggregates the
+   * source answers, of its fields, none named as one of the query's groups'
+   * meaning another operation or field.
+   */
+  #checkTotals(given: unknown, query: GridQuery): readonly GridAggregate[] | null {
+    if (given === null || given === undefined) return null;
+    const at = `${this.settings.surface} totals`;
+    if (!this.source.totals)
+      throw new Error(
+        `${at}: the source answers no totals; give the source totals(request, signal), or drop totals`,
+      );
+    if (!Array.isArray(given) || given.length === 0)
+      throw new TypeError(
+        `${at}: expected aggregates such as [{ op: "count", as: "n" }], or null for no totals row; received ${JSON.stringify(given)}`,
+      );
+    let totals: GridAggregate[];
+    try {
+      totals = aggregatesOf(given, this.schema);
+    } catch (error) {
+      throw new TypeError(`${at}: ${(error as Error).message}`);
+    }
+    for (const { as, op, field } of totals) {
+      const other = query.group?.aggregate.find((one) => one.as === as);
+      if (other && (other.op !== op || other.field !== field))
+        throw new Error(
+          `${at}: "${as}" is ${op}(${field ?? ""}) in the totals and ${other.op}(${other.field ?? ""}) in the query's groups; make them one operation of one field`,
+        );
+    }
+    return Object.freeze(totals);
+  }
+
+  /** Where the totals of the query's snapshot are: asked for, answered, or failed. */
+  #totalsState(): "loading" | "loaded" | "failed" {
+    const asked = this.#totalsAsked;
+    return asked?.revision === this.#revision && asked.totals === this.#totals
+      ? asked.state
+      : this.#revision.expired !== null ||
+          (this.#error !== null && this.#revision.snapshot === null)
+        ? "failed"
+        : "loading";
+  }
+
+  /**
+   * Asks the source for the totals of the query's snapshot once it is
+   * named (by the first window) and they are not asked for already; a
+   * request for another revision or other totals is aborted, its answer
+   * dropped.
+   */
+  #askTotals() {
+    const revision = this.#revision;
+    const totals = this.#totals;
+    const asked = this.#totalsAsked;
+    if (asked && (asked.revision !== revision || asked.totals !== totals)) {
+      this.#totalsAsked = null;
+      this.#totalsVersion++;
+      // A failure of totals no longer asked for is no longer the grid's.
+      if (this.#error === this.#totalsError) this.#error = this.#rowsError;
+      this.#totalsError = null;
+      const { controller } = asked;
+      if (asked.state === "loading") later(() => controller.abort());
+    }
+    const snapshot = revision.snapshot;
+    // An expired snapshot has no totals to give; the rows' failure says so until a refresh.
+    if (
+      !totals ||
+      snapshot === null ||
+      revision.expired !== null ||
+      this.#totalsAsked ||
+      this.#disposed
+    )
+      return;
+    const request: TotalsRequest = {
+      query: revision.query,
+      revision: revision.number,
+      schemaVersion: this.schema.version,
+      snapshot,
+      aggregate: totals,
+    };
+    const read: Asked = {
+      revision,
+      totals,
+      state: "loading",
+      fields: null,
+      controller: new AbortController(),
+    };
+    this.#totalsAsked = read;
+    this.#totalsVersion++;
+    const fields = this.schema.fields as Record<string, string>;
+    Promise.resolve()
+      .then(() => {
+        // Asked a microtask later: not for totals replaced, a revision
+        // ended, or a grid disposed meanwhile (each drops the read), nor of
+        // a snapshot expired meanwhile.
+        if (this.#totalsAsked !== read) throw DROPPED;
+        if (revision.expired) throw revision.expired;
+        return this.source.totals!(request, read.controller.signal);
+      })
+      .then((answer) => {
+        if (this.#totalsAsked !== read) return;
+        checkTotals(answer, request);
+        const kinds: Record<string, string> = Object.create(null);
+        // Each total copied: an answer's arrays may view far larger buffers.
+        const owned: Record<string, Float64Array> = Object.create(null);
+        for (const aggregate of totals) {
+          kinds[aggregate.as] = aggregateKind(aggregate, fields);
+          owned[aggregate.as] = Float64Array.of(answer.columns[aggregate.as]![0]!);
+        }
+        read.fields = windowFields(kinds, owned);
+        read.state = "loaded";
+        this.#changed();
+      })
+      .catch((error) => {
+        if (this.#totalsAsked !== read) return;
+        read.state = "failed";
+        const failure = sourceError(error);
+        // An expired snapshot is the rows' failure too, kept until a refresh.
+        if (failure.code === "snapshot-expired") revision.expired ??= failure;
+        else this.#error = this.#totalsError = failure;
+        this.#changed();
+      });
   }
 
   /**
@@ -973,6 +1194,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     settings: FormatSettings,
     presentation: LookPresentation,
     query: GridQuery,
+    totals: readonly GridAggregate[] | null,
   ): RemoteLooks {
     const { surface } = settings;
     const kinds = schemaFields(this.schema);
@@ -1014,6 +1236,8 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       blocks: new WeakMap(),
     };
     this.#groupLooks(compiled, query);
+    // The totals row's looks read the totals, whose kinds are known before any answer.
+    if (totals) this.#aggregateLooks(compiled, this.#aggregateTable([], totals));
     // Remote domains are given, so the scales are read once: gradients' ramps.
     scales.update();
     return compiled;
@@ -1026,8 +1250,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
    */
   #groupLooks(looks: RemoteLooks, query: GridQuery) {
     const group = query.group;
-    if (!group) return;
-    const of = this.#groupTable(query, group.by.length - 1);
+    if (group) this.#aggregateLooks(looks, this.#aggregateTable(group.by, group.aggregate));
+  }
+
+  /** Compiles the columns' looks of group rows or the totals row against what those rows read, throwing where refused. */
+  #aggregateLooks(looks: RemoteLooks, of: LookTable) {
     looks.columns.forEach((column, i) => {
       compileEncodings(
         column.aggregateEncode,
@@ -1039,30 +1266,33 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     });
   }
 
-  /** What group rows of `depth` read, as looks compile against them: their grouping fields and aggregates. */
-  #groupTable(query: GridQuery, depth: number, table?: Fields): LookTable {
-    const group = query.group!;
+  /**
+   * What rows of aggregates read, as looks compile against them: group
+   * rows their grouping fields (`by`) and aggregates, the totals row its
+   * totals; a window's fields, or the source's kinds before one came.
+   */
+  #aggregateTable(
+    by: readonly string[],
+    aggregates: readonly GridAggregate[],
+    table?: Fields,
+  ): LookTable {
     const fields = this.schema.fields as Record<string, string>;
     const kinds: Record<string, string> = Object.create(null);
-    for (const field of group.by.slice(0, depth + 1)) kinds[field] = fields[field]!;
-    for (const aggregate of group.aggregate) kinds[aggregate.as] = aggregateKind(aggregate, fields);
-    const aggregates: NamedAggregate[] = group.aggregate.map(({ op, field, as }) => ({
-      name: as,
-      op,
-      field,
-    }));
+    for (const field of by) kinds[field] = fields[field]!;
+    for (const aggregate of aggregates) kinds[aggregate.as] = aggregateKind(aggregate, fields);
     return {
       table: table ?? schemaFields({ ...this.schema, fields: kinds } as unknown as GridSchema),
       rank: RANKS,
-      aggregates,
+      aggregates: named(aggregates),
     };
   }
 
-  /** The looks of a block's rows (`leaf`) or groups, compiled against its fields. */
+  /** The looks of a block's rows (`leaf`) or groups, or of the totals, compiled against its fields. */
   #blockLooks(
     looks: RemoteLooks,
     leaf: boolean,
     fields: Fields,
+    totals?: readonly GridAggregate[],
   ): { columns: Map<string, Look>; rows: Look | undefined } {
     const columns = new Map<string, Look>();
     const { settings } = looks;
@@ -1083,8 +1313,10 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       const rows = compileEncodings(looks.rows, records, settings, `${settings.surface} encode`);
       return { columns, rows };
     }
-    const query = this.#revision.query;
-    const of = this.#groupTable(query, query.group!.by.length - 1, fields);
+    const group = this.#revision.query.group!;
+    const of = totals
+      ? this.#aggregateTable([], totals, fields)
+      : this.#aggregateTable(group.by, group.aggregate, fields);
     looks.columns.forEach((column, i) => {
       const look = compileEncodings(
         column.aggregateEncode,
@@ -1103,7 +1335,9 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const old = this.#revision;
     const focus = this.focus;
     let restore: { key: RowKey; column: string } | null = null;
-    if (focus && focus.rowIndex >= 0) {
+    // A focus on the totals row stays there.
+    const totals = focus !== null && focus.rowIndex === this.rowCount;
+    if (focus && focus.rowIndex >= 0 && !totals) {
       const key = this.keyAt(focus.rowIndex);
       if (key !== null) restore = { key, column: focus.column };
     } else if (focus && this.#restore?.column === focus.column)
@@ -1125,7 +1359,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         ? { ...restore, revision, controller: new AbortController() }
         : null;
     this.rangeAnchor = null;
-    this.#error = null;
+    this.#error = this.#rowsError = this.#totalsError = null;
     this.#textLayout = null;
     this.#textQuery = null;
     this.#textWriters = null;
@@ -1136,16 +1370,25 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     // tells listeners itself.
     this.#end(old);
     if (this.#revision !== revision) return;
+    this.#askTotals();
     // Listeners hear of it once, all of it in place: the focus waits on the
     // header, its row not known in the new query.
-    if (focus && focus.rowIndex >= 0) super.focusCell(-1, focus.column, { reveal: false });
+    if (focus && focus.rowIndex >= 0 && !totals)
+      super.focusCell(-1, focus.column, { reveal: false });
     else this.notify();
   }
 
-  /** Aborts a revision's requests and releases its snapshot. */
+  /**
+   * Aborts a revision's requests, releases its snapshot, and lets go of
+   * what it read and how it failed, which requests the source has not
+   * settled still reach.
+   */
   #end(revision: Revision) {
-    for (const list of revision.lists.values())
+    for (const list of revision.lists.values()) {
       for (const block of list.blocks.values()) this.#abort(block);
+      list.blocks.clear();
+    }
+    revision.expired = null;
     const { snapshot } = revision;
     if (snapshot !== null) later(() => this.source.release?.(snapshot));
   }
@@ -1284,7 +1527,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const evicted = this.#evict();
     try {
       if (this.#defer(far, first, focus !== previousFocus)) return;
-      if (revision.expired || revision.starting) return;
+      if (revision.expired !== null || revision.starting) return;
       for (const { list, index } of wanted.values()) {
         if (this.#loading >= this.#maxRequests) break;
         if (list.blocks.has(index)) continue;
@@ -1373,7 +1616,13 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       fields: list.leaf ? this.#fields : [],
     };
     Promise.resolve()
-      .then(() => this.source.rows(request, controller.signal))
+      .then(() => {
+        // Asked a microtask later: not for a block no longer wanted (its
+        // handlers drop it), nor of a snapshot expired meanwhile.
+        if (!this.#current(block)) throw DROPPED;
+        if (revision.expired) throw revision.expired;
+        return this.source.rows(request, controller.signal);
+      })
       .then(
         (data) => this.#arrived(block, request, data),
         (error) => this.#failed(block, error),
@@ -1435,6 +1684,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       revision.snapshot = data.snapshot;
       revision.starting = false;
       this.#locate();
+      this.#askTotals();
     }
     if (data.total !== null) list.total = data.total;
     list.frontier = Math.max(list.frontier, data.offset + data.length);
@@ -1473,15 +1723,9 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     this.#loading--;
     block.controller = null;
     block.state = "failed";
-    const failure =
-      error instanceof GridSourceError
-        ? error
-        : new GridSourceError(
-            "unavailable",
-            error instanceof Error ? error.message : `The source failed: ${String(error)}`,
-          );
-    this.#error = failure;
-    if (failure.code === "snapshot-expired") revision.expired = true;
+    const failure = sourceError(error);
+    if (failure.code === "snapshot-expired") revision.expired ??= failure;
+    else this.#error = this.#rowsError = failure;
     if (revision.snapshot === null) revision.starting = false;
     // Failed blocks count against the cache too.
     this.#evict();
@@ -1503,7 +1747,12 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       key: restore.key,
     };
     Promise.resolve()
-      .then(() => locate.call(this.source, request, restore.controller.signal))
+      .then(() => {
+        // Asked a microtask later: not once the focus no longer waits on it,
+        // nor of a snapshot expired meanwhile.
+        if (this.#restore !== restore || this.#disposed || revision.expired) throw DROPPED;
+        return locate.call(this.source, request, restore.controller.signal);
+      })
       .then(
         (result) => {
           if (this.#restore !== restore || this.#disposed) return;
@@ -1708,11 +1957,14 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
             k <= parent.length ? value(block, row, parent, k, column.content.key) : "";
         const aggregate = group.aggregate.find(({ as }) => as === column.content.aggregate);
         if (!aggregate) return () => "";
-        const kind = aggregateKind(aggregate, fields) as "number" | "time";
-        const format =
-          aggregate.field === column.field && kind === column.kind && aggregate.op !== "count"
-            ? column.content.amount
-            : valueFormatter(kind, settings);
+        const { op, field } = aggregate;
+        const format = aggregateWriter(
+          column,
+          op,
+          field,
+          aggregateKind(aggregate, fields),
+          settings,
+        );
         return (block, row) => format((block.data!.columns[aggregate.as] as Float64Array)[row]!);
       },
     );
@@ -1892,3 +2144,39 @@ function windowValue(fields: Fields, field: string, row: number): number | strin
 }
 
 const followers = new FinalizationRegistry<() => void>((stop) => stop());
+
+/** A query's aggregates named as looks read them. */
+function named(aggregates: readonly GridAggregate[]): NamedAggregate[] {
+  return aggregates.map(({ op, field, as }) => ({ name: as, op, field }));
+}
+
+/** Whether two checked lists of totals ask the same of the source. */
+function sameTotals(
+  a: readonly GridAggregate[] | null,
+  b: readonly GridAggregate[] | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every(
+    (one, k) => one.as === b[k]!.as && one.op === b[k]!.op && one.field === b[k]!.field,
+  );
+}
+
+/** A failure as a `GridSourceError`: the source's own, or "unavailable". */
+function sourceError(error: unknown): GridSourceError {
+  return error instanceof GridSourceError
+    ? error
+    : new GridSourceError(
+        "unavailable",
+        error instanceof Error ? error.message : `The source failed: ${String(error)}`,
+      );
+}
+
+/** The totals asked of the source for a revision's snapshot, and its answer's fields once loaded. */
+interface Asked {
+  readonly revision: Revision;
+  readonly totals: readonly GridAggregate[];
+  state: "loading" | "loaded" | "failed";
+  fields: Fields | null;
+  readonly controller: AbortController;
+}

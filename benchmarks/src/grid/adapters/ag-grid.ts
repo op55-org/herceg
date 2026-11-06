@@ -16,13 +16,18 @@
 // documented vanilla form: `init`, `getGui`, and `refresh`, which updates
 // the element in place rather than letting the grid build another) drawing
 // cells.ts' bars, chips, links, and symbols; n4's bar's domain is adapter
-// code, found from the rows at mount.
+// code, found from the rows at mount. With the summary, columns sit in
+// column groups (two levels of group headers), and the totals row is a
+// pinned bottom row (`pinnedBottomRowData`) whose values adapter code keeps
+// (summary.ts' `TotalsTracker`: Community has no aggregation) and sets
+// again after each transaction.
 
 import {
   CellStyleModule,
   ClientSideRowModelApiModule,
   ClientSideRowModelModule,
   type ColDef,
+  type ColGroupDef,
   ColumnApiModule,
   createGrid,
   ExternalFilterModule,
@@ -32,6 +37,7 @@ import {
   type IRowNode,
   ModuleRegistry,
   NumberFilterModule,
+  PinnedRowModule,
   RowApiModule,
   RowSelectionModule,
   themeQuartz,
@@ -53,6 +59,7 @@ import {
 import { CELL_FIELDS, DOM_CELL_CSS, domContent, extentOf, fillDomCell } from "../cells.ts";
 import { formatValue, type GridTable } from "../fixture.ts";
 import { type CellLook, cellLook, LookTracker } from "../looks.ts";
+import { headingsOf, LABEL_FIELD, TotalsTracker, totalText } from "../summary.ts";
 
 ModuleRegistry.registerModules([
   CellStyleModule,
@@ -62,6 +69,7 @@ ModuleRegistry.registerModules([
   RowApiModule,
   NumberFilterModule,
   ExternalFilterModule,
+  PinnedRowModule,
   RowSelectionModule,
 ]);
 
@@ -166,7 +174,10 @@ function mount(
     suppressMovable: true,
     sortable: true,
     comparator: missingLast,
-    valueFormatter: (params) => formatValue(field.kind, params.value as Value),
+    valueFormatter: (params) =>
+      params.node?.rowPinned
+        ? totalText(field.name, params.value as number | undefined)
+        : formatValue(field.kind, params.value as Value),
     filter: field.kind === "number" ? "agNumberColumnFilter" : false,
     filterParams: { inRangeInclusive: true },
     ...(tracker && {
@@ -182,9 +193,13 @@ function mount(
         cellRendererParams: { field: field.name, extent },
       }),
   }));
+  const totals = options.summary ? new TotalsTracker(table) : undefined;
+  /** The totals row as a row object: each totalled field's total, and the label. */
+  const totalsRow = () => [{ id: -1, [LABEL_FIELD]: "Total", ...totals!.values } as RowObject];
   const api: GridApi<RowObject> = createGrid(container, {
     theme,
-    columnDefs,
+    columnDefs: totals ? grouped(columnDefs) : columnDefs,
+    ...(totals && { groupHeaderHeight: HEADER_HEIGHT, pinnedBottomRowData: totalsRow() }),
     rowData: input as RowObject[],
     getRowId: (params) => String(params.data.id),
     rowHeight: ROW_HEIGHT,
@@ -216,7 +231,9 @@ function mount(
       if (!viewport || !header || !rows) return undefined;
       const view = scrollport(viewport);
       view.top = header.getBoundingClientRect().bottom;
-      return readDomVisible({
+      const bottom = totals && container.querySelector(".ag-grid-pinned-bottom-rows");
+      if (bottom) view.bottom = bottom.getBoundingClientRect().top;
+      const shown = readDomVisible({
         count: Math.round(rows.getBoundingClientRect().height / ROW_HEIGHT),
         view,
         top: viewport.scrollTop,
@@ -230,6 +247,13 @@ function mount(
         ...(tracker && { look: styledLook }),
         ...(cells && { content: domContent }),
       });
+      if (bottom) {
+        const texts = new Map<string, string>();
+        for (const cell of bottom.querySelectorAll(".ag-cell"))
+          texts.set(cell.getAttribute("col-id")!, cell.textContent ?? "");
+        shown.totals = shown.columns.map((field) => texts.get(fields[field]!.name) ?? "");
+      }
+      return shown;
     },
     rowCount: () => api.getDisplayedRowCount(),
     order() {
@@ -282,6 +306,10 @@ function mount(
       api.applyTransaction({ add: rowObjects(batch), remove });
       // Cells already drawn keep their style until refreshed.
       if (tracker && tracker.revision !== revision) api.refreshCells({ force: true });
+      if (totals) {
+        totals.append(batch, evict);
+        api.setGridOption("pinnedBottomRowData", totalsRow());
+      }
     },
     update(field, ids, values) {
       const name = fields[field]!.name;
@@ -302,6 +330,26 @@ function mount(
     selectedIds: () => api.getSelectedNodes().map((node) => node.data!.id),
     destroy: () => api.destroy(),
   };
+}
+
+/** Columns in two levels of column groups, as the summary's headings place them. */
+function grouped(columns: ColDef<RowObject>[]): ColGroupDef<RowObject>[] {
+  const parts: ColGroupDef<RowObject>[] = [];
+  columns.forEach((column, f) => {
+    const [part, half] = headingsOf(f);
+    let top = parts.at(-1);
+    if (top?.headerName !== part) {
+      top = { headerName: part, groupId: part, children: [] };
+      parts.push(top);
+    }
+    let below = top.children.at(-1) as ColGroupDef<RowObject> | undefined;
+    if (below?.headerName !== half) {
+      below = { headerName: half, groupId: half, children: [] };
+      top.children.push(below);
+    }
+    below.children.push(column);
+  });
+  return parts;
 }
 
 export const adapter: Adapter = {

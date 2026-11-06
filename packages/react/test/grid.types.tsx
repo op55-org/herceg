@@ -1,5 +1,5 @@
 // Compile-time tests of <Grid>: checked by `npm run typecheck`, never executed.
-import { count, rowView, table } from "herceg";
+import { count, rowTotals, rowView, table } from "herceg";
 import { createGridModel, type Grid as HercegGrid } from "herceg/grid";
 import { createPivotGridModel, type PivotGrid as PivotGridHandle } from "herceg/grid/pivot";
 import {
@@ -142,4 +142,39 @@ export function Pivot() {
       <PivotGrid model={model} ariaLabel="Requests by host" cells={{}} />
     </>
   );
+}
+
+// Totals rows and headings are the model's: <Grid> draws what the model holds.
+export function Totals() {
+  const view = useMemo(() => rowView(requests), []);
+  const totals = useMemo(() => rowTotals(view, { ops: { n: count() } }), [view]);
+  const model = useMemo(
+    () =>
+      createGridModel({
+        data: view,
+        totals,
+        columns: [
+          { field: "host", heading: "Who" },
+          { field: "latency", heading: ["Speed", { id: "p", title: "Latency" }], aggregate: "n" },
+        ],
+      }),
+    [view, totals],
+  );
+  return <Grid model={model} ariaLabel="Requests" />;
+}
+
+export function WrongTotal() {
+  const view = useMemo(() => rowView(requests), []);
+  const totals = useMemo(() => rowTotals(view, { ops: { n: count() } }), [view]);
+  const model = useMemo(
+    () =>
+      createGridModel({
+        data: view,
+        totals,
+        // @ts-expect-error the totals have no "p95"
+        columns: [{ field: "latency", aggregate: "p95" }],
+      }),
+    [view, totals],
+  );
+  return <Grid model={model} ariaLabel="Requests" />;
 }

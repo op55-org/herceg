@@ -8,6 +8,7 @@ DOM, and loads remote rows. For using grids, see the
 - [Columns](#columns)
 - [Grouped rows](#grouped-rows)
 - [Pivots](#pivots)
+- [Headings and the totals row](#headings-and-the-totals-row)
 - [Selection](#selection)
 - [The DOM grid](#the-dom-grid)
 - [Remote grids](#remote-grids)
@@ -152,6 +153,39 @@ of it.
   edge, so values parted by pinning get a header each. Only headers over
   mounted columns are mounted, with logical `aria-colindex` and
   `aria-colspan`.
+
+## Headings and the totals row
+
+**Headings** are part of a column's description (`heading`: a title,
+`{ id, title }`, or a path of them from the top), checked as columns are
+set: one id has one title at a level across the list. Headers over them
+are runs of adjacent shown columns whose paths agree by id at that level
+and every level above, found over every shown column, so the header rows
+do not change as the grid scrolls (`dom/grid-headings.ts`). A column moved
+out of its run, or held at an edge apart from its neighbors, has a header
+of its own. Only headers over mounted columns are mounted, with logical
+`aria-colindex` and `aria-colspan`, and the rows count in `aria-rowcount`.
+Columns' own headers are named with their headings ("Latency, p99").
+
+**The totals row** is one reader shared by the local and remote models
+(`totalsRow` in `grid/base.ts`): given where totals come from (a
+`TotalsSource`: a key that moves with them and with looks, their state, a
+writer per column, a value and a look per column), it gives the row's
+`version`, state, and each cell's text and look, keeping a writer per
+column for one layout and set of totals. "Total" goes in the first shown
+column without a total, so it moves as columns move, pin, or hide. A local
+grid's totals are `rowTotals` of its view, or the grand total of its
+groups (their own one-group level, never a sum of groups' sums); a pivot's
+are its totals row. Looks come from `aggregateEncode` compiled against the
+totals' table, as group rows' do; a pivot's totals row reads each value's
+column's totals through a table per value that holds the pivot field, so
+its rules match the cells above, and its fills join the domains of the
+cells above. The DOM grid draws the row in a footer rowgroup, sticky at
+the bottom of the scroller, through the same cell writer as body and group
+rows, rewriting cells only when the row's version, the columns, or the
+theme move. Its `aria-rowindex` follows the rows once their count is
+known. Focus moves to it and back like any row and stays on it as rows
+stream; it is never selected.
 
 ## Selection
 
@@ -366,7 +400,13 @@ wait. The first request of a revision goes alone, so the rest ask for its
 snapshot. The cache keeps wanted blocks plus 16 (and 8 MiB), dropping the
 farthest first, never a mounted block. The model calls the source only in a
 microtask after a command, so neither listeners nor the source ever see a
-command half done.
+command half done, and checks again when the microtask comes: a block,
+totals, or locate no longer wanted (a revision ended, totals replaced, a
+model disposed) is not asked for, and one of a snapshot expired meanwhile
+fails as the snapshot's. Ending a revision (a new query, a refresh,
+`dispose`) aborts its requests, releases its snapshot, and lets go of its
+blocks and its expiry, so requests the source never settles hold nothing
+it read.
 
 **New queries** start a new snapshot and release the old one; the focus
 goes to its column's header and back to its record once a source with
@@ -378,6 +418,23 @@ Select-all captures the query's filter; a group header selects rows
 matching its key path (`groupCondition`). Otherwise a group's state is
 counted from records loaded now, claiming "all" only when every record is
 loaded and selected.
+
+**Totals.** A remote model with `totals` asks the source for them
+(`GridSource.totals`, given the query and the snapshot) after each
+snapshot's first answer, and again with a new snapshot; answers are
+checked against the request (`checkTotals`: its revision and snapshot,
+one value per aggregate), copied (an answer's arrays may view larger
+buffers), and dropped when no longer current. While they load or after
+they failed, the row's cells are empty and the row says so
+(`status.totals`, `data-state`, `aria-busy`); a failure of the totals
+alone is announced as theirs, goes with the totals replaced or dropped
+(giving back the rows' last failure), and `retry()` asks again. An expired snapshot, whichever request found
+it, is kept on its revision apart from other failures: it is the grid's
+error (`status.error`) until a refresh, whatever fails after, and no
+totals are asked of it. A source without `totals` makes the option fail as
+it is given. Looks are checked against the totals' kinds when columns,
+totals, or scales are given, and compile against each answer as group
+rows' compile against each window.
 
 **The reference source** (`grid/memory.ts`) runs queries with the local
 grid's row views and groups, a snapshot being a view of the table that

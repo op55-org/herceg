@@ -9,7 +9,8 @@
 import type { Schema } from "../data/table.ts";
 import type { ShownRow } from "../grid/base.ts";
 import type { RemoteGridModel, RemoteGridRow, RemoteGridStatus } from "../grid/remote.ts";
-import { Grid, type GridExtras, type GridOptions, setAttribute } from "./grid.ts";
+import { Grid, type GridExtras, type GridOptions } from "./grid.ts";
+import { setAttribute } from "./grid-place.ts";
 
 export interface RemoteGridOptions<S extends Schema = Schema>
   extends Omit<GridOptions<S, RemoteGridModel<S>>, "model"> {
@@ -70,11 +71,14 @@ class LoadingRows implements GridExtras {
       // view (the grid shows its focused cell when it gets the focus), moved
       // before trying again. A refresh takes the focus to the header and back
       // to its record, so its row stays; a header's focus may be waiting to
-      // go back to its record, so it is left alone.
+      // go back to its record, and the totals row is always in view, so
+      // both are left alone.
       const focus = model.focus;
       const refreshing =
         (model.status.error as { code?: string } | null)?.code === "snapshot-expired";
-      if (focus && focus.rowIndex >= 0) {
+      const totals =
+        focus !== null && model.totalsRow !== null && focus.rowIndex === model.rowCount;
+      if (focus && focus.rowIndex >= 0 && !totals) {
         const height = model.rowHeight;
         const first = Math.min(model.rowCount - 1, Math.ceil(model.top / height));
         const last = Math.floor((model.top + model.viewportHeight) / height) - 1;
@@ -125,7 +129,7 @@ class LoadingRows implements GridExtras {
     this.#show(status, scroller);
     const said = this.#said;
     if (status.error && status.error !== said.error)
-      say(`Rows could not load: ${status.error.message}`);
+      say(`${totalsAlone(status) ? "Totals" : "Rows"} could not load: ${status.error.message}`);
     const message = model.message;
     if (message && message.count !== said.message) say(message.text);
     this.#said = { error: status.error, message: message?.count ?? 0 };
@@ -136,7 +140,8 @@ class LoadingRows implements GridExtras {
    * over them, with a button to try again (to refresh, past an expired
    * snapshot); none for refusals trying again cannot change.
    */
-  #show({ error, failed }: RemoteGridStatus, scroller: HTMLElement) {
+  #show(status: RemoteGridStatus, scroller: HTMLElement) {
+    const { error, failed } = status;
     const shown = error !== null || failed > 0;
     this.#notice.hidden = !shown;
     const code = (error as { code?: string } | null)?.code;
@@ -148,7 +153,9 @@ class LoadingRows implements GridExtras {
         ? "The rows changed where they live. "
         : final
           ? `The source refused the query: ${error!.message}`
-          : "Some rows could not load. ";
+          : totalsAlone(status)
+            ? "The totals could not load. "
+            : "Some rows could not load. ";
     if (this.#text.data !== text) this.#text.data = text;
     this.#button.hidden = final;
     const label = code === "snapshot-expired" ? "Refresh" : "Try again";
@@ -167,6 +174,11 @@ class LoadingRows implements GridExtras {
     this.#room = height;
     scroller.style.bottom = height > 0 ? `${height}px` : "";
   }
+}
+
+/** Whether the totals failed to load, and no rows. */
+function totalsAlone({ failed, totals }: RemoteGridStatus): boolean {
+  return failed === 0 && totals === "failed";
 }
 
 /**

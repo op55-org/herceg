@@ -177,4 +177,61 @@ describe("grid source conformance", () => {
       ),
     ).toBe(true);
   });
+
+  it("checks totals where a source answers them, and skips them where it does not", async () => {
+    const totalsSteps = GRID_SOURCE_FIXTURES.flatMap(({ steps }) =>
+      steps.filter((step) => "totals" in step),
+    ).length;
+    expect(totalsSteps).toBeGreaterThanOrEqual(4);
+    // Without the method: skipped.
+    const rowsOnly: ConformanceDriver = {
+      ...memory,
+      async install(fixture) {
+        const source = (await memory.install(fixture)) as MemorySource;
+        const wrapper: GridSource = {
+          schema: source.schema,
+          rows: (request, signal) => source.rows(request, signal),
+        };
+        tables.set(wrapper, tables.get(source)!);
+        return wrapper;
+      },
+      remove: () => {},
+    };
+    const skipping = await checkGridSource(rowsOnly);
+    expect(skipping.failures).toEqual([]);
+    expect(skipping.skipped).toBe(totalsSteps);
+    // Infinities summed, and an answer of another snapshot: caught.
+    const wrong = (
+      change: (columns: Record<string, Float64Array>) => object,
+    ): ConformanceDriver => ({
+      ...memory,
+      async install(fixture) {
+        const source = (await memory.install(fixture)) as MemorySource;
+        const wrapper: GridSource = {
+          schema: source.schema,
+          rows: (request, signal) => source.rows(request, signal),
+          totals: async (request, signal) => {
+            const answer = await source.totals(request, signal);
+            return { ...answer, ...change(answer.columns as Record<string, Float64Array>) };
+          },
+        };
+        tables.set(wrapper, tables.get(source)!);
+        return wrapper;
+      },
+      remove: () => {},
+    });
+    const infinite = await checkGridSource(
+      wrong((columns) =>
+        columns.sum
+          ? { columns: { ...columns, sum: Float64Array.of(Number.POSITIVE_INFINITY) } }
+          : {},
+      ),
+    );
+    expect(infinite.failures.some(({ problem }) => /totals are/.test(problem))).toBe(true);
+    const elsewhere = await checkGridSource(wrong(() => ({ snapshot: "other" })));
+    // Every totals step but the one after an insert, whose snapshot expired.
+    expect(
+      elsewhere.failures.filter(({ problem }) => /another snapshot/.test(problem)),
+    ).toHaveLength(totalsSteps - 1);
+  });
 });

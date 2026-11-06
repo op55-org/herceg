@@ -9,6 +9,7 @@ export {
   type PivotLimits,
   type PivotOptions,
   type PivotSnapshot,
+  type PivotTotalsOptions,
   type PivotValue,
   pivotRows,
   RowPivot,

@@ -8,7 +8,7 @@
 // computed again exactly, as are minimums and maximums whose value left.
 
 import type { ColumnInput, NumericArray } from "./column.ts";
-import type { GroupKey, GroupOp } from "./groups.ts";
+import type { GroupAggregate, GroupKey, GroupOp, NamedAggregate } from "./groups.ts";
 import { Table, type TableChange } from "./table.ts";
 
 /** An aggregate as levels compute it: `field` is the index of its values among those read, -1 for none. */
@@ -16,6 +16,63 @@ export interface LevelAggregate {
   readonly name: string;
   readonly op: GroupOp;
   readonly field: number;
+}
+
+/** Aggregates checked against their table: what levels compute and read. */
+export interface CheckedAggregates {
+  readonly aggregates: readonly NamedAggregate[];
+  /** The fields they read, each once. */
+  readonly read: readonly string[];
+  /** Those whose values are times. */
+  readonly times: ReadonlySet<string>;
+  readonly leveled: readonly LevelAggregate[];
+}
+
+/**
+ * Checks aggregates by name (`ops`, named `at` in messages) against
+ * `source`'s fields: operations groups compute, of number or time fields,
+ * none named as a grouping field of `by`.
+ */
+export function checkAggregates(
+  source: Table,
+  ops: Readonly<Record<string, GroupAggregate>>,
+  at: string,
+  by: readonly string[] = [],
+): CheckedAggregates {
+  const aggregates = Object.entries(ops).map(([name, { op, field }]) => {
+    const where = `${at}.${name}`;
+    if (by.includes(name))
+      throw new Error(`${where}: an aggregate cannot have the name of a grouping field; rename it`);
+    if (!["count", "sum", "mean", "min", "max"].includes(op))
+      throw new TypeError(`${where}: no operation "${op}"; give count, sum, mean, min, or max`);
+    if (field === undefined) {
+      if (op !== "count") throw new TypeError(`${where}: ${op} needs a field`);
+    } else {
+      if (!source.has(field)) throw new Error(`${where}: unknown field "${field}"`);
+      const kind = source.kind(field);
+      if (kind !== "number" && kind !== "time")
+        throw new TypeError(`${where}: field "${field}" is a ${kind}, not numbers`);
+    }
+    return Object.freeze({ name, op, field });
+  });
+  const read = [
+    ...new Set(aggregates.flatMap(({ field }) => (field === undefined ? [] : [field]))),
+  ];
+  return {
+    aggregates: Object.freeze(aggregates),
+    read,
+    times: new Set(
+      aggregates
+        .filter(({ op, field }) => op !== "count" && op !== "sum" && field !== undefined)
+        .filter(({ field }) => source.kind(field!) === "time")
+        .map(({ name }) => name),
+    ),
+    leveled: aggregates.map(({ name, op, field }) => ({
+      name,
+      op,
+      field: field === undefined ? -1 : read.indexOf(field),
+    })),
+  };
 }
 
 /**
@@ -260,10 +317,15 @@ export class GroupLevel {
   /**
    * Computes again what taking rows away cannot keep of a group: its
    * minimums and maximums, and sums that lost their accuracy (exactly) or
-   * overflowed, from its rows at `positions` (in table order, as a
-   * computation from scratch adds them).
+   * overflowed, from its `length` rows at `positions` (in table order, as a
+   * computation from scratch adds them; every row from the first without).
    */
-  recompute(group: number, positions: Uint32Array, columns: readonly ArrayLike<number>[]) {
+  recompute(
+    group: number,
+    columns: readonly ArrayLike<number>[],
+    positions: Uint32Array | undefined,
+    length: number,
+  ) {
     this.aggregates.forEach(({ op, field }, k) => {
       if (field < 0) return;
       const values = columns[field]!;
@@ -271,8 +333,8 @@ export class GroupLevel {
       if (op === "min" || op === "max") {
         const lower = op === "min";
         let extreme = Number.NaN;
-        for (const position of positions) {
-          const value = values[position]!;
+        for (let i = 0; i < length; i++) {
+          const value = values[positions ? positions[i]! : i]!;
           if (!Number.isFinite(value)) continue;
           if (Number.isNaN(extreme) || (lower ? value < extreme : value > extreme)) extreme = value;
         }
@@ -281,8 +343,8 @@ export class GroupLevel {
         const [low, error] = [this.low[k]!, this.error[k]!];
         if (accurate(running, low, error, group, false)) return;
         const sum = new ExactSum();
-        for (const position of positions) {
-          const value = values[position]!;
+        for (let i = 0; i < length; i++) {
+          const value = values[positions ? positions[i]! : i]!;
           if (Number.isFinite(value)) sum.add(value);
         }
         sum.write(running, low, error, group);
@@ -427,10 +489,11 @@ export class GroupLevel {
 
   /**
    * Adds the aggregates of `child`'s groups to their parents here: of every
-   * child, or with `only`, of children of the groups `only` marks.
+   * child, or with `only`, of children of the groups `only` marks. Parents
+   * are the child level's own, or `parents` by child (a pivot's totals row
+   * folds its combinations by their pivot values).
    */
-  fold(child: GroupLevel, only: Uint8Array | null) {
-    const parents = child.parents;
+  fold(child: GroupLevel, only: Uint8Array | null, parents: Int32Array = child.parents) {
     for (let c = 0; c < child.count; c++) {
       const group = parents[c]!;
       if (only && !only[group]) continue;

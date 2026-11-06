@@ -367,7 +367,9 @@ describe("grouped grids", () => {
     // The focused row keeps the focus.
     expect(model.focus!.rowIndex).toBe(model.rowIndexOf(model.identityAt(model.focus!.rowIndex)));
     expect(model.textAt(model.focus!.rowIndex, 0)).toBe("2");
-    expect(() => model.setGroups(groupRows(rowView(t), { by: ["host"] }))).toThrow(/of its view/);
+    expect(() => model.setGroups(groupRows(rowView(t), { by: ["host"] }))).toThrow(
+      /grid groups: expected groupRows\(data, \{ by, ops \}\) of the grid.s view/,
+    );
     expect(() =>
       createGridModel({
         data: view,
@@ -375,7 +377,7 @@ describe("grouped grids", () => {
         // @ts-expect-error The groups have no aggregates: Type 'string' is not assignable to type 'never'.
         columns: [{ field: "ms", aggregate: "nope" }],
       }),
-    ).toThrow(/"ms" shows "nope", which the groups lack/);
+    ).toThrow('grid columns[0].aggregate: no aggregate "nope" in the groups; they have none');
     // Aggregates are ignored without groups.
     expect(() =>
       createGridModel({ data: view, columns: [{ field: "ms", aggregate: "nope" }] }),

@@ -502,6 +502,34 @@ checks are the cells scenarios'.
 Herceg without React (`herceg`) draws custom cells with DOM renderers
 and is not run in these scenarios.
 
+### Headings and totals
+
+`summary` scenarios (100,000 x 20 and 1,000,000 x 20: mount, vertical and
+diagonal scroll steps, the vertical trace, and the plain and rolling
+appends) show two levels of headings over the columns and a totals row
+under the rows (`src/grid/summary.ts`): "Part g" over each run of 20
+fields and "Half h" over each run of 10; `n1`'s sum, `n2`'s minimum, `n3`'s
+maximum, the row count under `n4`, `n7`'s mean, and `n9`'s sum, with
+"Total" under `c0`. Sums and means are of integers, so every grid's are
+exact in any order. Each frame's check compares the totals row's text in
+the columns shown with the reference's, so a grid that has not followed an
+append is not counted as showing the frame; the header rows push the rows
+down, and the check reads rows below them. Headings are configured alike
+but their text is not checked per frame.
+
+| Grid | How it shows headings and totals |
+| --- | --- |
+| Herceg | Columns' `heading` (a path of two); `rowTotals` of the view as the model's `totals`, which follows appends and drops |
+| TanStack Table | Nested column definitions (header groups, each row positioned absolutely as the header is); a sticky `tfoot` row whose cells write totals kept in adapter code |
+| AG Grid | `ColGroupDef` children two levels deep; a pinned bottom row (`pinnedBottomRowData`, `PinnedRowModule`) of totals kept in adapter code, set again after each transaction |
+| Glide | Not run: its column groups are one level (`group`) |
+
+AG Grid Community and TanStack Table have no totals of their own (AG Grid's
+grand total row comes with Enterprise row grouping), so their totals are
+kept in adapter code (`TotalsTracker`): counts and sums follow each batch
+appended and evicted, and an extreme leaving the window is found again
+from the rows held, as Herceg's are.
+
 ### Memory
 
 Heap readings are the chart suite's, one fresh page per sample. Reserved
@@ -533,8 +561,8 @@ Each adapter documents its configuration at the top of its file.
   synchronous path, one batch per tick.
 - Herceg is measured from source at the current commit; competitors are
   pinned in `package.json`.
-- Not measured: grouping, aggregation, and pivots (AG Grid's are
-  Enterprise), rendering a prepared result on its own, a grid linked to a
+- Not measured: grouping, aggregation other than the totals row, and
+  pivots (AG Grid's are Enterprise), rendering a prepared result on its own, a grid linked to a
   chart, a high-cardinality category stress case, keyboard and screen
   reader behavior, and grid bundle sizes against other grids. Committed
   results use one data seed (`--seed`) and device pixel ratio 1 (`--dpr`).

@@ -5,9 +5,10 @@ import { count, max, mean, median, min, sum } from "../../src/data/aggregations.
 import { category, time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { type GroupKey, groupRows, type RowGroups } from "../../src/data/groups.ts";
-import { rowView } from "../../src/data/row-view.ts";
+import { type RowView, rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";
 import { type Schema, Table, table } from "../../src/data/table.ts";
+import { rowTotals } from "../../src/data/totals.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid, type Grid } from "../../src/dom/grid.ts";
 import { compileFields } from "../../src/fields.ts";
@@ -16,6 +17,7 @@ import {
   createGridModel,
   type GridColumn,
   type GridModel,
+  type GridModelOptions,
   type SparklineOptions,
   type SparklineRead,
   sparklineCell,
@@ -466,4 +468,35 @@ focusFirst(grid);
   // @ts-expect-error a key the data lacks
   const wrong: SparklineOptions<Log, "owner"> = shared;
   void wrong;
+}
+
+// Totals of a view's rows: a totals row's aggregates, typed as groups' are.
+{
+  const view = rowView(table({ host: category(["a", "b"]), latency: [1, 2] }));
+  const totals = rowTotals(view, { ops: { n: count(), slow: max("latency") } });
+  createGridModel({ data: view, totals, columns: [{ field: "latency", aggregate: "slow" }] });
+  // @ts-expect-error the totals have no "p95"
+  createGridModel({ data: view, totals, columns: [{ field: "latency", aggregate: "p95" }] });
+  const groups = groupRows(view, { by: ["host"], ops: { avg: mean("latency") } });
+  // Groups and totals together: a column names an aggregate of either.
+  createGridModel({
+    data: view,
+    groups,
+    totals,
+    columns: [
+      { field: "host" },
+      { field: "latency", aggregate: "avg", aggregateEncode: { fill: { field: "slow" } } },
+      { field: "latency", id: "n", aggregate: "n" },
+    ],
+  });
+  // @ts-expect-error a grouping field is no aggregate, of the totals either
+  createGridModel({ data: view, groups, totals, columns: [{ field: "host", aggregate: "host" }] });
+  // Options annotated without their groups' or totals' types take any, checked at run time.
+  const annotated: GridModelOptions<typeof view extends RowView<infer S> ? S : never> = {
+    data: view,
+    groups: groupRows(view, { by: ["host"], ops: { avg: mean("latency") } }),
+    totals,
+    columns: [{ field: "latency", aggregate: "anything" }],
+  };
+  createGridModel(annotated);
 }

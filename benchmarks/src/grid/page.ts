@@ -67,6 +67,7 @@ export function expectation(
     ...(extent && {
       content: (id: number, field: number) => reference.content(id, field, extent),
     }),
+    ...(reference.summary && { totals: reference.totalTexts() }),
     top,
     left,
   };
@@ -129,6 +130,7 @@ export async function mount(
   const handle = await adapter.mount(element, table, input, {
     looks: reference.looks,
     cells: reference.cells,
+    summary: reference.summary,
   });
   await untilCorrect(handle, expectation(reference, null), performance.now());
   return {

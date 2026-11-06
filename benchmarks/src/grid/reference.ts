@@ -31,6 +31,7 @@ import {
   ROW_FILL,
   sameColor,
 } from "./looks.ts";
+import { LABEL, LABEL_FIELD, TOTALS, totalText } from "./summary.ts";
 
 type Value = number | string | undefined;
 
@@ -63,10 +64,13 @@ export class Reference {
    * are then checked for; "react": drawn by React components (react-cells.tsx).
    */
   readonly cells: boolean | "react";
+  /** Whether grids show the summary scenarios' totals row (summary.ts), which frames are then checked for. */
+  readonly summary: boolean;
 
-  constructor(table: GridTable, looks = false, cells: boolean | "react" = false) {
+  constructor(table: GridTable, looks = false, cells: boolean | "react" = false, summary = false) {
     this.looks = looks;
     this.cells = cells;
+    this.summary = summary;
     this.fields = table.fields;
     this.chunks.push(table);
     this.overrides = table.fields.map(() => new Map());
@@ -125,6 +129,38 @@ export class Reference {
     return formatValue(this.fields[field]!.kind, missing(value) ? undefined : value);
   }
 
+  /**
+   * The totals row's text under each field (summary.ts' totals over every
+   * live row), worked out from the rows on its own; scanned again whenever
+   * the rows change.
+   */
+  totalTexts(): string[] {
+    const key = `${this.start} ${this.end} ${this.#updates}`;
+    if (this.#totals?.key === key) return this.#totals.texts;
+    const texts = this.fields.map((field, f) => {
+      if (field.name === LABEL_FIELD) return LABEL;
+      const op = TOTALS[field.name];
+      if (!op) return "";
+      if (op === "count") return totalText(field.name, this.length);
+      let sum = 0;
+      let n = 0;
+      let extreme = Number.NaN;
+      for (let id = this.start; id < this.end; id++) {
+        const value = this.value(id, f) as number;
+        if (Number.isNaN(value)) continue;
+        sum += value;
+        n++;
+        if (Number.isNaN(extreme) || (op === "min" ? value < extreme : value > extreme))
+          extreme = value;
+      }
+      const total = op === "sum" ? sum : op === "mean" ? (n > 0 ? sum / n : Number.NaN) : extreme;
+      return totalText(field.name, total);
+    });
+    this.#totals = { key, texts };
+    return texts;
+  }
+
+  #totals: { key: string; texts: string[] } | undefined;
   #domain: { key: string; domain: LookDomain } | undefined;
   /** Counts updates, which may move the looks' domain. */
   #updates = 0;
@@ -338,6 +374,8 @@ export interface Expected {
   look?: (id: number, field: number) => CellLook | undefined;
   /** What cells draw beyond their text, when the scenario draws them. */
   content?: (id: number, field: number) => CellContent | undefined;
+  /** The totals row's text under each field, when the scenario shows one. */
+  totals?: readonly string[];
   /** Requested scroll offsets; grids clamp them at the end of the content. */
   top: number;
   left: number;
@@ -384,6 +422,13 @@ export function verifyVisible(
   const columns = lastColumn - firstColumn + 1;
   if (v.columns.length !== columns || v.columns.some((field, c) => field !== firstColumn + c))
     return `shows columns ${v.columns.join(",")}, expected ${firstColumn}-${lastColumn}`;
+  if (expected.totals)
+    for (let c = 0; c < columns; c++) {
+      const want = expected.totals[firstColumn + c];
+      const got = v.totals?.[c];
+      if (got !== want)
+        return `the totals row's column ${firstColumn + c} shows "${got}", expected "${want}"`;
+    }
   for (let r = 0; r < rows; r++) {
     const id = expected.idAt(firstRow + r);
     for (let c = 0; c < columns; c++) {

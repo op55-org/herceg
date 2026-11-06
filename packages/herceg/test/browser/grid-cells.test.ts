@@ -2407,6 +2407,7 @@ describe("contexts kept", () => {
     expect(Object.keys(kept[0]!.column).sort()).toEqual([
       "align",
       "field",
+      "headings",
       "id",
       "kind",
       "pinned",

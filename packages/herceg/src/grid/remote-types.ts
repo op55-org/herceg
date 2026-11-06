@@ -16,8 +16,12 @@ export interface Revision {
   snapshot: string | null;
   /** The first request is in flight: the others wait for the snapshot it starts. */
   starting: boolean;
-  /** The source no longer has the snapshot: only a refresh reads more. */
-  expired: boolean;
+  /**
+   * The failure that said the source no longer has the snapshot (the
+   * first), kept apart from later failures, which do not hide it: only a
+   * refresh reads more.
+   */
+  expired: Error | null;
   readonly lists: Map<string, List>;
   root: List;
 }

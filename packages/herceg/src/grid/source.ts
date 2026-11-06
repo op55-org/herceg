@@ -13,7 +13,7 @@ import type { Expression, Fields } from "../data/expression.ts";
 import { type GroupKey, groupId } from "../data/groups.ts";
 import type { Schema } from "../data/table.ts";
 import type { LinkRows } from "../fields/links.ts";
-import type { GridQuery, GridSchema, RowKey } from "./query.ts";
+import type { GridAggregate, GridQuery, GridSchema, RowKey } from "./query.ts";
 
 /**
  * A group's key path as JSON carries it: labels, finite numbers (a time's
@@ -105,6 +105,26 @@ export interface LocateResult {
   readonly ancestors: readonly RowAddress[];
 }
 
+/**
+ * A request for aggregates of every row a query keeps (`aggregate`, one or
+ * more, as its groups take them, over its filtered rows), from the snapshot
+ * its windows come from: a remote grid's totals row.
+ */
+export interface TotalsRequest {
+  readonly query: GridQuery;
+  readonly revision: number;
+  readonly schemaVersion: string;
+  readonly snapshot: string;
+  readonly aggregate: readonly GridAggregate[];
+}
+
+/** The totals: a column of one value for each aggregate's `as` (NaN missing), as windows carry them. */
+export interface TotalsAnswer {
+  readonly revision: number;
+  readonly snapshot: string;
+  readonly columns: Readonly<Record<string, Float64Array>>;
+}
+
 /** Rows that live elsewhere, behind a server or a worker. */
 export interface GridSource<S extends Schema = Schema> {
   readonly schema: GridSchema<S>;
@@ -112,6 +132,8 @@ export interface GridSource<S extends Schema = Schema> {
   rows(request: RowsRequest, signal: AbortSignal): Promise<RowsWindow>;
   /** Where a record is in a snapshot, so the focus can follow it to a new query; optional. */
   locate?(request: LocateRequest, signal: AbortSignal): Promise<LocateResult>;
+  /** Aggregates of every row of a snapshot, for grids with a totals row; optional. */
+  totals?(request: TotalsRequest, signal: AbortSignal): Promise<TotalsAnswer>;
   /** The grid no longer reads a snapshot; optional. */
   release?(snapshot: string): void;
 }
@@ -293,6 +315,20 @@ export function checkWindow(
     return keys;
   }
   return null;
+}
+
+/** Throws unless `answer` answers `request`: of its query and snapshot, with one value of each aggregate. */
+export function checkTotals(answer: TotalsAnswer, request: TotalsRequest): void {
+  const fail = (problem: string) => {
+    throw new GridSourceError("invalid-response", `The totals answer ${problem}`);
+  };
+  if (typeof answer !== "object" || answer === null) fail("is not an object");
+  if (answer.revision !== request.revision) fail("answers another query");
+  if (answer.snapshot !== request.snapshot) fail("comes from another snapshot");
+  for (const { as } of request.aggregate) {
+    const column = answer.columns?.[as];
+    if (!(column instanceof Float64Array && column.length === 1)) fail(`lacks "${as}"`);
+  }
 }
 
 /** A field's value at a window's row: a label, a number (-0 as 0), or null for missing. */

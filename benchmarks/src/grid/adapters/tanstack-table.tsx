@@ -14,6 +14,11 @@
 // `cell` renders a React component drawing cells.ts' bars, chips, links,
 // and symbols (react-cells.tsx; in the React cells scenarios, the one with
 // state); n4's bar's domain is adapter code, found from the rows at mount.
+// With the summary, columns sit in two levels of column groups (`group`),
+// whose header rows draw the groups over the columns in view, and a footer
+// row sticky at the bottom shows totals adapter code keeps (summary.ts'
+// `TotalsTracker`: the table has no totals of its own), rendered again with
+// the rows after each change.
 
 import {
   type ColumnFiltersState,
@@ -55,6 +60,7 @@ import { CELL_FIELDS, DOM_CELL_CSS, domContent, extentOf } from "../cells.ts";
 import { formatValue, type GridField, type GridTable } from "../fixture.ts";
 import { type CellLook, cellLook, type LookDomain, LookTracker } from "../looks.ts";
 import { CellView, ReactCell } from "../react-cells.tsx";
+import { headingsOf, TotalsTracker, totalText } from "../summary.ts";
 
 const features = tableFeatures({
   rowSortingFeature,
@@ -76,8 +82,9 @@ const inLabels: FilterFn<Features, RowObject> = (row, id, labels: Set<string>) =
 function columnsFor(
   fields: GridField[],
   cells: { extent: readonly [number, number]; react: boolean } | undefined,
+  summary = false,
 ) {
-  return helper.columns(
+  const leaves = helper.columns(
     fields.map((field) =>
       helper.accessor(field.name, {
         header: field.name,
@@ -100,6 +107,25 @@ function columnsFor(
       }),
     ),
   );
+  if (!summary) return leaves;
+  // Two levels of groups, as the summary's headings place the columns.
+  const parts: { id: string; columns: { id: string; columns: typeof leaves }[] }[] = [];
+  leaves.forEach((leaf, f) => {
+    const [part, half] = headingsOf(f);
+    if (parts.at(-1)?.id !== part) parts.push({ id: part, columns: [] });
+    const halves = parts.at(-1)!.columns;
+    if (halves.at(-1)?.id !== half) halves.push({ id: half, columns: [] });
+    halves.at(-1)!.columns.push(leaf);
+  });
+  return parts.map(({ id, columns }) =>
+    helper.group({
+      id,
+      header: id,
+      columns: columns.map((group) =>
+        helper.group({ id: group.id, header: group.id, columns: group.columns }),
+      ),
+    }),
+  ) as unknown as typeof leaves;
 }
 
 const CSS = `
@@ -111,6 +137,10 @@ const CSS = `
 .tt-grid th{height:${HEADER_HEIGHT}px;font-weight:600;border-bottom:1px solid #ddd}
 .tt-grid td{height:${ROW_HEIGHT}px;border-bottom:1px solid #eee}
 .tt-grid tr[aria-selected=true]{background:#dbe9fb}
+.tt-grid tfoot{display:grid;position:sticky;bottom:0;z-index:1;background:#f8f8f8}
+.tt-grid tfoot td{font-weight:600;border-top:1px solid #ddd}
+.tt-grid .tt-group{position:relative;height:${HEADER_HEIGHT}px}
+.tt-grid .tt-group th{position:absolute;top:0;justify-content:center;border-left:1px solid #ddd}
 `;
 
 interface State {
@@ -127,6 +157,8 @@ interface GridProps {
   scroller: RefObject<HTMLDivElement | null>;
   /** With looks: the fields' names and the rows' domain. */
   looks: { fields: GridField[]; domain: LookDomain } | undefined;
+  /** With the summary: the fields, and each totalled field's total. */
+  totals: { fields: GridField[]; values: Record<string, number> } | undefined;
 }
 
 /** A row object's value of a looks field: NaN for missing numbers. */
@@ -142,7 +174,7 @@ function styledLook(cell: Element): CellLook | undefined {
   return { fill: backgroundColor || undefined, color: color || undefined };
 }
 
-function Grid({ state, columns, table: tableRef, scroller, looks }: GridProps) {
+function Grid({ state, columns, table: tableRef, scroller, looks, totals }: GridProps) {
   const table = useTable({
     features,
     columns,
@@ -158,7 +190,8 @@ function Grid({ state, columns, table: tableRef, scroller, looks }: GridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   scroller.current = scrollRef.current;
   const rows = table.getRowModel().rows;
-  const headers = table.getHeaderGroups()[0]!.headers;
+  const headerGroups = table.getHeaderGroups();
+  const headers = headerGroups.at(-1)!.headers;
   // Memoized as TanStack Virtual's documentation asks: a new key function
   // makes the virtualizer read every row's key again.
   const getItemKey = useCallback((index: number) => rows[index]!.id, [rows]);
@@ -190,6 +223,30 @@ function Grid({ state, columns, table: tableRef, scroller, looks }: GridProps) {
     >
       <table>
         <thead>
+          {headerGroups.slice(0, -1).map((group) => {
+            // Groups over the columns in view, each placed at its first column.
+            const first = virtualColumns[0]?.index ?? 0;
+            const last = virtualColumns.at(-1)?.index ?? -1;
+            let start = 0;
+            return (
+              <tr key={group.id} className="tt-group" style={{ width }}>
+                {group.headers.map((header) => {
+                  const at = start;
+                  start += header.colSpan;
+                  if (header.isPlaceholder || at > last || at + header.colSpan <= first)
+                    return null;
+                  return (
+                    <th
+                      key={header.id}
+                      style={{ left: at * COLUMN_WIDTH, width: header.colSpan * COLUMN_WIDTH }}
+                    >
+                      <table.FlexRender header={header} />
+                    </th>
+                  );
+                })}
+              </tr>
+            );
+          })}
           <tr style={{ width }}>
             {pad(paddingLeft, "th")}
             {virtualColumns.map((column) => {
@@ -241,6 +298,22 @@ function Grid({ state, columns, table: tableRef, scroller, looks }: GridProps) {
             );
           })}
         </tbody>
+        {totals && (
+          <tfoot>
+            <tr style={{ width }}>
+              {pad(paddingLeft, "td")}
+              {virtualColumns.map((column) => {
+                const { name } = totals.fields[column.index]!;
+                return (
+                  <td key={name} data-field={column.index} style={{ width: COLUMN_WIDTH }}>
+                    {totalText(name, totals.values[name])}
+                  </td>
+                );
+              })}
+              {pad(paddingRight, "td")}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );
@@ -270,7 +343,9 @@ function mount(
   const columns = columnsFor(
     fields,
     cells ? { extent: extentOf(gridTable, "n4"), react: options.cells === "react" } : undefined,
+    options.summary,
   );
+  const totals = options.summary ? new TotalsTracker(gridTable) : undefined;
   const table: RefObject<Table | null> = { current: null };
   const scroller: RefObject<HTMLDivElement | null> = { current: null };
   const root = createRoot(container);
@@ -284,9 +359,17 @@ function mount(
   const render = (change: Partial<State>) => {
     state = { ...state, ...change };
     const looks = tracker && { fields, domain: tracker.domain };
+    const summary = totals && { fields, values: totals.values };
     flushSync(() =>
       root.render(
-        <Grid state={state} columns={columns} table={table} scroller={scroller} looks={looks} />,
+        <Grid
+          state={state}
+          columns={columns}
+          table={table}
+          scroller={scroller}
+          looks={looks}
+          totals={summary}
+        />,
       ),
     );
   };
@@ -298,7 +381,9 @@ function mount(
       const scroll = element();
       const view = scrollport(scroll);
       view.top = scroll.querySelector("thead")!.getBoundingClientRect().bottom;
-      return readDomVisible({
+      const footer = scroll.querySelector("tfoot");
+      if (footer) view.bottom = footer.getBoundingClientRect().top;
+      const shown = readDomVisible({
         // From layout: the style string of a tall body is serialized with six digits.
         count: Math.round(
           scroll.querySelector("tbody")!.getBoundingClientRect().height / ROW_HEIGHT,
@@ -314,6 +399,13 @@ function mount(
         ...(tracker && { look: styledLook }),
         ...(cells && { content: domContent }),
       });
+      if (footer) {
+        const texts = new Map<number, string>();
+        for (const cell of footer.querySelectorAll("td[data-field]"))
+          texts.set(Number(cell.getAttribute("data-field")), cell.textContent ?? "");
+        shown.totals = shown.columns.map((field) => texts.get(field) ?? "");
+      }
+      return shown;
     },
     rowCount: () => table.current!.getRowModel().rows.length,
     order: () => table.current!.getRowModel().rows.map((row) => row.original.id),
@@ -334,6 +426,7 @@ function mount(
     },
     append(batch, evict) {
       tracker?.append(batch, evict);
+      totals?.append(batch, evict);
       const kept = evict > 0 ? state.data.slice(evict) : state.data;
       render({ data: kept.concat(rowObjects(batch)) });
     },

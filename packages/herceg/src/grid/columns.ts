@@ -40,9 +40,22 @@ export type CellOf<K> = K extends CellFieldKind ? GridCell<K> : never;
 export type PinSide = "left" | "right";
 
 /**
- * What a grid's columns read on group rows: the fields of the groups'
- * tables (`schema`: grouping fields and aggregates), and the names of the
- * aggregates a column may show (`names`).
+ * A header over columns: its title, which also names it, or an id and a
+ * title, for headings whose titles repeat (a "Revenue" under "Actual" and
+ * another under "Budget").
+ */
+export type GridHeading = string | { readonly id: string; readonly title: string };
+
+/** A heading as columns hold it, named by its id. */
+export interface ColumnHeading {
+  readonly id: string;
+  readonly title: string;
+}
+
+/**
+ * What a grid's columns read on group rows and the totals row: the fields
+ * of the groups' and the totals' tables (`schema`: grouping fields and
+ * aggregates), and the names of the aggregates a column may show (`names`).
  */
 export interface AggregateScope {
   readonly schema: Schema;
@@ -50,9 +63,9 @@ export interface AggregateScope {
 }
 
 /**
- * Groups not known as a model is made (chosen later, as a user picks them),
- * or erased (`RowGroups<S>`): any names and fields, which the model checks
- * when groups arrive.
+ * Groups and totals not known as a model is made (chosen later, as a user
+ * picks them), or erased (`RowGroups<S>`): any names and fields, which the
+ * model checks when they arrive.
  */
 export interface AnyAggregates {
   // biome-ignore lint/suspicious/noExplicitAny: fields named at run time, as erased groups' are.
@@ -60,24 +73,43 @@ export interface AnyAggregates {
   readonly names: string;
 }
 
+/** No table of aggregates: a model's groups or totals while it has none. */
+export type NoTables = Record<never, never>;
+
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /** A schema's field names, spelled out in errors. */
 type NameOf<S extends Schema> = S extends unknown ? Extract<keyof S, string> : never;
 
+/** The fields of two tables of aggregates together, a field of both of either kind. */
+type Joined<G extends Schema, T extends Schema> = {
+  [K in keyof G | keyof T]: K extends keyof G
+    ? K extends keyof T
+      ? G[K] | T[K]
+      : G[K]
+    : T[K & keyof T];
+};
+
 /**
  * The scope of a model's groups (their last level's table `G`, grouped by
- * `B`), fixed as it is made: precise for inferred groups, any names for
- * erased ones or none.
+ * `B`) and totals (`T`), fixed as it is made: precise for inferred groups
+ * and totals, any names for erased ones or none.
  */
-export type ScopeOf<G extends Schema, B extends readonly string[]> =
+export type ScopeOf<G extends Schema, B extends readonly string[], T extends Schema = NoTables> =
   IsAny<G> extends true
     ? AnyAggregates
-    : [keyof G] extends [never]
+    : IsAny<T> extends true
       ? AnyAggregates
-      : string extends B[number]
-        ? { readonly schema: G; readonly names: string }
-        : { readonly schema: G; readonly names: Exclude<NameOf<G>, B[number]> };
+      : [keyof G | keyof T] extends [never]
+        ? AnyAggregates
+        : { readonly schema: Joined<G, T>; readonly names: GroupNames<G, B> | NameOf<T> };
+
+/** The aggregates of groups' table `G` grouped by `B`: any names where the grouping fields are not known. */
+type GroupNames<G extends Schema, B extends readonly string[]> = [keyof G] extends [never]
+  ? never
+  : string extends B[number]
+    ? string
+    : Exclude<NameOf<G>, B[number]>;
 
 /** What every column takes, with a field or without. */
 interface ColumnPlacing {
@@ -93,6 +125,13 @@ interface ColumnPlacing {
    * scroll past. Pinned columns show first or last, in the columns' order.
    */
   pin?: PinSide;
+  /**
+   * The headings over the column, from the top: adjacent shown columns
+   * whose headings agree, by id, at a level and every level above it share
+   * one header there ("Latency" over its mean and p99; `["Performance",
+   * "Latency"]` nests).
+   */
+  heading?: GridHeading | readonly GridHeading[];
 }
 
 /**
@@ -182,6 +221,8 @@ export interface GridColumnLayout {
   readonly field: string | null;
   readonly kind: "number" | "time" | "category" | null;
   readonly title: string;
+  /** The headings over it, from the top. */
+  readonly headings: readonly ColumnHeading[];
   /** Left edge, from the first shown column, in CSS pixels, as if nothing were scrolled. */
   readonly x: number;
   readonly width: number;
@@ -241,8 +282,8 @@ export interface ColumnContent {
   /** A sparkline column's reading of its data, kept with this content and released with it. */
   readonly sparkline?: Sparkline | undefined;
   readonly aggregate: string | undefined;
-  /** A header over the column and its neighbors with the same one: a pivot's value over its aggregates. */
-  readonly heading?: { readonly id: string; readonly title: string };
+  /** The headings over the column, from the top (a pivot's value over its aggregates). */
+  readonly headings: readonly ColumnHeading[];
 }
 
 /** A shown column with what it shows. */
@@ -252,6 +293,7 @@ export interface PlacedColumn extends GridColumnLayout {
 }
 
 const WIDTH = 120;
+const NO_HEADINGS: readonly ColumnHeading[] = Object.freeze([]);
 /** The narrowest a column can be, in CSS pixels: room for the cell's padding and a few characters. */
 export const MIN_COLUMN_WIDTH = 32;
 /**
@@ -277,7 +319,55 @@ export function describeColumns(
     if (contents.has(id)) throw new Error(`Two grid columns have the id "${id}"`);
     contents.set(id, describeColumn(table, column, settings, `${settings.surface} columns[${i}]`));
   });
+  checkHeadings(columns, contents, settings.surface);
   return contents;
+}
+
+/**
+ * Refuses a heading id given two titles at one level (hidden columns'
+ * included), naming the later column.
+ */
+function checkHeadings(
+  columns: readonly GridColumn[],
+  contents: ReadonlyMap<string, ColumnContent>,
+  surface: string,
+) {
+  const seen = new Map<string, [title: string, at: number]>();
+  columns.forEach((column, i) => {
+    contents.get(columnId(column))!.headings.forEach(({ id, title }, level) => {
+      const [before, at] = seen.get(`${level} ${id}`) ?? [title, i];
+      seen.set(`${level} ${id}`, [before, at]);
+      if (before !== title)
+        throw new Error(
+          `${surface} columns[${i}].heading${Array.isArray(column.heading) ? `[${level}]` : ""}: ${JSON.stringify(id)} is titled ${JSON.stringify(title)} here and ${JSON.stringify(before)} in columns[${at}]; give one title`,
+        );
+    });
+  });
+}
+
+/** A column's headings (`given`, at `at`), from the top, checked. */
+function headingsOf(given: unknown, at: string): readonly ColumnHeading[] {
+  if (given === undefined) return NO_HEADINGS;
+  const list: readonly unknown[] = Array.isArray(given) ? given : [given];
+  return Object.freeze(
+    list.map((heading, level) => {
+      const { id, title } = (
+        typeof heading === "string" ? { id: heading, title: heading } : (heading ?? {})
+      ) as {
+        id?: unknown;
+        title?: unknown;
+      };
+      if (
+        typeof id !== "string" ||
+        typeof title !== "string" ||
+        (typeof heading === "object" && Object.keys(heading!).length !== 2)
+      )
+        throw new TypeError(
+          `${Array.isArray(given) ? `${at}[${level}]` : at}: expected a title or { id, title }; received ${JSON.stringify(heading)}`,
+        );
+      return Object.freeze({ id, title });
+    }),
+  );
 }
 
 /** Checks a column against a table's fields, and says what it shows; `at` names it in messages. */
@@ -309,6 +399,7 @@ export function describeColumn(
     amount: format,
     key: (value) => (value === null ? "(missing)" : format(value)),
     aggregate: column.aggregate,
+    headings: headingsOf(column.heading, `${at}.heading`),
     cell,
     // Written through the grid's field displays, where it has them.
     ...(settings.fields &&
@@ -375,6 +466,7 @@ function describeTextColumn(
     amount: empty,
     key: empty,
     aggregate: undefined,
+    headings: headingsOf(column.heading, `${at}.heading`),
     cell,
     sparkline: drawn?.sparkline,
   };
@@ -402,12 +494,13 @@ export function placeColumns(
   let x = 0;
   for (const { id, field, width = WIDTH, pin } of ordered) {
     const content = contents.get(id)!;
-    const { kind, title, align } = content;
+    const { kind, title, align, headings } = content;
     placed.push({
       id,
       field: field ?? null,
       kind,
       title,
+      headings,
       x,
       width,
       align,
@@ -498,6 +591,24 @@ export function valueFormatter(
     ? formatWriter(KIT, format, false, timeZone, locale, at)
     : readableNumber(locale);
   return (value) => (value === null || Number.isNaN(value) ? missing : write(value as number));
+}
+
+/**
+ * What writes an aggregate (`op` of `field`, giving values of `kind`) in a
+ * column, on group rows and the totals row, local or remote: the column's
+ * own format for an aggregate of its own field that keeps its kind (a sum,
+ * mean, minimum, or maximum), plainly otherwise (counts, kinds changed).
+ */
+export function aggregateWriter(
+  column: PlacedColumn,
+  op: string,
+  field: string | undefined,
+  kind: string,
+  settings: FormatSettings,
+): (value: number) => string {
+  return field === column.field && kind === column.kind && op !== "count"
+    ? column.content.amount
+    : valueFormatter(kind as "number" | "time", settings);
 }
 
 /**

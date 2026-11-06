@@ -1201,8 +1201,10 @@ describe("grids", () => {
       ["4", "2"],
       ["6", "2"],
     ]);
+    // Two header rows, two rows, and the totals row.
     const scroller = created.root.querySelector("[role=grid]")!;
-    expect(scroller.getAttribute("aria-rowcount")).toBe("4");
+    expect(scroller.getAttribute("aria-rowcount")).toBe("5");
+    expect(tree).toContain('  row "Total"');
     expect(scroller.getAttribute("aria-colcount")).toBe("9");
   });
 

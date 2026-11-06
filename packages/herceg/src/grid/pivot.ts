@@ -9,6 +9,7 @@
 // its row's totals). The model takes this through `GridPivot`, so grids
 // that show no pivot load none of it.
 
+import { type ColumnInput, category, time } from "../data/column.ts";
 import type { Fields } from "../data/expression.ts";
 import type { GroupSchema, NamedAggregate } from "../data/groups.ts";
 import {
@@ -20,7 +21,7 @@ import {
 } from "../data/pivot.ts";
 import type { MarkRows, RowView } from "../data/row-view.ts";
 import type { SelectionStore } from "../data/selection.ts";
-import type { Schema, Table } from "../data/table.ts";
+import { type Schema, type Table, table } from "../data/table.ts";
 import { nextRevision, wholeTable } from "../encoding/channel-scales.ts";
 import type { RankRead } from "../encoding/channels.ts";
 import { Rank } from "../encoding/ranks.ts";
@@ -30,6 +31,7 @@ import { columnDisplay } from "../fields/grid.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
+import type { GridPresentation } from "./base.ts";
 import {
   type ColumnContent,
   columnId,
@@ -156,10 +158,14 @@ export type PivotGridModel<S extends Schema = Schema> = Omit<
   | "rowAt"
   | "identityAt"
   | "rowIndexOf"
+  | "totals"
+  | "update"
 > & {
   /** The view the pivot pivots. */
   readonly data: RowView<S>;
   readonly selectionStore: SelectionStore<S>;
+  /** Changes `fields`, `scales`, and `encode` (see `GridModel.update`); a pivot's totals row is its own (`pivotRows` `totals`). */
+  update(options: GridPresentation<S>): void;
 };
 
 /**
@@ -263,6 +269,8 @@ class PivotLayout implements GridPivot {
   readonly #gone = new Map<string, { layout: Layout; after?: string | null }>();
   /** The columns' ids in their own order as last generated: what tells an order the user chose. */
   #order: readonly string[] = [];
+  /** The totals row's tables, and the pivot's state they are of. */
+  #totals: { key: string; tables: Table[] } | null = null;
 
   constructor(pivot: RowPivot, options: LayoutOptions) {
     this.#pivot = pivot;
@@ -289,6 +297,32 @@ class PivotLayout implements GridPivot {
 
   get stopped(): boolean {
     return this.#pivot.failure !== null;
+  }
+
+  get totalsRow(): boolean {
+    return this.#pivot.totals.row;
+  }
+
+  get totalsVersion(): string {
+    // The groups' revision moves with their aggregates even where none they publish changed.
+    return String(this.groups.revision);
+  }
+
+  total(id: string): ReturnType<GridPivot["total"]> {
+    const pivot = this.#pivot;
+    const crosstab = pivot.read();
+    const column = crosstab.column(id);
+    // The rows column says "Total".
+    if (!column) return null;
+    const { name } = column.aggregate;
+    const kind = (pivot.table as unknown as Table).kind(name) as "number" | "time";
+    const index = column.kind === "total" ? -1 : crosstab.indexOf(column.value);
+    if (column.kind === "value" && index < 0)
+      return { state: "absent", value: undefined, kind: null };
+    const value = crosstab.columnTotal(index, name);
+    return missingValue(kind, value)
+      ? { state: "missing", value: null, kind }
+      : { state: "value", value, kind };
   }
 
   get revision(): number {
@@ -382,19 +416,46 @@ class PivotLayout implements GridPivot {
     };
     const rows = () => wholeTable(totals);
     const total: LookTable = { table: totals, rows, rank: rankOf(rows), aggregates };
+    // The totals row's: each value's totals (a row per value), and every row's.
+    const [values, all] = pivot.totals.row
+      ? this.#totalsTables().map((one): LookTable => {
+          const rows = () => {
+            this.#totalsTables();
+            return wholeTable(one);
+          };
+          return { table: one, rows, rank: rankOf(rows), aggregates };
+        })
+      : [];
     const ofValues = new Map<string, Look>();
     const ofTotals = new Map<string, Look>();
+    const ofRow = new Map<string, [Look | undefined, Look | undefined]>();
     for (const { name } of aggregates) {
       const encode = this.#options.aggregates[name]?.encode;
       const at = `${settings.surface} aggregates${keyPath(name)}.encode`;
       const look = compileEncodings(encode, cells, settings, at);
       if (look) ofValues.set(name, look);
       // A row's totals lack the pivot field, which gives them no look.
-      const totalLook = pivot.totals && compileEncodings(encode, total, settings, at, true);
+      const totalLook = pivot.totals.columns && compileEncodings(encode, total, settings, at, true);
       if (totalLook) ofTotals.set(name, totalLook);
+      // The totals row's lack the rows field too.
+      if (values)
+        ofRow.set(name, [
+          compileEncodings(encode, values, settings, at, true),
+          compileEncodings(encode, all!, settings, at, true),
+        ]);
     }
     return {
-      any: ofValues.size > 0 || ofTotals.size > 0,
+      any: ofValues.size > 0 || ofTotals.size > 0 || ofRow.size > 0,
+      totalAt: (id) => {
+        const crosstab = pivot.read();
+        const column = crosstab.column(id);
+        const looks = column && ofRow.get(column.aggregate.name);
+        if (!looks) return undefined;
+        const [values, all] = this.#totalsTables();
+        if (column.kind === "total") return lookOf(all!, 0, looks[1]);
+        const index = crosstab.indexOf(column.value);
+        return index < 0 ? undefined : lookOf(values!, index, looks[0]);
+      },
       lookAt(id, row) {
         const crosstab = pivot.read();
         const column = crosstab.column(id);
@@ -406,6 +467,43 @@ class PivotLayout implements GridPivot {
         return position < 0 ? undefined : lookOf(table, position, look);
       },
     };
+  }
+
+  /**
+   * The totals row as looks read it: each pivot value's totals, a row per
+   * value in the crosstab's order, and every row's; made again as the
+   * pivot's aggregates change.
+   */
+  #totalsTables(): Table[] {
+    const pivot = this.#pivot;
+    const crosstab = pivot.read();
+    const source = pivot.table as unknown as Table;
+    const key = `${this.groups.revision} ${crosstab.values.length}`;
+    const seen = this.#totals;
+    if (seen?.key === key) return seen.tables;
+    const columns = (indices: readonly number[]): Record<string, ColumnInput> =>
+      Object.fromEntries(
+        pivot.aggregates.map(({ name }) => {
+          const values = Float64Array.from(indices, (index) => crosstab.columnTotal(index, name));
+          return [name, source.kind(name) === "time" ? time(values) : values];
+        }),
+      );
+    const made = [columns(crosstab.values.map((_, index) => index)), columns([-1])];
+    // Each value's row has the value too, as its cells' combinations do.
+    const field = pivot.pivot;
+    const kind = (pivot.view.source as unknown as Table).kind(field);
+    const keys = crosstab.values;
+    const numbers = () => Float64Array.from(keys, (key) => (key as number | null) ?? Number.NaN);
+    made[0]![field] =
+      kind === "category"
+        ? category(keys as (string | null)[])
+        : kind === "time"
+          ? time(numbers())
+          : numbers();
+    if (seen) for (const [k, one] of seen.tables.entries()) one.reset(made[k]!);
+    const tables = seen?.tables ?? made.map((one) => table(one) as unknown as Table);
+    this.#totals = { key, tables };
+    return tables;
   }
 
   read(id: string, row: number): ReturnType<GridPivot["read"]> {
@@ -572,15 +670,18 @@ class PivotLayout implements GridPivot {
       amount: format,
       key: written,
       aggregate: name,
-      ...(heading !== undefined && {
-        heading: {
-          id:
-            column.kind === "total"
-              ? "total"
-              : JSON.stringify(value === null ? null : String(value)),
-          title: heading,
-        },
-      }),
+      headings:
+        heading === undefined
+          ? []
+          : [
+              {
+                id:
+                  column.kind === "total"
+                    ? "total"
+                    : JSON.stringify(value === null ? null : String(value)),
+                title: heading,
+              },
+            ],
     };
   }
 

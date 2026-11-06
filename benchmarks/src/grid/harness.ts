@@ -63,9 +63,9 @@ function reorderDictionaries(table: GridTable): GridTable {
 
 async function runMount(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const expected = expectation(reference, null);
-  const looks = { looks: s.looks, cells: s.cells };
+  const looks = { looks: s.looks, cells: s.cells, summary: s.summary };
   const metrics = {
     fromNative: metric("ms"),
     fromColumnar: metric("ms"),
@@ -145,7 +145,7 @@ function scrollStep(s: GridScenario, i: number, rows: number, fields: number): [
 
 async function runScroll(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const grid = await mount(adapter, table, reference);
   const stepToFrame = metric("ms");
   const frames = metric("count");
@@ -194,7 +194,7 @@ const WHEEL_DRAIN_MS = 300;
  */
 async function runScrollTrace(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const grid = await mount(adapter, table, reference);
   const refresh = await refreshInterval();
   const wheel = s.direction === "wheel";
@@ -318,7 +318,7 @@ async function runScrollTrace(adapter: Adapter, s: GridScenario): Promise<GridRe
 /** Sort or filter: from source order to the query's result, each sample from a reset grid. */
 async function runQuery(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const grid = await mount(adapter, table, reference);
   const { handle } = grid;
   const sort = s.sort ?? [];
@@ -364,7 +364,7 @@ async function runQuery(adapter: Adapter, s: GridScenario): Promise<GridResult> 
 /** Selects one displayed row or a displayed-order range under a sort, then reads the selection back. */
 async function runSelect(adapter: Adapter, s: GridScenario): Promise<GridResult> {
   const table = gridTable(s.size, s.seed);
-  const reference = new Reference(table, s.looks, s.cells);
+  const reference = new Reference(table, s.looks, s.cells, s.summary);
   const grid = await mount(adapter, table, reference);
   const { handle } = grid;
   const range = s.select! < 1;
@@ -494,6 +494,7 @@ export function installGridHarness(adapter: Adapter): void {
       const operation = OPERATION[s.operation];
       const reason =
         (s.cells === "react" && adapter.unsupported?.["react-cells"]) ||
+        (s.summary && adapter.unsupported?.summary) ||
         (operation && adapter.unsupported?.[operation]);
       if (reason) return { status: "unsupported", reason, metrics: {} };
       try {
@@ -535,7 +536,7 @@ export function installGridHarness(adapter: Adapter): void {
       },
       reference() {
         const { scenario, table } = held!;
-        held!.reference = new Reference(table!, scenario.looks, scenario.cells);
+        held!.reference = new Reference(table!, scenario.looks, scenario.cells, scenario.summary);
         held!.sorted = held!.reference.order(held!.scenario.sort ?? [], null);
       },
       input() {

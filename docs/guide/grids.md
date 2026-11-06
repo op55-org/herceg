@@ -9,12 +9,14 @@ data. Grids are TypeScript and React only; Python has none.
 - [Sorting and selecting](#sorting-and-selecting)
 - [Events](#events)
 - [Columns](#columns)
+- [Headings](#headings)
 - [Formats](#formats)
 - [Field displays](#field-displays)
 - [Looks](#looks)
 - [Cells](#cells)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
+- [Totals row](#totals-row)
 - [Pivots](#pivots)
 - [Remote grids](#remote-grids)
 - [Accessibility](#accessibility)
@@ -148,6 +150,37 @@ model.setColumns(JSON.parse(localStorage.layout));
   (`model.canPin(id)` asks first). `setColumns` takes pins as given; in a
   grid too narrow for them, pinned columns scroll with the others until it
   widens.
+
+## Headings
+
+A column's `heading` puts headers over it, from the top: adjacent shown
+columns whose headings agree, at a level and every level above it, share
+one header spanning them.
+
+```ts
+createGridModel({
+  data: view,
+  columns: [
+    { field: "service", pin: "left" },
+    { field: "latency", heading: "Latency", title: "Mean" },
+    { field: "p99", heading: "Latency" },
+    { field: "bytesIn", heading: ["Traffic", { id: "in", title: "In" }] },
+    { field: "bytesOut", heading: ["Traffic", { id: "out", title: "Out" }] },
+  ],
+});
+```
+
+- A heading is a title, or `{ id, title }` where titles repeat
+  ("Revenue" under "Actual" and under "Budget"): headings are told apart
+  by id, and one id has one title at a level.
+- Runs are of whole paths: a column moved away, or pinned apart from its
+  neighbors, gets a header of its own; hidden columns leave their
+  neighbors adjacent. A grid has as many header rows as its longest path.
+- Headers over headings are not focusable and do nothing when clicked; a
+  column's own header still sorts, moves, and opens its menu. A column's
+  accessible name, and its name in menus and announcements
+  (`model.columnTitle(id)`), carry its headings: "Latency, p99".
+- `model.columnLayout[i].headings` gives a shown column's headings.
 
 ## Formats
 
@@ -609,6 +642,52 @@ bar(traffic.tableOf("region"), { x: "region", y: "latency" }); // the same group
   (`kind: "row"`); each has a `version` and a `ref` that
   `model.indexOf(ref)` finds again.
 
+## Totals row
+
+Given [totals](data.md#totals) of the grid's view as `totals`, the grid
+shows a totals row under its rows, sticky at the bottom: each column with
+an `aggregate` shows that aggregate of every row the view shows, and the
+first shown column without one says "Total".
+
+```ts
+import { count, groupRows, mean, rowTotals, rowView, sum } from "herceg";
+
+const view = rowView(requests);
+const ops = { n: count(), latency: mean("latency"), bytes: sum("bytes") };
+const model = createGridModel({
+  data: view,
+  groups: groupRows(view, { by: ["region"], ops }), // subtotals, as group rows
+  totals: rowTotals(view, { ops }), // the grand total
+  columns: [
+    { field: "region" }, // "Total"
+    { field: "service", aggregate: "n" },
+    { field: "latency", aggregate: "latency", aggregateEncode: { fill: { field: "latency", scale: "heat" } } },
+    { field: "bytes", aggregate: "bytes", format: { binary: "B" } },
+  ],
+});
+model.totalsRow?.cellAt(2).text; // the mean latency, in the column's format
+model.update({ totals: null }); // and back with update({ totals })
+```
+
+- Totals are of the rows the view shows: filters change them, the
+  selection does not. They follow appends and rolling windows as row
+  groups do.
+- Aggregates are written as group rows write them: in the column's format
+  where it is an aggregate of the column's own field that keeps its kind
+  (a sum, mean, minimum, or maximum), plainly otherwise (counts). Where
+  every shown column shows a total, no cell says "Total" and the row is
+  named so for assistive technology.
+- With groups, group rows are the subtotals and the totals row the grand
+  total; a name both give is one operation of one field, or the model
+  refuses them. A column's `aggregate` names an aggregate of either.
+- `aggregateEncode` gives the totals row its [looks](#looks), read from the
+  totals' table (a field it lacks, such as a grouping field, gives no look);
+  the row takes no custom renderers.
+- The totals row is no row of the table: `rowCount` does not count it, it
+  selects nothing, and clicking it only focuses it. Down from the last row
+  and Ctrl+End reach it; its focus is `rowIndex: model.rowCount` and stays
+  on the row as rows come and go.
+
 ## Pivots
 
 A [row pivot](data.md#row-pivots) shows in a grid from `herceg/grid/pivot`,
@@ -652,7 +731,14 @@ model.pinColumn("region", "left");
   without touching the view's order.
 - Selecting a row selects its rows of the view, so a chart restricted to
   them shows them.
-- A pivot that stopped at its limit says so in a notice under the grid.
+- With `totals: true` (or `{ row: true }`), the pivot has a totals row:
+  each value's aggregates over every row with that value, and the
+  totals' over every row, computed from the rows (never a mean of means).
+  Its cells take their aggregates' `encode`, read from each value's
+  totals (with the value, but not the rows field), and ranks among the
+  values. Total columns (`{ columns: true }`) are each row's totals.
+- A pivot that stopped at its limit says so in a notice under the grid,
+  under its totals row.
 
 ## Remote grids
 
@@ -773,6 +859,39 @@ a server can run; `model.selectedCount` is null for conditions.
 read row counts and aggregates from the source (a column's `aggregate`
 naming the query's `as`). There is no `expandAll`.
 
+**Totals.** `totals: [{ op: "mean", field: "latency", as: "latency" }]`
+(aggregates as the query's groups take them, of number and time fields)
+gives a [totals row](#totals-row) whose values the source computes over
+every row the query keeps, from the snapshot its windows come from:
+
+```ts
+const source: GridSource = {
+  // ...
+  async totals(request, signal) {
+    // request: the query, revision, schemaVersion, snapshot, and aggregate list
+    const body = await post("/api/totals", request, signal);
+    return { revision: request.revision, snapshot: request.snapshot, columns: { latency: Float64Array.of(body.latency) } };
+  },
+};
+createRemoteGridModel({ source, totals: [{ op: "count", as: "n" }, { op: "mean", field: "latency", as: "latency" }], columns });
+```
+
+- The grid asks once per snapshot and set of totals, once the first window
+  names the snapshot; the row says "loading" (`aria-busy`) until the answer
+  comes. Answers for a query or totals since replaced are dropped, and
+  their requests aborted. `model.update({ totals })` asks again where the
+  totals asked for changed; `totals: null` drops the row.
+- A failure shows as windows' do (`model.status.totals` is `"failed"`, the
+  notice says the totals could not load, and `retry()` asks again); it
+  goes with the totals replaced or dropped. A snapshot the source says
+  expired, for rows or totals, is the grid's error until `refresh()` (or
+  the notice's Refresh), whatever fails after it.
+- A source without `totals`, and an empty list, are refused when the model
+  is given them; a total named as one of the query's group aggregates is
+  one operation of one field. `TotalsRequest` and `TotalsAnswer` type a
+  source's `totals`. `memorySource` answers totals, and the conformance
+  fixtures check them.
+
 ## Accessibility
 
 - A grid is one tab stop (`role="grid"`; `role="treegrid"` when grouped).
@@ -792,6 +911,11 @@ naming the query's `as`). There is no `expandAll`.
   is outlined as a focused cell is.
 - Kinds' drawing is hidden from screen readers: bars, chips, and symbols
   read as their text.
+- Headings are column headers in header rows of their own, spanning their
+  columns (`aria-colspan`); columns' own headers are named with them. The
+  totals row is a row of its own rowgroup after the rows, counted in the
+  grid's rows and numbered after the last (while a remote grid's count is
+  unknown, it has no number).
 - Forced-colors mode uses system colors; cells drop their looks, and
   chips their fills, their text the row's.
 
@@ -820,7 +944,8 @@ A new `model` makes a new grid; `ariaLabel`, `theme`, `headerHeight`, and
 the grid's [events](#events), the latest handler each time. The `ref` is
 the grid (`grid.current.model` keeps the model's type). A model no one
 keeps stops following its view, so one made with `useMemo` needs no
-cleanup. Cell kinds and links come with the model's columns.
+cleanup. Cell kinds, links, headings, and a totals row come with the
+model's columns and options (`useMemo(() => rowTotals(view, { ops }), [view])`).
 
 **React cells.** `cells` draws columns' cells with React, by column id: a
 render function of the cell (`GridCellContext`: its `text`, `value`,
@@ -866,11 +991,18 @@ call `createGrid` on an element.
 - Rows have one height (`rowHeight`, 28 pixels by default); columns have
   explicit widths. Rows taller together than 8 million pixels scroll
   scaled (a pixel scrolled moves more than one).
-- Not available: column groups other than a pivot's values, sizing columns
-  to content, moving columns by touch (the menu moves them), editing,
-  copying, custom cells in Vue and Svelte, and custom renderers in pivot
-  grids.
+- Not available: sizing columns to content, moving columns by touch (the
+  menu moves them), sorting or moving columns by their headings, editing,
+  copying, custom cells in Vue and Svelte, custom renderers in pivot grids
+  and on the totals row, and a totals row at the top.
   Remote grids have no pivots and no bins in queries.
+- A totals row follows appends in O(batch), and rolling windows' drops by
+  taking the dropped rows away (from values it keeps, 8 bytes a row per
+  field, and a byte a row for a filtered view); other changes compute it
+  again from the rows, O(rows): ~10 ms for one value changed in place over
+  a million rows. A minimum or maximum leaving a rolling window is found
+  again from the rows, so a window of rising values costs O(window) per
+  append for its minimum (see [Totals](data.md#totals)).
 - Custom renderers update every mounted cell of their columns when any row
   of a local grid's table changes, as a table's rows share one version.
 - A sparkline column over a million data rows mounts in ~17–18 ms, about
