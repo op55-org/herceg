@@ -253,14 +253,48 @@ row and a spacer as tall as the rows.
 - **Cell kinds** are descriptors (`barCell()`): a frozen portable `spec`,
   and through a symbol-keyed property an implementation whose model part
   checks the field's kind and binds what the kind reads of the rows (a
-  bar's domain, kept with a revision the DOM grid redraws mounted cells
-  by, `cellsRevision`), and whose DOM part, run only when a cell mounts,
-  reaches the page only through the element it is given. Chips' text
+  bar's domain, a sparkline's index), and whose DOM part, run only when a
+  cell mounts, reaches the page only through the element it is given.
+  What a kind reads moves a revision per column (`cellsRevision(column)`),
+  by which the DOM grid redraws that column's mounted cells alone, so a
+  sparkline's data streaming in updates no other column's custom or React
+  cells. Views are given the column's layout and the row height; a kind
+  drawing to its cell's size (`sized`) is redrawn as its column's width
+  changes, without a revision. Chips' text
   takes black or white as cells' text over fills does, over the chip on
   the cell's fill, in plain and selected rows. A kind's
   stylesheet, and the host's for links and renderers, are added to the
   grid's root as the first such cell mounts, so grids without them match
   none of their rules.
+- **Sparklines** (`grid/sparklines.ts`) describe a column without a field
+  through their kind's `describe` hook: the column's content gets a
+  `Sparkline` of the grid and the data, which checks the key, x, and y
+  fields of both tables, and gives the cell's text (its summary), its
+  read (`cellAt`'s `sparkline`), and its paths. On the first read after a
+  change it buckets the data's rows by key (`grid/sparkline-index.ts`: a
+  counting sort into a map of keys, each bucket's start, count, and room,
+  and the rows as table positions in x order in one array: about 4 bytes
+  a row and 40 a key). Appends, which the table reports by an unchanged
+  `modifiedVersion`, `generation`, and `rowOffset`, are taken in as the
+  data's listener runs, so no read or frame finds the index half
+  updated: each new row goes into its bucket's room, a full bucket moves
+  to the array's end with a quarter more, a full array lays every bucket
+  out again with a quarter more and an eighth spare (up to ~5.6 bytes a
+  row and 36 a key; a category key's code-to-bucket cache adds 4–8 bytes
+  a label of its dictionary), and buckets the new rows put out of x order
+  are sorted again. Other changes, and a view's, build it again on the
+  next read. When cells drew since the previous change, a microtask after
+  the changing task makes the summaries and paths of the keys drawn last
+  (at most 256) in the box they were drawn in, so the next frame only
+  writes them. A row's series is read between binary searches for the window's ends,
+  with the rows either side for the lines crossing them, and reduced by
+  `lod/m4-joined.ts`: charts' M4 per device pixel column, with gaps inside
+  a column joined so a path is at most four points a pixel and one break
+  a pixel boundary. Paths are charts' (`traceLine` into `SvgPath`, a
+  tenth of a pixel). The base model has each sparkline follow its data
+  while the column is the model's: the data holds the sparkline weakly
+  (a `FinalizationRegistry` stops a forgotten one), and replacing the
+  columns or `dispose()` stops it and lets go of its index at once.
 - **Framework cells.** A renderer with `framework` is handed its cells in
   each draw, after DOM renderers' updates and before the focus is placed:
   at once in the grid's own frame and on the first draw, in the next

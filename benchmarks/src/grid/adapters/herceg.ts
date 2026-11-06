@@ -27,6 +27,7 @@ import {
   createGrid,
   createGridModel,
   type GridColumn,
+  type GridFieldColumn,
   type GridModel,
   symbolCell,
 } from "herceg/grid";
@@ -87,7 +88,7 @@ const CELL_DISPLAYS = compileFields([
 ]);
 
 /** Each cell-bearing column's kind and channels (cells.ts). */
-const CELLS: Record<string, Pick<GridColumn<Schema>, "cell" | "encode">> = {
+const CELLS: Record<string, Pick<GridFieldColumn<Schema>, "cell" | "encode">> = {
   c0: { cell: chipCell(), encode: { color: { field: "c0" } } },
   n0: { cell: barCell({ domain: [...N0_DOMAIN] }) },
   n3: {

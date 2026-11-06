@@ -51,7 +51,11 @@ kinds (`barCell`, `chipCell`, and `symbolCell`, whose shapes `encode.symbol`
 gives), `createGrid`'s `cells` takes custom renderers by column id (text,
 control, or composite cells, with signals and declared fields), and columns
 without fields write their `text` (literal text and fields), which a
-renderer draws more for. React's `<Grid>` and `<RemoteGrid>`
+renderer draws more for, or draw `sparklineCell`: a line or area per row
+of another table's rows matching the row's key by raw value, over an x
+window the column shares, at most four points a device pixel with gaps
+narrower than a pixel joined, its text a summary that screen readers and
+`cellAt` (`sparkline`) read, kept current through appends. React's `<Grid>` and `<RemoteGrid>`
 (`@herceg/react/grid/remote`) take `cells` as render functions by column
 id, typed by the model's fields: rendered through portals in the
 component's tree, their state kept per row, each in an error and

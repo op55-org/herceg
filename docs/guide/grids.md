@@ -313,7 +313,7 @@ model.update({ scales: { ...scales, heat: { type: "linear", range: ["#ffffff", "
 
 A cell writes its value's text. A column draws more with a link from its
 field's display, a cell kind, or a custom renderer; a column without a
-field draws only what a renderer draws.
+field draws a [sparkline](#sparklines) or what a renderer draws.
 
 ```ts
 import { barCell, chipCell, symbolCell } from "herceg/grid";
@@ -400,7 +400,7 @@ createGrid(element, {
   (`grid.update({ cells })`; `cells: undefined` gives columns their own
   cells back), and with the grid.
 - **The cell** (`GridCellContext`) is the model's read of it (`state`,
-  `value`, `text`, `look`, `link`, `bar`), its `row`, `rowIndex`,
+  `value`, `text`, `look`, `link`, `bar`, `sparkline`), its `row`, `rowIndex`,
   `column`, and `selected`, and `read(field)` of the fields the renderer
   names. Rows are the same row when their refs' `scope` and `id` agree. A
   `signal` aborts when the next update supersedes this one and on
@@ -435,8 +435,9 @@ createGrid(element, {
 text and fields written through their displays (`["Open ", { field:
 "trace" }]`). A renderer draws more where `cells` gives one, and the text
 then names its cells for screen readers and is the renderer's
-`cell.text`. They take looks, but no sort, format, aggregate, or kind;
-remote grids ask the source for the fields their text reads.
+`cell.text`. They take looks and `sparklineCell`, but no sort, format,
+aggregate, or other kind; remote grids ask the source for the fields
+their text reads.
 
 ```ts
 const model = createGridModel({
@@ -466,6 +467,74 @@ createGrid(element, {
   },
 });
 ```
+
+### Sparklines
+
+A sparkline column draws a line (or an area) in each row from another
+table: the rows of `data` whose key matches the grid row's.
+
+```ts
+import { sparklineCell } from "herceg/grid";
+
+const services = table({ service: category(["web", "api", "db"]), owner: ["ana", "li", "sam"] });
+const requests = table({ service: category([]), time: time([]), latency: [] }); // appended to as it streams
+
+createGridModel({
+  data: rowView(services),
+  columns: [
+    { field: "service" },
+    {
+      id: "latency",
+      title: "Latency",
+      width: 160,
+      cell: sparklineCell({ data: requests, key: "service", x: "time", y: "latency" }),
+    },
+  ],
+});
+```
+
+- **Keys.** `key: "service"` matches a field of that name in both tables;
+  `key: { row: "serviceId", data: "service" }` names each, of one kind.
+  Values match raw (labels, numbers, times), so tables with dictionaries
+  of their own match by label. Rows without a key draw nothing.
+- **Data.** A table or a view of one (`rowView`, its filter and order
+  included). `x` is a number or time field; rows without a finite x are
+  left out, and rows without a value of `y` break the line (below).
+- **The window.** Every row shares x: `xDomain`, else the extent of every
+  data row's x, so lines line up in time. A line crossing an end reaches
+  it, from the nearest rows past it, and is clipped there.
+- **Values** run from the cell's bottom to its top over `domain`, else
+  each end from the y field's display (`min`, `max`), else the extent of
+  what the row draws. `mark: "area"` fills down to the low end; a series of
+  one value is a dot.
+- **Drawing.** Each device pixel column keeps its first, lowest, highest,
+  and last values, so a path holds at most four points a pixel whatever
+  the series holds. A missing value between two pixel columns breaks the
+  line there; one within a pixel column is narrower than a pixel and is
+  not drawn. The line is the theme's accent, or the column's
+  `encode.color` (a constant, a condition on the grid row, or its display
+  colors); in forced colors, the system's text color.
+- **Text.** A sparkline's text is its summary, which screen readers,
+  `textAt`, and the cell's renderer read: "12 values, 3ms to 900ms, last
+  45ms", "4 values, all 45ms", "1 value, 5ms", "No values in this range",
+  "No values". Counts use
+  the grid's locale and values the y field's display. `cellAt(row,
+  column).sparkline` reads it as numbers (`key`, `count`, `low`, `high`,
+  `last`, `domain`, `xDomain`), and a custom renderer for the column draws
+  instead of the line, given the same read. Columns with a sparkline take
+  no `text`, and group rows draw none.
+- **Changes.** The grid indexes the data by key as it first draws, takes
+  appends into the index as they happen (about the rows appended, each
+  key's rows given room to grow), builds it again after other changes and
+  changes of a view's query, and redraws the column's cells alone, their
+  paths made before the frame. The index takes about 4 bytes a data row
+  and 40 a key (up to ~5.6 bytes a row and 76 a key once appended to),
+  and 4–8 a label of a category key's dictionary, and goes with the
+  column or the model (`dispose`).
+- **Remote grids** take sparklines over a local table: the source is asked
+  for the key field.
+- `sparklineCell(...).spec` is its portable form (`{ kind: "sparkline",
+  key, x, y, ... }`, with `data` where the table has a name).
 
 ## Linking a grid and a chart
 
@@ -804,6 +873,14 @@ call `createGrid` on an element.
   Remote grids have no pivots and no bins in queries.
 - Custom renderers update every mounted cell of their columns when any row
   of a local grid's table changes, as a table's rows share one version.
+- A sparkline column over a million data rows mounts in ~17–18 ms, about
+  twice TanStack Table with the same sparklines in custom cells (most of
+  it indexing the rows by key), and shows ten appends a second ~2 ms
+  after it (see the [comparison](../comparison.md#grids)). Appends to a
+  view, and drops (rolling windows), build the index again, O(rows) with
+  a larger factor. A window moved to a display of another pixel ratio
+  draws sparklines to it in the grid's next frame (`render()`), as
+  charts do.
 - A grid notices it was moved into or out of another grid's cell as it
   next draws; a move that changes neither its size nor its visibility
   takes effect at `render()`.

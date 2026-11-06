@@ -2,7 +2,7 @@
 // biome-ignore-all lint/suspicious/noThenProperty: conditions' branches, as specs name them.
 import { expectTypeOf } from "vitest";
 import { count, max, mean, median, min, sum } from "../../src/data/aggregations.ts";
-import { time } from "../../src/data/column.ts";
+import { category, time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { type GroupKey, groupRows, type RowGroups } from "../../src/data/groups.ts";
 import { rowView } from "../../src/data/row-view.ts";
@@ -16,6 +16,10 @@ import {
   createGridModel,
   type GridColumn,
   type GridModel,
+  type SparklineOptions,
+  type SparklineRead,
+  sparklineCell,
+  type UnboundCell,
 } from "../../src/grid/model.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { point } from "../../src/marks/point.ts";
@@ -371,4 +375,95 @@ focusFirst(grid);
       },
     ],
   });
+}
+
+// Sparklines: a key of both tables (or one of each), x numbers or times, y numbers.
+{
+  const services = rowView(table({ service: category(["web"]), owner: ["a"] }));
+  const log = table({
+    service: category(["web"]),
+    svc: category(["web"]),
+    time: time([0]),
+    latency: [1],
+    region: category(["eu"]),
+  });
+  const grid = createGridModel({
+    data: services,
+    columns: [
+      { field: "service" },
+      { id: "trend", cell: sparklineCell({ data: log, key: "service", x: "time", y: "latency" }) },
+      {
+        id: "named",
+        cell: sparklineCell({
+          data: rowView(log),
+          key: { row: "service", data: "svc" },
+          x: "time",
+          y: "latency",
+          mark: "area",
+          xDomain: [0, 10],
+        }),
+      },
+    ],
+  });
+  expectTypeOf(grid.cellAt(0, 1).sparkline).toEqualTypeOf<SparklineRead | undefined>();
+  createGridModel({
+    data: services,
+    columns: [
+      {
+        id: "trend",
+        // @ts-expect-error y of categories: sparklines draw numbers
+        cell: sparklineCell({ data: log, key: "service", x: "time", y: "region" }),
+      },
+    ],
+  });
+  createGridModel({
+    data: services,
+    columns: [
+      {
+        id: "trend",
+        // @ts-expect-error a key the grid's rows lack
+        cell: sparklineCell({ data: log, key: "svc", x: "time", y: "latency" }),
+      },
+    ],
+  });
+  createGridModel({
+    data: services,
+    columns: [
+      // @ts-expect-error a sparkline draws in a column without a field
+      {
+        field: "owner",
+        cell: sparklineCell({ data: log, key: "service", x: "time", y: "latency" }),
+      },
+    ],
+  });
+  // @ts-expect-error x of categories
+  sparklineCell({ data: log, key: "service", x: "region", y: "latency" });
+  // Options written out of the call: named keys go in columns of grids that have them.
+  type Log = typeof log extends Table<infer L> ? L : never;
+  const shared: SparklineOptions<Log, "service"> = {
+    data: log,
+    key: "service",
+    x: "time",
+    y: "latency",
+  };
+  const pair: SparklineOptions<Log, { row: "service"; data: "svc" }> = {
+    data: log,
+    key: { row: "service", data: "svc" },
+    x: "time",
+    y: "latency",
+  };
+  const loose: SparklineOptions<Log> = shared;
+  expectTypeOf(sparklineCell(loose)).toEqualTypeOf<UnboundCell<string>>();
+  createGridModel({
+    data: services,
+    columns: [
+      { id: "shared", cell: sparklineCell(shared) },
+      { id: "pair", cell: sparklineCell(pair) },
+      // @ts-expect-error a key not named: the grid cannot tell its rows have it
+      { id: "loose", cell: sparklineCell(loose) },
+    ],
+  });
+  // @ts-expect-error a key the data lacks
+  const wrong: SparklineOptions<Log, "owner"> = shared;
+  void wrong;
 }

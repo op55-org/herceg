@@ -16,8 +16,15 @@ import { type Formatter, FULL_TIME, numberFormatter, timeFormatter } from "../fo
 import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { FormatSpec, NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
-import { type CellFieldKind, type CellKind, type GridCell, kindOf } from "./cells.ts";
+import {
+  type CellFieldKind,
+  type CellKind,
+  type GridCell,
+  kindOf,
+  type UnboundCell,
+} from "./cells.ts";
 import type { CellEncodings } from "./looks.ts";
+import type { Sparkline } from "./sparklines.ts";
 
 /** The formats a field of kind `K` takes: every number or time form, as axes take them; none for categories. */
 export type FormatOf<K> = K extends "number"
@@ -134,8 +141,8 @@ export type GridFieldColumn<S extends Schema = Schema, X extends AggregateScope 
  * and header clicks do not sort it. Its cells write its `text`, literal
  * text and the row's fields as their displays write them (what the model's
  * `textAt` gives, and copy and export write); without one, they write
- * nothing. A custom renderer (the DOM grid's `cells`) draws more, the text
- * naming its cells for assistive technology.
+ * nothing. A sparkline (`cell`) or a custom renderer (the DOM grid's
+ * `cells`) draws more, the text naming its cells for assistive technology.
  */
 export interface GridTextColumn<S extends Schema = Schema> extends ColumnPlacing {
   /** Names the column: it has no field to be named by. Unique in a grid. */
@@ -144,8 +151,13 @@ export interface GridTextColumn<S extends Schema = Schema> extends ColumnPlacing
   format?: never;
   aggregate?: never;
   aggregateEncode?: never;
-  cell?: never;
-  /** How its cells look on table rows, read from the row (see `CellEncodings`). */
+  /**
+   * What its cells draw on table rows: a sparkline of another table's rows
+   * matching the row by key (`sparklineCell`), its text a summary of what
+   * it draws. Group rows write nothing.
+   */
+  cell?: UnboundCell<PositionField<S>>;
+  /** How its cells look on table rows, read from the row (see `CellEncodings`); `color` is a sparkline's line. */
   encode?: Omit<CellEncodings<S>, "symbol">;
   text?: readonly (string | { readonly field: PositionField<S> })[];
 }
@@ -224,8 +236,10 @@ export interface ColumnContent {
   /** With field displays: the field's bounds, where its display gives them. */
   readonly min?: number | undefined;
   readonly max?: number | undefined;
-  /** What its cells draw besides their text (a bar), where the column says. */
+  /** What its cells draw besides their text (a bar, a sparkline), where the column says. */
   readonly cell?: CellKind | undefined;
+  /** A sparkline column's reading of its data, kept with this content and released with it. */
+  readonly sparkline?: Sparkline | undefined;
   readonly aggregate: string | undefined;
   /** A header over the column and its neighbors with the same one: a pivot's value over its aggregates. */
   readonly heading?: { readonly id: string; readonly title: string };
@@ -319,11 +333,18 @@ function describeTextColumn(
 ): ColumnContent {
   const { id, text } = column;
   checkPlace(id, column);
-  for (const key of ["format", "aggregate", "aggregateEncode", "cell"] as const)
+  for (const key of ["format", "aggregate", "aggregateEncode"] as const)
     if (column[key] !== undefined)
       throw new TypeError(
-        `${at}.${key}: a column without a field has no ${key === "cell" ? "cell kind (custom renderers draw it)" : key === "format" ? "value to format" : "aggregate"}; drop ${key}`,
+        `${at}.${key}: a column without a field has no ${key === "format" ? "value to format" : "aggregate"}; drop ${key}`,
       );
+  const cell = column.cell === undefined ? undefined : kindOf(column.cell);
+  if (column.cell !== undefined && !cell?.describe)
+    throw new TypeError(
+      `${at}.cell: a column without a field takes sparklineCell() alone; give a field for other cell kinds`,
+    );
+  // A kind's cells write what it says (a sparkline's summary).
+  const drawn = cell?.describe?.(table, column, settings, at);
   if (text !== undefined && !Array.isArray(text))
     throw new TypeError(
       `${at}.text: expected text and { field } parts; received ${JSON.stringify(text)}`,
@@ -343,13 +364,19 @@ function describeTextColumn(
     kind: null,
     title: column.title ?? id,
     align: column.align ?? "start",
-    text: (fields, position) =>
-      parts.map((part) => (typeof part === "string" ? part : part(fields, position))).join(""),
-    reads: (text ?? []).flatMap((part) => (typeof part === "string" ? [] : [part.field])),
+    text:
+      drawn?.text ??
+      ((fields, position) =>
+        parts.map((part) => (typeof part === "string" ? part : part(fields, position))).join("")),
+    reads:
+      drawn?.reads ??
+      (text ?? []).flatMap((part) => (typeof part === "string" ? [] : [part.field])),
     format: empty,
     amount: empty,
     key: empty,
     aggregate: undefined,
+    cell,
+    sparkline: drawn?.sparkline,
   };
 }
 

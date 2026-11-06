@@ -129,7 +129,13 @@ type Interaction = "link" | "control" | "composite";
 /** What a cell element holds besides its text. */
 type Held =
   | { readonly type: "link"; readonly anchor: HTMLAnchorElement }
-  | { readonly type: "kind"; readonly kind: CellKind; readonly view: CellView }
+  | {
+      readonly type: "kind";
+      readonly kind: CellKind;
+      readonly view: CellView;
+      /** What a kind drawn to the cell's size last drew, given again in frames nothing else changed. */
+      read?: GridCellRead;
+    }
   | Custom;
 
 /** A custom renderer's view in a cell element of column `column`, and what it last drew. */
@@ -387,7 +393,12 @@ export class CellHost {
       );
       return;
     }
-    if (!changed) return;
+    if (!changed) {
+      // Its view checks the cell's size and the pixel ratio it drew at.
+      if (held.type === "kind" && held.kind.sized && held.read)
+        held.view.write(held.read, paint, column, model.rowHeight);
+      return;
+    }
     const read = model.cellAt(rowIndex, columnIndex);
     if (cell.text.data !== read.text) cell.text.data = read.text;
     if (held.type === "link") {
@@ -405,7 +416,8 @@ export class CellHost {
     }
     // A kind's color is its own paint (a bar's, a chip's), not the text's.
     paint.look(cell, read.look, false);
-    held.view.write(read, paint);
+    if (held.kind.sized) held.read = read;
+    held.view.write(read, paint, column, model.rowHeight);
     if (!held.kind.text) setLabel(cell.element, read.text);
   }
 

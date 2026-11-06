@@ -132,11 +132,11 @@ describe("bars", () => {
   it("follow the records as they stream and as the view filters them", () => {
     const data = services();
     const { model } = grid({ columns: [{ field: "ms", cell: barCell() }] }, data);
-    const before = model.cellsRevision;
+    const before = model.cellsRevision(0);
     expect(model.cellAt(5, 0).bar).toEqual([20 / 90, 1]);
     data.append({ id: [6], service: ["web"], ms: [160], url: ["/g"] });
     // The extent grew: mounted bars draw again.
-    expect(model.cellsRevision).not.toBe(before);
+    expect(model.cellsRevision(0)).not.toBe(before);
     expect(model.cellAt(5, 0).bar).toEqual([20 / 180, 90 / 180]);
     const view = model.data;
     view.setQuery({ filter: col("ms").ge(0) });
@@ -386,10 +386,13 @@ describe("columns without fields", () => {
     for (const [key, value, problem] of [
       ["format", { number: ".1f" }, "value to format"],
       ["aggregate", "n", "aggregate"],
-      ["cell", barCell(), "cell kind (custom renderers draw it)"],
     ] as const)
       expect(() => grid({ columns: [{ id: "x", [key]: value }] })).toThrow(
         `grid columns[0].${key}: a column without a field has no ${problem}; drop ${key}`,
+      );
+    for (const cell of [barCell(), { spec: { kind: "bar" } }])
+      expect(() => grid({ columns: [{ id: "x", cell }] })).toThrow(
+        "grid columns[0].cell: a column without a field takes sparklineCell() alone; give a field for other cell kinds",
       );
     expect(() => grid({ columns: [{ id: "x", text: [{ field: "srvice" }] }] })).toThrow(
       'grid columns[0].text[0].field: no field "srvice" in the grid\'s table',

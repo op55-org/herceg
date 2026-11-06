@@ -99,6 +99,7 @@ export {
   type GridCellSpec,
   type SymbolCellOptions,
   symbolCell,
+  type UnboundCell,
 } from "./cells.ts";
 export {
   type AggregateScope,
@@ -121,6 +122,13 @@ export type {
   GridScale,
   GridScales,
 } from "./looks.ts";
+export {
+  type SparklineCellSpec,
+  type SparklineKey,
+  type SparklineOptions,
+  type SparklineRead,
+  sparklineCell,
+} from "./sparklines.ts";
 
 /**
  * A model's options. `G` and `B` are its groups' (their last level's table
@@ -627,7 +635,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     const look = this.lookAt(rowIndex, columnIndex);
     if (position >= 0 && !this.#pivot) {
       const { content } = column;
-      // A column without a field has its text alone.
+      // A column without a field has its text alone, and a sparkline's series.
       if (column.field === null)
         return {
           state: "empty",
@@ -636,6 +644,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
           text: content.text(this.#table, position),
           look,
           link: undefined,
+          ...(content.sparkline && { sparkline: content.sparkline.read(this.#table, position) }),
         };
       const link = content.link?.(this.#table, position);
       const value = this.#table.value(column.field as never, position) as number | string | null;
@@ -691,10 +700,9 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     return this.#currentLooks().scales.revision;
   }
 
-  get cellsRevision(): number {
-    let sum = 0;
-    for (const binding of this.#currentCells().values()) sum += binding.revision;
-    return sum;
+  cellsRevision(columnIndex: number): number {
+    const { id, content } = this.#column(columnIndex);
+    return content.sparkline?.revision ?? this.#currentCells().get(id)?.revision ?? 0;
   }
 
   askFields(_asker: object, fields: readonly (readonly [field: string, at: string])[]): void {
