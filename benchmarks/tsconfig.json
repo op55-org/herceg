@@ -26,7 +26,13 @@
       "@herceg/react/grid/pivot": ["../packages/react/src/grid/pivot.tsx"],
       "@herceg/react/layout": ["../packages/react/src/layout.tsx"],
       "@herceg/vue": ["../packages/vue/src/index.ts"],
-      "@herceg/svelte": ["../packages/svelte/src/index.ts"]
+      "@herceg/vue/grid": ["../packages/vue/src/grid.ts"],
+      "@herceg/vue/grid/remote": ["../packages/vue/src/grid/remote.ts"],
+      "@herceg/vue/grid/pivot": ["../packages/vue/src/grid/pivot.ts"],
+      "@herceg/svelte": ["../packages/svelte/src/index.ts"],
+      "@herceg/svelte/grid": ["../packages/svelte/src/grid.ts"],
+      "@herceg/svelte/grid/remote": ["../packages/svelte/src/grid/remote.ts"],
+      "@herceg/svelte/grid/pivot": ["../packages/svelte/src/grid/pivot.ts"]
     }
   },
   "include": ["src"]

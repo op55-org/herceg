@@ -61,13 +61,18 @@ export class Reference {
   readonly looks: boolean;
   /**
    * Whether grids draw the cells scenarios' cells (cells.ts), which frames
-   * are then checked for; "react": drawn by React components (react-cells.tsx).
+   * are then checked for; "framework": drawn by framework components.
    */
-  readonly cells: boolean | "react";
+  readonly cells: boolean | "framework";
   /** Whether grids show the summary scenarios' totals row (summary.ts), which frames are then checked for. */
   readonly summary: boolean;
 
-  constructor(table: GridTable, looks = false, cells: boolean | "react" = false, summary = false) {
+  constructor(
+    table: GridTable,
+    looks = false,
+    cells: boolean | "framework" = false,
+    summary = false,
+  ) {
     this.looks = looks;
     this.cells = cells;
     this.summary = summary;

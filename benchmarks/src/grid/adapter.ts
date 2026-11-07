@@ -112,11 +112,12 @@ export interface Adapter {
   /** Who sorts and filters: the library, or code in the adapter (labeled in reports). */
   processing: { sort: string; filter: string };
   /**
-   * Operations the library cannot do, with the reason; "react-cells":
-   * cells drawn by React components (the React cells scenarios);
-   * "summary": headings and a totals row (the summary scenarios).
+   * Operations the library cannot do, with the reason; "framework-cells":
+   * cells drawn by components of the grid's framework (the framework cells
+   * scenarios); "summary": headings and a totals row (the summary
+   * scenarios).
    */
-  unsupported?: Partial<Record<Operation | "react-cells" | "summary", string>>;
+  unsupported?: Partial<Record<Operation | "framework-cells" | "summary", string>>;
   /**
    * Converts the shared columnar fixture into the library's native input
    * (row objects, or nothing for grids that read columns through a callback).
@@ -139,10 +140,11 @@ export interface MountOptions {
   looks?: boolean;
   /**
    * Drawing the cells scenarios' cells (cells.ts), read back in `visible`;
-   * "react": drawn by `ReactCell` components (react-cells.tsx) in the
-   * library's React cells.
+   * "framework": drawn by components of the grid's framework holding state
+   * (`ReactCell`, react-cells.tsx, and its Vue and Svelte equivalents) in
+   * the library's framework cells.
    */
-  cells?: boolean | "react";
+  cells?: boolean | "framework";
   /** Showing the summary scenarios' headings and totals row (summary.ts), read back in `visible`. */
   summary?: boolean;
 }

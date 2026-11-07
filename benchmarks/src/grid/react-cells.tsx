@@ -1,5 +1,5 @@
 // The cells scenarios' cells (cells.ts) as React elements: `CellView` draws
-// what `fillDomCell` draws. `ReactCell`, the React cells scenarios' cell,
+// what `fillDomCell` draws. `ReactCell`, the framework cells scenarios' cell,
 // wraps it with state of its own (whether it was pressed), as a cell holding
 // a control does, so grids pay for mounting, recycling, and tearing down
 // stateful components.
@@ -74,7 +74,7 @@ export function CellView({ field, value, text, extent }: CellProps) {
   );
 }
 
-/** A cell of the React cells scenarios: `CellView`, under state of its own. */
+/** A cell of the framework cells scenarios: `CellView`, under state of its own. */
 export function ReactCell(props: CellProps) {
   const [pressed, setPressed] = useState(false);
   return (

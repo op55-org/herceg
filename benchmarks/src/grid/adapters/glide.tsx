@@ -668,7 +668,7 @@ export const adapter: Adapter = {
     filter: "external: adapter code (typed-array scan)",
   },
   unsupported: {
-    "react-cells":
+    "framework-cells":
       "cells are drawn on a canvas: custom cells (the cells scenarios) are drawing callbacks, not React components",
     summary:
       "column groups are one level (`group`), so the two levels of headings cannot be shown (a frozen trailing row, `freezeTrailingRows`, could hold totals the adapter keeps)",

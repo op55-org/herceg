@@ -55,12 +55,16 @@ renderer draws more for, or draw `sparklineCell`: a line or area per row
 of another table's rows matching the row's key by raw value, over an x
 window the column shares, at most four points a device pixel with gaps
 narrower than a pixel joined, its text a summary that screen readers and
-`cellAt` (`sparkline`) read, kept current through appends. React's `<Grid>` and `<RemoteGrid>`
-(`@herceg/react/grid/remote`) take `cells` as render functions by column
-id, typed by the model's fields: rendered through portals in the
-component's tree, their state kept per row, each in an error and
-Suspense boundary drawing the cell's text, and committed before the grid
-paints; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows pivots.
+`cellAt` (`sparkline`) read, kept current through appends. React's,
+Vue's, and Svelte's `<Grid>` (`@herceg/react/grid`, `@herceg/vue/grid`,
+`@herceg/svelte/grid`) and `<RemoteGrid>` (`/grid/remote`) take `cells`
+by column id, typed by the model's fields: React render functions
+through portals, Vue render functions or `#cell-<id>` slots through
+teleports, and Svelte snippets mounted with the component's contexts,
+each in the component's tree, its state kept per row, in an error
+boundary drawing the cell's text (React's in a Suspense boundary too),
+and committed before the grid paints; `<PivotGrid>` (`/grid/pivot`)
+shows pivots.
 `rowTotals(view, { ops })` keeps one row of aggregates over every row a view
 shows, as row groups keep theirs (appends and rolling windows' drops
 followed, sums compensated), for a grid's totals row (`totals`), a KPI, or
@@ -82,7 +86,7 @@ writes the state the rows were in when it started, in chunks that yield
 to the page, failing with a `GridExportError` where they changed, and
 reads a remote grid's rows from its snapshot, which it keeps until it
 ends. Ctrl+C (Cmd+C) in a grid copies the selected rows, or the focused
-cell, as TSV within limits (`createGrid`'s `copy`, React's `copy` prop),
+cell, as TSV within limits (`createGrid`'s `copy`, the components' `copy` prop),
 and announces what it copied. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's

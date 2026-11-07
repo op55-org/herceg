@@ -50,7 +50,15 @@ const SIZE_LABEL: Record<string, string> = {
   "1m": "1M x 20",
   "1m-wide": "1M x 100",
 };
-const ORDER = ["herceg", "herceg-react", "tanstack-table", "ag-grid", "glide"];
+const ORDER = [
+  "herceg",
+  "herceg-react",
+  "herceg-vue",
+  "herceg-svelte",
+  "tanstack-table",
+  "ag-grid",
+  "glide",
+];
 
 /** A distribution without samples has a null (JSON) or NaN median; it reads as a dash. */
 const known = (value: number | null | undefined): value is number =>

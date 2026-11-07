@@ -3,14 +3,18 @@ import { createServer, type ViteDevServer } from "vite";
 import { defineConfig } from "vitest/config";
 import type { BrowserCommand } from "vitest/node";
 import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
+import { commands } from "../../scripts/browser/commands.ts";
 
+const engine = (file: string) => new URL(`../herceg/src/${file}`, import.meta.url).pathname;
 // Exact matches, so "herceg" does not also rewrite "herceg/layout".
 const herceg = [
-  { find: /^herceg$/, replacement: new URL("../herceg/src/index.ts", import.meta.url).pathname },
-  {
-    find: /^herceg\/layout$/,
-    replacement: new URL("../herceg/src/layout.ts", import.meta.url).pathname,
-  },
+  { find: /^herceg$/, replacement: engine("index.ts") },
+  { find: /^herceg\/layout$/, replacement: engine("layout.ts") },
+  { find: /^herceg\/grid$/, replacement: engine("grid.ts") },
+  { find: /^herceg\/grid\/remote$/, replacement: engine("grid-remote.ts") },
+  { find: /^herceg\/grid\/pivot$/, replacement: engine("grid-pivot.ts") },
+  { find: /^herceg\/grid\/memory$/, replacement: engine("grid-memory.ts") },
+  { find: /^herceg\/pivot$/, replacement: engine("pivot.ts") },
 ];
 
 /**
@@ -58,7 +62,8 @@ export default defineConfig({
       enabled: true,
       headless: true,
       instances: browsers,
-      commands: { renderOnServer },
+      // Garbage collection, for what grids' cells leave behind; server rendering.
+      commands: { ...commands, renderOnServer },
     },
   },
 });

@@ -55,10 +55,11 @@ export interface GridScenario {
   looks?: boolean;
   /**
    * Grids draw the cells scenarios' bars, chips, links, and symbols
-   * (cells.ts), checked in every frame; "react": through React components
-   * holding state (react-cells.tsx) in each grid's React cells.
+   * (cells.ts), checked in every frame; "framework": through components of
+   * the grid's framework holding state (react-cells.tsx and its Vue and
+   * Svelte equivalents) in each grid's framework cells.
    */
-  cells?: boolean | "react";
+  cells?: boolean | "framework";
   /** Grids show the summary scenarios' headings and totals row (summary.ts), its text checked in every frame. */
   summary?: boolean;
   description: string;
@@ -388,18 +389,24 @@ function looksFor(name: SizeName): GridScenario[] {
 /**
  * Cells at one size: bars on two columns, chips, links, and symbols
  * (cells.ts), mounted, scrolled, traced, and held in memory, each frame's
- * content checked with its text. With `react`, drawn by React components
- * (react-cells.tsx) through each React grid's cells.
+ * content checked with its text. With `framework`, drawn by components of
+ * each grid's framework (react-cells.tsx, vue-cells.ts, svelte-cells/)
+ * through its framework cells.
  */
-function cellsFor(name: SizeName, react = false): GridScenario[] {
+function cellsFor(name: SizeName, framework = false): GridScenario[] {
   const size = SIZES[name];
   const shape = `${size.rows.toLocaleString("en-US")} x ${size.groups * 20}`;
   const big = size.rows >= 1_000_000;
-  const kind = react ? "react-cells" : "cells";
+  const kind = framework ? "framework-cells" : "cells";
   const id = (suffix: string) => `grid-${name}-${kind}-${suffix}`;
   const timeout = big ? 900 : 300;
-  const common = { sizeName: name, size, cells: react ? ("react" as const) : true, timeout };
-  const cells = react ? "React cells" : "cells";
+  const common = {
+    sizeName: name,
+    size,
+    cells: framework ? ("framework" as const) : true,
+    timeout,
+  };
+  const cells = framework ? "framework cells" : "cells";
   return [
     {
       ...common,

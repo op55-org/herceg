@@ -493,7 +493,7 @@ export function installGridHarness(adapter: Adapter): void {
     async run(s) {
       const operation = OPERATION[s.operation];
       const reason =
-        (s.cells === "react" && adapter.unsupported?.["react-cells"]) ||
+        (s.cells === "framework" && adapter.unsupported?.["framework-cells"]) ||
         (s.summary && adapter.unsupported?.summary) ||
         (operation && adapter.unsupported?.[operation]);
       if (reason) return { status: "unsupported", reason, metrics: {} };

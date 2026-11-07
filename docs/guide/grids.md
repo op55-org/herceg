@@ -3,7 +3,8 @@
 `herceg/grid` shows the rows of a table in a virtualized grid: a million
 rows mount only what is in view. Grids share tables, views, and selections
 with charts, so a grid and a chart can link both ways without copying
-data. Grids are TypeScript and React only; Python has none.
+data. Grids are TypeScript, with components for React, Vue, and Svelte;
+Python has none.
 
 - [A grid](#a-grid)
 - [Sorting and selecting](#sorting-and-selecting)
@@ -21,7 +22,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Remote grids](#remote-grids)
 - [Export and copy](#export-and-copy)
 - [Accessibility](#accessibility)
-- [In React](#in-react)
+- [In React, Vue, and Svelte](#in-react-vue-and-svelte)
 - [Limits](#limits)
 
 ## A grid
@@ -460,8 +461,9 @@ createGrid(element, {
   reads) and the hosts to let go of, and shows each cell's text until it
   says the cell's content is drawn (the host waiting meanwhile is laid
   out unseen, so content measuring itself as it mounts finds the cell's
-  size). React's `<Grid>` and `<RemoteGrid>` take cells as render
-  functions ([In React](#in-react)); Vue and Svelte have no cells yet.
+  size). The React, Vue, and Svelte `<Grid>` and `<RemoteGrid>` take
+  cells as render functions, slots, or snippets
+  ([In React, Vue, and Svelte](#in-react-vue-and-svelte)).
 - Pivot grids take no renderers: their rows are combinations, not
   records.
 
@@ -1008,11 +1010,12 @@ grid.update({ copy: false }); // leaves Ctrl+C to the page
 - Forced-colors mode uses system colors; cells drop their looks, and
   chips their fills, their text the row's.
 
-## In React
+## In React, Vue, and Svelte
 
-`<Grid>` from `@herceg/react/grid` shows a model the application makes and
-owns; data, scrolling, focus, selection, sorting, and column layout go
-through the model, never through React.
+`<Grid>` from `@herceg/react/grid`, `@herceg/vue/grid`, or
+`@herceg/svelte/grid` shows a model the application makes and owns; data,
+scrolling, focus, selection, sorting, and column layout go through the
+model, never through the framework.
 
 ```tsx
 import { rowView } from "herceg";
@@ -1070,11 +1073,67 @@ shows a row's text under another row's content. See
 [React, Vue, and Svelte](frameworks.md#grids) for when cells commit and
 what they cost.
 
-`<RemoteGrid>` (`@herceg/react/grid/remote`) shows a [remote
-grid](#remote-grids)'s model and takes `cells` too, asking the source for
-the fields they read; `<PivotGrid>` (`@herceg/react/grid/pivot`) shows a
-[pivot](#pivots)'s, without cells. Vue and Svelte have no grid component;
-call `createGrid` on an element.
+**In Vue**, the same props are written as a template's (`aria-label`,
+`:header-height`), events as `@row-click`, `@cell-click`, and `@render`,
+and a template ref's `grid` is the grid. Keep the model in a plain
+`const`, `shallowRef`, or `markRaw`: deep proxies (`ref()`, `reactive()`)
+cannot reach its private fields (the grid itself takes a proxy's
+original). A column's cells are a render function in `cells`, or a scoped
+slot:
+
+```vue
+<script setup lang="ts">
+import { Grid } from "@herceg/vue/grid";
+
+const model = createGridModel({ data: rowView(services), columns });
+</script>
+
+<template>
+  <Grid :model="model" aria-label="Services" style="height: 400px"
+    :cells="{ open: { fields: ['service'], interaction: 'control' } }">
+    <template #cell-status="{ cell }"><StatusBadge :status="cell.value" /></template>
+    <template #cell-open="{ cell }">
+      <button type="button" @click="openService(cell.read('service'))">Open</button>
+    </template>
+  </Grid>
+</template>
+```
+
+Cells render in the component's tree (`provide` and `inject` reach them),
+through teleports into their elements, and commit in the microtask after
+the grid's frame, before it paints. A slot for no column, or a column
+drawn by both a slot and a render function, is an error naming them.
+
+**In Svelte**, events are `onrowclick`, `oncellclick`, and `onrender`,
+and `bind:grid` is the grid. A column's cells are a snippet:
+
+```svelte
+<script lang="ts">
+  import { Grid } from "@herceg/svelte/grid";
+  import type { GridCellContext, GridModel } from "herceg/grid";
+
+  // The model's schema, for the snippets' parameters.
+  type Services = { service: "category"; status: "category"; latency: "number" };
+  const model: GridModel<Services> = createGridModel({ data: rowView(services), columns });
+</script>
+
+{#snippet status(cell: GridCellContext<Services>)}<StatusBadge status={cell.value} />{/snippet}
+{#snippet open(cell: GridCellContext<Services>)}
+  <button type="button" onclick={() => openService(cell.read("service"))}>Open</button>
+{/snippet}
+
+<Grid {model} ariaLabel="Services" style="height: 400px"
+  cells={{ status, open: { fields: ["service"], interaction: "control", render: open } }} />
+```
+
+Each cell is mounted into its element with the component's contexts
+(`getContext` reaches them) and committed in the grid's frame before it
+paints (`flushSync`).
+
+`<RemoteGrid>` (`/grid/remote`) shows a [remote grid](#remote-grids)'s
+model and takes `cells` too, asking the source for the fields they read;
+`<PivotGrid>` (`/grid/pivot`) shows a [pivot](#pivots)'s, without
+cells.
 
 ## Limits
 
@@ -1083,9 +1142,8 @@ call `createGrid` on an element.
   scaled (a pixel scrolled moves more than one).
 - Not available: sizing columns to content, moving columns by touch (the
   menu moves them), sorting or moving columns by their headings, editing,
-  pasting, copying ranges of cells, Excel files, custom cells in Vue and
-  Svelte, custom renderers in pivot grids and on the totals row, and a
-  totals row at the top.
+  pasting, copying ranges of cells, Excel files, custom renderers in
+  pivot grids and on the totals row, and a totals row at the top.
   Remote grids have no pivots and no bins in queries, and export and copy
   only the rows they show.
 - Exports and copies write text and values, not looks, links' targets, or

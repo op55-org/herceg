@@ -64,8 +64,8 @@ export function Latency() {
   draws columns' cells with React components, keeping your app's
   context: each cell's state is its row's, a cell that throws or suspends
   draws its text, and cells commit before the grid paints. Each mounted
-  React cell is a portal, which costs about 17 KB of React's event
-  listeners, growing with the cells on screen, not with the rows.
+  React cell is a portal, which costs about 34 KB, most of it React's
+  event listeners, growing with the cells on screen, not with the rows.
   `copy={{ maxCells }}` sets what Ctrl+C copies (`copy={false}` leaves the
   key to the page); `exportGrid(model)` from `herceg/grid` writes CSV.
 
@@ -75,7 +75,7 @@ export function Latency() {
   to the adapters
 - [Getting started](https://github.com/op55-org/herceg/blob/main/docs/guide/getting-started.md) and the
   [documentation index](https://github.com/op55-org/herceg/blob/main/docs/README.md)
-- [Grids](https://github.com/op55-org/herceg/blob/main/docs/guide/grids.md#in-react)
+- [Grids](https://github.com/op55-org/herceg/blob/main/docs/guide/grids.md#in-react-vue-and-svelte)
 
 ## License
 
