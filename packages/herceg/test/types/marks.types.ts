@@ -11,6 +11,7 @@ import { dendrogram } from "../../src/marks/dendrogram.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
 import { funnel } from "../../src/marks/funnel.ts";
 import { gauge } from "../../src/marks/gauge.ts";
+import { geopoint } from "../../src/marks/geopoint.ts";
 import { graph } from "../../src/marks/graph.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
@@ -57,6 +58,18 @@ rule(readings, { y: "cpu", itemKey: "at" });
 point(readings, { x: "at", y: "cpu", itemKey: "missing" });
 // @ts-expect-error a histogram's items are its bins, named by their intervals
 histogram(readings, { x: "cpu", itemKey: "stage" });
+
+// A point's color is a field or a CSS color, as a line's is.
+point(readings, { x: "at", y: "cpu", color: "#ff00ff" });
+point(readings, { x: "at", y: "cpu", color: "tomato" });
+point(readings, { x: "at", y: "cpu", color: "stage" });
+// @ts-expect-error neither a field of the table nor a color
+point(readings, { x: "at", y: "cpu", color: "stgae" });
+// Map points' too.
+geopoint(readings, { longitude: "cpu", latitude: "cpu", color: "tomato" });
+geopoint(readings, { longitude: "cpu", latitude: "cpu", color: "stage" });
+// @ts-expect-error neither a field of the table nor a color
+geopoint(readings, { longitude: "cpu", latitude: "cpu", color: "stgae" });
 
 // Tooltip fields are fields of the mark's table, of any kind but shapes, and
 // only marks whose points are rows take them.

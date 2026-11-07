@@ -2341,14 +2341,15 @@ describe("capabilities: color identity in every family", () => {
     expect(() => radar(data, { category: "city", value: "v", color: "region" } as never)).toThrow(
       "radar color: the mark colors by series; give series",
     );
-    // A string neither a field nor a color, in static output as in the browser.
+    // A string neither a field nor a color, in static output as in the
+    // browser: refused as the mark is made, as static output tells colors.
     const model = () =>
       new ChartModel(
         { marks: [histogram(data, { x: "v", color: "stie" as never })] },
         undefined,
         staticCompilers(),
       );
-    expect(model).toThrow('histogram (mark 0) color: "stie" is neither a field nor a color');
+    expect(model).toThrow('histogram color: "stie" is neither a field nor a color');
   });
 
   it.each(families)(

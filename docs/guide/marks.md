@@ -328,7 +328,7 @@ hg.scatter(tips, x="day", y="tip", swarm=True)
 | --- | --- |
 | `radius` | Every point's radius in pixels (2.5 by default). |
 | `size` | A number field sizing points by area, from zero (or the least value) at `radiusRange[0]` to the largest at `radiusRange[1]` (default `[2, 12]`), with a size key. Takes the place of `radius`. |
-| `color` | A number or time field on a continuous scale with a color legend, or a category field through the color scale. |
+| `color` | A number or time field on a continuous scale with a color legend, a category field through the color scale, or a CSS color for every point. |
 | `fillOpacity` | A constant, or a field mapped from 0.15 to opaque. |
 | `symbol` | A shape (`"circle"`, `"square"`, `"triangle"`, `"diamond"`, `"cross"`, `"star"`, `"wye"`, `"triangle-down"`, `"x"`) or a category field through the `"symbol"` scale (the first eight by default). Every shape has the area of the circle of the same radius. A name that is both a shape and a field is refused; write `{ field }`. |
 | `stroke`, `strokeWidth` | Outlines: `stroke` alone is 1 pixel; `strokeWidth` alone uses the chart's background, keeping overlapping points apart. |

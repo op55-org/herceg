@@ -75,7 +75,7 @@ longitude and latitude (degrees, WGS 84).
 | --- | --- |
 | `longitude`, `latitude` | Number fields. |
 | `radius`, `size`, `radiusRange` | One radius (4 px), or area by a field (2 to 16 px by default, with a size key). |
-| `series`, `color` | Series colors, or a number field on a continuous scale. Map points refuse colors row by row. |
+| `series`, `color` | Series colors, a number field on a continuous scale, or a CSS color for every point. Map points refuse colors row by row. |
 | `labelField` | Names points in tooltips and keyboard reading. |
 
 Points are drawn at 0.8 opacity, ringed in the background color, largest

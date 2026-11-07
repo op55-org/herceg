@@ -17,12 +17,12 @@ import {
   SequentialScale,
 } from "../scale/color.ts";
 import type { PointBatch3D } from "../scene/scene.ts";
-import { ChartError } from "../spec/errors.ts";
 import type { Frozen, Point3DSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { View } from "../three/camera.ts";
 import { ScreenGrid } from "../three/hit.ts";
-import type { ItemKeyed } from "./encoding.ts";
+import { pointColor } from "./colored.ts";
+import type { CssColor, ItemKeyed } from "./encoding.ts";
 import {
   type ItemSources,
   type LayoutFrame,
@@ -70,7 +70,6 @@ export interface Point3DOptions<S extends Schema> extends ItemKeyed<S> {
   x: NumericField<S>;
   y: NumericField<S>;
   z: NumericField<S>;
-  /** Category field: one colored set of points per value, with a legend. */
   /** A category field: a series per value; by default a category `color`, and `false` for none. */
   series?: CategoryField<S> | false;
   /** Category field naming each point, for tooltips and keyboard reading. */
@@ -80,9 +79,10 @@ export interface Point3DOptions<S extends Schema> extends ItemKeyed<S> {
   /**
    * A number field colored on a continuous scale, with a color legend; or a
    * category field whose values take the theme's palette in order of
-   * appearance, with a key of them (the `series` field keeps its series' colors).
+   * appearance, with a key of them (the `series` field keeps its series' colors);
+   * or a color for every point.
    */
-  color?: NumberField<S> | CategoryField<S>;
+  color?: NumberField<S> | CategoryField<S> | CssColor;
   /** Colors for a number `color`, low to high; the theme's ramp by default. */
   colors?: readonly string[];
   colorDomain?: readonly [number, number];
@@ -150,7 +150,8 @@ export class Point3DMark implements Layer3D {
   #cloudStyle: { key: string; style: Uint8Array } | undefined;
   /** A number `color`, colored on a continuous scale. */
   readonly #toneField: string | undefined;
-  /** A category `color` other than the series field, its values in order of appearance. */
+  /** The fill of every point: `fill`, or a color `color` gives. */
+  readonly #fill: string | undefined;
 
   constructor(input: Point3DSpec, table: Table) {
     checkDepthOrder(input, "point3d");
@@ -165,25 +166,9 @@ export class Point3DMark implements Layer3D {
     if (spec.series !== undefined) requireField(table, spec.series, ["category"], "point3d series");
     if (spec.labelField !== undefined)
       requireField(table, spec.labelField, ["category"], "point3d labelField");
-    if (spec.color !== undefined) {
-      requireField(table, spec.color, ["number", "category"], "point3d color");
-      if (table.kind(spec.color) === "number") this.#toneField = spec.color;
-      else if (
-        spec.colors !== undefined ||
-        spec.colorDomain !== undefined ||
-        spec.colorMidpoint !== undefined
-      )
-        throw new Error(
-          `point3d colors: "${spec.color}" is a category field, colored by the theme's palette; drop colors, colorDomain, and colorMidpoint`,
-        );
-      // 3D points color by one category field, their series': it gives their colors, legend entries, and hiding.
-      else if (spec.color !== spec.series && spec.fill === undefined)
-        throw new ChartError({
-          code: "invalid-option",
-          path: "color",
-          message: `point3d color: "${spec.color}" holds categories, which color 3D points by series; leave series out (or give series: "${spec.color}"), or color by a number field`,
-        });
-    }
+    const color = pointColor(spec, table, "3D points");
+    this.#toneField = color.tone;
+    this.#fill = color.fill;
     if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point3d colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "point3d");
     if (spec.radius !== undefined && !(spec.radius > 0 && Number.isFinite(spec.radius)))
@@ -265,7 +250,7 @@ export class Point3DMark implements Layer3D {
     const muted = this.#toneField !== undefined;
     return this.#groups().map(({ label, category }) => {
       const key = groupKey(id, category);
-      const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key), paint, "point3d fill");
+      const fill = ownOr(muted ? theme.muted : this.#fill, color(key), paint, "point3d fill");
       return { key, label, color: fill, glyph };
     });
   }
@@ -299,7 +284,7 @@ export class Point3DMark implements Layer3D {
     const scale = this.#scale(theme, paint);
     const groups = this.#groups();
     const fills = groups.map((group) =>
-      ownOr(spec.fill, frame.color(groupKey(id, group.category)), paint, "point3d fill"),
+      ownOr(this.#fill, frame.color(groupKey(id, group.category)), paint, "point3d fill"),
     );
     const shown = groups.map((group) => !hidden.has(groupKey(id, group.category)));
     const palette = this.#toneField === undefined ? fills : (scale?.colors() ?? []);
@@ -478,7 +463,7 @@ export class Point3DMark implements Layer3D {
         color:
           tones && scale
             ? scale.color(tones[row]!)
-            : ownOr(spec.fill, frame.color(groupKey(id, group)), paint, "point3d fill"),
+            : ownOr(this.#fill, frame.color(groupKey(id, group)), paint, "point3d fill"),
         value: values[2]!,
         text: parts.join(", "),
         px,
@@ -530,7 +515,7 @@ export class Point3DMark implements Layer3D {
     if (!ramp)
       for (const group of this.#groups()) {
         const fill = ownOr(
-          spec.fill,
+          this.#fill,
           frame.color(groupKey(id, group.category)),
           paint,
           "point3d fill",

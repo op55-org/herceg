@@ -5,12 +5,15 @@ import { encodedCategory } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../../src/draw/symbols.ts";
 import { estimateText } from "../../src/layout/text.ts";
+import { geopoint } from "../../src/marks/geopoint.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { PointMark, point } from "../../src/marks/point.ts";
+import { point3d } from "../../src/marks/point3d.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
+import { renderToSVG } from "../../src/render/static.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import { SequentialScale } from "../../src/scale/color.ts";
 import { rdbu, scheme, viridis } from "../../src/scale/schemes.ts";
@@ -386,6 +389,83 @@ describe("point color by field", () => {
   });
 });
 
+describe("point color as a CSS color", () => {
+  it("fills every point with it, as a line's color strokes it", () => {
+    for (const color of ["#ff00ff", "rgb(10, 20, 30)", "var(--accent)", "tomato"] as const) {
+      const [g] = points({ marks: [point(cities, { x: "x", y: "y", color })] });
+      expect([g!.fill, g!.colors]).toEqual([color, undefined]);
+      // One series, as with no color: no key.
+      expect(legendOf(build({ marks: [point(cities, { x: "x", y: "y", color })] }).scene)).toEqual(
+        [],
+      );
+    }
+    // A fill wins over it, as it does over a field.
+    const [filled] = points({
+      marks: [point(cities, { x: "x", y: "y", color: "red", fill: "#123456" })],
+    });
+    expect(filled!.fill).toBe("#123456");
+  });
+
+  it("refuses a name that is neither a field nor a color, or both, and a ramp's options", () => {
+    expect(() =>
+      points({ marks: [point(cities, { x: "x", y: "y", color: "regoin" as never })] }),
+    ).toThrow(
+      'point (mark 0) color: "regoin" is neither a field nor a color; the table has "x", "y", "pop", "growth", "region", and colors are hex',
+    );
+    const red = table({ x: [1, 2], y: [1, 2], red: ["a", "b"] });
+    expect(() => points({ marks: [point(red, { x: "x", y: "y", color: "red" })] })).toThrow(
+      'point (mark 0) color: "red" names both a field and a color; give encode.color: { field: "red" } or { value: "red" }',
+    );
+    // A number field so named too: the mark asks for the code that refuses it,
+    // on a page where no chart has loaded that yet.
+    const reds = table({ x: [1, 2], y: [1, 2], red: [3, 4] });
+    expect(() => points({ marks: [point(reds, { x: "x", y: "y", color: "red" })] })).toThrow(
+      'point (mark 0) color: "red" names both a field and a color',
+    );
+    const page = globalThis as { CSS?: unknown };
+    const css = page.CSS;
+    page.CSS = { supports: (_: string, value: string) => value === "red" };
+    try {
+      expect((point(reds, { x: "x", y: "y", color: "red" }) as PointMark).featured).toBe(true);
+      expect((point(cities, { x: "x", y: "y", color: "pop" }) as PointMark).featured).toBe(false);
+    } finally {
+      page.CSS = css;
+    }
+    expect(() =>
+      point(cities, { x: "x", y: "y", color: "#ff00ff", colors: "viridis" as never }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "invalid-option",
+        path: "colors",
+        message:
+          "point colors: a ramp colors a number field; drop colors, colorDomain, and colorMidpoint",
+      }),
+    );
+  });
+
+  // Without a browser, marks tell colors from fields as static output's
+  // feature compiler does, so static output refuses what a page would.
+  it("tells colors from fields in static output as a page does, on every kind of point", () => {
+    const places = table({ x: [1, 2], y: [1, 2], z: [1, 2], red: [3, 4] });
+    const kinds = {
+      point: (color: string) => point(places, { x: "x", y: "y", color } as never),
+      geopoint: (color: string) =>
+        geopoint(places, { longitude: "x", latitude: "y", color } as never),
+      point3d: (color: string) => point3d(places, { x: "x", y: "y", z: "z", color } as never),
+    };
+    for (const [type, make] of Object.entries(kinds)) {
+      const svg = (color: string) => () =>
+        renderToSVG({ width: 300, height: 200, marks: [make(color)] });
+      expect(svg("knid"), type).toThrow(/color: "knid" is neither a field nor a color/);
+      expect(svg("red"), type).toThrow(/color: "red" names both a field and a color/);
+      expect(svg("tomato")(), type).toContain('fill="#ff6347"');
+      // CSS names are any case, currentColor too.
+      expect(svg("currentcolor"), type).not.toThrow();
+      expect(svg("CurrentColor"), type).not.toThrow();
+    }
+  });
+});
+
 describe("point color by category", () => {
   const colorOf = (g: PointGeometry, i: number) => g.colors!.palette[g.colors!.index[i]!];
 
@@ -590,11 +670,24 @@ describe("point color by category", () => {
     expect(colorOf("k20")).toBe(palette[20]);
   });
 
-  it("refuses ramp options for a category color", () => {
-    for (const options of [{ colors: viridis }, { colorDomain: [0, 1] }, { colorMidpoint: 0 }])
-      expect(() =>
-        point(cities, { x: "x", y: "y", series: false, color: "region", ...(options as object) }),
-      ).toThrow(/point colors: "region" is a category field/);
+  it("refuses ramp options for a category color, at the option", () => {
+    for (const [path, value] of [
+      ["colors", viridis],
+      ["colorDomain", [0, 1]],
+      ["colorMidpoint", 0],
+    ] as const) {
+      let refused: unknown;
+      try {
+        point(cities, { x: "x", y: "y", series: false, color: "region", [path]: value } as never);
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toMatchObject({
+        code: "invalid-option",
+        path,
+        message: expect.stringContaining(`point ${path}: "region" is a category field`),
+      });
+    }
   });
 
   it("loads from specs and draws in static SVG", () => {

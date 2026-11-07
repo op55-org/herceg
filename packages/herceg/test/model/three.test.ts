@@ -196,6 +196,55 @@ describe("3D scatter", () => {
     ).toThrow('point3d color: "group" holds categories, which color 3D points by series');
   });
 
+  it("fills every point with a CSS color, as points along axes do", () => {
+    const at = { x: "x", y: "y", z: "z" } as const;
+    for (const color of ["tomato", "#ff00ff", "var(--accent)"] as const) {
+      const { scene, model } = build({ marks: [point3d(clusters, { ...at, color })] });
+      const mark = faces(scene);
+      expect(
+        new Set(Array.from(mark.style.subarray(0, mark.count), (s) => mark.styles[s]!.fill)),
+      ).toEqual(new Set([color]));
+      const first = model.inspectItem(model.stepItem(undefined, 1)!) as ItemInspection;
+      expect(first.points[0]).toMatchObject({ color });
+    }
+    // A fill wins over it, as it does over a field.
+    const mark = faces(
+      build({ marks: [point3d(clusters, { ...at, color: "tomato", fill: "#123456" })] }).scene,
+    );
+    expect(mark.styles[mark.style[0]!]!.fill).toBe("#123456");
+    // A ramp's options are refused, at the option, but for a fill's.
+    expect(() =>
+      point3d(clusters, { ...at, color: "tomato", fill: "#123456", colorDomain: [0, 1] }),
+    ).not.toThrow();
+    let refused: unknown;
+    try {
+      point3d(clusters, { ...at, color: "tomato", colorDomain: [0, 1] });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({
+      code: "invalid-option",
+      path: "colorDomain",
+      message:
+        "point3d colorDomain: a ramp colors a number field; drop colors, colorDomain, and colorMidpoint",
+    });
+    // Where the page can tell colors, a name that is neither or both is refused.
+    const page = globalThis as { CSS?: unknown };
+    const css = page.CSS;
+    page.CSS = { supports: (_: string, value: string) => value === "red" };
+    try {
+      expect(() => point3d(clusters, { ...at, color: "gruop" as never })).toThrow(
+        'point3d color: "gruop" is neither a field nor a color; the table has "x", "y", "z", "group", and colors are hex',
+      );
+      const red = table({ x: [0], y: [0], z: [0], red: [1] });
+      expect(() => point3d(red, { ...at, color: "red" })).toThrow(
+        'point3d color: "red" names both a field and a color; give fill: "red" for the color, or rename the field',
+      );
+    } finally {
+      page.CSS = css;
+    }
+  });
+
   it("labels time axes as times", () => {
     const day = 86_400_000;
     const data = table({

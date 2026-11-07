@@ -3527,7 +3527,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number field colored on a continuous scale.",
+          "description": "A number field colored on a continuous scale, with a color legend; a category field (the series it names); or a color for every point.",
           "type": "string"
         },
         "colors": {
@@ -6331,7 +6331,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number field colored on a continuous scale, with a color legend.",
+          "description": "A number field colored on a continuous scale, with a color legend; a category field (the series it names); or a color for every point.",
           "type": "string"
         },
         "colors": {
@@ -6413,7 +6413,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number or time field colored on a continuous scale (see `colors`), a category field (its values' colors, and the series it names), or a channel: `{ field, scale }` through one of the chart's scales, or `{ field, scale: { type: \"identity\" } }` for colors the data holds.",
+          "description": "A number or time field colored on a continuous scale (see `colors`), a category field (its values' colors, and the series it names), a color for every point, or a channel: `{ field, scale }` through one of the chart's scales, or `{ field, scale: { type: \"identity\" } }` for colors the data holds.",
           "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" }]
         },
         "colors": {

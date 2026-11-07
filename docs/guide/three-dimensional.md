@@ -39,7 +39,7 @@ hg.surface(z=heights, x=eastings, y=northings)  # a 2D array: row i, column j at
 
 | Mark | Draws |
 | --- | --- |
-| `point3d` | Points at number or time `x`, `y`, `z` (z is vertical). Colored by `series`, or `color` (a number field on a continuous scale, or a category naming series). `radius` 3.5 px; `labelField` names points in tooltips. |
+| `point3d` | Points at number or time `x`, `y`, `z` (z is vertical). Colored by `series`, or `color` (a number field on a continuous scale, a category naming series, or a CSS color for every point). `radius` 3.5 px; `labelField` names points in tooltips. |
 | `line3d` | A path per `series` category through its rows in table order, so a path may turn back on any axis. A missing value breaks the path. `strokeWidth` (2 px) stays constant with depth. A one-row run draws nothing (add `point3d` for markers). |
 | `surface` | A height field over a grid: each row's `x` and `y` (numbers, times, or categories) pick a grid point and `z` is its height (the last row with a value wins). Cells of four grid points are two triangles, cells of three one, so missing values leave holes. |
 

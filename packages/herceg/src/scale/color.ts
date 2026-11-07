@@ -3,6 +3,7 @@
 // diverging ramp maps a midpoint to its middle color, and each side of the
 // midpoint onto its own half of the ramp.
 
+import { ChartError } from "../spec/errors.ts";
 import type { PaintReader } from "../theme.ts";
 
 /** Odd, so one entry is the ramp's exact middle, and below 256, so an index fits a byte. */
@@ -23,6 +24,29 @@ export function checkRamp(stops: readonly string[], what: string, given = false)
   if (bad !== undefined) {
     throw new TypeError(`${what}: expected "#rrggbb" colors; received ${JSON.stringify(bad)}`);
   }
+}
+
+/**
+ * Refuses the ramp's options (`colors`, `colorDomain`, `colorMidpoint`) on
+ * a `type` mark whose `color` reads no ramp, saying `why`, at the first
+ * one given.
+ */
+export function refuseRamp(
+  spec: {
+    readonly colors?: unknown;
+    readonly colorDomain?: unknown;
+    readonly colorMidpoint?: unknown;
+  },
+  type: string,
+  why: string,
+): void {
+  for (const path of ["colors", "colorDomain", "colorMidpoint"] as const)
+    if (spec[path] !== undefined)
+      throw new ChartError({
+        code: "invalid-option",
+        path,
+        message: `${type} ${path}: ${why}; drop colors, colorDomain, and colorMidpoint`,
+      });
 }
 
 /**

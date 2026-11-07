@@ -2642,7 +2642,10 @@ interface GeoPointStyleSpec extends RowTooltip, RowItems {
   labelField?: Field;
   /** A category field: a series per value; by default a category `color` field, and `false` for none. */
   series?: Field | false;
-  /** A number field colored on a continuous scale. */
+  /**
+   * A number field colored on a continuous scale, with a color legend; a
+   * category field (the series it names); or a color for every point.
+   */
   color?: Field;
   /** @minItems 2 */
   colors?: readonly string[] | string;
@@ -2809,9 +2812,10 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
   fillOpacity?: number | Field | ChannelsSpec<number>;
   /**
    * A number or time field colored on a continuous scale (see `colors`),
-   * a category field (its values' colors, and the series it names), or a
-   * channel: `{ field, scale }` through one of the chart's scales, or
-   * `{ field, scale: { type: "identity" } }` for colors the data holds.
+   * a category field (its values' colors, and the series it names), a
+   * color for every point, or a channel: `{ field, scale }` through one of
+   * the chart's scales, or `{ field, scale: { type: "identity" } }` for
+   * colors the data holds.
    */
   color?: Field | ChannelsSpec<string>;
   /** Colors for `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
@@ -3044,7 +3048,10 @@ export interface Point3DSpec extends RowTooltip, RowItems {
   labelField?: Field;
   /** Radius in pixels; default 3.5. @exclusiveMinimum 0 @default 3.5 */
   radius?: number;
-  /** A number field colored on a continuous scale, with a color legend. */
+  /**
+   * A number field colored on a continuous scale, with a color legend; a
+   * category field (the series it names); or a color for every point.
+   */
   color?: Field;
   /** Colors for `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
   colors?: readonly string[] | string;

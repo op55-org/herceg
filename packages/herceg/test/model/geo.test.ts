@@ -51,6 +51,16 @@ const polygons = (scene: Scene) =>
 const points = (scene: Scene) =>
   scene.panels[0]!.marks.filter((m): m is PointGeometry => m.kind === "point");
 
+/** What `make` throws. */
+function refusal(make: () => unknown): unknown {
+  try {
+    make();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
 /** Every item, in keyboard order. */
 function items(model: ChartModel): ItemInspection[] {
   const out: ItemInspection[] = [];
@@ -332,7 +342,49 @@ describe("geopoint", () => {
     ).toThrow('geopoint color: "kind" holds categories, which color map points by series');
     expect(() =>
       geopoint(cities(), { longitude: "lon", latitude: "lat", color: "kind", colorMidpoint: 0 }),
-    ).toThrow(/geopoint colors: "kind" is a category field/);
+    ).toThrow(/geopoint colorMidpoint: "kind" is a category field/);
+  });
+
+  it("fill every point with a CSS color, as points along axes do", () => {
+    const at = { longitude: "lon", latitude: "lat" } as const;
+    for (const color of ["tomato", "#ff00ff", "var(--accent)"] as const) {
+      const { scene, model } = build({ marks: [geopoint(cities(), { ...at, color })] });
+      expect(points(scene)[0]!.fill).toBe(color);
+      expect(items(model)[0]!.points[0]!.color).toBe(color);
+      expect(keysOf(scene)).toEqual([]);
+    }
+    // A fill wins over it, as it does over a field.
+    const { scene } = build({
+      marks: [geopoint(cities(), { ...at, color: "tomato", fill: "#123456" })],
+    });
+    expect(points(scene)[0]!.fill).toBe("#123456");
+    // A ramp's options are refused, at the option, but for a fill's.
+    expect(() =>
+      geopoint(cities(), { ...at, color: "tomato", fill: "#123456", colorMidpoint: 0 }),
+    ).not.toThrow();
+    expect(
+      refusal(() => geopoint(cities(), { ...at, color: "tomato", colorMidpoint: 0 })),
+    ).toMatchObject({
+      code: "invalid-option",
+      path: "colorMidpoint",
+      message:
+        "geopoint colorMidpoint: a ramp colors a number field; drop colors, colorDomain, and colorMidpoint",
+    });
+    // Where the page can tell colors, a name that is neither or both is refused.
+    const page = globalThis as { CSS?: unknown };
+    const css = page.CSS;
+    page.CSS = { supports: (_: string, value: string) => value === "red" };
+    try {
+      expect(() => geopoint(cities(), { ...at, color: "knid" as never })).toThrow(
+        'geopoint color: "knid" is neither a field nor a color; the table has "city", "lon", "lat", "people", "kind", and colors are hex',
+      );
+      const red = table({ lon: [0], lat: [0], red: [1] });
+      expect(() => geopoint(red, { ...at, color: "red" })).toThrow(
+        'geopoint color: "red" names both a field and a color; give fill: "red" for the color, or rename the field',
+      );
+    } finally {
+      page.CSS = css;
+    }
   });
 
   it("keep series colors when the series field is the color field", () => {

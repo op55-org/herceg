@@ -135,6 +135,7 @@ const PAINTED = [
   "line",
   "area",
   "bar",
+  "point",
   "histogram",
   "boxplot",
   "boxen",
