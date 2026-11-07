@@ -21,6 +21,8 @@ export function start(
     snapshot: null,
     starting: false,
     expired: null,
+    holds: 0,
+    ended: false,
     lists: new Map(),
     root: undefined as unknown as List,
   };

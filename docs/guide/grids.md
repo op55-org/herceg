@@ -19,6 +19,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Totals row](#totals-row)
 - [Pivots](#pivots)
 - [Remote grids](#remote-grids)
+- [Export and copy](#export-and-copy)
 - [Accessibility](#accessibility)
 - [In React](#in-react)
 - [Limits](#limits)
@@ -892,6 +893,91 @@ createRemoteGridModel({ source, totals: [{ op: "count", as: "n" }, { op: "mean",
   source's `totals`. `memorySource` answers totals, and the conformance
   fixtures check them.
 
+## Export and copy
+
+`exportGrid(model, options)` writes what a grid shows as CSV or TSV, a
+UTF-8 `Blob`: local, grouped, pivot, and remote models, mounted or not.
+
+```ts
+import { exportGrid } from "herceg/grid";
+
+const blob = await exportGrid(model); // the rows shown, their text, titles as the header
+const link = Object.assign(document.createElement("a"), {
+  href: URL.createObjectURL(blob),
+  download: "requests.csv",
+});
+link.click();
+URL.revokeObjectURL(link.href);
+
+await exportGrid(model, { values: "raw", headers: "ids", bom: true });
+await exportGrid(model, { format: "tsv", rows: "selected", columns: ["service", "latency"] });
+```
+
+| Option | Default | Means |
+| --- | --- | --- |
+| `format` | `"csv"` | Or `"tsv"`. |
+| `values` | `"text"` | The text cells show (formats, mappings, missing text, a link's text). `"raw"`: each value by its kind, numbers as JavaScript writes them, times in ISO 8601 UTC, categories' labels, missing values empty; a count is a number, in a time column too. |
+| `rows` | `"shown"` | Every row the grid lists, in order: group rows as written and the rows of expanded groups. `"records"`: the view's rows without group rows, those of collapsed groups too. `"selected"`: the selected records, in the view's order. Pivot and remote grids export `"shown"`. |
+| `columns` | `"shown"` | The shown columns in their order, without columns that have no text; or column ids, hidden columns too. |
+| `headers` | `true` | `true` or `"titles"`: titles after their [headings](#headings) ("Latency, p99"); `"ids"`; `false` for none. |
+| `totals` | where the grid shows a [totals row](#totals-row) and `rows` is `"shown"` | The totals row, last; never with `"selected"`. |
+| `escapeFormulas` | `true` | Text a spreadsheet would run is written after a `'` (below). |
+| `bom` | `false` | A byte order mark first, which Excel needs to read UTF-8. |
+| `signal`, `onProgress` | | Stops the export, which rejects with the signal's reason; hears the rows written after each chunk, and of how many (null while unknown). |
+
+- **One state of the rows.** An export writes the rows, columns, formats,
+  and totals as they were when it started, in chunks of about 8 ms that
+  yield to the page. It fails with a `GridExportError` (`code:
+  "view-changed"`) where what it writes changed meanwhile: values written
+  in place, the table reset or rows dropped, the view's query, the groups,
+  a pivot's rows, or the data a [sparkline](#sparklines) column summarizes.
+  Appends leave an export of records (`"records"`, `"selected"`, and an
+  ungrouped grid's `"shown"`) going, without the rows appended. Export
+  again after such a change. Inside a transaction that has written to the
+  grid's table an export is refused, as its groups and totals follow the
+  rows only once the transaction ends.
+- **Remote grids** read the rows they list from the source, block by
+  block, two requests at a time: group rows and the rows of the groups
+  expanded when the export started, from the snapshot the grid's rows come
+  from, which the export keeps through a new query until it ends. A
+  snapshot the source no longer has fails it (`code: "snapshot-expired"`);
+  a grid that has no rows yet starts one of its own.
+- **Formulas.** Text starting with a tab or a line break, or with `=`,
+  `+`, `-`, or `@` (or their full-width forms) after any controls and
+  spaces an importer drops or trims, is written after a `'`, so a
+  spreadsheet opening the file shows it rather than running it, unless the
+  text is wholly a number as the grid's locale writes one ("-1,204",
+  "+3.5%", "-%12,5", "1.2e-7"). Raw numbers and times are never escaped;
+  `escapeFormulas: false` writes text as it is, for files no spreadsheet
+  opens.
+- CSV is RFC 4180: CRLF between rows; fields with a separator, quote, or
+  line break in quotes, their quotes doubled. TSV quotes the same way.
+
+**Copy.** Ctrl+C (Cmd+C) in a grid holding the focus copies the selected
+rows (the shown columns' text, as TSV, without a header), or with no rows
+selected the focused cell's text (a header's title), as spreadsheets paste
+it, with formulas escaped as exports escape them. It writes the clipboard
+in the `copy` event, so the page asks no permission, and the grid says
+what it copied ("Copied 3 rows") or why it copied nothing. Text selected
+on the page, and the controls of control and composite cells, copy as the
+browser copies them.
+
+```ts
+createGrid(element, { model, ariaLabel: "Requests", copy: { maxCells: 20_000 } });
+grid.update({ copy: false }); // leaves Ctrl+C to the page
+```
+
+- Past its limits, `maxCells` (100,000 by default) and `maxBytes` (10 MiB
+  of UTF-8), copy writes nothing and says "Too many cells to copy; export
+  the grid instead": it runs in the key's event, all at once (see
+  [Limits](#limits)).
+- A remote grid copies a selection of keys whose rows are all loaded; a
+  selection of every row matching a condition, or with rows it has not
+  loaded, copies nothing and says why.
+- A pivot copies cells, not selected rows: they stand for records it shows
+  only as aggregates. Cells loading, failed, or without text copy nothing.
+- `copy: { escapeFormulas: false }` copies text as it is.
+
 ## Accessibility
 
 - A grid is one tab stop (`role="grid"`; `role="treegrid"` when grouped).
@@ -900,6 +986,9 @@ createRemoteGridModel({ source, totals: [{ op: "count", as: "n" }, { op: "mean",
 - Space toggles the focused row's selection, Shift+arrows extend it,
   Ctrl+A (Cmd+A) selects every row, Escape clears; Enter or Space on a
   header sorts by it.
+- Ctrl+C (Cmd+C) copies the selected rows or the focused cell
+  ([Copy](#export-and-copy)); the grid's instructions say so, and it
+  announces what it copied or why it copied nothing.
 - In grouped grids, a row's first cell stands for the row: Right expands,
   Left collapses or goes to the parent group; Enter on any header cell
   toggles it.
@@ -939,9 +1028,10 @@ function Requests({ data }: { data: typeof requests }) {
 }
 ```
 
-A new `model` makes a new grid; `ariaLabel`, `theme`, `headerHeight`, and
-`cells` change in place. `onRowClick`, `onCellClick`, and `onRender` hear
-the grid's [events](#events), the latest handler each time. The `ref` is
+A new `model` makes a new grid; `ariaLabel`, `theme`, `headerHeight`,
+`copy`, and `cells` change in place. `onRowClick`, `onCellClick`, and
+`onRender` hear the grid's [events](#events), the latest handler each
+time. `exportGrid(model)` exports it as any grid's. The `ref` is
 the grid (`grid.current.model` keeps the model's type). A model no one
 keeps stops following its view, so one made with `useMemo` needs no
 cleanup. Cell kinds, links, headings, and a totals row come with the
@@ -993,9 +1083,21 @@ call `createGrid` on an element.
   scaled (a pixel scrolled moves more than one).
 - Not available: sizing columns to content, moving columns by touch (the
   menu moves them), sorting or moving columns by their headings, editing,
-  copying, custom cells in Vue and Svelte, custom renderers in pivot grids
-  and on the totals row, and a totals row at the top.
-  Remote grids have no pivots and no bins in queries.
+  pasting, copying ranges of cells, Excel files, custom cells in Vue and
+  Svelte, custom renderers in pivot grids and on the totals row, and a
+  totals row at the top.
+  Remote grids have no pivots and no bins in queries, and export and copy
+  only the rows they show.
+- Exports and copies write text and values, not looks, links' targets, or
+  what custom renderers draw (a column's `text` is what they know of it).
+  An export holds its whole output in its `Blob`. A million rows of 20
+  columns export in ~3.8 s as text (~1.8 s raw), in tasks of at most
+  ~11 ms; AG Grid Community's CSV export takes ~5.4 s (~3.0 s) in one
+  task, and its renderer's peak memory is 6 to 18 times Herceg's (see the
+  [comparison](../comparison.md#export-and-copy)).
+- Copy runs in the key's event, all at once: 5,000 rows of 20 columns
+  (100,000 cells, the default limit) take ~18 ms, and 100,000 rows ~350 ms
+  with the limits raised.
 - A totals row follows appends in O(batch), and rolling windows' drops by
   taking the dropped rows away (from values it keeps, 8 bytes a row per
   field, and a byte a row for a filtered view); other changes compute it

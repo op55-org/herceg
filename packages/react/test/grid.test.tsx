@@ -82,7 +82,7 @@ describe("<Grid>", () => {
     expect(revisions.at(-1)).toBe(model.revision);
   });
 
-  it("draws its model, and applies changed props without a new grid", () => {
+  it("draws its model, and applies changed props without a new grid", async () => {
     const model = createGridModel({
       data: rowView(requests(100)),
       columns: [{ field: "id" }, { field: "ms" }],
@@ -103,6 +103,15 @@ describe("<Grid>", () => {
     // A theme no longer passed is the default again.
     act(() => root.render(<Grid model={model} ariaLabel="Latest" style={{ height: 300 }} />));
     expect(surface()).toBe("#ffffff");
+    // Copy is on by default; `copy={false}` leaves Ctrl+C to the page, and its instructions go.
+    const keys = () => host.querySelector("[id$=-keys]")!.textContent;
+    expect(keys()).toContain("Control C copies");
+    act(() =>
+      root.render(<Grid model={model} ariaLabel="Latest" copy={false} style={{ height: 300 }} />),
+    );
+    await frames();
+    expect(grid()).toBe(element);
+    expect(keys()).not.toContain("Control C copies");
   });
 
   it("never renders React for data changes, scrolling, focus, selection, or column layout", async () => {

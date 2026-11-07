@@ -12,6 +12,7 @@ DOM, and loads remote rows. For using grids, see the
 - [Selection](#selection)
 - [The DOM grid](#the-dom-grid)
 - [Remote grids](#remote-grids)
+- [Export and copy](#export-and-copy)
 
 ## The model
 
@@ -404,9 +405,9 @@ command half done, and checks again when the microtask comes: a block,
 totals, or locate no longer wanted (a revision ended, totals replaced, a
 model disposed) is not asked for, and one of a snapshot expired meanwhile
 fails as the snapshot's. Ending a revision (a new query, a refresh,
-`dispose`) aborts its requests, releases its snapshot, and lets go of its
-blocks and its expiry, so requests the source never settles hold nothing
-it read.
+`dispose`) aborts its requests, releases its snapshot (once no export
+holds it), and lets go of its blocks and its expiry, so requests the
+source never settles hold nothing it read.
 
 **New queries** start a new snapshot and release the old one; the focus
 goes to its column's header and back to its record once a source with
@@ -441,3 +442,65 @@ grid's row views and groups, a snapshot being a view of the table that
 expires when the table changes. The conformance fixtures
 (`grid/conformance.ts`) are worked out by hand from these semantics and
 checked against it.
+
+## Export and copy
+
+**Reading.** `exportGrid` (`grid/export.ts`) and copy (`dom/grid-copy.ts`)
+read models through members keyed by symbols no public entry exports
+(`grid/export-rows.ts`), so models gain no public methods and only small
+accessors load with every grid. `[EXPORT_ROWS]` gives what an export
+reads, captured synchronously as it starts; the reading itself loads with
+`exportGrid`. A local model gives its table, view, snapshot of positions,
+grouped projection, pivot, layout, settings, and totals; the local reader
+(`grid/export-local.ts`) copies the rows' positions where the view orders
+or filters them, and the selection's members in the view's order (4 bytes
+a row), computes the totals row's cells, and records the table's generation, offset, writes
+(`writesOf`), and `modifiedVersion`, the view's query revision, and the
+groups' or pivot's revision. Before each chunk and before it resolves it
+compares them: appends leave an ungrouped projection of records to go on
+(positions start at the table's first row, which only drops move;
+in-place writes and inserts move `modifiedVersion`). Sparkline columns'
+data are checked by their revision. It refuses to start inside a
+transaction that has written to the table, as the table itself says
+(`untold`), whenever the model was made: the table's rows are changed,
+but its groups and totals follow only once listeners hear.
+
+**Remote exports.** The remote model captures its query, revision,
+snapshot, fields, expanded groups, layout, settings, and the totals
+answer it holds, and takes a hold on the snapshot (`Revision.holds`):
+ending the revision releases the snapshot only once no export holds it.
+The reader (`grid/remote-export.ts`, loaded on the first remote export)
+walks the lists depth first through the groups expanded at the start,
+asking for blocks of that snapshot (its own, released when it ends, where
+the grid had none yet: claimed as its first answer comes, before it is
+checked) with at most two requests in flight, those asked ahead and those
+it waits for alike, checking each answer as the grid checks windows, and
+each list's total against its other answers, the rows they hold, and the
+group's child count. It keeps its own place and windows (copied where
+they view a larger buffer, as the grid's blocks are), never the grid's
+lists or blocks, so scrolling, collapsing, or a new query change nothing
+it reads. It asks for the totals (where the grid had not read them) as
+it first reads, not as it is made. Ending it aborts its requests, ends
+those waiting for a place without asking them (those out may never
+answer), and releases its hold; `exportGrid` stops waiting at once
+when its signal aborts, whatever the source does with it, and closes a
+reader that loads after.
+
+**Writing.** Readers fill a row's cells and which are plain numbers (raw
+numbers and times, never escaped); the writer quotes fields as RFC 4180
+asks, escapes formulas (`grid/delimited.ts`: a leading tab or line
+break, or `=`, `+`, `-`, `@` after any controls, format characters, and
+spaces importers drop or trim, unless the text is wholly a number in the
+locale's format, built from `Intl.NumberFormat`'s parts), and turns each
+chunk's text into a `Blob` part, yielding (`scheduler.yield`, else a
+message) after ~8 ms or 1M characters. The `Blob` is made of the parts.
+
+**Copy** listens for `copy` on the document (Firefox fires it at the body
+when nothing is selected) and acts when the grid holds the page's focus,
+nothing is selected on the page, and the focus is not in a cell's
+controls: the nearest grid copies, so grids in grids copy their own. It
+reads at most `maxCells` cells (`[COPY_ROWS]`: the local selection's
+positions in the view's order, found by a pass over the view's snapshot
+that stops past the limit; the remote one's keys, each found loaded), writes
+TSV with the export's field writer, and sets `text/plain` in the event,
+announcing the outcome in the grid's live region.

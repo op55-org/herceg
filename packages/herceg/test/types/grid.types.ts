@@ -12,6 +12,7 @@ import { rowTotals } from "../../src/data/totals.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid, type Grid } from "../../src/dom/grid.ts";
 import { compileFields } from "../../src/fields.ts";
+import { exportGrid } from "../../src/grid/export.ts";
 import {
   type CellLook,
   createGridModel,
@@ -500,3 +501,20 @@ focusFirst(grid);
   };
   createGridModel(annotated);
 }
+
+// Exports take a grid model of any kind, not the grid that shows it.
+expectTypeOf(exportGrid(model, { format: "tsv", values: "raw", columns: ["at"] })).toEqualTypeOf<
+  Promise<Blob>
+>();
+// @ts-expect-error the grid's model, not the grid: "Grid<…> is not assignable to parameter of type 'AnyGridModel'"
+exportGrid(grid);
+// @ts-expect-error a model, not its table
+exportGrid(requests);
+// @ts-expect-error values are "text" or "raw"
+exportGrid(model, { values: "formatted" });
+// @ts-expect-error totals are on or off
+exportGrid(model, { totals: "auto" });
+createGrid(document.body, { model, ariaLabel: "Requests", copy: { maxCells: 1000 } });
+createGrid(document.body, { model, ariaLabel: "Requests", copy: false });
+// @ts-expect-error copy is false or its limits
+createGrid(document.body, { model, ariaLabel: "Requests", copy: true });

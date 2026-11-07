@@ -18,4 +18,5 @@ export type {
   GridCellView,
   GridFrameworkRenderer,
 } from "./dom/grid-cells.ts";
+export type { GridCopyOptions } from "./dom/grid-copy.ts";
 export * from "./grid/model.ts";

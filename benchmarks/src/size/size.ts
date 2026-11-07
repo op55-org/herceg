@@ -35,6 +35,7 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-grid-pivot": "herceg",
   "herceg-grid-remote": "herceg",
   "herceg-grid-sparklines": "herceg",
+  "herceg-grid-export": "herceg",
   "herceg-bar": "herceg",
   "herceg-area": "herceg",
   "herceg-scatter": "herceg",

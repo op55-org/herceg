@@ -2,8 +2,8 @@
 
 Static SVG, PNG, JPEG, WebP, and PDF; fonts for identical layout
 everywhere; server rendering with hydration; charts as portable specs
-and binary payloads; and the spec's JSON Schema and the marks'
-capabilities, for editors.
+and binary payloads; the spec's JSON Schema and the marks'
+capabilities, for editors; and grids' rows as CSV and TSV.
 
 - [Exporting a chart](#exporting-a-chart)
 - [SVG size and scaling](#svg-size-and-scaling)
@@ -14,6 +14,7 @@ capabilities, for editors.
 - [Charts from specs](#charts-from-specs)
 - [Schema and capabilities for editors](#schema-and-capabilities-for-editors)
 - [Payloads and page fragments](#payloads-and-page-fragments)
+- [Grids](#grids)
 
 ## Exporting a chart
 
@@ -478,3 +479,12 @@ causes and revisions are as the chart's events give them
 `restoreViewportState(chart, state)` carry the views a chart shows to one
 mounted in its place. Payloads carry
 charts only; grids have no spec.
+
+## Grids
+
+A grid exports the rows it shows as CSV or TSV (`exportGrid(model)` from
+`herceg/grid`, a UTF-8 `Blob`): their text or raw values, titles with
+their headings as the header, the totals row, and formulas escaped for
+spreadsheets, in chunks that yield to the page; Ctrl+C copies selected
+rows or the focused cell as TSV. See [Export and
+copy](grids.md#export-and-copy).

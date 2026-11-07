@@ -284,6 +284,8 @@ export interface ColumnContent {
   readonly aggregate: string | undefined;
   /** The headings over the column, from the top (a pivot's value over its aggregates). */
   readonly headings: readonly ColumnHeading[];
+  /** A column without a field that writes no text (no `text`, nor a cell writing one): copy and export leave it out. */
+  readonly textless?: true | undefined;
 }
 
 /** A shown column with what it shows. */
@@ -407,6 +409,16 @@ export function describeColumn(
   };
 }
 
+/** The text of `content`'s cell of row `position` of `rows`: its link's where it is linked. */
+export function cellText(
+  content: ColumnContent,
+  rows: Fields & LinkRows,
+  position: number,
+): string {
+  const link = content.link?.(rows, position);
+  return link ? link.text : content.text(rows, position);
+}
+
 /** A column's id: its own, else its field's (a column without a field has one). */
 export function columnId(column: {
   readonly id?: string | undefined;
@@ -469,6 +481,7 @@ function describeTextColumn(
     headings: headingsOf(column.heading, `${at}.heading`),
     cell,
     sparkline: drawn?.sparkline,
+    ...(text === undefined && !drawn && { textless: true }),
   };
 }
 

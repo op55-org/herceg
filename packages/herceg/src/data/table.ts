@@ -211,6 +211,13 @@ export let moved: (table: Table, start: number, modified: boolean) => void;
  */
 export let writesOf: (table: Table) => number;
 
+/**
+ * Whether `table` is in a transaction that has written to it: its rows
+ * are changed, while what follows them through its listeners (groups,
+ * totals) hears of it only once the transaction ends.
+ */
+export let untold: (table: Table) => boolean;
+
 const GROWTH = 1.5;
 const MIN_CAPACITY = 64;
 
@@ -300,6 +307,7 @@ export class Table<S extends Schema = Schema> {
   static {
     moved = (table, start, modified) => table.#moved(start, modified);
     writesOf = (table) => table.#writes;
+    untold = (table) => !!table.#pending?.changed;
   }
 
   /** Number of live rows. */

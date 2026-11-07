@@ -29,6 +29,15 @@ import {
   placeColumns,
   widthOf,
 } from "./columns.ts";
+import {
+  CONTENTS,
+  COPY_ROWS,
+  type CopiedRows,
+  EXPORT_ROWS,
+  type LocalRows,
+  type ReadRequest,
+  type RowsRead,
+} from "./export-rows.ts";
 import { type CellEncodings, type CellLook, type GridScales, plain } from "./looks.ts";
 import type { SparklineRead } from "./sparklines.ts";
 
@@ -141,11 +150,11 @@ export interface TotalsSource {
   state(): GridTotalsRow["state"];
   /** What the totals are: the writers are made again when it changes, or the columns do. */
   totals(): unknown;
-  /** What writes shown column `column`'s total, as group rows write aggregates; null where it shows none. */
+  /** What writes column `column`'s total, as group rows write aggregates; null where it shows none. */
   writer(column: PlacedColumn): ((value: number) => string) | null;
-  /** Shown column `columnIndex`'s total, where it shows one: its value and kind, or why it has none. */
-  read(columnIndex: number): Pick<GridCellRead, "state" | "value" | "kind">;
-  look(columnIndex: number): CellLook | undefined;
+  /** Column `column`'s total, where it shows one: its value and kind, or why it has none. */
+  read(column: PlacedColumn): Pick<GridCellRead, "state" | "value" | "kind">;
+  look(column: PlacedColumn): CellLook | undefined;
 }
 
 /**
@@ -173,16 +182,17 @@ export function totalsRow(
     return written;
   };
   const cellAt = (columnIndex: number): GridCellRead => {
-    const { texts, label } = writers();
+    const { layout, texts, label } = writers();
+    const column = layout[columnIndex] as PlacedColumn;
     const write = texts[columnIndex];
-    const read = write ? of.read(columnIndex) : NO_TOTAL;
+    const read = write ? of.read(column) : NO_TOTAL;
     const text =
       columnIndex === label
         ? TOTAL
         : write && read.kind
           ? write((read.value as number | null) ?? Number.NaN)
           : "";
-    return { ...read, text, look: of.look(columnIndex), link: undefined };
+    return { ...read, text, look: of.look(column), link: undefined };
   };
   return {
     get version() {
@@ -197,13 +207,13 @@ export function totalsRow(
       return of.state();
     },
     textAt: (columnIndex) => cellAt(columnIndex).text,
-    lookAt: (columnIndex) => of.look(columnIndex),
+    lookAt: (columnIndex) => of.look(model.columnLayout[columnIndex] as PlacedColumn),
     cellAt,
   };
 }
 
 /** A totals row's cell without a total. */
-const NO_TOTAL = { state: "empty", value: undefined, kind: null } as const;
+export const NO_TOTAL = { state: "empty", value: undefined, kind: null } as const;
 
 /** How a grid's clicks select its rows. */
 export interface GridSelectionOptions {
@@ -337,6 +347,8 @@ const TOTALS = "totals";
  */
 export abstract class BaseGridModel<S extends Schema = Schema> {
   readonly rowHeight: number;
+  /** The BCP 47 locale numbers and times are written in, as given; undefined for the runtime's. */
+  readonly locale: string | undefined;
   /** How values are written: replaced whole by `update`. */
   protected settings: FormatSettings;
   /** The scales and row encodings looks read, as given: replaced whole by `update`. */
@@ -387,6 +399,7 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
       return model !== undefined;
     };
     this.rowHeight = options.rowHeight ?? ROW_HEIGHT;
+    this.locale = options.locale;
     if (!(Number.isFinite(this.rowHeight) && this.rowHeight > 0))
       throw new RangeError(`A grid's rowHeight must be positive, not ${this.rowHeight}`);
     const click = options.selection?.click ?? "only";
@@ -581,6 +594,22 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     const { hidden: _, ...rest } = column;
     this.#replace(column, (visible ? rest : { ...rest, hidden: true }) as Column<S>);
   }
+
+  /** What each column shows, by id, hidden ones too: exports read columns by id. */
+  get [CONTENTS](): ReadonlyMap<string, ColumnContent> {
+    this.generated();
+    return this.#contents;
+  }
+
+  /**
+   * What an export reads, as it starts: a local model's state, which the
+   * export captures at once, or a remote model's rows, captured now and
+   * read once the reader loads. Refuses rows it does not export.
+   */
+  abstract [EXPORT_ROWS](request: ReadRequest): LocalRows | Promise<RowsRead>;
+
+  /** The selected rows copy writes in `columns` (see `CopiedRows`). */
+  abstract [COPY_ROWS](columns: readonly PlacedColumn[], limit: number): CopiedRows;
 
   /** Index of the shown column `id`, or -1. */
   columnIndex(id: string): number {

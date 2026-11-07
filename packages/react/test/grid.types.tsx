@@ -35,6 +35,18 @@ export function Unnamed() {
   return <Grid model={model} />;
 }
 
+export function Copy() {
+  const model = useMemo(() => createGridModel({ data: rowView(requests), columns: [] }), []);
+  return (
+    <>
+      <Grid model={model} ariaLabel="Requests" copy={{ maxCells: 1000, escapeFormulas: false }} />
+      <Grid model={model} ariaLabel="Requests" copy={false} />
+      {/* @ts-expect-error copy is false or its limits */}
+      <Grid model={model} ariaLabel="Requests" copy={true} />
+    </>
+  );
+}
+
 export function Cells() {
   const model = useMemo(
     () =>

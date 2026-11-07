@@ -14,6 +14,7 @@ export type {
   GridCellView,
   GridFrameworkRenderer,
 } from "./dom/grid-cells.ts";
+export type { GridCopyOptions } from "./dom/grid-copy.ts";
 export { createRemoteGrid, type RemoteGrid, type RemoteGridOptions } from "./dom/grid-remote.ts";
 export {
   type BarCellOptions,
@@ -23,6 +24,7 @@ export {
   type SymbolCellOptions,
   symbolCell,
 } from "./grid/cells.ts";
+export { exportGrid, GridExportError, type GridExportOptions } from "./grid/export.ts";
 export {
   type GridAggregate,
   type GridFieldKind,

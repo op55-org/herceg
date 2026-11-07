@@ -123,9 +123,24 @@ const forcedColors: BrowserCommand<[boolean]> = async (context, active) => {
   return frame.evaluate(() => matchMedia("(forced-colors: active)").matches);
 };
 
+/**
+ * The text on the clipboard, after writing `text` there when given: in
+ * Chrome, whose pages Playwright lets read the clipboard; null elsewhere.
+ */
+const clipboard: BrowserCommand<[text?: string]> = async (context, text) => {
+  if (context.project.config.browser.name !== "chromium") return null;
+  await context.page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const frame = await context.frame();
+  return frame.evaluate(async (write) => {
+    if (write !== undefined) await navigator.clipboard.writeText(write);
+    return navigator.clipboard.readText();
+  }, text);
+};
+
 export const commands = {
   accessibilityTree: accessibilityTree as BrowserCommand<[string, readonly string[]]>,
   bundleHerceg,
+  clipboard,
   collectGarbage,
   forcedColors,
   mouse,
