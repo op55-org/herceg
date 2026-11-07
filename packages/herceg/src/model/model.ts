@@ -693,9 +693,12 @@ export class ChartModel {
     ];
     this.#config = read;
     this.#placing = marks.some((mark) => mark.roomPlaced);
-    // What labels placed as drawn took is measured afresh: marks and panels may have gone.
-    this.#placedRooms.clear();
-    this.#placedLast.clear();
+    // Rooms labels placed as drawn took are kept for the next layout to
+    // start from (see `#sceneOf`), unless no mark places labels now.
+    if (!this.#placing) {
+      this.#placedRooms.clear();
+      this.#placedLast.clear();
+    }
     this.#dictionaries = dictionaries;
     // What was read of the page is read again: an update follows changes there.
     if (page) this.#readings = this.#readings.again(page);
@@ -2904,6 +2907,8 @@ export class ChartModel {
     });
     // Labels outside the plots placed as they are drawn (labels following
     // series) may want more room than their panel's tracks kept: once more, wider.
+    const fresh = this.#placedFresh;
+    this.#placedFresh = false;
     if (rooms) {
       let grew = false;
       for (const [at, room] of rooms) {
@@ -2913,8 +2918,15 @@ export class ChartModel {
           grew = true;
         }
       }
+      // A new layout starts from the rooms last drawn; where labels take
+      // other rooms now (marks, panels, or text changed), it is laid out
+      // afresh from theirs.
+      const changed =
+        fresh && JSON.stringify([...this.#placedRooms]) !== JSON.stringify([...rooms]);
+      if (changed) this.#layoutKey = "";
       this.#placedLast = rooms;
-      if (grew && !again.labels) return this.#sceneOf(measure, clouds, { ...again, labels: true });
+      if ((grew || changed) && !again.labels)
+        return this.#sceneOf(measure, clouds, { ...again, labels: true });
     }
     // Drop buffers of series that no longer exist.
     const pools = [this.#polylines, this.#floats, this.#doubles, this.#bytes];
@@ -2990,6 +3002,8 @@ export class ChartModel {
    */
   #placedRooms = new Map<string, readonly [number, number]>();
   #placedLast = new Map<string, readonly [number, number]>();
+  /** Whether the scene being laid out began a layout, its placed rooms those last drawn. */
+  #placedFresh = false;
 
   /**
    * What `marks`' labels outside the plots take left and right, at least
@@ -3164,7 +3178,10 @@ export class ChartModel {
     // while the chart's size and settings stay, as margins do, so labels
     // that follow streaming data do not move the plots back and forth.
     const same = this.#layoutKey === `${width}x${height}`;
-    if (!same) this.#placedRooms = new Map(this.#placedLast);
+    if (!same) {
+      this.#placedRooms = new Map(this.#placedLast);
+      this.#placedFresh = true;
+    }
     const outside = this.#outsideRoom(marks, measure, same ? this.#labelRoom : [0, 0]);
     this.#labelRoom = outside;
     outside.forEach((size, i) => {

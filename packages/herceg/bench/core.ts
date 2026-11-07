@@ -705,6 +705,51 @@ for (const labelled of [false, true]) {
     },
   );
 }
+// A6 as its application draws it: a line mark per series, and an update
+// each tick moving the x domain with the window (a new layout, which starts
+// from the room the labels took).
+for (const labelled of [false, true]) {
+  const window = table(
+    {
+      t: Float64Array.from({ length: 360 }, (_, t) => t),
+      ...Object.fromEntries(
+        SERIES_NAMES.map((name, k) => [
+          name,
+          Float64Array.from({ length: 360 }, (_, t) => converging(k, t)),
+        ]),
+      ),
+    },
+    { maxRows: 360 },
+  );
+  const marks = SERIES_NAMES.map((name) =>
+    line(window, {
+      x: "t",
+      y: name as never,
+      ...(labelled && { labels: { at: "visible-end", place: { outside: true }, leader: true } }),
+    }),
+  );
+  const config = (t: number) => ({
+    x: { domain: [t - 359, t] as [number, number] },
+    y: { domain: [0, 1000] as [number, number] },
+    legend: false as const,
+    marks,
+  });
+  let next = 360;
+  const model = new ChartModel(config(next - 1), undefined, staticCompilers());
+  model.setSize(1100, 640, 1);
+  drawsLabels(model, labelled ? 30 : 0, labelled);
+  measure(
+    `labels: 30 line marks, the view following a row${labelled ? ", named with leaders" : ", unlabelled"}`,
+    () => {
+      window.appendRow({
+        t: next,
+        ...Object.fromEntries(SERIES_NAMES.map((name, k) => [name, converging(k, next)])),
+      });
+      model.update(config(next++));
+      model.scene(estimateText);
+    },
+  );
+}
 // The series-label solver alone, crowded: 300 labels in one column outside
 // a 600 px plot (half left out), and 48 inside it meeting only some of the
 // others.

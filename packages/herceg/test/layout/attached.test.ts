@@ -304,6 +304,41 @@ describe("tracks for labels placed as they are drawn", () => {
     expect(edge(model)).toBe(edge(plain));
   });
 
+  it("lay out a chart updated with the same labels once, and afresh where they take other room", () => {
+    const rows = table({ t: [0, 10], v: [0, 10] });
+    let text = "a much longer label";
+    let drawn = 0;
+    const follower = new Following(() => {
+      drawn++;
+      return text;
+    });
+    const config = () => ({
+      locale: "en-US",
+      legend: false,
+      marks: [line(rows, { x: "t", y: "v" }), follower as never],
+    });
+    const edge = (model: ChartModel) => {
+      const { plot } = model.scene(estimateText).panels[0]!;
+      return plot.x + plot.width;
+    };
+    const model = new ChartModel(config());
+    model.setSize(400, 300, 1);
+    const wide = edge(model);
+    // An update starts from the room its labels took: drawn once, where they were.
+    drawn = 0;
+    model.update(config());
+    expect(edge(model)).toBe(wide);
+    expect(drawn).toBe(1);
+    // Labels taking less room after an update give it back, as a chart made with them has.
+    text = "short";
+    model.update(config());
+    const narrow = edge(model);
+    const made = new ChartModel(config());
+    made.setSize(400, 300, 1);
+    expect(narrow).toBeGreaterThan(wide);
+    expect(narrow).toBe(edge(made));
+  });
+
   contractTest("label.attached.room.interior", () => {
     // Labels outside the plots of panels beside others keep room between them.
     const rows = table({ t: [0, 10, 0, 10], v: [0, 10, 0, 10], g: ["a", "a", "b", "b"] });
