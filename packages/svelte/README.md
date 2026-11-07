@@ -29,6 +29,9 @@ made per data point.
 | `@herceg/svelte` | `Chart` and a component per mark (`Line`, `Area`, `Bar`, `Point`, `Heatmap`, `Pie`, `Graph`, `GeoShape`, `Surface`, `Rule`, `Custom`, ...) |
 | `@herceg/svelte/layout` | `Columns`, `Rows`, `Grid`, `Cell`, `Panel`, `Inset` for subplots |
 | `@herceg/svelte/guides` | `Legend`, a panel's own legend |
+| `@herceg/svelte/grid` | `Grid`, the data grid over a `herceg/grid` model, with Svelte cells |
+| `@herceg/svelte/grid/remote` | `RemoteGrid`, over a remote grid model, with Svelte cells |
+| `@herceg/svelte/grid/pivot` | `PivotGrid`, over a pivot grid model |
 
 ## In brief
 
@@ -48,6 +51,13 @@ made per data point.
   thrown to the nearest `<svelte:boundary>`.
 - **Server rendering**: `initial={hydration(snapshot)}` adopts markup from
   `renderToSnapshot` without drawing again.
+- **Grids** take a model the application owns; data and scrolling bypass
+  Svelte. `cells={{ status }}`, a snippet of the cell, draws a column's
+  cells with Svelte components, each mounted with your component's
+  contexts: each cell's state is its row's, a cell that throws draws its
+  text, and cells commit before the grid paints, at about 15 KB a mounted
+  cell. Type a snippet's parameter with the model's schema
+  (`cell: GridCellContext<Services>`).
 
 ## Documentation
 
@@ -55,6 +65,7 @@ made per data point.
   to the adapters
 - [Getting started](https://github.com/op55-org/herceg/blob/main/docs/guide/getting-started.md) and the
   [documentation index](https://github.com/op55-org/herceg/blob/main/docs/README.md)
+- [Grids](https://github.com/op55-org/herceg/blob/main/docs/guide/grids.md#in-react-vue-and-svelte)
 
 ## License
 

@@ -361,7 +361,7 @@ export const adapter: Adapter = {
     filter: "native number filter; external filter for category membership",
   },
   unsupported: {
-    "react-cells": "AG Grid's React cell renderers need ag-grid-react, which is not installed",
+    "framework-cells": "AG Grid's React cell renderers need ag-grid-react, which is not installed",
   },
   prepare: rowObjects,
   mount,

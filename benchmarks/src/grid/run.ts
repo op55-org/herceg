@@ -40,6 +40,8 @@ import { GRID_SCENARIOS, type GridScenario, SIZES } from "./scenarios.ts";
 const LIBRARIES: Record<string, { package: string; runtime: string[] }> = {
   herceg: { package: "herceg", runtime: [] },
   "herceg-react": { package: "@herceg/react", runtime: ["react", "react-dom"] },
+  "herceg-vue": { package: "@herceg/vue", runtime: ["vue"] },
+  "herceg-svelte": { package: "@herceg/svelte", runtime: ["svelte"] },
   "tanstack-table": {
     package: "@tanstack/react-table",
     runtime: ["@tanstack/react-virtual", "react", "react-dom"],
@@ -328,8 +330,8 @@ async function main() {
     }));
     if (s.operation === "memory") {
       const unsupported =
-        s.cells === "react" &&
-        (await page.evaluate(() => window.gridBench.unsupported["react-cells"]));
+        s.cells === "framework" &&
+        (await page.evaluate(() => window.gridBench.unsupported["framework-cells"]));
       if (unsupported) return { status: "unsupported", reason: unsupported, metrics: {} };
       const metrics: Record<string, Metric> = {};
       for (let i = 0; i < s.samples; i++) {

@@ -3,14 +3,14 @@
 //
 //   npm run size -- [--out results/size.json]
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import * as esbuild from "esbuild";
-import { compile } from "svelte/compiler";
 import { HERCEG_ALIAS, ROOT } from "../runner/build.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
+import { svelte } from "../runner/svelte.ts";
 
 const { values: args } = parseArgs({
   options: { out: { type: "string" }, filter: { type: "string" } },
@@ -46,7 +46,13 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-react-grid-remote": "@herceg/react",
   "herceg-react-grid-pivot": "@herceg/react",
   "herceg-vue-line": "@herceg/vue",
+  "herceg-vue-grid": "@herceg/vue",
+  "herceg-vue-grid-remote": "@herceg/vue",
+  "herceg-vue-grid-pivot": "@herceg/vue",
   "herceg-svelte-line": "@herceg/svelte",
+  "herceg-svelte-grid": "@herceg/svelte",
+  "herceg-svelte-grid-remote": "@herceg/svelte",
+  "herceg-svelte-grid-pivot": "@herceg/svelte",
   "echarts-line": "echarts",
   "echarts-full": "echarts",
   "chartjs-line": "chart.js",
@@ -80,19 +86,13 @@ const FRAMEWORKS: Record<string, string[]> = {
   "herceg-react-grid-remote": ["react", "react-dom", "react/jsx-runtime"],
   "herceg-react-grid-pivot": ["react", "react-dom", "react/jsx-runtime"],
   "herceg-vue-line": ["vue"],
+  "herceg-vue-grid": ["vue"],
+  "herceg-vue-grid-remote": ["vue"],
+  "herceg-vue-grid-pivot": ["vue"],
   "herceg-svelte-line": ["svelte", "svelte/*"],
-};
-
-/** Compiles Svelte components for production, as an application's build would. */
-const svelte: esbuild.Plugin = {
-  name: "svelte",
-  setup(build) {
-    build.onLoad({ filter: /\.svelte$/ }, ({ path }) => ({
-      contents: compile(readFileSync(path, "utf8"), { filename: path }).js.code,
-      loader: "js",
-      resolveDir: dirname(path),
-    }));
-  },
+  "herceg-svelte-grid": ["svelte", "svelte/*"],
+  "herceg-svelte-grid-remote": ["svelte", "svelte/*"],
+  "herceg-svelte-grid-pivot": ["svelte", "svelte/*"],
 };
 
 async function bundle(entry: string, minify: boolean, external: string[]): Promise<Bundle> {

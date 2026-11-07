@@ -66,7 +66,7 @@ violin, and layout-mark performance has not been compared.
 | Geographic maps | Regions and points on Equal Earth, Natural Earth, Mercator, equirectangular, or conic equal-area projections, from GeoJSON, GeoPandas, or Shapely as packed geometry; zoom, pan, and lasso; a pan frame of 200 detailed regions ~0.6 ms (one-off). No base maps or globes. | Documented. `map` series and the `geo` component over GeoJSON or SVG registered with `registerMap`, colored through `visualMap`; `scatter`, `effectScatter`, `lines`, and `heatmap` series on geo coordinates; `roam` zoom and pan, region labels and emphasis, and a `projection` of `project`/`unproject` functions (or a d3-geo projection stream). No bundled base maps. | Documented. `geoShape` in the opt-in `@tanstack/charts/geo` entry draws GeoJSON (polygons, lines, and points sized by a value) through any d3-geo projection factory fitted to the plot, including globes, with sphere and graticule layers; boundaries are the application's own GeoJSON. | No built-in maps (the `chartjs-chart-geo` plugin adds choropleth and bubble map charts). | Documented. `choropleth` and `scattergeo` traces with built-in base maps (countries, US states) and `locationmode`, or GeoJSON with `locations` and `featureidkey`; many projections (including orthographic and Albers USA), `fitbounds`, zoom and pan; tile-based maps (`choroplethmap`, `scattermap`) as well. |
 | 3D charts | Measured. Points, lines, and height-field surfaces with orthographic or perspective cameras; WebGL from 20,000 points or 10,000 cells, CPU and vector export below. Turning a million-cell surface takes ~0.4 ms of JavaScript at 60 fps (Plotly ~67 ms, 15 fps). No meshes. | Documented. ECharts-GL, a separate package: 3D scatter, bars, lines, surfaces (also parametric), polygons, maps, and globes in WebGL with realistic shading, in several `grid3D` viewports; no vector export of 3D. Not measured. | Not implemented. | Not implemented (no 3D chart types). | Documented. WebGL scenes with a camera per subplot: `scatter3d`, `surface`, `mesh3d`, `cone`, `streamtube`, `isosurface`, `volume`; static export rasterizes them. Measured: as fast as Herceg's GPU path at 100,000 cells turned every frame, slower at a million. |
 | Data preparation | Derived tables in specs, TypeScript, and Python: filter, calculate, bin, aggregate, rolling windows, and sort, computed in the browser and kept current as sources stream (~15 ms to filter 1M rows, ~10 µs to follow a 100-row append). Row views (which every series mark draws, from TypeScript, specs, and Python), groups, and pivots. No joins. | Documented. `dataset.transform` with filter, sort, and registered external transforms (ecStat for regression and clustering). | Data is prepared by the application. | Data is prepared by the application. | Documented. Plotly.js `transforms` (filter, groupby, aggregate, sort) are deprecated; Plotly Express prepares data in pandas. |
-| Data grid | Measured. A virtualized grid over typed columns: 100k × 20 mounts in ~3.4 ms (TanStack ~77, AG Grid ~75 with row objects), sorts in ~16 ms (~80), keeps ~2 MB of heap (~54, ~27). Grouped rows, pivots, headings over columns, a totals row that follows appends and rolling windows (100k rows: a 10 Hz append's tick to its frame ~10 ms, AG Grid's ~23 with totals kept by adapter code), pinned columns, remote data, row and cell click events naming rows by identity; every format form and field displays in the grid; conditional formatting through the encodings charts use (thresholds, gradients, labels' colors, conditions, rank tests; cells, rows, group rows, pivot cells); links, bars, chips, and symbols in cells, sparklines of another table's rows by key (a 1,000-row grid over a million series rows mounts in ~17–18 ms, TanStack Table's ~9; ten appends a second show in ~20 ms, its ~18; the index 4 bytes a series row), and custom renderers with control and composite keyboard modes; React components as cells (`@herceg/react/grid`), mounting 5–50 times faster than TanStack Table's, with scroll steps about even; CSV and TSV export of what the grid shows (a million rows of 20 columns in ~3.8 s, in tasks of at most ~11 ms; AG Grid Community's CSV export ~5.4 s in one task) and copy of selected rows. ~65 KiB gzip. | Documented. No data grid; the toolbox's `dataView` shows (and lets users edit) the chart's data as text. | No data grid; TanStack Table and TanStack Virtual are separate libraries, compared in [Grids](#grids). | No data grid. | Documented. `table` trace with cell values, formats, fills, and column order; no sorting or selection documented. |
+| Data grid | Measured. A virtualized grid over typed columns: 100k × 20 mounts in ~3.4 ms (TanStack ~77, AG Grid ~75 with row objects), sorts in ~16 ms (~80), keeps ~2 MB of heap (~54, ~27). Grouped rows, pivots, headings over columns, a totals row that follows appends and rolling windows (100k rows: a 10 Hz append's tick to its frame ~10 ms, AG Grid's ~23 with totals kept by adapter code), pinned columns, remote data, row and cell click events naming rows by identity; every format form and field displays in the grid; conditional formatting through the encodings charts use (thresholds, gradients, labels' colors, conditions, rank tests; cells, rows, group rows, pivot cells); links, bars, chips, and symbols in cells, sparklines of another table's rows by key (a 1,000-row grid over a million series rows mounts in ~17–18 ms, TanStack Table's ~9; ten appends a second show in ~20 ms, its ~18; the index 4 bytes a series row), and custom renderers with control and composite keyboard modes; React, Vue, and Svelte components as cells (`@herceg/react/grid`, `@herceg/vue/grid`, `@herceg/svelte/grid`), mounting 5–85 times faster than TanStack Table's React cells, vertical scroll steps ~2–2.6 ms slower at 100k rows, diagonal ones faster; CSV and TSV export of what the grid shows (a million rows of 20 columns in ~3.8 s, in tasks of at most ~11 ms; AG Grid Community's CSV export ~5.4 s in one task) and copy of selected rows. ~65 KiB gzip. | Documented. No data grid; the toolbox's `dataView` shows (and lets users edit) the chart's data as text. | No data grid; TanStack Table and TanStack Virtual are separate libraries, compared in [Grids](#grids). | No data grid. | Documented. `table` trace with cell values, formats, fills, and column order; no sorting or selection documented. |
 | Interaction | Measured (Chrome). Hover 0.3–0.6 ms (uPlot 0.2–0.5); zoom steps 0.8 ms over 1M line points and 1.4 ms over 10M; 3.9 ms over 1M WebGL points. Pan, zoom, brushes (moved, resized, and cleared, previewed while dragged) and lassos, click selection of items or series with selected and unselected looks, legends that select or hide, tooltips pinned by a click with links and buttons inside, rules dragged to a new value (previewed, then kept or refused by the application), gesture bindings, view limits, keyboard navigation and range selection; selection, view, visibility, and drill root as state options with conditional writes. Hover, click, and context-menu events carry the pointer's axis values and the item, axis label, legend entry, or plot under it, picked as drawn; a clicked item also says what it stands for: what it groups by (a bin, a cell, a slice, a bar's position and series), its rows' condition, that condition on the table its data was derived from, and its rows by identity. Inspection reads each series by a policy (`snap`, `within`). Hover latency with picking not yet measured against the others. | Measured: hover ~0.8–11 ms; zoom ~6.9 ms over 1M line points, ~51 ms over 10M. Documented: `dataZoom`, a brush component (rectangles, polygons, ranges) linking series of one chart, and an event API. | Measured: hover ~6–91 ms; zoom ~58 ms over 1M line points; the tab crashes at 10M. Documented: controls bound to application state (`keyedSelection`, `brushX`, `zoomX`, cursors); linking charts is the application's. | Measured: hover ~0.4–1.8 ms; zoom steps ~1.9 ms over a 1M-point line, ~5.7 ms over 10M points. Documented. `onClick`/`onHover` callbacks; zoom, pan, and drag-to-zoom through `chartjs-plugin-zoom`; no selection of data. | Measured: hover ~10–18 ms, ~450 ms over 1M points; zoom ~0.9–1.0 ms to the frame over 1M and 10M points, its WebGL drawing done ~3.6 and ~12.7 ms after each step. Documented: box and lasso selection and events; linking is the application's. |
 | Embedding in scrolling pages | The vertical wheel scrolls the page; Ctrl/⌘ with the wheel and pinches zoom. Gesture bindings change any of it, alike in every chart family, with `touch-action` following. View limits and `edge` events load history as the reader pans. A hover while the controller loads shows in ~5 ms. | Documented. `dataZoom` of type inside zooms on the wheel by default (`zoomOnMouseWheel`: `true`, `false`, `"shift"`, `"ctrl"`, or `"alt"`), with `moveOnMouseWheel`, `moveOnMouseMove`, and `preventDefaultMouseMove`; spans limited by `minSpan`/`maxSpan` and `minValueSpan`/`maxValueSpan`; `datazoom` events, no edge event. | Documented. `zoomX` takes the wheel only once the plot has the focus by default; `wheelActivation: "modifier"` takes Ctrl or ⌘ with the wheel at once, `"always"` every wheel; an `extent` clamps the domain, and changes are proposals the application applies. | Documented. Through `chartjs-plugin-zoom`: wheel zoom optionally behind a modifier key (`wheel.modifierKey`), pan behind one, and `limits` per scale (`min`, `max`, `minRange`); `onZoom`/`onPan` callbacks, no edge event. | Documented. `scrollZoom` is off for 2D axes by default (on for 3D, geo, and maps); `fixedrange` freezes an axis, `minallowed`/`maxallowed` bound ranges; `plotly_relayout` events, no edge event. |
 | Synced charts | `sync` shares cursor, view, and selection by group and channel; values travel as data (categories by name); snapping for charts at other frequencies; `showCursor` from application code; across separate copies of the engine and sandboxed notebook frames. | Documented. `echarts.connect(group)` links charts' tooltips and axis pointers, data zoom, and legend selections, matched by series and data index. | Documented. A shared `createChartCursor` controller syncs focus cursors by value (`match: "x"` or `"y"`); views and selections are linked through application state. | Documented. None built in; plugins or application code. | Documented. None built in: applications forward `plotly_hover` and `plotly_relayout` events (`Fx.hover`, `relayout`); Dash callbacks in Python. |
@@ -949,59 +949,67 @@ commit 3a475ca2, Chrome 156, the machine above; median ± MAD in ms:
   2.09 MiB at 100k rows), and ~190 more DOM nodes for Herceg against ~430
   to ~450 for the others.
 
-### React cells
+### Framework cells
 
-The `react-cells` scenarios (`benchmarks/README.md`, "React cells") draw
-the cells scenarios' five columns with one React component holding state
-of its own, so a grid mounts, recycles, and unmounts components as it
-scrolls. Herceg draws them through `@herceg/react/grid`'s `cells` (a
-portal into each cell's element), TanStack Table through its columns'
-`cell`. AG Grid's React cell renderers need `ag-grid-react`, which the
-suite does not install, so they are not measured (its `cellRenderer`
-components are in [Cells](#cells)); Glide draws cells on a canvas, with
-callbacks rather than components, and is not comparable. Measured
-2026-11-06 at commit 78ff5821, Chrome 156, the machine above; 100k-row
-mounts and every scroll step pooled from three runs, the rest from one;
-median ± MAD in ms:
+The `framework-cells` scenarios (`benchmarks/README.md`, "Framework
+cells") draw the cells scenarios' five columns with one component of the
+grid's framework holding state of its own, so a grid mounts, recycles, and
+unmounts components as it scrolls. Herceg draws them through the `cells`
+of `@herceg/react/grid` (a portal into each cell's element),
+`@herceg/vue/grid` (a teleport), and `@herceg/svelte/grid` (a component
+mounted into the element), TanStack Table through its columns' `cell`.
+AG Grid's React cell renderers need `ag-grid-react`, which the suite does
+not install, so they are not measured (its `cellRenderer` components are
+in [Cells](#cells)); Glide draws cells on a canvas, with callbacks rather
+than components, and is not comparable. Measured 2026-11-07 at commit
+060883c6, Chrome 156, the machine above (raw results in
+`benchmarks/results/grid-framework-cells.json`); median ± MAD in ms:
 
-| React cells | herceg (React) | tanstack-table |
-| --- | ---: | ---: |
-| 100k x 20: mount from native input | 9.21 ± 0.54 | 48.0 ± 1.20 |
-| 100k x 20: vertical scroll step | 6.66 ± 0.92 | 6.00 ± 0.51 |
-| 100k x 20: diagonal scroll step | 7.87 ± 1.76 | 8.84 ± 1.20 |
-| 1M x 20: mount from native input | 13.0 ± 0.65 | 672 ± 67.3 |
-| 1M x 20: vertical scroll step | 7.34 ± 0.81 | 7.59 ± 0.91 |
-| 1M x 20: diagonal scroll step | 7.99 ± 1.00 | 10.6 ± 1.79 |
-| 100k x 20: 3 s of scrolling down, offset set every frame: dropped; incomplete | 0; 0 of 181 | 0; 0 of 180 |
-| 100k x 20: down and across: dropped; incomplete | 0; 0 of 180.5 | 0; 0 of 180 |
-| 1M x 20: down: dropped; incomplete | 0; 1 of 180 | 0; 0 of 180 |
-| 1M x 20: down and across: dropped; incomplete | 0; 1 of 180 | 0; 0 of 181 |
-| 100k x 20: retained heap with the grid mounted (MiB) | 8.10 | 52.9 |
-| 1M x 20: retained heap with the grid mounted (MiB) | 8.12 | 493 |
-| DOM nodes with the grid mounted | 1,207 | 1,108 |
+| Framework cells | herceg (React) | herceg (Vue) | herceg (Svelte) | tanstack-table |
+| --- | ---: | ---: | ---: | ---: |
+| 100k x 20: mount from native input | 8.45 ± 0.26 | 7.30 ± 0.52 | 8.01 ± 0.35 | 45.5 ± 0.56 |
+| 100k x 20: vertical scroll step | 7.11 ± 1.21 | 7.36 ± 1.45 | 7.91 ± 1.63 | 5.30 ± 0.35 |
+| 100k x 20: diagonal scroll step | 6.87 ± 2.05 | 7.29 ± 1.73 | 6.92 ± 1.57 | 7.72 ± 0.94 |
+| 1M x 20: mount from native input | 9.58 ± 0.51 | 8.08 ± 0.35 | 10.0 ± 1.11 | 694 ± 23.8 |
+| 1M x 20: vertical scroll step | 6.23 ± 0.50 | 6.95 ± 0.45 | 6.84 ± 0.48 | 13.5 ± 0.68 |
+| 1M x 20: diagonal scroll step | 7.43 ± 0.40 | 7.49 ± 1.38 | 8.32 ± 0.93 | 12.5 ± 2.38 |
+| 100k x 20: 3 s of scrolling down, offset set every frame: dropped; incomplete | 0; 0 of 180.5 | 0; 0 of 180.5 | 0; 0 of 180.5 | 0; 0 of 180.5 |
+| 100k x 20: down and across: dropped; incomplete | 0; 0 of 180 | 0; 0 of 180.5 | 0; 0 of 180 | 0; 0 of 180 |
+| 1M x 20: down: dropped; incomplete | 0; 1 of 181 | 0; 1 of 180 | 0; 1 of 180 | 0; 0 of 180 |
+| 1M x 20: down and across: dropped; incomplete | 0; 1 of 180 | 0; 1 of 180 | 0; 1 of 181 | 0; 0 of 180 |
+| 100k x 20: retained heap with the grid mounted (MiB) | 8.14 | 5.21 | 5.32 | 52.9 |
+| 1M x 20: retained heap with the grid mounted (MiB) | 7.79 | 5.44 | 5.32 | 492 |
+| DOM nodes with the grid mounted | 1,209 | 1,209 | 1,209 | 1,108 |
 
-- **Mounting** takes Herceg 5 times less than TanStack Table at 100k rows
-  and 50 times less at 1M, whose rows become objects first; the React
-  cells add ~4.7 ms to Herceg's own mount (4.5 ms without them).
-- **Scrolling** vertically, TanStack Table is ~0.7 ms faster a step at
-  100k rows (6.0 against 6.7 ms, in each of the three runs) and about
-  even at 1M; diagonally Herceg is ~1 ms faster at 100k rows and ~2.6 ms
-  at 1M. Against its own cells drawn without React (bars, chips, links,
-  and symbols as cell kinds), React cells cost Herceg ~1.1 ms a vertical
-  step at 100k rows and ~2.6 ms at 1M. Neither grid dropped a frame;
-  Herceg's one incomplete frame at 1M rows is a scroll's first, as
-  without React cells.
-- **Memory.** Herceg's React cells keep ~5.9 MiB more heap than its grid
-  without them (8.1 against 2.2 MiB), most of it the event listeners
-  React adds to each portal's element (~17 KB a mounted cell); TanStack
-  Table's cells, rendered in its one React root, add ~1.1 MiB, but its row
-  objects keep 52.9 MiB in all. Scrolling across 3,000 rows not shown
-  before, round after round, Herceg's heap stayed within ±0.4 MB of the
-  round before (a cell element's React content goes as it shows another
-  row) and TanStack Table's grew ~24 MB a round. A second after
-  destroying, no element of Herceg's grid or its cells is left, and
-  mounting and destroying again grows the heap no more than with Herceg's
-  own cells.
+- **Mounting** takes Herceg 5 to 6 times less than TanStack Table at 100k
+  rows and 70 to 85 times less at 1M, whose rows become objects first.
+  The 155 framework cells of the first screen add ~3.5 to ~6 ms to
+  Herceg's own mount (~4 ms without them, through any of the three).
+- **Scrolling** vertically at 100k rows, TanStack Table is fastest
+  (5.3 ms a step), then Herceg's React, Vue, and Svelte cells (7.1, 7.4,
+  and 7.9 ms, each within the others' spread); at 1M rows Herceg's React
+  cells are fastest and its Vue and Svelte cells take ~0.6 to ~0.7 ms
+  more. TanStack Table's 1M steps vary most from run to run (medians of
+  ~5.6 to ~13.5 ms over the runs made for this table). Diagonally Herceg
+  is faster than TanStack Table with any of the three, by ~0.4 to ~0.9 ms
+  at 100k rows and ~4 to ~5 ms at 1M. Each of the three mounts a cell's
+  components anew for each row it shows; in a profile, Svelte's extra
+  time goes to inserting and removing each cell's nodes, and Vue's and
+  Svelte's to more garbage collection than React's. Against Herceg's own
+  cells drawn without a framework (bars, chips, links, and symbols as
+  cell kinds, 5.2 ms a vertical step), framework cells cost ~2 to ~2.8 ms
+  a vertical step at 100k rows (React ~2.0, Vue ~2.2, Svelte ~2.8). No grid dropped a frame; Herceg's one incomplete frame at 1M rows
+  is a scroll's first, as without framework cells.
+- **Memory.** Against the same grid with Herceg's own cells, React cells
+  keep ~5.2 MiB more heap (~34 KB a mounted cell, most of it the event
+  listeners React adds to each portal's element), Vue and Svelte cells
+  ~2.3 to ~2.4 MiB (~15 KB a cell). TanStack Table's cells, rendered in
+  its one React root, add ~1.1 MiB, but its row objects keep 52.9 MiB in
+  all. A second after destroying, no element of Herceg's grid or its
+  cells is left; ~0.3 to ~0.4 MiB more heap remains than with Herceg's
+  own cells, with each of the three, and mounting and destroying again
+  grows the heap no more than with Herceg's own cells (~0.05 to
+  ~0.07 MiB over the cycles).
 
 ### Sparklines
 
@@ -1164,9 +1172,10 @@ machine above; medians (± MAD where timed):
 - **Selection.** Selecting half of 100k sorted rows takes ~1 ms in Herceg
   and Glide (a row set, or one range), ~8 ms in TanStack Table (an object of
   ids), and ~17 ms in AG Grid.
-- **React.** Herceg through `@herceg/react/grid` measures like the plain
-  grid (data, sorting, and scrolling bypass React); React cells cost what
-  their components do ([React cells](#react-cells)).
+- **Frameworks.** Herceg through `@herceg/react/grid`, `@herceg/vue/grid`,
+  or `@herceg/svelte/grid` measures like the plain grid (data, sorting,
+  and scrolling bypass the framework); framework cells cost what their
+  components do ([Framework cells](#framework-cells)).
 - **After destroying.** A second after being destroyed, Herceg and AG Grid
   have released their grids. TanStack Table keeps its last table, with its
   row objects, reachable until another is created (~50 MB at 100k), and

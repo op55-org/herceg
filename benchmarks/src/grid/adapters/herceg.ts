@@ -16,8 +16,8 @@
 // the rank as rows stream, and picks black or white text over fills.
 // With cells, columns take cell kinds (`barCell`, `chipCell`, `symbolCell`)
 // and n1's display a link; the grid finds n4's bar's domain from the rows.
-// With React cells (herceg-react), columns draw only text here, and the
-// component's `cells` draw the content.
+// With framework cells (herceg-react, herceg-vue, herceg-svelte), columns
+// draw only text here, and the component's `cells` draw the content.
 // With the summary, columns take headings, and the model the view's totals
 // (`rowTotals`), which follow appends and drops as the table streams.
 
@@ -224,7 +224,8 @@ function batchOf(batch: GridTable): Record<string, Float64Array | (string | null
 
 /**
  * A handle over a Herceg table, view, and model, for a grid that `attach`
- * puts in `container` (directly, or through @herceg/react).
+ * puts in `container` (directly, or through @herceg/react, @herceg/vue, or
+ * @herceg/svelte).
  */
 export function hercegHandle(
   container: HTMLElement,
@@ -235,8 +236,8 @@ export function hercegHandle(
 ): GridHandle {
   const view = rowView(source);
   const looks = options.looks === true;
-  // React cells draw the cells scenarios' content in place of cell kinds and the link.
-  const react = options.cells === "react";
+  // Framework cells draw the cells scenarios' content in place of cell kinds and the link.
+  const framework = options.cells === "framework";
   const cells = options.cells === true;
   const summary = options.summary === true;
   const columns: GridColumn<Schema>[] = fixture.fields.map((field, f) => ({
@@ -320,7 +321,7 @@ export function hercegHandle(
         selected: (row) => row.getAttribute("aria-selected") === "true",
         ...(looks && { look: lookOf }),
         ...(cells && { content: contentOf }),
-        ...(react && { content: domContent }),
+        ...(framework && { content: domContent }),
       });
       if (totalsRow) {
         const texts = new Map<number, string>();
@@ -407,7 +408,8 @@ export const adapter: Adapter = {
   renderer: "DOM rows and cells written through field displays (10 rows and 2 columns of overscan)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
   unsupported: {
-    "react-cells": "no React: herceg-react draws React cells; here custom cells are DOM renderers",
+    "framework-cells":
+      "no framework: herceg-react, herceg-vue, and herceg-svelte draw framework cells; here custom cells are DOM renderers",
   },
   prepare: hercegTable,
   mount: (container, fixture, input, options) =>

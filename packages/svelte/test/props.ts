@@ -52,9 +52,15 @@ import type {
   treemap,
   violin,
 } from "herceg";
+import type { GridOptions as DataGridOptions, GridEvents } from "herceg/grid";
+import type { PivotGridOptions } from "herceg/grid/pivot";
+import type { RemoteGridOptions } from "herceg/grid/remote";
 import type { GridOptions, InsetOptions, PanelDefinition, Tracks } from "herceg/layout";
 import type { Snippet } from "svelte";
 import type { MarkProps, Mixed, Takes } from "../../herceg/test/helpers/props.ts";
+import type { PivotGrid } from "../src/grid/pivot.js";
+import type { RemoteGrid } from "../src/grid/remote.js";
+import type { Grid as DataGrid } from "../src/grid.js";
 import type { Legend } from "../src/guides.ts";
 import type {
   Area,
@@ -170,4 +176,22 @@ type Listeners = {
 true satisfies Takes<
   Omit<PropsOf<typeof Chart>, Own>,
   Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> & Listeners
+>;
+type GridListeners = {
+  [E in keyof GridEvents as `on${Lowercase<E>}`]?: ((event: GridEvents[E]) => void) | undefined;
+};
+/** A grid component's props of its own: its model, element, and bound grid. */
+type GridOwn = "model" | "class" | "style" | "grid";
+// Svelte's grids take Svelte cells in place of DOM renderers (`cells`); pivot grids take none.
+true satisfies Takes<
+  Omit<PropsOf<typeof DataGrid<Mixed>>, GridOwn | "cells">,
+  Omit<DataGridOptions<Mixed>, "model" | "cells"> & GridListeners
+>;
+true satisfies Takes<
+  Omit<PropsOf<typeof RemoteGrid<Mixed>>, GridOwn | "cells">,
+  Omit<RemoteGridOptions<Mixed>, "model" | "cells"> & GridListeners
+>;
+true satisfies Takes<
+  Omit<PropsOf<typeof PivotGrid<Mixed>>, GridOwn>,
+  Omit<PivotGridOptions<Mixed>, "model"> & GridListeners
 >;

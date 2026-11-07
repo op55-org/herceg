@@ -292,8 +292,8 @@ row and a spacer as tall as the rows.
   cell mounts, reaches the page only through the element it is given.
   What a kind reads moves a revision per column (`cellsRevision(column)`),
   by which the DOM grid redraws that column's mounted cells alone, so a
-  sparkline's data streaming in updates no other column's custom or React
-  cells. Views are given the column's layout and the row height; a kind
+  sparkline's data streaming in updates no other column's custom or
+  framework cells. Views are given the column's layout and the row height; a kind
   drawing to its cell's size (`sized`) is redrawn as its column's width
   changes, without a revision. Chips' text
   takes black or white as cells' text over fills does, over the chip on
@@ -342,11 +342,17 @@ row and a spacer as tall as the rows.
   which takes the page's focus where the cell had it, unless the user has
   taken it elsewhere. Every host a framework lets go of reaches it once:
   destroying the grid hands each framework its hosts, those of batches
-  not yet handed too. React's grids (`@herceg/react/grid`) draw their
-  cells through it: portals into the hosts, keyed by host and row,
-  committed with `flushSync` in the grid's frame and as state set in the
-  layout effect that makes the grid ([React, Vue, and
-  Svelte](../guide/frameworks.md#grids)).
+  not yet handed too. The adapters' grids draw their cells through it,
+  keyed by host and row ([React, Vue, and
+  Svelte](../guide/frameworks.md#grids)): React's (`@herceg/react/grid`)
+  as portals into the hosts, committed with `flushSync` in the grid's
+  frame and as state set in the layout effect that makes the grid; Vue's
+  (`@herceg/vue/grid`) as teleports, committed by Vue's flush in the
+  microtask after the frame's callback, before paint, and acknowledged
+  from each cell's mounted or updated hook; Svelte's
+  (`@herceg/svelte/grid`) as a component mounted into each host with the
+  grid component's contexts, committed with `flushSync` in the grid's
+  frame and acknowledged from an effect after the content's own.
 - **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
   model's `GridRef`, taken before the click selects (listeners of the
   selection may move or restrict rows), and give its index after; Enter on

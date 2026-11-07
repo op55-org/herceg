@@ -86,11 +86,9 @@ The long-term target covers the major chart families. Not yet available:
 
 - Column groups (headers over several columns) beyond pivots, sizing
   columns to their content, and moving columns by touch.
-- Custom cells in Vue and Svelte.
 - Editing and copying.
 - Pivots and binned times in remote grids, a SQL generator for grid
   queries, and remote grids from Python.
-- Grid components for Vue and Svelte.
 
 ## Python and live integration
 

@@ -29,8 +29,8 @@ whose data is large or changes often.
 - **Grids.** A virtualized analytical grid with grouped rows, a totals
   row, column headings, pivots, and remote data, cells colored through the
   same encodings as charts and drawing links, bars, chips, symbols,
-  sparklines, or custom renderers' content, sharing tables and selections
-  with charts, reporting clicks by row identity, exporting CSV and TSV,
+  sparklines, or custom renderers' content (React, Vue, and Svelte
+  components among them), sharing tables and selections with charts, reporting clicks by row identity, exporting CSV and TSV,
   and copying rows as spreadsheets paste them.
 - **Python.** A Pythonic API over pandas, Polars, PyArrow, and NumPy, with
   notebook widgets, Streamlit, Seaborn-style statistics

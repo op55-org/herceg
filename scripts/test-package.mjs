@@ -36,7 +36,13 @@ const publicAPIs = {
   "@herceg/vue": ["Chart", "Line"],
   "@herceg/vue/layout": ["Columns", "Rows", "Grid", "Cell", "Panel", "Inset"],
   "@herceg/vue/guides": ["Legend"],
+  "@herceg/vue/grid": ["Grid"],
+  "@herceg/vue/grid/remote": ["RemoteGrid"],
+  "@herceg/vue/grid/pivot": ["PivotGrid"],
   "@herceg/svelte": ["Chart", "Line"],
+  "@herceg/svelte/grid": ["Grid"],
+  "@herceg/svelte/grid/remote": ["RemoteGrid"],
+  "@herceg/svelte/grid/pivot": ["PivotGrid"],
 };
 const readJSON = (path) => JSON.parse(readFileSync(path, "utf8"));
 /** Subpaths of JSON data rather than modules: imported with a JSON attribute, and without declarations. */
@@ -324,10 +330,20 @@ export const wrong = <Line data={data} x="t" y="missing" />;
       join(consumer, "App.vue"),
       `<script setup lang="ts">
 import { Chart, Line } from "@herceg/vue";
-import { table, time } from "herceg";
+import { Grid } from "@herceg/vue/grid";
+import { rowView, table, time } from "herceg";
+import { createGridModel } from "herceg/grid";
 const data = table({ t: time([0, 1]), v: [1, 2] });
+const model = createGridModel({ data: rowView(data), columns: [{ field: "t" }, { field: "v" }] });
 </script>
-<template><Chart><Line :data="data" x="t" y="v" /></Chart></template>
+<template>
+  <Chart><Line :data="data" x="t" y="v" /></Chart>
+  <Grid :model="model" aria-label="Values" :cells="{ v: { fields: ['v'] } }">
+    <template #cell-v="{ cell }">{{ cell.read("v") }}</template>
+  </Grid>
+  <!-- @vue-expect-error the grid's cells read only the model's fields -->
+  <Grid :model="model" aria-label="Values" :cells="{ v: { fields: ['missing'] } }" />
+</template>
 `,
     );
     writeJSON(join(consumer, "tsconfig.vue.json"), {

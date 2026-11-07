@@ -12,7 +12,7 @@
 // a domain kept by adapter code (looks.ts); appends render every row in view
 // again, so cells follow the domain. With cells, the cell-bearing columns'
 // `cell` renders a React component drawing cells.ts' bars, chips, links,
-// and symbols (react-cells.tsx; in the React cells scenarios, the one with
+// and symbols (react-cells.tsx; in the framework cells scenarios, the one with
 // state); n4's bar's domain is adapter code, found from the rows at mount.
 // With the summary, columns sit in two levels of column groups (`group`),
 // whose header rows draw the groups over the columns in view, and a footer
@@ -342,7 +342,7 @@ function mount(
   // Adapter code: the rows' extent, which n4's bars are drawn within.
   const columns = columnsFor(
     fields,
-    cells ? { extent: extentOf(gridTable, "n4"), react: options.cells === "react" } : undefined,
+    cells ? { extent: extentOf(gridTable, "n4"), react: options.cells === "framework" } : undefined,
     options.summary,
   );
   const totals = options.summary ? new TotalsTracker(gridTable) : undefined;

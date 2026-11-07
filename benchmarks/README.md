@@ -46,8 +46,10 @@ otherwise idle while it runs.
 ### Builds and pages
 
 Each library gets its own production bundle (esbuild, minified,
-`NODE_ENV=production`) containing the harness and that library's adapter, so
-a page never loads two chart libraries. Every scenario runs in a fresh page.
+`NODE_ENV=production`, Vue's production flags, Svelte components compiled
+with `svelte/compiler`) containing the harness and that library's adapter,
+so a page never loads two chart libraries. Every scenario runs in a fresh
+page.
 
 ### Browser
 
@@ -272,7 +274,9 @@ could load for some chart, not what its own chart downloads.
 - `herceg-react-line`, `herceg-vue-line`, and `herceg-svelte-line` leave
   the framework's runtime out, as an application using the adapter already
   ships it; the Svelte entry's own component, compiled with
-  `svelte/compiler`, is measured with it.
+  `svelte/compiler`, is measured with it. So do the grid entries of each
+  adapter (`herceg-react-grid`, `herceg-vue-grid`, `herceg-svelte-grid`,
+  and their `-remote` and `-pivot` entries).
 - `herceg-bar`, `herceg-area`, `herceg-scatter`, `herceg-heatmap`, and
   `herceg-contour` chart the same data with other marks, to track what each
   adds. Only the line entries have counterparts among the other libraries.
@@ -325,13 +329,16 @@ peak Python memory (`tracemalloc`) from one more run:
 ## Grids
 
 `npm run bench:grid` compares Herceg's grid (`herceg/grid`, and the same
-grid through `@herceg/react/grid`) with TanStack Table and TanStack Virtual,
-AG Grid Community, and Glide Data Grid.
+grid through `@herceg/react/grid`, `@herceg/vue/grid`, and
+`@herceg/svelte/grid`: `herceg-react`, `herceg-vue`, `herceg-svelte`)
+with TanStack Table and TanStack Virtual, AG Grid Community, and Glide
+Data Grid.
 
 ```sh
 npm run bench:grid                                   # every scenario -> tmp/benchmarks/grid-<time>.json
 npm run bench:grid -- --size 10k,100k --lib herceg,ag-grid --filter sort
 npm run bench:grid -- --out results/grid.json        # refresh the committed results
+npm run bench:grid -- --lib herceg-react,herceg-vue,herceg-svelte,tanstack-table --filter framework-cells --out results/grid-framework-cells.json   # framework cells (see "Framework cells")
 node --experimental-strip-types benchmarks/src/grid/report.ts <results file>   # print the tables
 ```
 
@@ -484,24 +491,29 @@ The other grids find `n4`'s extent in adapter code when they mount
 (the scenarios do not stream), and draw bars, chips, and symbols with the
 same styles (`DOM_CELL_CSS`, or the canvas's equivalents).
 
-### React cells
+### Framework cells
 
-`react-cells` scenarios (the same sizes and operations as `cells`) draw
-the same five columns with one React component (`ReactCell`,
-`src/grid/react-cells.tsx`): the cells scenarios' DOM under state of its
-own (whether it was pressed), as a cell holding a control has, so a grid
-pays for mounting, recycling, and tearing down stateful components. The
+`framework-cells` scenarios (the same sizes and operations as `cells`)
+draw the same five columns with one component of the grid's framework:
+the cells scenarios' DOM under state of its own (whether it was pressed),
+as a cell holding a control has, so a grid pays for mounting, recycling,
+and tearing down stateful components. React grids draw `ReactCell`
+(`src/grid/react-cells.tsx`), the Vue grid `VueCell`
+(`src/grid/vue-cells.ts`), and the Svelte grid `SvelteCell`
+(`src/grid/svelte-cells/`), each wrapping a `CellView` component. The
 checks are the cells scenarios'.
 
-| Grid | How it draws React cells |
+| Grid | How it draws framework cells |
 | --- | --- |
 | Herceg (`herceg-react`) | `<Grid cells>`: a render function per column from each cell's `value` and `text` (`n1` a control cell), through portals; `n4`'s extent in adapter code, as the others find it |
+| Herceg (`herceg-vue`) | `<Grid :cells>`: a render function per column, as `herceg-react`'s, through teleports |
+| Herceg (`herceg-svelte`) | `<Grid {cells}>`: one snippet for every column (`n1` a control cell), each cell mounted into its host |
 | TanStack Table | Each column's `cell` renders `ReactCell` |
 | AG Grid | Not measured: its React cell renderers need `ag-grid-react`, which the suite does not install; its `cellRenderer` components are in the cells scenarios |
 | Glide | Not comparable: it draws cells on a canvas, with drawing callbacks rather than components |
 
-Herceg without React (`herceg`) draws custom cells with DOM renderers
-and is not run in these scenarios.
+Herceg without a framework (`herceg`) draws custom cells with DOM
+renderers and is not run in these scenarios.
 
 ### Headings and totals
 
@@ -546,7 +558,7 @@ Each adapter documents its configuration at the top of its file.
 
 | Grid | Input | Sorting and filtering | Updates | Rendering |
 | --- | --- | --- | --- | --- |
-| Herceg | Table over the fixture's arrays; field displays on every column | Row view (`setQuery`): typed-array comparators, filter expressions | `Table.append`, `dropFirst`, `set` | DOM rows and cells, 10 rows and 2 columns of overscan |
+| Herceg | Table over the fixture's arrays; field displays on every column | Row view (`setQuery`): typed-array comparators, filter expressions | `Table.append`, `dropFirst`, `set` | DOM rows and cells, 10 rows and 2 columns of overscan; mounted directly, or by React 19 (flushSync), Vue 3, or Svelte 5 (flushSync) |
 | TanStack Table 9 + Virtual 3 | Row objects | Native sorted and filtered row models (`basic` comparator, `sortUndefined: "last"`, `inNumberRange`, a membership filter function) | A new data array keeping unchanged row objects | React 19 DOM table, flushSync, 10 rows and 3 columns of overscan |
 | AG Grid Community 36 | Row objects, `getRowId` | Native sorting with a comparator keeping missing values last, `deltaSort`; native number filter; the external filter for membership (Community has no set filter) | Synchronous transactions (`applyTransaction`) | DOM rows and cells, `rowBuffer` 10, animations off |
 | Glide Data Grid 6 | The fixture's arrays through `getCellContent` | External: adapter code, labeled as such | Writes to the arrays; `updateCells` when order is unchanged | Canvas 2D, React 19 |

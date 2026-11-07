@@ -376,12 +376,15 @@ and Svelte's server render and `hydrate` (as SvelteKit does).
 
 ## Grids
 
-React has `<Grid>` in `@herceg/react/grid`, `<RemoteGrid>` in
-`@herceg/react/grid/remote`, and `<PivotGrid>` in
-`@herceg/react/grid/pivot`, each over a model the application makes; Vue
-and Svelte call `createGrid` on an element. See [Grids](grids.md#in-react).
+Each adapter has `<Grid>` in `/grid` (`@herceg/react/grid`,
+`@herceg/vue/grid`, `@herceg/svelte/grid`), `<RemoteGrid>` in
+`/grid/remote`, and `<PivotGrid>` in `/grid/pivot`, each over a model the
+application makes. Their props are the same: `model`, `ariaLabel`,
+`theme`, `headerHeight`, `copy`, and `cells`, with the grid's events as
+each framework hears them. See [Grids](grids.md#in-react-vue-and-svelte).
 
 ```tsx
+// React
 import { Grid } from "@herceg/react/grid";
 
 <Grid
@@ -393,44 +396,95 @@ import { Grid } from "@herceg/react/grid";
 />;
 ```
 
-`<Grid>` and `<RemoteGrid>` take `cells`, React cells by column id, typed
-by the model's fields (`fields` and `read` take only names the model has,
-and `read` gives each field's kind):
+```vue
+<!-- Vue -->
+<Grid :model="model" aria-label="Services" :cells="{ trend: { fields: ['service'] } }">
+  <template #cell-trend="{ cell }"><Sparkline :service="cell.read('service')" /></template>
+</Grid>
+```
 
-- **Where they render.** Each cell renders through a portal into the
-  element the grid gives it, inside the component's tree: providers and
-  context reach it. Only mounted cells render; built-in cells, data
-  changes, and scrolling never go through React.
+```svelte
+<!-- Svelte -->
+{#snippet trend(cell: GridCellContext<Services>)}
+  <Sparkline service={cell.read("service")} />
+{/snippet}
+
+<Grid {model} ariaLabel="Services" cells={{ trend: { fields: ["service"], render: trend } }} />
+```
+
+`<Grid>` and `<RemoteGrid>` take `cells`, framework cells by column id:
+React and Vue render functions of the cell, or Svelte snippets, or `{
+render, fields, interaction }`. In Vue a scoped slot `#cell-<id>="{ cell
+}"` draws a column too, `cells` then giving only its `fields` and
+`interaction`; a column drawn by both, or a slot for no column, is an
+error naming them. `fields` and `read` take only names the model has, and
+`read` gives each field's kind.
+
+- **Where they render.** Each cell renders into the element the grid
+  gives it, inside the component's tree: React through a portal, Vue
+  through a teleport, Svelte mounted with the component's contexts
+  (`getAllContexts`). Providers, `provide` and `inject`, and `setContext`
+  reach cells. Only mounted cells render; built-in cells, data changes,
+  and scrolling never go through the framework.
 - **State.** A cell's component is its row's: it keeps its state while the
   cell shows that row (as the row's selection or values change) and
   mounts again when the cell's element shows another row, as scrolling
   recycles elements. Keep state that must outlive scrolling outside the
   cell.
-- **When they commit.** The grid's first frame commits its cells in the
-  layout effect that makes the grid, before the page paints; later frames
-  commit theirs at once (`flushSync`) in the grid's own animation frame,
-  before it places the focus and paints. A cell whose row changed shows
-  its text until its content commits, never another row's content.
-  `onRender` hears of the first frame once its cells are committed, and
-  of the grid's own frames after their commits; a frame drawn by a call
-  (`render()`, `focusCell`, from an effect or a handler) is heard at once,
-  and its cells commit in the grid's next frame.
-- **Reading the row.** Read fields in the render function
-  (`cell.read("service")`), which renders again with each update; a
-  component holding `cell` can read it until its update is superseded
-  (`cell.signal`), after which `read` throws.
-- **Boundaries.** Each cell has an error boundary and a Suspense boundary
-  of its own, both drawing the cell's text: an error is reported once
-  (`reportError`) until the cell shows another row, and a suspended cell
-  reveals on its own; a focused control cell takes the focus as it
-  reveals, unless the user has moved it elsewhere.
+- **When they commit.** The grid's first frame commits its cells before
+  the page paints: in React's layout effect that makes the grid, in Vue's
+  flush after the component mounts, and in Svelte's effect that makes it.
+  Later frames commit theirs before the page paints: React and Svelte at
+  once (`flushSync`) in the grid's own animation frame, before it places
+  the focus; Vue in the microtask after the frame's callback, after the
+  grid placed the focus, and a focused control cell's acknowledgement then
+  moves it into the control. A cell whose row changed shows its text until
+  its content commits, never another row's content.
+  The render event hears of the first frame once its cells are committed,
+  and of the grid's own frames after their commits; a frame drawn by a
+  call (`render()`, `focusCell`, from an effect or a handler) is heard at
+  once (in Vue, once a commit still pending is done), and its cells
+  commit in the grid's next frame.
+- **Reading the row.** Read fields in the render function, slot, or
+  snippet (`cell.read("service")`), which runs again with each update. An
+  update is superseded (`cell.signal`) by the next, or by a draw called
+  from code, which hands the next over in the grid's next frame. After
+  that, a React cell's `read` throws, and React leaves the cell as it is
+  meanwhile; a Vue or Svelte cell's `read` gives the values of `fields` as
+  it last read them (or as they were when it was handed over), so content
+  that renders again on its own (state of its own or of the page changed)
+  draws the row it shows and keeps its state.
+- **Boundaries.** Each cell has an error boundary of its own drawing the
+  cell's text: an error is reported once (`reportError`) until the cell
+  shows another row. React cells also have a Suspense boundary of their
+  own, which reveals on its own; a focused control cell takes the focus as
+  it reveals, unless the user has moved it elsewhere. Vue and Svelte cells
+  have no pending boundary: content that loads draws its own placeholder.
+  Errors in a cell's event handlers are not caught; they go to the
+  framework's handlers as any component's.
 - **Keys.** `interaction: "control"` and `"composite"` work as for
   [custom renderers](grids.md#cells): a cell's button takes the grid's
   focus, or Enter moves into its controls.
-- **Cost.** A cell is a portal, and React listens for every event it
-  handles on each portal's element: about 17 KB of memory per mounted
-  React cell (a few MB for a screen of five React columns), held while
-  the element shows its column and let go of with it. It grows with the
-  cells mounted, not with the rows. Mounting, scrolling, and memory
-  against TanStack Table's React cells are in the
-  [comparison](../comparison.md#react-cells).
+- **Cost.** A React cell is a portal, and React listens for every event it
+  handles on each portal's element: about 34 KB of memory per mounted
+  React cell (~5 MB for a screen of five React columns), held while the
+  element shows its column and let go of with it. A Vue or Svelte cell
+  holds about 15 KB. Each grows with the cells mounted, not with the rows.
+  Mounting, scrolling, and memory against TanStack Table's React cells
+  are in the [comparison](../comparison.md#framework-cells).
+
+**Types.** Each grid component is generic in its model's schema: `cells`'
+`fields` and `read`, and the exposed `grid` (`ref`, a Vue template ref's
+`grid`, Svelte's `bind:grid`), are typed by the model. Where the
+frameworks fall short:
+
+- Vue slots are typed by name pattern (`cell-${string}`), so a slot's
+  name is not checked against the columns (React's and Svelte's `cells`
+  keys are not either; a wrong id is an error when the grid mounts).
+  Templates (vue-tsc) and TSX infer the schema from `model`; `h()` does
+  not take generic components, so cast `h(Grid as Component, props)` and
+  type the cells apart (`VueGridCells<S>`). Templates write the accessible
+  name `aria-label` (the prop is `ariaLabel`; one of the two is required).
+- Svelte snippets declared in markup are typed by their parameter's
+  annotation (`cell: GridCellContext<Services>`, the model's schema), not
+  inferred from where they are passed.

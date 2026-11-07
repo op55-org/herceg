@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { svelte } from "./svelte.ts";
 
 export const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** Herceg is bundled from source so benchmarks always measure the working tree. */
@@ -26,7 +27,13 @@ export const HERCEG_ALIAS = {
   "@herceg/react/grid/pivot": join(ROOT, "..", "packages", "react", "src", "grid", "pivot.tsx"),
   "@herceg/react/layout": join(ROOT, "..", "packages", "react", "src", "layout.tsx"),
   "@herceg/vue": join(ROOT, "..", "packages", "vue", "src", "index.ts"),
+  "@herceg/vue/grid": join(ROOT, "..", "packages", "vue", "src", "grid.ts"),
+  "@herceg/vue/grid/remote": join(ROOT, "..", "packages", "vue", "src", "grid", "remote.ts"),
+  "@herceg/vue/grid/pivot": join(ROOT, "..", "packages", "vue", "src", "grid", "pivot.ts"),
   "@herceg/svelte": join(ROOT, "..", "packages", "svelte", "src", "index.ts"),
+  "@herceg/svelte/grid": join(ROOT, "..", "packages", "svelte", "src", "grid.ts"),
+  "@herceg/svelte/grid/remote": join(ROOT, "..", "packages", "svelte", "src", "grid", "remote.ts"),
+  "@herceg/svelte/grid/pivot": join(ROOT, "..", "packages", "svelte", "src", "grid", "pivot.ts"),
 };
 const OUT = join(ROOT, ".build");
 
@@ -79,9 +86,16 @@ export async function buildPage(
     format: "esm",
     target: "es2022",
     outfile: join(OUT, `${name}.js`),
-    define: { "process.env.NODE_ENV": '"production"' },
+    // Vue's flags as an application's build sets them (Vite's defaults).
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      __VUE_OPTIONS_API__: "true",
+      __VUE_PROD_DEVTOOLS__: "false",
+      __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false",
+    },
     jsx: "automatic",
     alias: HERCEG_ALIAS,
+    plugins: [svelte],
     logLevel: "warning",
   });
 }
