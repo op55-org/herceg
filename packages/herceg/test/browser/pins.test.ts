@@ -122,6 +122,32 @@ describe("a click on what the tooltip shows", () => {
     expect(tip.style.display).toBe("block");
   });
 
+  it("pins the value its own inspection reads, not the row of the line it picked", async () => {
+    // A dip at t = 200 between plateaus. A click 2.7 steps right of its foot is within reach of
+    // the dip's steep sides, whose rows are 200 and its neighbors; the inspection there, which
+    // the tooltip shows, reads t = 203.
+    const t = Float64Array.from({ length: 401 }, (_, i) => i);
+    const v = Float64Array.from(t, (i) => (i === 200 ? 0 : 100));
+    const chart = await mount({
+      marks: [line(table({ t, v }), { x: "t", y: "v" })],
+      x: { domain: [0, 400] },
+      y: { domain: [0, 100] },
+      inspection: { mode: "nearest-x" },
+    });
+    const pins = heard(chart, "pin");
+    const clicks = heard(chart, "click");
+    const [x, y] = pixel(chart, 200, 0);
+    const step = chart.toPixel(1, { axis: "x" })! - chart.toPixel(0, { axis: "x" })!;
+    expect(2.7 * step).toBeLessThan(4);
+    clickAt(chart, [x + 2.7 * step, y]);
+    const clicked = clicks[0]!;
+    expect(clicked.target?.kind).toBe("item");
+    expect((clicked.target as { row?: number }).row).not.toBe(203);
+    expect(clicked.inspection?.value).toBe(203);
+    expect(pins.map(({ at }) => at)).toEqual([{ value: 203, axis: "x", panel: "" }]);
+    expect(pins[0]?.inspection?.value).toBe(203);
+  });
+
   it("pins at a point of any series, those sharing another's positions too", async () => {
     const chart = await mount();
     const pins = heard(chart, "pin");

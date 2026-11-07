@@ -763,10 +763,17 @@ export class Interaction {
   /**
    * A pin of the item the keyboard's kind of cursor `cursor` is on (keyed
    * `key`, `item` naming what it is on): of the item itself where the
-   * inspection reads one point or reads items, else of its value along the
-   * inspection's axis. Undefined for an item the inspection does not read.
+   * inspection reads one point or reads items, else of a value along the
+   * inspection's axis: the one `shown` reads where given (what a click's
+   * own inspection, and so its tooltip, read), else the item's own.
+   * Undefined for an item the inspection does not read.
    */
-  #anchored(cursor: KeyboardCursor, item: KeyedItem | undefined, key: string): Pin | undefined {
+  #anchored(
+    cursor: KeyboardCursor,
+    item: KeyedItem | undefined,
+    key: string,
+    shown?: Inspection,
+  ): Pin | undefined {
     const { model } = this.#host;
     const inspection = this.#keyed(cursor);
     if (!inspection) return undefined;
@@ -791,9 +798,11 @@ export class Interaction {
     )
       return undefined;
     const scale = drawn[axis];
-    let at = inspection.value;
-    if (axis !== inspection.axis) {
-      const point = inspection.points.find((p) => p.key === cursor.key) ?? inspection.points[0];
+    // A line picked within reach of the pointer may be at another row than the one read there.
+    const reads = shown?.axis === inspection.axis ? shown : inspection;
+    let at = reads.value;
+    if (axis !== reads.axis) {
+      const point = reads.points.find((p) => p.key === cursor.key) ?? reads.points[0];
       at = point && scale ? scale.invert(axis === "x" ? point.px : point.py) : Number.NaN;
       if (scale?.categories) at = Math.round(at);
       if (!Number.isFinite(at)) return undefined;
@@ -850,11 +859,14 @@ export class Interaction {
    * Undefined where it changes nothing: elsewhere, and once the options
    * no longer pin by click or inspect as they did.
    */
-  #clickPin(target: Target | undefined): () => Pin | null | undefined {
+  #clickPin(
+    target: Target | undefined,
+    shown: () => Inspection | undefined,
+  ): () => Pin | null | undefined {
     if (!this.#pinsByClick() || (target?.kind !== "item" && target?.kind !== "plot"))
       return () => undefined;
     const at = target.kind === "item" ? this.#cursorOf(target) : undefined;
-    const pin = (at && this.#anchored(...at, (target as ItemTarget).item)) ?? null;
+    const pin = (at && this.#anchored(...at, (target as ItemTarget).item, shown())) ?? null;
     const mode = this.#pinMode;
     return () =>
       !this.#pinsByClick() || this.#pinMode !== mode
@@ -3185,7 +3197,16 @@ export class Interaction {
     // chart asks, what it picked.
     const drills = !select && this.#drills(target, x, y);
     const chosen = picks && !drills ? this.#chosen(target, event.shiftKey) : undefined;
-    const pinning = drills ? undefined : this.#clickPin(target);
+    // A pin is at what the click's inspection reads, as the tooltip at the pointer showed.
+    const pinning = drills
+      ? undefined
+      : this.#clickPin(target, () =>
+          payload
+            ? payload.inspection
+            : host.options().inspection === false
+              ? undefined
+              : host.model.inspect(x, y),
+        );
     const panel = this.#panelAt(x, y);
     const brush = host.model.interactionOf(panel?.key)?.brush;
     // A click clears the brush where it says so (by default), but not one on the brush it moves.
@@ -3365,7 +3386,7 @@ export class Interaction {
     // Enter on a node with nodes under it, or on a sunburst's middle, drills, and does nothing else.
     const drills = this.#drills(payload.target, Number.NaN, Number.NaN);
     const chosen = drills ? undefined : this.#chosen(payload.target, false);
-    const pinning = drills ? undefined : this.#clickPin(payload.target);
+    const pinning = drills ? undefined : this.#clickPin(payload.target, () => inspection);
     return () => {
       if (drills) this.#drill(payload.target!, Number.NaN, Number.NaN, "keyboard");
       if (chosen !== undefined) host.select(chosen, undefined, "keyboard");
