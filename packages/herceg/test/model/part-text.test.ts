@@ -21,6 +21,7 @@ import type {
   RectGeometry,
   RuleGeometry,
   Scene,
+  TextGeometry,
   TextItem,
 } from "../../src/scene/scene.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
@@ -265,6 +266,84 @@ describe("labels of styled parts", () => {
     expect(middle(drawn[0]!)).toBeCloseTo(middle(drawn[1]!), 6);
     expect(Math.max(right(drawn[0]!), right(drawn[1]!))).toBeLessThan(end);
     expect(drawn[1]!.y).toBeGreaterThan(drawn[0]!.y);
+  });
+
+  it("align the lines of bar labels in their block as their style says", () => {
+    // b6.04: a race's name over its value, both ending at the bar's end.
+    const rows = table({ name: ["Galaxy Pictures", "Fizzco"], value: [80, 60] });
+    const lines = (align: "start" | "center" | "end" | undefined, styled: boolean) => {
+      const scene = build(
+        {
+          marks: [
+            bar(rows, {
+              x: "value",
+              y: "name",
+              labels: {
+                content: [
+                  { field: "name", ...(styled && { style: { fontWeight: 700 } }) },
+                  "\n",
+                  { value: true },
+                ],
+                place: { outside: false, attachment: "end" },
+                ...(align && { style: { align } }),
+              },
+            }),
+          ],
+          x: { domain: [0, 100] },
+        },
+        400,
+        200,
+      );
+      // Every text drawn, as items: plain labels are text geometry in the theme's font.
+      const plain = textPaint([LIGHT.roles.text]).css;
+      const drawn = scene.panels[0]!.marks.flatMap((g) =>
+        g.kind === "labels"
+          ? fills([...(g as LabelsGeometry).items]).map(({ text, x, anchor, paint }) => ({
+              text,
+              x,
+              anchor,
+              css: paint.css,
+            }))
+          : g.kind === "text"
+            ? (g as TextGeometry).labels.map((text, i) => ({
+                text,
+                x: (g as TextGeometry).coords[i * 2]!,
+                anchor: (g as TextGeometry).anchor,
+                css: plain,
+              }))
+            : [],
+      );
+      // Each label's lines, where they start and end: each line is anchored at its item's x.
+      return drawn.flatMap(({ text, x, anchor, css }) =>
+        text.split("\n").map((line) => {
+          const width = estimateText(line, css);
+          const left = x - (anchor === "start" ? 0 : anchor === "end" ? 1 : 0.5) * width;
+          return { line, left, right: left + width };
+        }),
+      );
+    };
+    for (const styled of [true, false]) {
+      const [name, value] = lines("end", styled);
+      expect(name!.right, `ends of lines ending, ${styled ? "styled" : "plain"} parts`).toBeCloseTo(
+        value!.right,
+        6,
+      );
+      const [first, second] = lines("start", styled);
+      expect(first!.left).toBeCloseTo(second!.left, 6);
+      // Centered, and by default as their place anchors them (inside a bar's end, centered).
+      for (const align of ["center", undefined] as const) {
+        const [a, b] = lines(align, styled);
+        expect((a!.left + a!.right) / 2).toBeCloseTo((b!.left + b!.right) / 2, 6);
+      }
+      // The block stays where its place puts it: its widest line ends at the same place.
+      const ends = (align: "start" | "end") =>
+        Math.max(
+          ...lines(align, styled)
+            .slice(0, 2)
+            .map((l) => l.right),
+        );
+      expect(ends("end")).toBeCloseTo(ends("start"), 6);
+    }
   });
 
   it("leave out bar labels of parts taller than their bars are thick, and keep small ones", () => {

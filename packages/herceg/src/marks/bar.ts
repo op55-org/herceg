@@ -1168,6 +1168,9 @@ function lengthExtent(
 
 /** Pixels between a bar's end and its label. */
 const LABEL_GAP = 4;
+/** The text anchor of each alignment of a label's lines, and how far along its width each anchor is. */
+const ANCHORS = { start: "start", center: "middle", end: "end" } as const;
+const SHARES = { start: 0, middle: 0.5, end: 1 } as const;
 
 /** Value labels' paint: the theme's text, the color of plain text, and the labels' style over them. */
 function labelPaint(theme: Theme, style: Frozen<TextStyle> | undefined): TextPaint {
@@ -1283,6 +1286,8 @@ class ValueLabels {
     this.#styled = features?.content?.styled;
     this.#plain =
       !this.#styled &&
+      // Lines aligned other than as their place anchors them are drawn as items.
+      paint.align === undefined &&
       paint.font === theme.font &&
       paint.size === theme.fontSize &&
       paint.weight === 400 &&
@@ -1503,11 +1508,21 @@ class ValueLabels {
         this.text(value, named!.rows[i]!, named!.series, named!.field)();
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
+        // The block stands where its place anchors it; its lines align in it as its style says.
+        const lines = paint.align === undefined ? group.anchor : ANCHORS[paint.align];
         const itemsAt = (text: Written, x: number, y: number) => {
           // Parts are drawn in their block, its middle at the label's place.
           if (typeof text !== "string")
-            return text.items(text.box(x, y, group.anchor, paint), group.anchor, paint, halo);
-          const at = { x, y, anchor: group.anchor, baseline: "middle", angle: 0 } as const;
+            return text.items(text.box(x, y, group.anchor, paint), lines, paint, halo);
+          // Moved from the block's anchor to its lines', across the block's width.
+          const along = SHARES[lines] - SHARES[group.anchor];
+          const at = {
+            x: along ? x + along * this.#width(text) : x,
+            y,
+            anchor: lines,
+            baseline: "middle",
+            angle: 0,
+          } as const;
           // Placed by their middle, labels are drawn from their first line.
           const made = textItem(
             text,
@@ -1664,8 +1679,7 @@ class ValueLabels {
       group.named.values.push(value);
       group.named.rows.push(row);
       // Where its text starts, by its anchor's share of its width.
-      const share = anchor === "start" ? 0 : anchor === "middle" ? 0.5 : 1;
-      group.named.starts.push(x - share * this.#width(text));
+      group.named.starts.push(x - SHARES[anchor] * this.#width(text));
     }
   }
 }

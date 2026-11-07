@@ -299,7 +299,7 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
 | `field` | Another field's value instead. |
 | `content` | Text and parts (`{ value: true }`, `{ field }`, `{ series: true }`), each with a `format` and a [`style`](#parts-with-a-look-of-their-own). |
 | `format` | Intl options, or `{ number: ",.0f" }` / `{ time }` patterns. |
-| `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. |
+| `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. `align` lines up the lines of a label of several lines (`"\n"` in `content`) at their start, center, or end; the block stays where `place` puts it. |
 | `minLength` | Bars shorter than this many pixels get no label. |
 | `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. |
 | `overlap` | `"show"` (default) or `"hide"`: a label that would cover an earlier one goes inside its bar, or is left out where it does not fit there. |
