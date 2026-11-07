@@ -474,15 +474,42 @@ function permute(values: NumericArray, start: number, order: Uint32Array) {
   for (let i = 0; i < order.length; i++) values[start + i] = rows[order[i]!]!;
 }
 
-/** Positions `[from, to)` of `values` in ascending order of their values, ties in position order, from 0. */
+/**
+ * Positions `[from, to)` of `values` in ascending order of their values,
+ * ties in position order, from 0: the ascending runs they hold merged in
+ * pairs, so that rows given as a few sorted series (one after another)
+ * take a few passes.
+ */
 function stableOrder(values: ArrayLike<number>, from = 0, to = values.length): Uint32Array {
-  const order = new Uint32Array(to - from);
-  let sorted = true;
-  for (let i = 0; i < order.length; i++) {
+  const length = to - from;
+  let order = new Uint32Array(length);
+  // Where each run starts, then the end.
+  let runs = [0];
+  for (let i = 0; i < length; i++) {
     order[i] = i;
-    if (i > 0 && values[from + i]! < values[from + i - 1]!) sorted = false;
+    if (i > 0 && values[from + i]! < values[from + i - 1]!) runs.push(i);
   }
-  return sorted ? order : order.sort((a, b) => values[from + a]! - values[from + b]! || a - b);
+  if (runs.length === 1) return order;
+  runs.push(length);
+  let out = new Uint32Array(length);
+  while (runs.length > 2) {
+    const merged = [0];
+    for (let r = 0; r + 1 < runs.length; r += 2) {
+      const [start, middle] = [runs[r]!, runs[r + 1]!];
+      const end = runs[r + 2] ?? middle;
+      let [i, j, k] = [start, middle, start];
+      // Of equal values, the earlier run's first.
+      while (i < middle && j < end)
+        out[k++] =
+          values[from + order[j]!]! < values[from + order[i]!]! ? order[j++]! : order[i++]!;
+      while (i < middle) out[k++] = order[i++]!;
+      while (j < end) out[k++] = order[j++]!;
+      merged.push(end);
+    }
+    [order, out] = [out, order];
+    runs = merged;
+  }
+  return order;
 }
 
 /** A batch's rows at `rows`, every field's. */

@@ -3,7 +3,7 @@
 // Reports the median and median absolute deviation over repeated runs.
 
 import { count, max, mean, min, sum } from "../src/data/aggregations.ts";
-import { category, time } from "../src/data/column.ts";
+import { category, encodedCategory, time } from "../src/data/column.ts";
 import { derive } from "../src/data/derive.ts";
 import { col } from "../src/data/expr.ts";
 import { fromGeoJSON } from "../src/data/geojson.ts";
@@ -419,6 +419,34 @@ const feed = orderedTable(
     value: Float64Array.from(history.value),
   },
   { orderBy: "time" },
+);
+// The history as A7's application has it, each series' rows in time order
+// one series after another: an ordered table sorts them as it is made.
+const bySeries = {
+  time: new Float64Array(history.time.length),
+  series: new Int32Array(history.time.length),
+};
+{
+  let at = 0;
+  for (let s = 0; s < FEED; s++)
+    history.time.forEach((t, i) => {
+      if (history.series[i] !== s) return;
+      bySeries.time[at] = t;
+      bySeries.series[at++] = s;
+    });
+}
+measure(
+  "ordered: make a table of 10 series given one after another, 180k rows",
+  () =>
+    orderedTable(
+      {
+        time: time(bySeries.time),
+        series: encodedCategory(bySeries.series, feedNames),
+        value: bySeries.time,
+      },
+      { orderBy: "time" },
+    ),
+  { warmup: 5, samples: 20 },
 );
 // The feature compiler applies continuity, as charts load it.
 const feedModel = (marks: ConstructorParameters<typeof ChartModel>[0]["marks"]) => {

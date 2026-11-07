@@ -28,6 +28,23 @@ describe("orderedTable()", () => {
     expect(t.maxRows).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it("sorts series given one after another, and rows in any order, ties as given", () => {
+    // Three sorted series end to end, interleaved in time with ties across
+    // them; then values in no order, with many ties: as a stable sort has them.
+    const series = [0, 1, 2].flatMap((s) => Array.from({ length: 50 }, (_, k) => k * 3 + (s % 2)));
+    let seed = 7;
+    const shuffled = Array.from({ length: 301 }, () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed % 40;
+    });
+    for (const given of [series, shuffled]) {
+      const t = orderedTable({ t: given, v: given.map((_, i) => i) }, { orderBy: "t" });
+      const stable = given.map((value, i) => [value, i] as const).sort((a, b) => a[0] - b[0]);
+      expect(times(t)).toEqual(stable.map(([value]) => value));
+      expect(identities(t)).toEqual(stable.map(([, i]) => i));
+    }
+  });
+
   it("keeps the last maxRows rows in order", () => {
     const t = orderedTable(
       { t: [5, 1, 4, 2, 3], v: [5, 1, 4, 2, 3] },
