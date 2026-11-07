@@ -89,6 +89,8 @@ export class Sliders {
       part.setAttribute("aria-orientation", "horizontal");
       part.setAttribute("aria-label", label);
       part.tabIndex = 0;
+      // The chart's own, whose focus from a press draws no ring until a key (see press-focus.ts).
+      part.setAttribute("data-herceg-focus", "");
       part.style.cssText = `position:absolute;top:0;height:100%;cursor:${cursor};z-index:${z}`;
       return part;
     };

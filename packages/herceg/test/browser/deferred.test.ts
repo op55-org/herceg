@@ -3,7 +3,7 @@
 // not import helpers.ts, whose import loads the controller first.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { commands } from "vitest/browser";
+import { commands, userEvent } from "vitest/browser";
 import { MOUSE } from "../../../../scripts/browser/mouse.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, createChart, forgetInteraction } from "../../src/dom/chart.ts";
@@ -87,6 +87,122 @@ describe("the interaction controller", () => {
     expect(chart.getViewport().x).not.toBeNull();
     expect(document.activeElement).toBe(elsewhere);
     chart.destroy();
+  });
+
+  it("draws no focus ring for a press held while it loaded, but for a key once it has, in shadow roots too", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    const ring = (element: HTMLElement) => getComputedStyle(element).outlineStyle !== "none";
+    for (const [typed, shadowed] of [
+      [false, false],
+      [true, false],
+      [false, true],
+    ] as const) {
+      let attach = (_: typeof module) => {};
+      forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+      let parent = host;
+      if (shadowed) {
+        const outer = document.createElement("div");
+        host.append(outer);
+        parent = document.createElement("div");
+        parent.style.cssText = "width:600px;height:300px";
+        outer.attachShadow({ mode: "open" }).append(parent);
+      }
+      const chart = createChart(parent, {
+        interaction: { pan: "x" },
+        marks: [line(data(), { x: "t", y: "v" })],
+      });
+      await mouse(chart, "move", 70, 80);
+      await mouse(chart, "press", 70, 80);
+      await mouse(chart, "move", 200, 150);
+      await mouse(chart, "release", 200, 150);
+      if (typed) await userEvent.keyboard("{ArrowRight}");
+      attach(module);
+      await chart.loading;
+      const at = `${typed ? "a key after the press" : "the press"}${shadowed ? " in a shadow root" : ""}`;
+      expect(chart.root.matches(":focus"), at).toBe(true);
+      // The press's focus draws no ring; with a key held, Chrome and Firefox
+      // keep none for it (that focus asked for none), and the next key draws one.
+      if (!typed) expect(ring(chart.root), at).toBe(false);
+      await userEvent.keyboard("{ArrowLeft}");
+      expect(ring(chart.root), `${at}, then a key`).toBe(true);
+      chart.destroy();
+      host.replaceChildren();
+    }
+  });
+
+  // Bug: once loaded, the controller read the presses held again, and what
+  // had the focus then lost its ring, though the keyboard gave it since.
+  it("keeps the ring of focus the keyboard gave after a press held while it loaded", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const before = document.createElement("button");
+    before.textContent = "Before";
+    host.before(before);
+    try {
+      const chart = createChart(host, {
+        interaction: { pan: "x" },
+        marks: [line(data(), { x: "t", y: "v" })],
+      });
+      await mouse(chart, "move", 70, 80);
+      await mouse(chart, "press", 70, 80);
+      await mouse(chart, "move", 200, 150);
+      await mouse(chart, "release", 200, 150);
+      expect(document.activeElement).toBe(chart.root);
+      // Away, with a click on a button before the chart, and back with Tab.
+      const box = before.getBoundingClientRect();
+      const root = chart.root.getBoundingClientRect();
+      const [x, y] = [box.left - root.left + 5, box.top - root.top + box.height / 2];
+      await mouse(chart, "move", x, y);
+      await mouse(chart, "press", x, y);
+      await mouse(chart, "release", x, y);
+      before.focus();
+      await userEvent.keyboard("{Tab}");
+      expect(document.activeElement).toBe(chart.root);
+      const ring = () => getComputedStyle(chart.root).outlineStyle !== "none";
+      expect(ring(), "Tab's ring").toBe(true);
+      attach(module);
+      await chart.loading;
+      expect(document.activeElement).toBe(chart.root);
+      expect(ring(), "the ring once loaded").toBe(true);
+      chart.destroy();
+    } finally {
+      before.remove();
+    }
+  });
+
+  // Bug: the ring a key asks for, where the focus a held press gave draws
+  // none, weighed nothing, so a page's `:focus` reset took it off again.
+  it("draws a ring for a key after a press held while it loaded, under a page's focus reset", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    for (const reset of [
+      ":focus { outline: none } :focus-visible { outline: 2px solid rgb(0, 0, 255) }",
+      ":focus:not(:focus-visible) { outline: none }",
+    ])
+      for (const drags of [true, false]) {
+        const style = document.createElement("style");
+        style.textContent = reset;
+        document.head.append(style);
+        let attach = (_: typeof module) => {};
+        forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+        const chart = createChart(host, {
+          interaction: { pan: drags ? "x" : false },
+          marks: [line(data(), { x: "t", y: "v" })],
+        });
+        await mouse(chart, "move", 70, 80);
+        await mouse(chart, "press", 70, 80);
+        if (drags) await mouse(chart, "move", 200, 150);
+        await mouse(chart, "release", drags ? 200 : 70, drags ? 150 : 80);
+        attach(module);
+        await chart.loading;
+        const at = `${drags ? "a drag" : "a click"}, ${reset}`;
+        expect(document.activeElement, at).toBe(chart.root);
+        await userEvent.keyboard("{ArrowRight}");
+        expect(getComputedStyle(chart.root).outlineStyle, at).not.toBe("none");
+        chart.destroy();
+        style.remove();
+        host.replaceChildren();
+      }
   });
 
   it.each([

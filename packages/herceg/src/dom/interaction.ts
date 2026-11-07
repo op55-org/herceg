@@ -55,6 +55,7 @@ import type {
 } from "./events.ts";
 import type { CursorPosition } from "./handle.ts";
 import type { LegendClick } from "./legend.ts";
+import { pressed, pressFocus } from "./press-focus.ts";
 import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
 import { describeInspection, Tooltip } from "./tooltip.ts";
@@ -508,6 +509,10 @@ export class Interaction {
       visibility: "hidden",
     });
     host.overlay.append(...this.#crosshairs, this.#dots, this.#outline);
+    // What presses focus draws no ring until a key (see press-focus.ts); a
+    // focus the chart has without one now is a press's, held while this loaded.
+    this.#cleanup.push(pressFocus(host.root));
+    if (!host.root.matches(":focus-visible")) pressed(host.root);
     this.#listen();
     this.configure(compiled);
     // The chart's \`pin\` pins through the model; a pin it asked for before now is made now.
