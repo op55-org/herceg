@@ -1114,7 +1114,9 @@ describe("<RemoteGrid> cells", () => {
         )
       );
     };
-    await until(() => model.row(0).kind === "row" && drawn());
+    // Its second block too: the cache drops a block only once two are out of
+    // view, so with the second still loading the first would stay.
+    await until(() => model.row(0).kind === "row" && model.row(50).kind === "row" && drawn());
     // Far away and back: the first block was evicted and loaded again.
     model.scrollTo({ top: ROW * 1500 });
     await until(() => model.row(1500).kind === "row" && model.row(0).kind === "placeholder");

@@ -2290,6 +2290,9 @@ describe("remote grids", () => {
     const before = first()!.row.ref;
     // Each context's ref is its own: a scope and an id, no more.
     expect(Object.keys(before)).toEqual(["scope", "id"]);
+    // Its second block too: the cache drops a block only once two are out of
+    // view, so with the second still loading the first would stay.
+    await until(() => model.row(50).kind === "row");
     // Far away and back: the first block was evicted and loaded again, its rows the same rows.
     model.scrollTo({ top: ROW * 1500 });
     // The first block goes once the new window's blocks have loaded, which
