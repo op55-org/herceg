@@ -565,6 +565,32 @@ describe("series labels keeping apart", () => {
     }
   });
 
+  it("draw a leader from labels displaced more than 6 pixels from their points, either way", () => {
+    // Two labels whose points are `apart` pixels closer than a block's
+    // height move apart evenly, one up and one down, half of that each. The
+    // threshold is on that displacement, not on the space the text paints.
+    const look = { stroke: undefined, path: "line labels.leader.stroke", strokeWidth: 1 };
+    const [single] = place([series(100, "a", "move", owner())], frame, GUIDE_KIT).boxes;
+    const block = single!.height;
+    const leaders = (moved: number) => {
+      const own = owner("labels", look);
+      const lower = 100 + block - 2 * moved;
+      const { geometry, boxes } = place(
+        [series(100, "up", "move", own), series(lower, "down", "move", own)],
+        frame,
+        GUIDE_KIT,
+      );
+      const [up, down] = [...boxes].sort((a, b) => a.y - b.y);
+      expect(single!.y - up!.y).toBeCloseTo(moved, 6);
+      expect(down!.y - (single!.y + lower - 100)).toBeCloseTo(moved, 6);
+      const segments = geometry.get(own)!.find((g) => g.kind === "segments");
+      return (segments as SegmentGeometry | undefined)?.count ?? 0;
+    };
+    expect(leaders(5.9)).toBe(0);
+    expect(leaders(6)).toBe(0);
+    expect(leaders(6.1)).toBe(2);
+  });
+
   it("move least where blocks meet only some of the others", () => {
     // A meets B and C; B and C do not meet. C, tall, wants to be above A,
     // so A and C move apart; B, whose room A leaves, stays at its point.

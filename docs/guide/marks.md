@@ -853,8 +853,10 @@ Each kind takes only the fields it can honour and refuses the others:
   inside the plot, keeping off labels that "show" and labels that "hide"
   of higher priority than any that move. Where the plot is too short for
   all of them, "move" leaves out the lowest priority, then the last
-  series, until the rest fit. Labels moved more than 6 pixels from their
-  point draw a leader when asked. They are placed first in a panel;
+  series, until the rest fit. A label displaced more than 6 pixels from
+  where it would sit at its point draws a leader when asked: the threshold
+  is on how far layout moved it from that place, not on where its glyphs
+  fall. They are placed first in a panel;
   annotation labels keep off them.
 - **Annotation labels** are placed by priority, then mark order, then row
   order. A rule's label that moves tries the mirror place across its rule,
