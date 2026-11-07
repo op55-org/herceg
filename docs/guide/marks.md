@@ -863,10 +863,11 @@ Each kind takes only the fields it can honour and refuses the others:
   then slides along the rule; text tries places around its point; a
   region's label slides along its side. Places near the label are tried for
   every label before farther ones.
-- **As painted.** Labels keep apart, and "hide" leaves out, by what they
-  paint: box outlines and halos count, on series, annotation, and bar
-  labels alike. A label that writes nothing (empty, or only line breaks)
-  takes no place and hides no other.
+- **As painted.** Labels keep apart, and "hide" leaves out, by the blocks
+  they paint: their lines at their line height, with box padding,
+  outlines, and halos, on series, annotation, and bar labels alike. A
+  label that writes nothing (empty, or only line breaks) takes no place
+  and hides no other.
 - **Cost.** Series labels take O(n log n) for n labels at one column, and
   for up to 48 labels whose columns differ, about O(n·m) for m pairs that
   meet (O(n²(n + m)) at worst); labels that "show" add the sorting of
