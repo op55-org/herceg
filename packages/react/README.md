@@ -66,6 +66,8 @@ export function Latency() {
   draws its text, and cells commit before the grid paints. Each mounted
   React cell is a portal, which costs about 17 KB of React's event
   listeners, growing with the cells on screen, not with the rows.
+  `copy={{ maxCells }}` sets what Ctrl+C copies (`copy={false}` leaves the
+  key to the page); `exportGrid(model)` from `herceg/grid` writes CSV.
 
 ## Documentation
 

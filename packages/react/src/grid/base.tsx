@@ -18,7 +18,7 @@ import type { ReactCells } from "./cells.tsx";
 
 /** The props every grid component takes besides its model (and `cells`). */
 export interface GridComponentProps<G>
-  extends Pick<GridOptions, "ariaLabel" | "theme" | "headerHeight"> {
+  extends Pick<GridOptions, "ariaLabel" | "theme" | "headerHeight" | "copy"> {
   className?: string;
   /** Style of the container. Without a height, the grid is 320 px tall. */
   style?: CSSProperties;
@@ -44,7 +44,7 @@ type Made = Pick<HercegGrid, "on" | "destroy" | "render" | "drawnRevision" | "ro
 /** What a component makes its grid with. */
 export type Make<S extends Schema, G> = (
   container: HTMLElement,
-  options: Pick<GridOptions<S>, "ariaLabel" | "theme" | "headerHeight" | "cells">,
+  options: Pick<GridOptions<S>, "ariaLabel" | "theme" | "headerHeight" | "copy" | "cells">,
 ) => G;
 
 /**
@@ -65,6 +65,7 @@ export function useGrid<S extends Schema, G extends Made>(
     ariaLabel,
     theme,
     headerHeight,
+    copy,
   }: GridComponentProps<G>,
   cells?: ReactCells,
 ): ReactNode {
@@ -73,7 +74,7 @@ export function useGrid<S extends Schema, G extends Made>(
   const renderers = cells?.renderers;
   /** The options the grid has, to skip updates when a re-render changed none. */
   const applied = useRef<{ key: string; renderers: unknown }>({ key: "", renderers: undefined });
-  const key = JSON.stringify([ariaLabel, theme, headerHeight]);
+  const key = JSON.stringify([ariaLabel, theme, headerHeight, copy]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: options change through update()
   useLayoutEffect(() => {
@@ -81,6 +82,7 @@ export function useGrid<S extends Schema, G extends Made>(
       ariaLabel,
       ...(theme !== undefined && { theme }),
       ...(headerHeight !== undefined && { headerHeight }),
+      ...(copy !== undefined && { copy }),
       ...(renderers !== undefined && { cells: renderers as GridOptions<S>["cells"] }),
     });
     grid.current = created;
@@ -100,6 +102,7 @@ export function useGrid<S extends Schema, G extends Made>(
       ariaLabel,
       theme,
       headerHeight,
+      copy,
       ...(cells && { cells: renderers }),
     });
     if (!cells || last.renderers === renderers) return;

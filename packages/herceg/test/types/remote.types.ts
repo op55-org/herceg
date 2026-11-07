@@ -4,6 +4,7 @@ import { expectTypeOf } from "vitest";
 import { category, time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { createRemoteGrid } from "../../src/dom/grid-remote.ts";
+import { exportGrid } from "../../src/grid/export.ts";
 import { memorySource } from "../../src/grid/memory.ts";
 import type { GridAggregate } from "../../src/grid/query.ts";
 import { createRemoteGridModel, type RemoteGridModel } from "../../src/grid/remote.ts";
@@ -26,6 +27,7 @@ expectTypeOf(model).toEqualTypeOf<
 >();
 const grid = createRemoteGrid(document.body, { model, ariaLabel: "Requests" });
 expectTypeOf(grid.model).toEqualTypeOf(model);
+expectTypeOf(exportGrid(model, { headers: "ids" })).toEqualTypeOf<Promise<Blob>>();
 
 createRemoteGridModel({
   source,

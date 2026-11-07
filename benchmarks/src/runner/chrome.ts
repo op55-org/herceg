@@ -76,15 +76,19 @@ export async function committedBytes(cdp: CDPSession): Promise<number> {
   return usage.totalSize + (usage.embedderHeapUsedSize ?? 0) + (usage.backingStorageSize ?? 0);
 }
 
-type TraceEvent = {
+export type TraceEvent = {
   name: string;
   ph: string;
   pid: number;
+  tid?: number;
+  /** Start and duration, in microseconds. */
+  ts?: number;
+  dur?: number;
   args?: Record<string, unknown>;
 };
 
 /** Records a trace of `categories` on `cdp` while `body` runs. */
-async function trace(
+export async function trace(
   cdp: CDPSession,
   categories: string[],
   body: () => Promise<unknown>,
@@ -137,13 +141,23 @@ export async function rendererPid(page: CDPSession): Promise<number> {
  * `footprint`. Undefined elsewhere.
  */
 export function physFootprint(pid: number): number | undefined {
+  return footprints(pid)?.now;
+}
+
+/**
+ * A process's physical footprint now and the highest it has been since
+ * the process started (`phys_footprint_peak`), read with macOS's
+ * `footprint`. Undefined elsewhere.
+ */
+export function footprints(pid: number): { now: number; peak: number } | undefined {
   if (process.platform !== "darwin") return undefined;
   const output = execFileSync("footprint", ["-p", String(pid), "-f", "bytes", "--noCategories"], {
     stdio: ["ignore", "pipe", "ignore"],
   }).toString();
-  const match = /phys_footprint:\s*(\d+)/.exec(output);
-  if (!match) throw new Error(`physFootprint: no phys_footprint for process ${pid}`);
-  return Number(match[1]);
+  const now = /phys_footprint:\s*(\d+)/.exec(output);
+  const peak = /phys_footprint_peak:\s*(\d+)/.exec(output);
+  if (!now || !peak) throw new Error(`footprints: no phys_footprint for process ${pid}`);
+  return { now: Number(now[1]), peak: Number(peak[1]) };
 }
 
 /**

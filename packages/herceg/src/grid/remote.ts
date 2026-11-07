@@ -38,6 +38,7 @@ import {
   nextOrder,
   type SelectionState,
   type SelectMode,
+  type TotalsSource,
   totalsRow,
 } from "./base.ts";
 import { type CellBinding, drawsSymbols } from "./cells.ts";
@@ -52,6 +53,13 @@ import {
   keyFormatter,
   type PlacedColumn,
 } from "./columns.ts";
+import {
+  COPY_ROWS,
+  type CopiedRows,
+  EXPORT_ROWS,
+  type ReadRequest,
+  type RowsRead,
+} from "./export-rows.ts";
 import {
   type CellLook,
   compileEncodings,
@@ -75,6 +83,7 @@ import {
   schemaFields,
   validateGridQuery,
 } from "./query.ts";
+import type { RemoteRead } from "./remote-export.ts";
 import {
   aggregateKind,
   at,
@@ -122,6 +131,7 @@ import {
   type RowsRequest,
   type RowsWindow,
   type TotalsRequest,
+  valueAt,
   type WindowRows,
   windowFields,
 } from "./source.ts";
@@ -143,6 +153,8 @@ const JUMP = 2;
 /** Rows the DOM grid mounts past the view on each side. */
 const MOUNTED = 10;
 const LOADING = "Loading…";
+/** Why copy writes no rows of a selection the grid has not loaded all of. */
+const UNLOADED = "The selection holds rows that are not loaded; select fewer rows to copy them";
 const FAILED = "Couldn't load rows";
 /** Why a remote grid's looks take no rank tests. */
 const RANKS = "a rank reads every row, which a remote grid does not hold; compare with a value";
@@ -237,7 +249,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   >();
   #textLayout: readonly PlacedColumn[] | null = null;
   #textQuery: GridQuery | null = null;
-  #textWriters: ((block: Block, row: number, path: GroupKey) => string)[] | null = null;
+  #textWriters: ((data: RowsWindow, row: number, path: GroupKey) => string)[] | null = null;
   #looks: RemoteLooks | null = null;
   /** The totals the totals row shows (null for none), and the source's answer for one revision's snapshot. */
   #totals: readonly GridAggregate[] | null = null;
@@ -250,29 +262,20 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   #rowsError: Error | null = null;
   #totalsError: Error | null = null;
   #totalsVersion = 0;
-  readonly #totalsRow = totalsRow(this, {
+  readonly #totalsSource: TotalsSource = {
     key: () => `${this.#totalsVersion} ${this.#totalsState()} ${this.looksRevision}`,
     state: () => this.#totalsState(),
     totals: () => this.#totals,
-    writer: (column) => {
-      const aggregate = this.#totals!.find(({ as }) => as === column.content.aggregate);
-      if (!aggregate) return null;
-      const { op, field } = aggregate;
-      const kind = aggregateKind(aggregate, this.schema.fields as Record<string, string>);
-      return aggregateWriter(column, op, field, kind, this.settings);
-    },
-    read: (columnIndex) => {
+    writer: (column) =>
+      totalsOf(this.#totals!, this.#totalsAsked?.fields, this.schema, this.settings).writer(column),
+    read: (column) => {
       const state = this.#totalsState();
       if (state !== "loaded") return { state, value: undefined, kind: null };
-      const name = (this.columnLayout[columnIndex] as PlacedColumn).content.aggregate!;
-      const fields = this.#totalsAsked!.fields!;
-      const value = windowValue(fields, name, 0) as number | null;
-      const kind = fields.kind(name) as "number" | "time";
-      return missingValue(kind, value)
-        ? { state: "missing", value: null, kind }
-        : { state: "value", value, kind };
+      return totalsOf(this.#totals!, this.#totalsAsked!.fields, this.schema, this.settings).read(
+        column,
+      );
     },
-    look: (columnIndex) => {
+    look: (column) => {
       const fields = this.#totalsAsked?.fields;
       const looks = this.#looks;
       if (!fields || this.#totalsState() !== "loaded" || !looks?.any) return undefined;
@@ -281,9 +284,10 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         compiled = this.#blockLooks(looks, false, fields, this.#totals!);
         looks.blocks.set(fields, compiled);
       }
-      return lookOf(fields, 0, compiled.columns.get(this.columnLayout[columnIndex]!.id));
+      return lookOf(fields, 0, compiled.columns.get(column.id));
     },
-  });
+  };
+  readonly #totalsRow = totalsRow(this, this.#totalsSource);
   /** What columns' cell kinds read, by column id: bars' ends, which remote grids are given. */
   #cells = new Map<string, CellBinding>();
   /** Fields custom renderers read, by the grid asking (`askFields`), and those columns' texts and links read. */
@@ -564,7 +568,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       const link = column.content.link?.(block.fields!, row);
       return link ? link.text : column.content.text(block.fields!, row);
     }
-    return this.#groupTexts(layout)[columnIndex]!(block, row, list.parent);
+    return this.#groupTexts(layout)[columnIndex]!(block.data!, row, list.parent);
   }
 
   lookAt(rowIndex: number, columnIndex: number): CellLook | undefined {
@@ -626,20 +630,17 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         ...(binding && { bar: binding.bar(value as number | null) }),
       };
     }
-    // A group's header: its key's values, and its aggregates.
-    const by = this.#by();
-    const k =
-      columnIndex === 0 ? list.depth : column.field === null ? -1 : by.indexOf(column.field);
-    if (k >= 0 && k <= list.depth)
-      return cell(
-        k < list.depth ? list.parent[k]! : groupValue(block, list.depth, row, by),
-        this.schema.fields[by[k]! as keyof S] as "number" | "time" | "category",
-      );
-    const name = column.content.aggregate;
-    const kind = name !== undefined && fields.has(name) ? fields.kind(name) : null;
-    return kind === null || kind === "geometry"
-      ? cell(undefined, null)
-      : cell(windowValue(fields, name!, row), kind);
+    const { value, kind } = groupCell(
+      column,
+      block.data!,
+      fields,
+      row,
+      list.parent,
+      this.#by(),
+      this.schema,
+      columnIndex === 0,
+    );
+    return cell(value, kind);
   }
 
   /**
@@ -704,6 +705,90 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       const value = windowValue(fields, field, row) ?? null;
       // Missing as cells read it: a time out of range too.
       return missingValue(fields.kind(field) as "number", value) ? null : value;
+    };
+  }
+
+  [EXPORT_ROWS](request: ReadRequest): Promise<RowsRead> {
+    const revision = this.#revision;
+    // The grid's snapshot, held until the export ends, whatever query comes
+    // meanwhile. A grid still waiting for its first rows has none: the
+    // export starts one of its own.
+    const { snapshot } = revision;
+    let held = snapshot !== null;
+    if (held) revision.holds++;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      if (--revision.holds === 0 && revision.ended) later(() => this.source.release?.(snapshot!));
+    };
+    const asked = this.#totalsAsked;
+    const totals = this.#totals;
+    const read: RemoteRead = {
+      ...request,
+      source: this.source,
+      schema: this.schema,
+      query: revision.query,
+      revision: revision.number,
+      snapshot,
+      expired: revision.expired !== null,
+      release,
+      fields: this.#fields,
+      expanded: new Set(this.#expanded),
+      blockSize: this.blockSize,
+      layout: this.columnLayout as readonly PlacedColumn[],
+      settings: this.settings,
+      // The totals' answer where the grid has read it already (its values are the grid's own copies).
+      totals: request.totals &&
+        totals && {
+          aggregates: totals,
+          fields:
+            asked?.revision === revision && asked.totals === totals && asked.state === "loaded"
+              ? asked.fields
+              : null,
+        },
+    };
+    // All read above, before the reader loads, so the export is of the state it was asked in.
+    return import("./remote-export.ts")
+      .then(({ readRemote }) => readRemote(read))
+      .catch((error) => {
+        release();
+        throw error;
+      });
+  }
+
+  [COPY_ROWS](columns: readonly PlacedColumn[], limit: number): CopiedRows {
+    return this.#loadedSelection(columns, limit);
+  }
+
+  /**
+   * The selected records for copy, from the rows loaded: a selection of
+   * keys whose every row is loaded, in the order the grid shows them.
+   */
+  #loadedSelection(columns: readonly PlacedColumn[], limit: number): CopiedRows {
+    const selection = this.selectionStore.get(this.channel);
+    if (!selection) return null;
+    if (selection.kind !== "keys") return UNLOADED;
+    const indices: number[] = [];
+    for (const key of selection.keys) {
+      if (indices.length > limit) break;
+      const index = this.rowIndexOfKey(key);
+      if (index < 0) return UNLOADED;
+      indices.push(index);
+    }
+    indices.sort((a, b) => a - b);
+    const layout = this.columnLayout;
+    const shown = columns.map((column) => layout.indexOf(column));
+    let row = 0;
+    return {
+      total: indices.length,
+      next: (cells) => {
+        if (row >= indices.length) return false;
+        const index = indices[row++]!;
+        shown.forEach((column, c) => {
+          cells[c] = this.textAt(index, column);
+        });
+        return true;
+      },
     };
   }
 
@@ -1389,8 +1474,9 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       list.blocks.clear();
     }
     revision.expired = null;
+    revision.ended = true;
     const { snapshot } = revision;
-    if (snapshot !== null) later(() => this.source.release?.(snapshot));
+    if (snapshot !== null && revision.holds === 0) later(() => this.source.release?.(snapshot));
   }
 
   #abort(block: Block) {
@@ -1907,67 +1993,16 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
 
   /** Fields a list's blocks hold, and their kinds. */
   #kinds(list: List): Record<string, string> {
-    const fields = this.schema.fields as Record<string, string>;
-    // Without a prototype: a field may be named "__proto__".
-    const kinds: Record<string, string> = Object.create(null);
-    if (list.leaf) {
-      for (const field of this.#fields) kinds[field] = fields[field]!;
-      return kinds;
-    }
-    const group = this.#revision.query.group!;
-    for (const field of group.by.slice(0, list.depth + 1)) kinds[field] = fields[field]!;
-    for (const aggregate of group.aggregate) kinds[aggregate.as] = aggregateKind(aggregate, fields);
-    return kinds;
+    return windowKinds(list.leaf, list.depth, this.#fields, list.revision.query, this.schema);
   }
 
   /** What each column says on a group's header, as a local grid's groups do. */
   #groupTexts(
     layout: readonly PlacedColumn[],
-  ): ((block: Block, row: number, parent: GroupKey) => string)[] {
+  ): ((data: RowsWindow, row: number, parent: GroupKey) => string)[] {
     const query = this.#revision.query;
     if (this.#textLayout === layout && this.#textQuery === query) return this.#textWriters!;
-    const settings = this.settings;
-    const group = query.group!;
-    const by = group.by;
-    const fields = this.schema.fields as Record<string, "number" | "time" | "category">;
-    const formats = by.map(
-      (field) =>
-        layout.find((column) => column.field === field)?.content.key ??
-        keyFormatter(fields[field]!, settings, field),
-    );
-    const count = numberFormatter({ maximumFractionDigits: 0 }, settings.locale);
-    const value = (
-      block: Block,
-      row: number,
-      parent: GroupKey,
-      k: number,
-      format = formats[k]!,
-    ) => {
-      const depth = parent.length;
-      return format(k < depth ? parent[k]! : groupValue(block, depth, row, by));
-    };
-    const write = layout.map(
-      (column, c): ((block: Block, row: number, parent: GroupKey) => string) => {
-        if (c === 0)
-          return (block, row, parent) =>
-            `${value(block, row, parent, parent.length)} (${count((block.data as RowsWindow & { kind: "groups" }).rowCounts[row]!)})`;
-        const k = column.field === null ? -1 : by.indexOf(column.field);
-        if (k >= 0)
-          return (block, row, parent) =>
-            k <= parent.length ? value(block, row, parent, k, column.content.key) : "";
-        const aggregate = group.aggregate.find(({ as }) => as === column.content.aggregate);
-        if (!aggregate) return () => "";
-        const { op, field } = aggregate;
-        const format = aggregateWriter(
-          column,
-          op,
-          field,
-          aggregateKind(aggregate, fields),
-          settings,
-        );
-        return (block, row) => format((block.data!.columns[aggregate.as] as Float64Array)[row]!);
-      },
-    );
+    const write = groupTexts(layout, query, this.settings, this.schema);
     this.#textLayout = layout;
     this.#textQuery = query;
     this.#textWriters = write;
@@ -2133,7 +2168,133 @@ function bindCells(
   return bindings;
 }
 
-function windowValue(fields: Fields, field: string, row: number): number | string | null {
+/**
+ * What writes and reads the totals `totals` as the source answered them
+ * (`fields`), for a remote grid's totals row and its exports.
+ */
+export function totalsOf(
+  totals: readonly GridAggregate[],
+  fields: Fields | null | undefined,
+  schema: GridSchema,
+  settings: FormatSettings,
+): Pick<TotalsSource, "writer" | "read"> {
+  return {
+    writer: (column) => {
+      const aggregate = totals.find(({ as }) => as === column.content.aggregate);
+      if (!aggregate) return null;
+      const { op, field } = aggregate;
+      const kind = aggregateKind(aggregate, schema.fields as Record<string, string>);
+      return aggregateWriter(column, op, field, kind, settings);
+    },
+    read: ({ content }) => {
+      const name = content.aggregate!;
+      const value = windowValue(fields!, name, 0) as number | null;
+      const kind = fields!.kind(name) as "number" | "time";
+      return missingValue(kind, value)
+        ? { state: "missing", value: null, kind }
+        : { state: "value", value, kind };
+    },
+  };
+}
+
+/**
+ * The fields of a list's windows and their kinds: of rows, `fields`; of
+ * groups at `depth`, their grouping fields down to it and the query's
+ * aggregates.
+ */
+export function windowKinds(
+  leaf: boolean,
+  depth: number,
+  fields: readonly string[],
+  query: GridQuery,
+  schema: GridSchema,
+): Record<string, string> {
+  const kinds = schema.fields as Record<string, string>;
+  // Without a prototype: a field may be named "__proto__".
+  const of: Record<string, string> = Object.create(null);
+  if (leaf) {
+    for (const field of fields) of[field] = kinds[field]!;
+    return of;
+  }
+  const group = query.group!;
+  for (const field of group.by.slice(0, depth + 1)) of[field] = kinds[field]!;
+  for (const aggregate of group.aggregate) of[aggregate.as] = aggregateKind(aggregate, kinds);
+  return of;
+}
+
+/**
+ * What each of `columns` (the shown ones by default) says on a group's
+ * header of `query`, as a local grid's groups do: the first shown column
+ * names the group and counts its rows.
+ */
+export function groupTexts(
+  layout: readonly PlacedColumn[],
+  query: GridQuery,
+  settings: FormatSettings,
+  schema: GridSchema,
+  columns = layout,
+): ((data: RowsWindow, row: number, parent: GroupKey) => string)[] {
+  const group = query.group!;
+  const by = group.by;
+  const fields = schema.fields as Record<string, "number" | "time" | "category">;
+  const formats = by.map(
+    (field) =>
+      layout.find((column) => column.field === field)?.content.key ??
+      keyFormatter(fields[field]!, settings, field),
+  );
+  const count = numberFormatter({ maximumFractionDigits: 0 }, settings.locale);
+  const value = (
+    data: RowsWindow,
+    row: number,
+    parent: GroupKey,
+    k: number,
+    format = formats[k]!,
+  ) => format(k < parent.length ? parent[k]! : valueAt(data, by[parent.length]!, row));
+  return columns.map((column): ((data: RowsWindow, row: number, parent: GroupKey) => string) => {
+    if (column.id === layout[0]?.id)
+      return (data, row, parent) =>
+        `${value(data, row, parent, parent.length)} (${count((data as RowsWindow & { kind: "groups" }).rowCounts[row]!)})`;
+    const k = column.field === null ? -1 : by.indexOf(column.field);
+    if (k >= 0)
+      return (data, row, parent) =>
+        k <= parent.length ? value(data, row, parent, k, column.content.key) : "";
+    const aggregate = group.aggregate.find(({ as }) => as === column.content.aggregate);
+    if (!aggregate) return () => "";
+    const { op, field } = aggregate;
+    const format = aggregateWriter(column, op, field, aggregateKind(aggregate, fields), settings);
+    return (data, row) => format((data.columns[aggregate.as] as Float64Array)[row]!);
+  });
+}
+
+/**
+ * What a group's row of a window holds in `column` (`label`: the first
+ * shown, which names the group): a key's value, an aggregate, or nothing.
+ */
+export function groupCell(
+  column: PlacedColumn,
+  data: RowsWindow,
+  fields: Fields,
+  row: number,
+  parent: GroupKey,
+  by: readonly string[],
+  schema: GridSchema,
+  label: boolean,
+): { value: number | string | null | undefined; kind: GridCellRead["kind"] } {
+  const depth = parent.length;
+  const k = label ? depth : column.field === null ? -1 : by.indexOf(column.field);
+  if (k >= 0 && k <= depth)
+    return {
+      value: k < depth ? parent[k]! : valueAt(data, by[depth]!, row),
+      kind: (schema.fields as Record<string, string>)[by[k]!] as "number" | "time" | "category",
+    };
+  const name = column.content.aggregate;
+  const kind = name !== undefined && fields.has(name) ? fields.kind(name) : null;
+  return kind === null || kind === "geometry"
+    ? { value: undefined, kind: null }
+    : { value: windowValue(fields, name!, row), kind };
+}
+
+export function windowValue(fields: Fields, field: string, row: number): number | string | null {
   if (fields.kind(field) === "category") {
     const { codes, dictionary } = fields.categories(field);
     const code = codes[row]!;

@@ -22,6 +22,10 @@ export interface Revision {
    * refresh reads more.
    */
   expired: Error | null;
+  /** Exports reading the snapshot, which keep it until the last of them ends. */
+  holds: number;
+  /** Whether the grid stopped reading it (a new query, a refresh, disposal): it is released once no export holds it. */
+  ended: boolean;
   readonly lists: Map<string, List>;
   root: List;
 }

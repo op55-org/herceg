@@ -9,6 +9,7 @@ import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { createPivotGrid } from "../../src/dom/grid-pivot.ts";
+import { exportGrid } from "../../src/grid/export.ts";
 import { createPivotGridModel, type PivotGridModel } from "../../src/grid/pivot.ts";
 import { bar } from "../../src/marks/bar.ts";
 
@@ -56,6 +57,7 @@ const model = createPivotGridModel({
   selectionStore: selectionStore(requests),
 });
 expectTypeOf(model).toEqualTypeOf<PivotGridModel<Requests>>();
+expectTypeOf(exportGrid(model, { values: "raw" })).toEqualTypeOf<Promise<Blob>>();
 // Field displays, formats of every form by kind, and update, as other grids take them.
 createPivotGridModel({
   data: pivot,

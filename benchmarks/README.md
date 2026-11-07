@@ -15,6 +15,7 @@ npm run bench:react                  # herceg vs herceg through @herceg/react ->
 npm run bench:grid                   # grid suite (see "Grids") -> tmp/benchmarks/grid-<time>.json
 npm run bench:grid-remote            # remote grids (see "Remote grids") -> tmp/benchmarks/grid-remote-<time>.json
 npm run bench:grid-sparklines        # sparkline cells (see "Sparklines") -> tmp/benchmarks/grid-sparklines-<time>.json
+npm run bench:grid-export            # grid export and copy (see "Grid export") -> tmp/benchmarks/grid-export-<time>.json
 npm run bench:first-hover -- --out results/first-hover.json   # first hover (see "First hover")
 npm run bench:report                 # regenerate the tables in docs/comparison.md
 npm run bench:express -- --out results/express.json   # herceg.express timings (Python)
@@ -34,7 +35,7 @@ otherwise idle while it runs.
 | `src/adapters/` | One adapter per library. Each documents the configuration it uses. |
 | `src/runner/` | Node runner: builds pages, serves them, drives Chrome, Firefox, or WebKit, records results. |
 | `src/size/` | Bundle size benchmark and its entry points. JavaScript and required CSS are reported separately. |
-| `src/grid/` | The grid suite: fixture, reference, scenarios, harness, runner, report, and one adapter per grid in `src/grid/adapters/`; the remote grid benchmark in `src/grid/remote/`. |
+| `src/grid/` | The grid suite: fixture, reference, scenarios, harness, runner, report, and one adapter per grid in `src/grid/adapters/`; the remote grid benchmark in `src/grid/remote/`, sparklines in `src/grid/sparklines/`, and export and copy in `src/grid/export/`. |
 | `src/report.ts` | Writes Markdown tables into `docs/comparison.md`. |
 | `src/ease/` | The common-task samples of `docs/comparison.md` ("Common tasks"): a directory per task and a file per library, over the data in `data.ts` (and `data.py`). `samples.test.tsx` mounts each in Chrome (`npm run test:browser`; `vitest.config.ts` here), `python/tests/test_ease_samples.py` runs the Python ones, and `lines.ts` counts their lines. |
 | `python/express.py` | Timings of `herceg.express` (Python), with Seaborn's and statsmodels' computations beside them; run in the Python package's uv environment. |
@@ -630,6 +631,45 @@ cached per key and data version. AG Grid's sparklines are Enterprise
   once and what a library keeps are counted), and a second after
   destroying it; three pages each. Herceg's grid with the column empty
   measures the sparklines' index and paths apart.
+
+## Grid export
+
+`npm run bench:grid-export` (`src/grid/export/`) exports every row of a
+grid of the grid suite's fixture (20 fields: 16 numbers, 2 times, and 2
+categories, with missing values), 100,000 and 1,000,000 rows, as CSV,
+text and raw (`--size 100k,1m`, `--values text,raw`). Both grids format
+cells as the grid suite does (two decimals, en-US, times in UTC, missing
+values as an em dash) and are mounted.
+
+- **Herceg**: `exportGrid(model, { values })` with its defaults (titles as
+  the header, formulas escaped, values quoted only where needed, chunks
+  yielding to the page), to a `Blob`.
+- **AG Grid Community**: `api.getDataAsCsv()` turned into a `Blob`, as
+  its `exportDataAsCsv` does before downloading. Text goes through the
+  columns' `valueFormatter`, which exports use by default; raw through a
+  `processCellCallback` writing times as ISO 8601 and missing values
+  empty, as Herceg's raw values are. AG Grid quotes every value and
+  escapes no formulas, by default.
+- **Same output.** At 100,000 rows both CSVs are parsed and compared cell
+  by cell: quoting aside, they write the same cells.
+- **Time**: from the call to the `Blob`, in the page, garbage collected
+  before each export; ten exports after two at 100,000 rows, five after
+  one at a million.
+- **Tasks**: three traced exports (Chrome's `toplevel` trace): the
+  renderer main thread's longest task between the export's marks, and
+  their total. A task runs on through the microtasks after it, which
+  Chrome traces apart; Herceg's chunks after the first run there.
+- **Memory**: three fresh pages with the grid mounted: the renderer's
+  peak footprint (macOS `phys_footprint_peak`) over its footprint before
+  the export, where the export passed the peak mounting left (else an
+  upper bound, listed apart); and, after garbage collection and holding
+  the output, the renderer's and the browser process's growth (Blobs are
+  stored in the browser process).
+- **Copy** (Herceg only; AG Grid's clipboard is Enterprise): Ctrl+C
+  (Cmd+C) over every row selected, 100,000 rows with the limits raised
+  and with the default ones, and 5,000 rows (100,000 cells, the default
+  limit), timed from the copy event reaching the window to a listener
+  after the grid's; ten copies after two.
 
 ## Layouts of panels
 

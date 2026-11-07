@@ -876,7 +876,7 @@ describe("grids", () => {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const tree = await treeUnder("grid", ["multiselectable"]);
     expect(tree[0]).toMatch(
-      /^grid "Requests" \(Arrow keys, .* adds it to the sort\. On a column header, .* hides, and shows columns\.\) multiselectable=true$/,
+      /^grid "Requests" \(Arrow keys, .* adds it to the sort\. On a column header, .* hides, and shows columns\. Control C copies the selected rows, or the focused cell\.\) multiselectable=true$/,
     );
     if (server.browser !== "webkit") expect(tree[1]).toBe('  rowgroup ""');
     expect(outline(tree).slice(1, 6)).toEqual([
@@ -950,7 +950,7 @@ describe("grids", () => {
       await treeUnder("treegrid", ["multiselectable", "level", "expanded", "checked", "focused"]),
     );
     expect(tree[0]).toMatch(
-      /^treegrid "Requests" \(Arrow keys, .* goes to the group holding it\.\) multiselectable=true$/,
+      /^treegrid "Requests" \(Arrow keys, .* goes to the group holding it\. Control C copies the selected rows, or the focused cell\.\) multiselectable=true$/,
     );
     const web = tree.findIndex((line) => line.startsWith('  row "Select web'));
     expect(tree.slice(web, web + 15)).toEqual([

@@ -39,12 +39,14 @@ import {
   nextOrder,
   type SelectionState,
   type SelectMode,
+  type TotalsSource,
   totalsRow,
 } from "./base.ts";
 import { type CellBinding, drawsSymbols } from "./cells.ts";
 import {
   aggregateWriter,
   type ColumnContent,
+  cellText,
   checkKeys,
   columnId,
   describeColumns,
@@ -54,12 +56,14 @@ import {
   type PlacedColumn,
   type ScopeOf,
 } from "./columns.ts";
+import { COPY_ROWS, type CopiedRows, EXPORT_ROWS, type LocalRows } from "./export-rows.ts";
 import {
   countGroup,
   countRow,
   countSelected,
   countsHold,
   extended,
+  groupCell,
   headerTexts,
   type Projection,
   placeOf,
@@ -123,6 +127,7 @@ export {
   type PinSide,
   type ScopeOf,
 } from "./columns.ts";
+export { exportGrid, GridExportError, type GridExportOptions } from "./export.ts";
 export type {
   CellEncodings,
   CellLook,
@@ -346,8 +351,9 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
 
   #groups: RowGroups | null = null;
   #totals: RowTotals | null = null;
-  /** The totals row's reader while there is one, its texts by shown column, and its version's inputs. */
+  /** The totals row's reader while there is one, and what it reads. */
   #totalsRow: GridTotalsRow | null = null;
+  #totalsSource: TotalsSource | null = null;
   readonly #pivot: GridPivot | null;
   /** The pivot's columns' revision the columns were generated for. */
   #pivotRevision = -1;
@@ -663,11 +669,8 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     // Catching up first: a pivot's columns follow its rows.
     const { group, depth, position } = this.#entry(rowIndex);
     const { content } = this.#column(columnIndex);
-    if (position >= 0) {
-      // A linked cell's text is its link's.
-      const link = content.link?.(this.#table, position);
-      return link ? link.text : content.text(this.#table, position);
-    }
+    // A linked cell's text is its link's.
+    if (position >= 0) return cellText(content, this.#table, position);
     if (this.#pivot) return content.text(this.#pivot.rows, group);
     return this.#textsOfGroups()[columnIndex]!(group, depth);
   }
@@ -727,22 +730,15 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       link: undefined,
     });
     if (this.#pivot) return { ...this.#pivot.read(column.id, group), text, look, link: undefined };
-    // A group's header: its key's values, and its aggregates.
-    const groups = this.#groups!;
-    const by = groups.by as readonly string[];
-    const k = columnIndex === 0 ? depth : column.field === null ? -1 : by.indexOf(column.field);
-    if (k >= 0 && k <= depth) {
-      const value = groups.keyOf(group, depth)[k]!;
-      const kind = this.#table.kind(by[k]!) as "number" | "time" | "category";
-      return missingValue(kind, value) ? cell("missing", null, kind) : cell("value", value, kind);
-    }
-    const name = column.content.aggregate;
-    if (name === undefined || !groups.aggregates.some((one) => one.name === name))
-      return cell("empty", undefined, null);
-    const table = groups.tableOf(by[depth]!) as Table;
-    const kind = table.kind(name) as "number" | "time";
-    const value = table.numbers(name as never)[group]!;
-    return missingValue(kind, value) ? cell("missing", null, kind) : cell("value", value, kind);
+    const { state, value, kind } = groupCell(
+      this.#groups!,
+      this.#table,
+      group,
+      depth,
+      column,
+      columnIndex === 0,
+    );
+    return cell(state, value, kind);
   }
 
   /**
@@ -803,6 +799,42 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
         throw new RangeError(`grid rowValues: row ${identity} is no longer in the table`);
       const value = table.value(field as never, position) as number | string | null;
       return missingValue(table.kind(field as never) as "number", value) ? null : value;
+    };
+  }
+
+  [EXPORT_ROWS](): LocalRows {
+    const { snapshot, grouped, length } = this.current() as Display;
+    return {
+      table: this.#table,
+      view: this.data as unknown as RowView,
+      snapshot,
+      grouped,
+      length,
+      pivot: this.#pivot,
+      settings: this.settings,
+      layout: this.columnLayout as readonly PlacedColumn[],
+      totals: this.#totalsSource,
+      selected: (limit) => this.#selectedOf(limit),
+    };
+  }
+
+  [COPY_ROWS](columns: readonly PlacedColumn[], limit: number): CopiedRows {
+    // A pivot refuses any selection, without finding its rows.
+    if (this.#pivot) return this.selectionStore.get(this.channel) ? PIVOT_ROWS : null;
+    const positions = this.#selectedOf(limit);
+    if (!positions) return null;
+    const table = this.#table;
+    let row = 0;
+    return {
+      total: positions.length,
+      next: (cells) => {
+        if (row >= positions.length) return false;
+        const position = positions[row++]!;
+        columns.forEach(({ content }, c) => {
+          cells[c] = cellText(content, table, position);
+        });
+        return true;
+      },
     };
   }
 
@@ -1331,8 +1363,9 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   #makeTotalsRow(): GridTotalsRow | null {
     const totals = this.#totals;
     const pivot = this.#pivot;
+    this.#totalsSource = null;
     if (!totals && !pivot?.totalsRow) return null;
-    return totalsRow(this, {
+    this.#totalsSource = {
       key: () => `${pivot?.totalsVersion ?? totals!.revision} ${this.looksRevision}`,
       state: () => "loaded",
       totals: () => this.settings,
@@ -1343,8 +1376,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
         const { name, op, field } = aggregate;
         return aggregateWriter(column, op, field, totals!.table.kind(name as never), this.settings);
       },
-      read: (columnIndex) => {
-        const { id, content } = this.#column(columnIndex);
+      read: ({ id, content }) => {
         if (pivot) return pivot.total(id)!;
         // Caught up first.
         totals!.revision;
@@ -1355,14 +1387,14 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
           ? { state: "missing", value: null, kind }
           : { state: "value", value, kind };
       },
-      look: (columnIndex) => {
-        const { id } = this.#column(columnIndex);
+      look: ({ id }) => {
         const looks = this.#currentLooks();
         if (looks.pivot) return looks.pivot.totalAt(id);
         const own = looks.totals.get(id);
         return own && lookOf(totals!.table as Table, 0, own);
       },
-    });
+    };
+    return totalsRow(this, this.#totalsSource);
   }
 
   #isOpen(id: string): boolean {
@@ -1433,6 +1465,34 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     const offset = rowIndex - grouped.starts[header]!;
     const position = offset === 0 ? -1 : grouped.groups.memberAt(group, offset - 1);
     return { depth: grouped.depths[header]!, group, position, header, offset };
+  }
+
+  /**
+   * The positions of the selected records the view shows, in its order,
+   * or null with nothing selected; past `limit` of them, one more and no
+   * further.
+   */
+  #selectedOf(limit: number): Uint32Array | null {
+    const selection = this.selectionStore.get(this.channel);
+    if (!selection) return null;
+    const { indices, length } = (this.current() as Display).snapshot;
+    let found = new Uint32Array(Math.min(length, 1024));
+    let count = 0;
+    const test =
+      selection.kind === "rows"
+        ? (position: number) => selection.rows.has(position)
+        : this.#test(selection.expression);
+    for (let i = 0; i < length && count <= limit; i++) {
+      const position = indices ? indices[i]! : i;
+      if (!test(position)) continue;
+      if (count === found.length) {
+        const grown = new Uint32Array(Math.min(length, found.length * 2));
+        grown.set(found);
+        found = grown;
+      }
+      found[count++] = position;
+    }
+    return found.subarray(0, count);
   }
 
   /** Whether the table's row at `position` is selected. */
@@ -1587,6 +1647,10 @@ export function createGridModel<
 >(options: GridModelOptions<S, G, B, T>): GridModel<S> {
   return new GridModel(options);
 }
+
+/** Why copy writes no rows of a pivot (selecting one selects its records). */
+const PIVOT_ROWS =
+  "A pivot's selected rows stand for its records, which it shows only as aggregates; copy a cell, or export the grid";
 
 /** Adds the rows at view indices `[start, end)`. */
 function addRows<S extends Schema>(

@@ -4,7 +4,9 @@
 // pivot load none of it.
 
 export type { GridEvents, GridInputEvent } from "./dom/grid.ts";
+export type { GridCopyOptions } from "./dom/grid-copy.ts";
 export { createPivotGrid, type PivotGrid, type PivotGridOptions } from "./dom/grid-pivot.ts";
+export { exportGrid, GridExportError, type GridExportOptions } from "./grid/export.ts";
 export {
   createPivotGridModel,
   type PivotColumnOptions,

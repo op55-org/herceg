@@ -35,6 +35,7 @@ import {
   type HostPaint,
 } from "./grid-cells.ts";
 import { ColumnControls } from "./grid-columns.ts";
+import { type CopySettings, copied, copySettings, type GridCopyOptions } from "./grid-copy.ts";
 import { Headings } from "./grid-headings.ts";
 import { arrange, placeCell, setAttribute, setText } from "./grid-place.ts";
 import { contrastOf, faintOf, GRID_CSS, PAGE_INKS, themeProperties } from "./grid-style.ts";
@@ -57,6 +58,14 @@ export interface GridOptions<S extends Schema = Schema, M extends BaseGridModel<
    * of it.
    */
   cells?: GridCellRenderers<S> | undefined;
+  /**
+   * What Ctrl+C (Cmd+C) copies while the grid has the focus: the selected
+   * rows, or else the focused cell, as TSV spreadsheets paste, within
+   * limits (`maxCells`, 100,000, and `maxBytes`, 10 MiB, by default), with
+   * formulas escaped as exports escape them (`escapeFormulas`, true by
+   * default); false leaves the key to the page.
+   */
+  copy?: GridCopyOptions | undefined;
 }
 
 /** Options to change; one given as undefined goes back to its default. */
@@ -116,6 +125,7 @@ const HIDDEN_TEXT =
   "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
 const INSTRUCTIONS =
   "Arrow keys, Page Up, Page Down, Home, and End move between cells. Space selects a row, Shift with arrow keys selects a range, and Control A selects every row. Enter on a column header sorts by it; Shift and Enter adds it to the sort. On a column header, Shift with Left or Right Arrow moves the column, Alt with Left or Right Arrow resizes it, and Alt and Down Arrow opens its menu, which also pins, hides, and shows columns.";
+const COPY_INSTRUCTIONS = " Control C copies the selected rows, or the focused cell.";
 const GROUP_INSTRUCTIONS =
   " Rows are grouped. Enter on a group expands or collapses it, and Space selects its rows. On a row's first cell, Right Arrow expands a group, Left Arrow collapses it, and Left Arrow on a collapsed group or a group's row goes to the group holding it.";
 
@@ -229,6 +239,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   /** What hosted cells' looks and kinds are painted with. */
   readonly #hostPaint: HostPaint;
   #options: GridOptions<S, M>;
+  /** What copy writes at most, and how; null while copy is off. */
+  #copy: CopySettings | null = null;
   readonly #extras: GridExtras;
   /** Header rows: the columns' own and the headings' over them. */
   #levels = 1;
@@ -513,6 +525,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       throw new RangeError(`A grid's headerHeight must be positive, not ${headerHeight}`);
     const refused = this.#extras.refuseCells;
     if (refused && cells !== undefined) throw new TypeError(`${at} cells: ${refused}; drop cells`);
+    const copy = copySettings(options.copy, at);
     this.#host.setRenderers(
       cells as GridCellRenderers | undefined,
       this.model as unknown as BaseGridModel,
@@ -521,6 +534,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     // A subscriber the model told of the renderers' fields destroyed the grid: nothing is watched.
     if (this.#destroyed) return;
     this.#options = options;
+    this.#copy = copy;
     this.#headerHeight = headerHeight;
     this.#scroller.setAttribute("aria-label", ariaLabel);
     this.#applyTheme();
@@ -660,8 +674,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     setAttribute(scroller, "role", grid ? (grouped ? "treegrid" : "grid") : "group");
     const extras = this.#extras;
     const instructions =
-      extras.instructions?.(grouped) ??
-      (grouped ? INSTRUCTIONS + GROUP_INSTRUCTIONS : INSTRUCTIONS);
+      (extras.instructions?.(grouped) ??
+        (grouped ? INSTRUCTIONS + GROUP_INSTRUCTIONS : INSTRUCTIONS)) +
+      (this.#copy ? COPY_INSTRUCTIONS : "");
     if (this.#description.textContent !== instructions)
       this.#description.textContent = instructions;
     // Rows and row groups belong in a grid. Their elements stay laid out, so
@@ -1369,10 +1384,15 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     ] as const;
     for (const [type, listener] of listeners)
       scroller.addEventListener(type, listener as EventListener, { passive: type === "scroll" });
+    // Copy goes to the page's body in Firefox when nothing is selected, so
+    // the document hears it, and passes it to the grid holding the focus.
+    const document = scroller.ownerDocument;
+    document.addEventListener("copy", this.#onCopy);
     // Detached elements can outlive the grid (browsers remember where the focus was).
     this.#stops.push(() => {
       for (const [type, listener] of listeners)
         scroller.removeEventListener(type, listener as EventListener);
+      document.removeEventListener("copy", this.#onCopy);
     });
   }
 
@@ -1464,6 +1484,26 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     event.preventDefault();
     this.#focusRequested = true;
     this.render();
+  };
+
+  #onCopy = (event: ClipboardEvent) => {
+    const settings = this.#copy;
+    if (!settings || !this.#focused || event.defaultPrevented) return;
+    const document = this.#scroller.ownerDocument;
+    // Text selected copies as the browser copies it.
+    const selection = document.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    // The grid nearest the element holding the focus copies; a cell's controls copy as their own.
+    // Read in the grid's own root, which a page cannot see into when it is a closed shadow root.
+    let active = (this.#scroller.getRootNode() as Document | ShadowRoot).activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    if (active?.closest(".hg-scroller") !== this.#scroller) return;
+    const owner = this.#holding(active)?.owner;
+    if (owner === "control" || owner === "composite") return;
+    event.preventDefault();
+    const { text, say } = copied(this.model as unknown as BaseGridModel, settings);
+    if (text !== undefined) event.clipboardData?.setData("text/plain", text);
+    this.#say(say);
   };
 
   #onMouseDown = (event: MouseEvent) => {

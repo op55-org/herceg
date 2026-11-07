@@ -10,7 +10,9 @@ import { rowComparator, type SortKey } from "../data/order.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { DataSelection } from "../data/selection.ts";
 import type { Table } from "../data/table.ts";
+import { missingValue } from "../fields/display.ts";
 import { numberFormatter } from "../format/format.ts";
+import type { GridCellRead } from "./base.ts";
 import {
   aggregateWriter,
   type FormatSettings,
@@ -126,16 +128,18 @@ export function shownAs(
 }
 
 /**
- * What each shown column says on a group's header: the first names the
- * group by its own key value and counts its rows, a column of a grouping
- * field shows the key's value (on the field's level and below), and a
- * column with an aggregate shows the group's; others nothing.
+ * What each of `columns` (the shown columns by default) says on a group's
+ * header: the first shown column names the group by its own key value and
+ * counts its rows, a column of a grouping field shows the key's value (on
+ * the field's level and below), and a column with an aggregate shows the
+ * group's; others nothing.
  */
 export function headerTexts(
   groups: RowGroups,
   layout: readonly PlacedColumn[],
   settings: FormatSettings,
   source: Table,
+  columns = layout,
 ): ((group: number, depth: number) => string)[] {
   const by = groups.by as readonly string[];
   // Keys as the first column showing their field writes them, or plainly
@@ -149,8 +153,8 @@ export function headerTexts(
     format(groups.keyOf(group, depth)[k]!);
   const count = numberFormatter({ maximumFractionDigits: 0 }, settings.locale);
   const tables = by.map((field) => groups.tableOf(field));
-  return layout.map((column, c): ((group: number, depth: number) => string) => {
-    if (c === 0)
+  return columns.map((column): ((group: number, depth: number) => string) => {
+    if (column.id === layout[0]?.id)
       return (group, depth) =>
         `${value(group, depth, depth)} (${count(groups.size(group, depth))})`;
     const k = column.field === null ? -1 : by.indexOf(column.field);
@@ -162,6 +166,38 @@ export function headerTexts(
     const format = aggregateWriter(column, op, field, groups.table.kind(name), settings);
     return (group, depth) => format(tables[depth]!.numbers(name)[group]!);
   });
+}
+
+/**
+ * What a group's header holds in `column` (`label`: the first shown, which
+ * names the group): a key's value, an aggregate, or nothing.
+ */
+export function groupCell(
+  groups: RowGroups,
+  table: Table,
+  group: number,
+  depth: number,
+  column: PlacedColumn,
+  label: boolean,
+): Pick<GridCellRead, "state" | "value" | "kind"> {
+  const by = groups.by as readonly string[];
+  const k = label ? depth : column.field === null ? -1 : by.indexOf(column.field);
+  let value: number | string | null | undefined;
+  let kind: GridCellRead["kind"] = null;
+  if (k >= 0 && k <= depth) {
+    value = groups.keyOf(group, depth)[k]!;
+    kind = table.kind(by[k]!) as "number" | "time" | "category";
+  } else {
+    const name = column.content.aggregate;
+    if (name === undefined || !groups.aggregates.some((one) => one.name === name))
+      return { state: "empty", value: undefined, kind: null };
+    const aggregates = groups.tableOf(by[depth]!) as Table;
+    kind = aggregates.kind(name) as "number" | "time";
+    value = aggregates.numbers(name as never)[group]!;
+  }
+  return missingValue(kind, value)
+    ? { state: "missing", value: null, kind }
+    : { state: "value", value, kind };
 }
 
 /** Selected rows per group at each depth, and the state they were counted in. */

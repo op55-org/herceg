@@ -73,7 +73,17 @@ folded from its own combinations; remote grids ask their source
 answer). Grid columns take `heading` (a title, `{ id, title }`, or a path of
 them): runs of adjacent columns under the same path share a header, in as
 many header rows as the longest path, and columns' names carry their
-headings. Series marks' `label`
+headings. `exportGrid(model, options)` writes what a grid shows as CSV or
+TSV (a UTF-8 `Blob`; local, grouped, pivot, and remote grids): text or raw
+values, the rows shown, the records, or the selection, titles with their
+headings as the header, the totals row, and formulas escaped for
+spreadsheets unless the text is wholly a number in the grid's locale; it
+writes the state the rows were in when it started, in chunks that yield
+to the page, failing with a `GridExportError` where they changed, and
+reads a remote grid's rows from its snapshot, which it keeps until it
+ends. Ctrl+C (Cmd+C) in a grid copies the selected rows, or the focused
+cell, as TSV within limits (`createGrid`'s `copy`, React's `copy` prop),
+and announces what it copied. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,
