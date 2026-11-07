@@ -70,8 +70,8 @@ import {
   axesAt,
   blendAt,
   motionOf,
-  planAt,
   plannable,
+  plansAt,
   type ScaleMotion,
 } from "./value-motion.ts";
 import {
@@ -248,6 +248,8 @@ export interface PanelTween {
   motions: Record<Axis, ScaleMotion>;
   /** The axes moving, when any scale does. */
   axes: AxesMotion | undefined;
+  /** With axes moving, how the panel lays out the axes its guides list (see `DrawnPanel.listed`). */
+  listed: DrawnPanel["listed"];
   bars: MovingBars[];
   labels: MovingLabels[];
   /** Category axes whose categories changed order: each axis' place among the panel's, and its ticks' places before. */
@@ -855,9 +857,13 @@ function planPanel(
   const labeled = (list: readonly AxisGuide[]) =>
     list.map(({ side, ticks }) => `${side}${ticks.length > 0}`).join();
   if (axes && (!plannable(axes) || labeled(shown.axes) !== labeled(drawn.axes))) return undefined;
-  // Axes the guides list plan their layers with the scene; they cannot follow
-  // a moving scale, nor one of the chart's own, which moves on its own.
-  if (drawn.axes.some((guide) => guide.layers && (motions[guide.scale as Axis]?.moves ?? true)))
+  // Axes the guides list plan their layers with the scene, and frames lay
+  // them out again over the domains between; one of a scale of the chart's
+  // own, which moves on its own, cannot follow.
+  const guided = axes ? panel!.listed : undefined;
+  if (
+    drawn.axes.some((guide) => guide.layers && (!motions[guide.scale as Axis] || (axes && !guided)))
+  )
     return undefined;
   // Category axes whose categories changed order move their ticks to their new places.
   const bands = bandsOf(shown, drawn, panel);
@@ -871,6 +877,7 @@ function planPanel(
   const tween: PanelTween = {
     motions,
     axes: axes || undefined,
+    listed: guided,
     bars: [],
     labels: [],
     bands,
@@ -1277,17 +1284,11 @@ export function panelsAt(
     const at = tween.scene.panels.findIndex(({ key }) => key === panel.key);
     const axes = tween.panels[at]?.axes;
     if (!axes) return panel;
-    const plans = { ...panel.plans };
+    const plans = plansAt(axes, t);
     const moved: Partial<Record<Axis, PositionScale>> = {};
-    for (const axis of ["x", "y", "yRight"] as const) {
-      const after = panel.plans[axis];
-      if (!axes.motions[axis].moves || !after) continue;
-      const plan = planAt(axes, axis, t);
-      plans[axis] = plan;
-      if (panel.plans.grid === after) plans.grid = plan;
-      moved[axis] = plan.scale;
-    }
-    return { ...panel, ...moved, plans };
+    for (const axis of ["x", "y", "yRight"] as const)
+      if (axes.motions[axis].moves && plans[axis]) moved[axis] = plans[axis].scale;
+    return { ...panel, ...moved, plans: { ...panel.plans, ...plans } };
   });
 }
 
@@ -1351,7 +1352,13 @@ function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders)
   for (const rule of tween.rules) marks[rule.index] = ruleAt(rule, blends[rule.along]);
   for (const list of tween.lists) marks[list.index] = listAt(list, blends.x, blends[list.side]);
   for (const raster of tween.rasters) marks[raster.index] = rasterAt(raster, t);
-  let guides = tween.axes && axesAt(panel, tween.axes, t);
+  const plans = tween.axes && plansAt(tween.axes, t);
+  let guides = plans && axesAt(panel, tween.axes!, plans);
+  // Axes the guides list, laid out over the automatic axes between.
+  if (plans && tween.listed) {
+    const defaults = axesAt({ axes: tween.listed.defaults, grids: [] }, tween.axes!, plans).axes;
+    guides = { axes: tween.listed.at(defaults, plans), grids: guides!.grids };
+  }
   if (tween.bands.length > 0) {
     // Category axes' ticks move from their places to their new ones.
     const axes = (guides?.axes ?? panel.axes).slice();

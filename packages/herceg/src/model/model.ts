@@ -111,6 +111,7 @@ import {
   type GuideCompiler,
   LOADED,
   type MarkRoom,
+  type MovingAxes,
   needsGuides,
   type OwnScales,
 } from "./guides.ts";
@@ -275,6 +276,12 @@ export interface DrawnPanel {
   /** Whether the panel has a left y axis: a mark it draws is on it, or none is on the right. */
   drawsY: boolean;
   plans: PanelPlans;
+  /**
+   * With axes the guides list: the panel's automatic axes, and its axes as
+   * the guides change and add to automatic ones planned by `plans` (as
+   * value transitions plan them for the domains between two scenes).
+   */
+  listed?: MovingAxes | undefined;
 }
 
 /**
@@ -2855,6 +2862,7 @@ export class ChartModel {
         drawsY: leftIn[i]!,
         inspector,
         plans: { x: xAt, y: yAt, yRight: rightAt, grid: gridAt },
+        ...(placing && { listed: guided.moving(axes, placing, i, plot, ownScales) }),
       });
       // Grid lines, under the marks unless their settings say otherwise;
       // only lines drawn read their styles.

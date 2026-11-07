@@ -1007,7 +1007,8 @@ gradually to a view asked for: `setViewport`, zooming to a brush,
 double-click reset, a map's or network's plane. With `values: true`, marks
 also move to new values when a table changes in place or is reset (`set`,
 `replace`, `setColumn`, `reset`), and axes whose automatic domains change
-move with them.
+move with them, those the guides list too (on other sides, with tick
+layers or labels of their own), laid out for the domains between.
 
 ```ts
 const chart = createChart(element, {

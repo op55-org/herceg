@@ -1054,7 +1054,7 @@ export interface AxisGuide extends GuideBase, AxisPlacement {
   readonly kind: "axis";
   /**
    * The ids of the tick layers an axis the guides list draws ("major"
-   * first); such axes keep their items while a change of values plays.
+   * first); value transitions lay such axes out again for each frame.
    */
   readonly layers?: readonly string[] | undefined;
   /** The scale it shows: "x", "y", or "yRight". */

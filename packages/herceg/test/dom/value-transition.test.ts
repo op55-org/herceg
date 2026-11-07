@@ -1473,7 +1473,8 @@ describe("axes moving with values", () => {
     expect(axisOf(middle, "bottom")).toBe(axisOf(tween!.scene, "bottom"));
   });
 
-  it("show at once a change that moves an axis the guides list", () => {
+  it("move axes the guides list with their scales, their layers laid out between", () => {
+    // b6.05: a bar race's x axis on top, without tick marks, moving with the bars.
     const data = table({ x: [1, 2, 3], y: [10, 20, 30] });
     const model = new ChartModel(
       {
@@ -1482,15 +1483,40 @@ describe("axes moving with values", () => {
         marks: [point(data, { x: "x", y: "y" })],
         guides: [
           axis({ scale: "y", layers: [{ id: "minor", ticks: { every: 1 }, labels: false }] }),
+          axis({ scale: "y", place: { side: "right" }, title: "Value" }),
+          axis({ scale: "x", place: { side: "top" }, tick: false }),
         ],
       },
       undefined,
       [guideCompiler(GUIDE_KIT)],
     );
     model.setSize(600, 300, 1);
-    expect(change(model, () => data.set("y", 2, 45)).tween).toBeUndefined();
-    // A change its axes stay through still moves.
-    expect(change(model, () => data.set("y", 1, 25)).tween).toBeDefined();
+    const before = model.scene(estimateText);
+    const from = model.panels()[0]!.y;
+    const { tween } = change(model, () => data.set("y", 2, 45));
+    expect(tween).toBeDefined();
+    const to = model.panels()[0]!.y;
+    for (const side of ["left", "right", "top"] as const) {
+      expectTicks(axisOf(frameAt(tween!, 0), side), axisOf(before, side));
+      expectTicks(axisOf(frameAt(tween!, 200), side), axisOf(tween!.scene, side));
+    }
+    // Half way, the listed axes' ticks are planned for the domain between, as the scene plans them.
+    const middle = frameAt(tween!, 100);
+    const left = axisOf(middle, "left");
+    expect(labels(left)).not.toEqual(labels(axisOf(tween!.scene, "left")));
+    expect(labels(axisOf(middle, "right"))).toEqual(labels(left));
+    for (const side of ["left", "right"] as const)
+      for (const { label, position } of axisOf(middle, side).ticks)
+        expect(position).toBeCloseTo(placed(Number(label), from, to, HALF), 3);
+    expect(left.layers).toEqual(["major", "minor"]);
+    expect(gridAt(middle.panels[0]!, "y")).toEqual(left.ticks.map(({ position }) => position));
+    // The minor layer's tick marks too: one a unit, more of them than the major layer's.
+    const marks = (axis: AxisGuide) => axis.items.filter((item) => item.type === "segments");
+    expect(marks(left)).not.toEqual(marks(axisOf(tween!.scene, "left")));
+    // The axis on the right keeps its title where the scene puts it, with its labels.
+    expect(axisOf(middle, "right").title).toEqual(axisOf(tween!.scene, "right").title);
+    // The x axis on top did not move: as the scene draws it.
+    expectTicks(axisOf(middle, "top"), axisOf(tween!.scene, "top"));
   });
 
   it("move points, lines, and rules with their axes", () => {
