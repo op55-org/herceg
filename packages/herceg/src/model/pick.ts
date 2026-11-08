@@ -246,7 +246,7 @@ export class Picker {
     if (!hits) return undefined;
     /** The item a hit draws, as picked. */
     const resolve = (hit: Hit): Picked | undefined => {
-      if (mark.pickDrawn) return this.#named(mark, drawn, geometry, hit, query, clip);
+      if (mark.pickDrawn) return this.#named(mark, drawn, g, hit, query);
       // Outlines that are no trace (a histogram's) say their item where it was picked.
       const part =
         trace?.kind === "trace" ? trace : this.#parts.partOf(mark, drawn, g, hit.index, query);
@@ -282,30 +282,20 @@ export class Picker {
   }
 
   /**
-   * The item a mark picked by what it draws (`pickDrawn`) draws a hit
-   * shape for, as its lookup names it at the shape's middle (held within
-   * the clip: a zoomed box's middle may be out of view), in the shape's
-   * series; at the hit's distance.
+   * The item a shape of a mark picked by what it draws (`pickDrawn`)
+   * stands for: its owner as the geometry records it, named by the mark's
+   * lookup; at the hit's distance.
    */
-  #named(
-    mark: Mark,
-    drawn: DrawnMark,
-    geometry: Geometry,
-    hit: Hit,
-    query: PickQuery,
-    clip: Readonly<Rect>,
-  ): Picked | undefined {
-    const [ax, ay, bx, by] = hit.segment ?? [];
-    const box = hit.box ?? boxOf(ax!, ay!, bx!, by!);
-    const held = (v: number, from: number, size: number) =>
-      Math.min(from + size, Math.max(from, v));
-    const found = mark.pickItem!(drawn, {
-      ...query,
-      x: held(box.x + box.width / 2, clip.x, clip.width),
-      y: held(box.y + box.height / 2, clip.y, clip.height),
-      slop: 1,
-      series: this.#parts.seriesOf(drawn, geometry)?.key,
-    });
+  #named(mark: Mark, drawn: DrawnMark, g: number, hit: Hit, query: PickQuery): Picked | undefined {
+    const part = this.#parts.partOf(mark, drawn, g, hit.index);
+    const owner = part?.kind === "row" ? part.series : undefined;
+    const found =
+      owner &&
+      mark.pickItem!(drawn, {
+        ...query,
+        // A highlight's selected copies' keys say so (model/highlight.ts).
+        owner: { ...owner, selected: drawn.geometry[g]!.key.includes("\u0001on") },
+      });
     const item = found?.candidate ?? found?.fill ?? undefined;
     return (
       item && {
@@ -942,17 +932,20 @@ function areaHit(
   const a = orient === "y" ? 1 : 0;
   const [p, q] = a ? [y, x] : [x, y];
   let winding = 0;
-  // On the outline, to within single precision, is inside too (a stack's
-  // zeros, drawn as a line along the axis).
-  let onEdge = false;
+  // Edges the query is on, to within single precision: on the outline is
+  // inside too (a stack's zeros, drawn as a line along the axis).
+  let edges = 0;
+  // The nearest top edge of the runs the query is inside, each as filled
+  // alone (of a row of notched boxes, its own); the whole outline says
+  // whether it is filled.
   let top: { w: number; index: number } | undefined;
   const cross = (u0: number, u1: number, w: number) => {
-    if (Math.abs(w - q) <= TIE) onEdge = true;
+    if (Math.abs(w - q) <= TIE) edges++;
     if (w > q && ((u0 <= p && p < u1) || (u1 <= p && p < u0))) winding += u1 > u0 ? 1 : -1;
   };
   // An edge across the axis, at the query's place along it.
   const across = (w0: number, w1: number) => {
-    if (Math.min(w0, w1) - TIE <= q && q <= Math.max(w0, w1) + TIE) onEdge = true;
+    if (Math.min(w0, w1) - TIE <= q && q <= Math.max(w0, w1) + TIE) edges++;
   };
   // A straight edge between two pixels.
   const line = (x0: number, y0: number, x1: number, y1: number) => {
@@ -980,6 +973,7 @@ function areaHit(
     const start = upper.starts[r]!;
     const end = r + 1 < upper.starts.length ? upper.starts[r + 1]! : upper.count;
     if (end - start < 2) continue;
+    const [kept, before, seen] = [top, winding, edges];
     for (let i = start; i < end - 1; i++) segment(upper, i, false, true);
     const [fx, fy, lx, ly] = [u[start * 2]!, u[start * 2 + 1]!, u[(end - 1) * 2]!, u[end * 2 - 1]!];
     if (lower && r < lower.starts.length) {
@@ -994,10 +988,12 @@ function areaHit(
       line(lx, baseline, fx, baseline);
       line(fx, baseline, fx, fy);
     }
+    // A run the query is outside of has no say in the edge.
+    if (winding === before && edges === seen) top = kept;
   }
   // An area of no fill (a highlight's outline drawn apart) is its outline.
   let held: Hit | undefined;
-  if ((winding !== 0 || onEdge) && top && area.fillOpacity > 0) {
+  if ((winding !== 0 || edges > 0) && top && area.fillOpacity > 0) {
     const { w, index: i } = top;
     held = {
       index: i,

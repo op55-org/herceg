@@ -10,7 +10,7 @@ import type { Geometry, Rect, RectGeometry, SegmentGeometry } from "../scene/sce
 import type { CandlestickSpec, Clip, Frozen } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { refuseColor } from "./colored.ts";
-import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
+import { type DrawnMark, drawingRows, type PickQuery, type PickResult } from "./drawn.ts";
 import type { ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -34,6 +34,7 @@ import {
   type Palette,
   painted,
   requireField,
+  rowBuffer,
   type SelectionDrawing,
   SeriesSplitter,
   type SummaryContext,
@@ -334,9 +335,20 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
       // A falling candle draws one wick beside its body; a falling bar, all its segments.
       const falling = frame.floats(s.key, "fall", capacity * (ohlc ? OHLC_SEGMENTS : 1) * 4);
       const bodies = ohlc ? undefined : frame.floats(s.key, "body", capacity * 4);
+      // The row each segment draws, which picking names (a merged column's
+      // first); a falling candle's body is its wick's.
+      const risingRows = rowBuffer(frame, s.key, "rise-rows", capacity * SEGMENTS);
+      const fallingRows = rowBuffer(
+        frame,
+        s.key,
+        "fall-rows",
+        capacity * (ohlc ? OHLC_SEGMENTS : 1),
+      );
       let risingCount = 0;
       let fallingCount = 0;
       let bodyCount = 0;
+      // The row the candle drawn now stands for.
+      let owner = 0;
       const segment = (
         to: Float32Array,
         at: number,
@@ -345,12 +357,22 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
         c: number,
         d: number,
       ) => {
+        (to === rising ? risingRows : fallingRows)[at] = owner;
         to[at * 4] = a;
         to[at * 4 + 1] = b;
         to[at * 4 + 2] = c;
         to[at * 4 + 3] = d;
       };
-      const draw = (center: number, width: number, o: number, h: number, l: number, c: number) => {
+      const draw = (
+        center: number,
+        width: number,
+        o: number,
+        h: number,
+        l: number,
+        c: number,
+        row: number,
+      ) => {
+        owner = row;
         const [yo, yh, yl, yc] = [y.map(o), y.map(h), y.map(l), y.map(c)];
         const left = center - width / 2;
         const right = center + width / 2;
@@ -395,41 +417,52 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
           if ((this.categorical && at < 0) || breaks?.hides(at)) continue;
           const center = x.map(places ? places.at(at) : at);
           if (!reaches(center) || !candleOf(prices, row, log, candle)) continue;
-          draw(center, width, candle[0]!, candle[1]!, candle[2]!, candle[3]!);
+          draw(center, width, candle[0]!, candle[1]!, candle[2]!, candle[3]!, row);
         }
       }
       // Bars wide enough to read a heavier line get one.
       const strokeWidth = ohlc && !merged && width >= 8 ? 2 : 1;
       out.push(
-        {
-          kind: "segments",
-          draw: segmentDrawing,
-          key: `${s.key}|rise`,
-          stroke: rise,
-          strokeWidth,
-          coords: rising,
-          count: risingCount,
-        },
-        {
-          kind: "segments",
-          draw: segmentDrawing,
-          key: `${s.key}|fall`,
-          stroke: fall,
-          strokeWidth,
-          coords: falling,
-          count: fallingCount,
-        },
+        drawingRows<SegmentGeometry>(
+          {
+            kind: "segments",
+            draw: segmentDrawing,
+            key: `${s.key}|rise`,
+            stroke: rise,
+            strokeWidth,
+            coords: rising,
+            count: risingCount,
+          },
+          risingRows,
+        ),
+        drawingRows<SegmentGeometry>(
+          {
+            kind: "segments",
+            draw: segmentDrawing,
+            key: `${s.key}|fall`,
+            stroke: fall,
+            strokeWidth,
+            coords: falling,
+            count: fallingCount,
+          },
+          fallingRows,
+        ),
       );
       if (bodies) {
-        out.push({
-          kind: "rect",
-          draw: rectDrawing,
-          key: `${s.key}|body`,
-          fill: fall,
-          fillOpacity: 1,
-          rects: bodies,
-          count: bodyCount,
-        });
+        out.push(
+          drawingRows<RectGeometry>(
+            {
+              kind: "rect",
+              draw: rectDrawing,
+              key: `${s.key}|body`,
+              fill: fall,
+              fillOpacity: 1,
+              rects: bodies,
+              count: bodyCount,
+            },
+            fallingRows,
+          ),
+        );
       }
     }
     return out;
@@ -447,7 +480,15 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     frame: Frame,
     log: boolean,
     columns: number,
-    draw: (center: number, width: number, o: number, h: number, l: number, c: number) => void,
+    draw: (
+      center: number,
+      width: number,
+      o: number,
+      h: number,
+      l: number,
+      c: number,
+      row: number,
+    ) => void,
   ): void {
     const { x, plot } = frame;
     const prices = this.prices();
@@ -487,7 +528,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
       const open = prices.open[row]!;
       const close = prices.close[last[column]!]!;
       const [center, width] = this.column(column, frame);
-      draw(center, width, open, highs[column]!, lows[column]!, close);
+      draw(center, width, open, highs[column]!, lows[column]!, close, row);
     }
   }
 

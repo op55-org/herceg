@@ -124,7 +124,11 @@ export function copiedFrom<G extends Geometry>(
 /** Rows drawn by geometry that carries none (a highlight's dots), each primitive's. */
 const rowsDrawn = /* @__PURE__ */ new WeakMap<Geometry, Uint32Array>();
 
-/** Records the table row each primitive of `geometry` draws. Returns `geometry`. */
+/**
+ * Records the row each primitive of `geometry` draws: of the mark's table,
+ * or of its series' summaries for marks drawing summaries (box plots).
+ * Returns `geometry`.
+ */
 export function drawingRows<G extends Geometry>(geometry: G, rows: Uint32Array): G {
   rowsDrawn.set(geometry, rows);
   return geometry;
@@ -170,6 +174,13 @@ export interface PickQuery {
   readonly slop: number;
   /** Only this series' items, by key: a keyboard cursor's, wherever others are drawn over it. */
   readonly series?: string | undefined;
+  /**
+   * The item to name, wherever the query is: the owner of a shape a mark
+   * picked by what it draws drew, as its geometry records it (`drawingRows`),
+   * and whether the shape is of a highlight's selected copy (of a merged
+   * candle column, the selected rows' candle, not the column's).
+   */
+  readonly owner?: (DrawnRow & { readonly selected: boolean }) | undefined;
   /**
    * How marks with lookups of their own pick (`Mark.pickItem`), which load
    * with the picker that asks (marks/lookups.ts).

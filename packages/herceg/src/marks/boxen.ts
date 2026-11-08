@@ -14,8 +14,9 @@ import {
   type Stat,
   type Summary,
 } from "./distribution.ts";
+import { drawingRows } from "./drawn.ts";
 import { definedFields } from "./line.ts";
-import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
+import { type AxisFormat, type ChartMark, type Frame, rowBuffer } from "./mark.ts";
 import { isRowView } from "./rows.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
 import { refuseValues } from "./still.ts";
@@ -174,17 +175,25 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
       const counts = new Array<number>(levels).fill(0);
       const lines = frame.floats(s.key, "lines", (boxes * 4 + s.length) * 4);
       const coords = frame.floats(s.key, "outliers", dots * 2);
+      // The summary row each box, segment, and dot draws, which picking names.
+      const rectRows = Array.from({ length: levels }, (_, depth) =>
+        rowBuffer(frame, s.key, `level${depth}-rows`, s.length * 2),
+      );
+      const lineRows = rowBuffer(frame, s.key, "line-rows", boxes * 4 + s.length);
+      const dotRows = rowBuffer(frame, s.key, "outlier-rows", dots);
       let segments = 0;
+      let row = 0;
       dots = 0;
       // Points given along the category and across it, as x and y.
       const segment = (a0: number, c0: number, a1: number, c1: number) => {
+        lineRows[segments] = row;
         const at = segments++ * 4;
         if (horizontal) lines.set([c0, a0, c1, a1], at);
         else lines.set([a0, c0, a1, c1], at);
       };
       const full = share * WIDTH * this.partWidth(s);
       for (let k = 0; k < s.length; k++) {
-        const row = rowOf(s, k);
+        row = rowOf(s, k);
         // A panel's own categories are read at their places.
         const position = placeAt(s, horizontal ? "y" : "x", row);
         if (position < 0) continue;
@@ -204,6 +213,7 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
           const level = (i < depth ? i : 2 * depth - 2 - i) + levels - depth;
           const [c0, c1] = [Math.min(p0, p1), Math.max(p0, p1)];
           const [a0, a1] = [center - width / 2, center + width / 2];
+          rectRows[level]![counts[level]!] = row;
           const at = counts[level]!++ * 4;
           if (horizontal) rects[level]!.set([c0, a0, c1 - c0, a1 - a0], at);
           else rects[level]!.set([a0, c0, a1 - a0, c1 - c0], at);
@@ -218,44 +228,56 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
         for (const value of letters.outliers) {
           const c = across.map(value);
           if (!Number.isFinite(c)) continue;
+          dotRows[dots] = row;
           coords[dots * 2] = horizontal ? c : center;
           coords[dots * 2 + 1] = horizontal ? center : c;
           dots++;
         }
       }
       for (let level = 0; level < levels; level++)
-        out.push({
-          kind: "rect",
-          draw: rectDrawing,
-          key: `${s.key}|level${level}`,
-          fill: s.color,
-          // Seaborn's shading: 2^((level + 1 - k) / 3) of the quartile box's.
-          fillOpacity: fillOpacity * 2 ** ((level + 1 - levels) / 3),
-          rects: rects[level]!,
-          count: counts[level]!,
-        });
+        out.push(
+          drawingRows<RectGeometry>(
+            {
+              kind: "rect",
+              draw: rectDrawing,
+              key: `${s.key}|level${level}`,
+              fill: s.color,
+              // Seaborn's shading: 2^((level + 1 - k) / 3) of the quartile box's.
+              fillOpacity: fillOpacity * 2 ** ((level + 1 - levels) / 3),
+              rects: rects[level]!,
+              count: counts[level]!,
+            },
+            rectRows[level]!,
+          ),
+        );
       out.push(
-        {
-          kind: "segments",
-          draw: segmentDrawing,
-          key: `${s.key}|lines`,
-          stroke: s.color,
-          strokeWidth: 1,
-          coords: lines,
-          count: segments,
-        },
-        {
-          kind: "point",
-          draw: pointDrawing,
-          key: `${s.key}|outliers`,
-          fill: s.color,
-          fillOpacity: 0.75,
-          opaque: false,
-          radius: RADIUS,
-          symbol: "circle",
-          coords,
-          count: dots,
-        },
+        drawingRows<SegmentGeometry>(
+          {
+            kind: "segments",
+            draw: segmentDrawing,
+            key: `${s.key}|lines`,
+            stroke: s.color,
+            strokeWidth: 1,
+            coords: lines,
+            count: segments,
+          },
+          lineRows,
+        ),
+        drawingRows<PointGeometry>(
+          {
+            kind: "point",
+            draw: pointDrawing,
+            key: `${s.key}|outliers`,
+            fill: s.color,
+            fillOpacity: 0.75,
+            opaque: false,
+            radius: RADIUS,
+            symbol: "circle",
+            coords,
+            count: dots,
+          },
+          dotRows,
+        ),
       );
     }
     return out;

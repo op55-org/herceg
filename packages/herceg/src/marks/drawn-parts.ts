@@ -56,7 +56,7 @@ export function partReader(kit: PartKit): PartReader {
     const [geometry, index] = madeIn(drawn.geometry[g], painted);
     const rows = rowsOfDrawn(geometry);
     if (rows)
-      return index < ((geometry as { count?: number }).count ?? 0)
+      return index < ((geometry as { count?: number }).count ?? rows.length)
         ? parts.row(drawn, geometry, mark.table!, rows[index]!)
         : undefined;
     const cloud = (geometry as PointGeometry).cloud;

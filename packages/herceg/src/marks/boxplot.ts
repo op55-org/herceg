@@ -22,6 +22,7 @@ import {
   type Stat,
   type Summary,
 } from "./distribution.ts";
+import { drawingRows } from "./drawn.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -29,6 +30,7 @@ import {
   type Frame,
   NUMERIC,
   requireField,
+  rowBuffer,
   type SelectionDrawing,
   valueKind,
 } from "./mark.ts";
@@ -333,9 +335,16 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
       const dotted = this.spec.outliers !== false;
       let points = 0;
       if (dotted) for (let k = 0; k < s.length; k++) points += outliers[rowOf(s, k)]!.length;
+      const per = this.spec.notch ? 15 : SEGMENTS;
       const rects = frame.floats(s.key, "box", s.length * 4);
-      const lines = frame.floats(s.key, "lines", s.length * (this.spec.notch ? 15 : SEGMENTS) * 4);
+      const lines = frame.floats(s.key, "lines", s.length * per * 4);
       const coords = frame.floats(s.key, "outliers", points * 2);
+      // The summary row each box, segment, dot, and notched outline's point
+      // draws, which picking names.
+      const boxRows = rowBuffer(frame, s.key, "box-rows", s.length);
+      const lineRows = rowBuffer(frame, s.key, "line-rows", s.length * per);
+      const dotRows = rowBuffer(frame, s.key, "outlier-rows", points);
+      const notchRows = rowBuffer(frame, s.key, "notch-rows", this.spec.notch ? s.length * 5 : 0);
       const upper = this.spec.notch ? frame.polyline(s.key, "notch-upper") : undefined;
       const lower = this.spec.notch ? frame.polyline(s.key, "notch-lower") : undefined;
       upper?.reset();
@@ -343,14 +352,16 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
       let boxes = 0;
       let segments = 0;
       let dots = 0;
+      let row = 0;
       // Points given along the category and across it, as x and y.
       const segment = (a0: number, c0: number, a1: number, c1: number) => {
+        lineRows[segments] = row;
         const at = segments++ * 4;
         if (horizontal) lines.set([c0, a0, c1, a1], at);
         else lines.set([a0, c0, a1, c1], at);
       };
       for (let k = 0; k < s.length; k++) {
-        const row = rowOf(s, k);
+        row = rowOf(s, k);
         // A panel's own categories are read at their places.
         const position = placeAt(s, horizontal ? "y" : "x", row);
         if (position < 0) continue;
@@ -370,6 +381,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
           if (values.every(ok)) {
             upper.break();
             lower.break();
+            notchRows.fill(row, upper.count, upper.count + values.length);
             for (let i = 0; i < values.length; i++) {
               const c = values[i]!;
               const left = center - widths[i]!;
@@ -392,6 +404,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
           if (ok(p3)) segment(a0, p3, a1, p3);
         } else if (ok(p1) && ok(p3)) {
           const [c0, c1] = [Math.min(p1, p3), Math.max(p1, p3)];
+          boxRows[boxes] = row;
           const at = boxes++ * 4;
           if (horizontal) rects.set([c0, a0, c1 - c0, a1 - a0], at);
           else rects.set([a0, c0, a1 - a0, c1 - c0], at);
@@ -420,6 +433,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
         for (const value of outliers[row]!) {
           const c = across.map(value);
           if (!Number.isFinite(c)) continue;
+          dotRows[dots] = row;
           coords[dots * 2] = horizontal ? c : center;
           coords[dots * 2 + 1] = horizontal ? center : c;
           dots++;
@@ -427,49 +441,61 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
       }
       out.push(
         upper && lower
-          ? {
-              kind: "area",
-              draw: areaDrawing,
-              key: `${s.key}|box`,
-              fill: s.color,
-              fillOpacity,
-              upper,
-              lower,
-              baseline: 0,
-              along: horizontal ? "x" : "y",
-              stroke: null,
-              strokeWidth: 0,
-            }
-          : {
-              kind: "rect",
-              draw: rectDrawing,
-              key: `${s.key}|box`,
-              fill: s.color,
-              fillOpacity,
-              rects,
-              count: boxes,
-            },
-        {
-          kind: "segments",
-          draw: segmentDrawing,
-          key: `${s.key}|lines`,
-          stroke: s.color,
-          strokeWidth: 1.5,
-          coords: lines,
-          count: segments,
-        },
-        {
-          kind: "point",
-          draw: pointDrawing,
-          key: `${s.key}|outliers`,
-          fill: s.color,
-          fillOpacity: 0.75,
-          opaque: false,
-          radius: RADIUS,
-          symbol: "circle",
-          coords,
-          count: dots,
-        },
+          ? drawingRows<AreaGeometry>(
+              {
+                kind: "area",
+                draw: areaDrawing,
+                key: `${s.key}|box`,
+                fill: s.color,
+                fillOpacity,
+                upper,
+                lower,
+                baseline: 0,
+                along: horizontal ? "x" : "y",
+                stroke: null,
+                strokeWidth: 0,
+              },
+              notchRows,
+            )
+          : drawingRows<RectGeometry>(
+              {
+                kind: "rect",
+                draw: rectDrawing,
+                key: `${s.key}|box`,
+                fill: s.color,
+                fillOpacity,
+                rects,
+                count: boxes,
+              },
+              boxRows,
+            ),
+        drawingRows<SegmentGeometry>(
+          {
+            kind: "segments",
+            draw: segmentDrawing,
+            key: `${s.key}|lines`,
+            stroke: s.color,
+            strokeWidth: 1.5,
+            coords: lines,
+            count: segments,
+          },
+          lineRows,
+        ),
+        drawingRows<PointGeometry>(
+          {
+            kind: "point",
+            draw: pointDrawing,
+            key: `${s.key}|outliers`,
+            fill: s.color,
+            fillOpacity: 0.75,
+            opaque: false,
+            radius: RADIUS,
+            symbol: "circle",
+            coords,
+            count: dots,
+          },
+          dotRows,
+        ),
       );
     }
     return out;

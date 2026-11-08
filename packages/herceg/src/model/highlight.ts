@@ -1147,7 +1147,7 @@ function dimLayer(kit: HighlightKit, geometry: Geometry): Geometry[] {
   const area = geometry as AreaGeometry;
   // An outline of no fill (a style run's) dims as drawn, keeping where it is cut.
   if (outlined(area))
-    return [{ ...area, strokeOpacity: (area.strokeOpacity ?? 1) * DIM } as AreaGeometry];
+    return [copiedFrom({ ...area, strokeOpacity: (area.strokeOpacity ?? 1) * DIM }, area)];
   // Areas draw isolated observations as dots of their outline, or of their
   // fill's color without one: with the outline, dimmed, or dimmed here.
   const fill: AreaGeometry = area.stroke
@@ -1157,6 +1157,7 @@ function dimLayer(kit: HighlightKit, geometry: Geometry): Geometry[] {
         fillOpacity: area.fillOpacity * DIM,
         strokeOpacity: (area.strokeOpacity ?? 1) * DIM,
       };
+  copiedFrom(fill, area);
   return area.stroke ? [fill, ...dimLayer(kit, outlineOf(area))] : [fill];
 }
 
@@ -1167,7 +1168,10 @@ function dimLayer(kit: HighlightKit, geometry: Geometry): Geometry[] {
  */
 function outlineOf(area: AreaGeometry): AreaGeometry {
   // Its series', whose selected dots are drawn after it.
-  return { ...area, key: `${area.key}-outline`, of: area.of ?? area.key, fillOpacity: 0 };
+  return copiedFrom(
+    { ...area, key: `${area.key}-outline`, of: area.of ?? area.key, fillOpacity: 0 },
+    area,
+  );
 }
 
 /** A drawing of the same marks at `fraction` of their opacity. */
