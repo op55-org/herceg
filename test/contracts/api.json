@@ -256,7 +256,9 @@
         "seams": "As breaks.",
         "scope": "Python's one hg.AxisOptions serves every axis; z refuses the chart's 2D axes' (`Chart z scope: only the chart's x, y, and y_right take scope; move it there`).",
         "repeat": "As scope.",
-        "style": "Python's one hg.AxisOptions serves every axis; z refuses style (`Chart z style: a 3D chart's axes take the theme's styles; drop style`)."
+        "style": "Python's one hg.AxisOptions serves every axis; z refuses style (`Chart z style: a 3D chart's axes take the theme's styles; drop style`).",
+        "place": "Python's one hg.AxisOptions serves every axis; z refuses place and room (`Chart z place: a 3D chart's axes are drawn along its box; drop place`).",
+        "room": "As place."
       },
       "untyped": {
         "title": "Python's one hg.AxisOptions serves every axis; z refuses a title of parts (`Chart z title: a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis`), as the spec's validator does."
@@ -268,7 +270,9 @@
         "seams": "As chart python z's.",
         "scope": "As chart python z's.",
         "repeat": "As chart python z's.",
-        "style": "As chart python z's."
+        "style": "As chart python z's.",
+        "place": "As chart python z's.",
+        "room": "As chart python z's."
       },
       "untyped": {
         "title": "As chart python z's."
@@ -868,7 +872,20 @@
     "settings ChartAxisSpec hg.AxisOptions": {
       "only": {
         "breaks": "Python's one hg.AxisOptions serves every axis; y and y_right refuse x's (`Chart y breaks: only the chart's x axis takes breaks; drop them`).",
-        "seams": "As breaks."
+        "seams": "As breaks.",
+        "place": "Python's one hg.AxisOptions serves every axis; y_right refuses place (`Chart y_right place: the right y axis is on the right; drop place`)."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+      }
+    },
+    "settings YAxisSpec hg.AxisOptions": {
+      "only": {
+        "breaks": "As settings ChartAxisSpec hg.AxisOptions's.",
+        "seams": "As settings ChartAxisSpec hg.AxisOptions's."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
       }
     },
     "settings TooltipSpec hg.Tooltip": {
@@ -887,7 +904,20 @@
     "settings ChartAxisOptions hg.AxisOptions": {
       "only": {
         "breaks": "Python's one hg.AxisOptions serves every axis; y and y_right refuse x's (`Chart y breaks: only the chart's x axis takes breaks; drop them`).",
-        "seams": "As breaks."
+        "seams": "As breaks.",
+        "place": "Python's one hg.AxisOptions serves every axis; y_right refuses place (`Chart y_right place: the right y axis is on the right; drop place`)."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+      }
+    },
+    "settings YAxisOptions hg.AxisOptions": {
+      "only": {
+        "breaks": "As settings ChartAxisOptions hg.AxisOptions's.",
+        "seams": "As settings ChartAxisOptions hg.AxisOptions's."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
       }
     },
     "settings PanelTitleSpec hg.Title": {
@@ -1136,7 +1166,13 @@
     },
     "settings XAxisConfig hg.AxisOptions": {
       "untyped": {
-        "breaks": "TypeScript takes timeBreaks()'s TimeBreaks, an instance; the widget's update() takes hg.Break dataclasses."
+        "breaks": "TypeScript takes timeBreaks()'s TimeBreaks, an instance; the widget's update() takes hg.Break dataclasses.",
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+      }
+    },
+    "settings XAxisSpec hg.AxisOptions": {
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
       }
     },
     "settings ScalesSpec hg.ChannelScale|hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
@@ -1592,9 +1628,11 @@
         "breaks": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's x's (`Panel x seams: only the chart's x axis takes seams; drop them`).",
         "seams": "As breaks.",
         "scope": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's (`Panel x scope: only the chart's x, y, and y_right take scope; move it there`).",
-        "repeat": "As scope."
+        "repeat": "As scope.",
+        "place": "Python's one hg.AxisOptions serves every axis; a panel's refuses place (`Panel x place: a panel's axes are on the chart's sides; give place on the chart's x`)."
       },
       "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }.",
         "title": "Python's one hg.AxisOptions serves every axis; a panel's refuses a title of parts (`Panel x title: a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis`), as the spec's validator does."
       }
     },
@@ -1707,6 +1745,88 @@
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
         "style": "As chart python x title's."
+      }
+    },
+    "chart python yRight title": {
+      "only": {
+        "field": "As chart python x title's.",
+        "series": "As chart python x title's.",
+        "value": "As chart python x title's.",
+        "format": "As chart python x title's.",
+        "style": "As chart python x title's."
+      }
+    },
+    "chart update yRight title": {
+      "only": {
+        "field": "As chart python x title's.",
+        "series": "As chart python x title's.",
+        "value": "As chart python x title's.",
+        "format": "As chart python x title's.",
+        "style": "As chart python x title's."
+      }
+    },
+    "chart python x place": {
+      "choices": {
+        "side": {
+          "takes": ["bottom", "left", "right", "top"],
+          "reason": "Python's one hg.Place takes every side; the chart's x refuses left and right (`Chart x place: an x axis goes on the top or the bottom; received \"left\"`)."
+        }
+      },
+      "only": {
+        "align": "Python's one hg.Place serves legends, colorbars, titles, and axes; an axis' takes only its side (`AxisOptions place: an axis takes only its side; drop align`).",
+        "offset": "As align.",
+        "inside": "As align.",
+        "inset": "As align.",
+        "scope": "As align.",
+        "panel": "As align."
+      }
+    },
+    "chart python y place": {
+      "choices": {
+        "side": {
+          "takes": ["bottom", "left", "right", "top"],
+          "reason": "Python's one hg.Place takes every side; the chart's y refuses top and bottom (`Chart y place: a y axis goes on the left or the right; received \"top\"`)."
+        }
+      },
+      "only": {
+        "align": "As chart python x place's.",
+        "offset": "As chart python x place's.",
+        "inside": "As chart python x place's.",
+        "inset": "As chart python x place's.",
+        "scope": "As chart python x place's.",
+        "panel": "As chart python x place's."
+      }
+    },
+    "chart update x place": {
+      "choices": {
+        "side": {
+          "takes": ["bottom", "left", "right", "top"],
+          "reason": "Python's one hg.Place takes every side; the chart's x refuses left and right (`Chart x place: an x axis goes on the top or the bottom; received \"left\"`)."
+        }
+      },
+      "only": {
+        "align": "As chart python x place's.",
+        "offset": "As chart python x place's.",
+        "inside": "As chart python x place's.",
+        "inset": "As chart python x place's.",
+        "scope": "As chart python x place's.",
+        "panel": "As chart python x place's."
+      }
+    },
+    "chart update y place": {
+      "choices": {
+        "side": {
+          "takes": ["bottom", "left", "right", "top"],
+          "reason": "Python's one hg.Place takes every side; the chart's y refuses top and bottom (`Chart y place: a y axis goes on the left or the right; received \"top\"`)."
+        }
+      },
+      "only": {
+        "align": "As chart python x place's.",
+        "offset": "As chart python x place's.",
+        "inside": "As chart python x place's.",
+        "inset": "As chart python x place's.",
+        "scope": "As chart python x place's.",
+        "panel": "As chart python x place's."
       }
     },
     "chart python guides title": {

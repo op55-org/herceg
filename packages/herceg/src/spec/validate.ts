@@ -830,9 +830,45 @@ function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
     format: axisFormat(spec.type),
     tooltipFormat: axisFormat(spec.type),
     show: boolean,
+    room: axisRoom,
     style: axisStyle,
   };
 }
+
+/** Pixels an axis takes beside the plot: a fixed room, or `{ min, max }` with min no more than max. */
+const axisRoom: Check = (v, path) => {
+  if (typeof v === "number") return width(v, path);
+  object(v, path);
+  properties(v as Record<string, unknown>, path, { min: width, max: width });
+  const { min = 0, max = Number.POSITIVE_INFINITY } = v as { min?: number; max?: number };
+  if (min > max)
+    throw refusal(
+      path,
+      `expected finite pixels of at least 0, or { min, max } with min no more than max; received { min: ${min}, max: ${max} }`,
+    );
+};
+
+/**
+ * Where an axis of x, y, or yRight goes, a short form's or a guide's
+ * (`place`): `{ side }`, one of `sides`, as `rule` says.
+ */
+function axisPlace(sides: readonly string[], rule: string): Check {
+  return (v, path) => {
+    object(v, path);
+    checkProperties(v as Record<string, unknown>, path, ["side"], {
+      side: (side, at) => {
+        if (!sides.includes(side as string))
+          throw refusal(at, `${rule}; received ${describe(side)}`);
+      },
+    });
+  };
+}
+const RIGHT_AXIS = "the right y axis is on the right";
+const AXIS_PLACES: Record<string, Check> = {
+  x: axisPlace(["top", "bottom"], "an x axis goes on the top or the bottom"),
+  y: axisPlace(["left", "right"], "a y axis goes on the left or the right"),
+  yRight: axisPlace(["right"], RIGHT_AXIS),
+};
 
 /** A function where a spec holds data: JavaScript only, never serializable. */
 function noFunction(v: unknown, path: string, instead: string): void {
@@ -1226,6 +1262,14 @@ function anyAxis(v: unknown, path: string, chart: boolean): void {
     fail(`${path}.breaks`, "breaks on the chart's x axis only", spec.breaks);
   if (spec.seams !== undefined)
     fail(`${path}.seams`, "seams on the chart's x axis only", spec.seams);
+  // The chart's y takes its side (see `yAxis`); a subplot's axes are on the chart's sides.
+  if (spec.place !== undefined)
+    throw refusal(
+      `${path}.place`,
+      chart
+        ? `${RIGHT_AXIS}; drop place`
+        : `a panel's axes are on the chart's sides; give place on the chart's ${path.split(".").at(-1)}`,
+    );
   if (chart)
     properties(spec, path, {
       ...axisChecks(spec),
@@ -1252,12 +1296,20 @@ function anyAxis(v: unknown, path: string, chart: boolean): void {
 
 const axis: Check = (v, path) => anyAxis(v, path, false);
 const chartAxis: Check = (v, path) => anyAxis(v, path, true);
+/** The chart's y: a y axis, on the left or with `place` on the right. */
+const yAxis: Check = (v, path) => {
+  object(v, path);
+  const { place, ...rest } = v as Record<string, unknown>;
+  if (place !== undefined) AXIS_PLACES.y!(place, `${path}.place`);
+  anyAxis(rest, path, true);
+};
 
 const xAxis: Check = (v, path) => {
   object(v, path);
   const spec = v as Record<string, unknown>;
   properties(spec, path, {
     ...axisChecks(spec),
+    place: AXIS_PLACES.x!,
     scope,
     repeat: labelRepeat,
     // Whether any x scale is a time scale shows only once panels are planned.
@@ -1709,16 +1761,9 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
         fail(at, '"x", "y", "yRight", or a position scale of the chart\'s scales', v);
     },
     place: (p, at) => {
+      if (!own) return AXIS_PLACES[scale as string]!(p, at);
       object(p, at);
       checkProperties(p as Record<string, unknown>, at, ["side"], { side: sides });
-      const side = (p as { side: string }).side;
-      const across = side === "top" || side === "bottom";
-      if (!own && across !== (scale === "x"))
-        fail(
-          `${at}.side`,
-          scale === "x" ? '"top" or "bottom" for an x axis' : '"left" or "right" for a y axis',
-          side,
-        );
     },
     title: axisTitle,
     ticks: ticks(type),
@@ -1730,11 +1775,7 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
     layers: tickLayers(type),
     show: boolean,
     repeat: labelRepeat,
-    room: (v, at) => {
-      if (typeof v === "number") return width(v, at);
-      object(v, at);
-      properties(v as Record<string, unknown>, at, { min: width, max: width });
-    },
+    room: axisRoom,
     style: axisStyle,
   } satisfies ChecksOf<AxisGuideSpec>);
 }
@@ -4041,7 +4082,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
         }
       },
       x: xAxis,
-      y: chartAxis,
+      y: yAxis,
       yRight: chartAxis,
       panels: (p, path) => {
         if (!Array.isArray(p)) fail(path, "a list of panels", p);
@@ -4244,6 +4285,12 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       z: (v, path) => {
         if (isRecord(v) && v.style !== undefined)
           fail(`${path}.style`, "no style on a 3D chart's axes, which take the theme's", v.style);
+        for (const option of ["place", "room"])
+          if (isRecord(v) && v[option] !== undefined)
+            throw refusal(
+              `${path}.${option}`,
+              `a 3D chart's axes are drawn along its box; drop ${option}`,
+            );
         axis(v, path);
       },
       camera,
@@ -4263,6 +4310,24 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       for (const axis of ["x", "y"])
         if (item[`${axis}Step`] !== undefined && item[`${axis}Banded`] === true)
           fail(`marks[${i}].${axis}Step`, `no ${axis}Step with ${axis}Banded`, item[`${axis}Step`]);
+  }
+  // A short form's side is one guide's: the guides may not list another there.
+  for (const scale of ["x", "y"] as const) {
+    const side = (chart[scale] as { place?: { side?: string } } | undefined)?.place?.side;
+    const home = scale === "x" ? "bottom" : "left";
+    if (
+      side !== undefined &&
+      (
+        (chart.guides ?? []) as { type?: unknown; scale?: unknown; place?: { side?: unknown } }[]
+      ).some(
+        (guide) =>
+          guide.type === "axis" && guide.scale === scale && (guide.place?.side ?? home) === side,
+      )
+    )
+      throw refusal(
+        `${scale}.place`,
+        `guides list ${scale === "x" ? "an x" : "a y"} axis on the ${side} too; give its options in one of them`,
+      );
   }
   // Dragging moves a network's nodes; a chart of other marks has none.
   const interaction = chart.interaction as { drag?: unknown } | undefined;

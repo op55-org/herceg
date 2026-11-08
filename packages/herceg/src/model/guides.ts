@@ -271,16 +271,20 @@ export interface PlacedLegend {
  */
 export interface CompiledAxes {
   /**
-   * Pixels they take above the plots, and below the default x axes'
-   * labels; which panels draw an axis above their plot; which write x
-   * labels, below, above, or inside their plot; and how far each panel's
-   * y labels reach past their end ticks (half a label's box, or text), of
-   * the panels `state.labeled` says may show y labels and of axes on the
-   * right.
+   * Pixels they take above the plots, and below beyond the room the model
+   * keeps for the default x axes' labels (`xRoom`): the most any panel's
+   * take, and each panel's (`tops`, `bottoms`; its own where a room of
+   * its own holds its axes, else the most); which panels draw an axis
+   * above their plot; which write x labels, below, above, or inside their
+   * plot; and how far each panel's y labels reach past their end ticks
+   * (half a label's box, or text), of the panels `state.labeled` says may
+   * show y labels and of axes on the right.
    */
   across(state: AxesState): {
     top: number;
     bottom: number;
+    tops: readonly number[];
+    bottoms: readonly number[];
     over: readonly boolean[];
     labels: readonly boolean[];
     reach: readonly number[];
@@ -293,9 +297,17 @@ export interface CompiledAxes {
   ends(plan: AxisPlan, state: AxesState, i: number): [number, number] | undefined;
   /**
    * Pixels they take beside the plots, beyond the default y axes', once y
-   * is planned; and which panels draw an axis on the right of their plot.
+   * is planned: the most for every panel, and each panel's (`lefts`,
+   * `rights`; its own where a room of its own holds its axis, else the
+   * most); and which panels draw an axis on the right of their plot.
    */
-  beside(state: AxesState): { left: number; right: number; after: readonly boolean[] };
+  beside(state: AxesState): {
+    left: number;
+    right: number;
+    lefts: readonly number[];
+    rights: readonly number[];
+    after: readonly boolean[];
+  };
   /**
    * How the axis on `scale`'s default side writes panel `i`'s tick labels:
    * a paint for each of its layers that writes them (none where the guides
@@ -312,14 +324,15 @@ export interface CompiledAxes {
   ): AxisGuide[];
   /**
    * Panel `index`'s axes as `panel` lays them out from `axes`, its default
-   * ones, for plans other than the scene's: value transitions' frames.
+   * ones, for plans other than the scene's, `plans`: value transitions'
+   * frames, which leave out the rows of labels the scene's room does.
    */
   moving(
     axes: readonly AxisGuide[],
     state: AxesState,
     index: number,
     plot: Rect,
-    own: OwnScales | undefined,
+    plans: PanelPlans,
   ): MovingAxes;
   /**
    * Whether the room `across` kept fits the x axes as panel `i`'s x plan,
@@ -368,6 +381,10 @@ export interface AxesState {
   readonly drawsY: readonly boolean[];
   /** Pixels the model keeps below the plots for the x axis' tick marks and labels, its title apart. */
   readonly xRoom: number;
+  /** Of those, the labels' lines: one, or category labels' several. */
+  readonly xLabelLines: number;
+  /** Pixels from the line of panel `i`'s x axis below its plot to its labels, as the model draws them. */
+  xGap(i: number): number;
   /**
    * In a layout of cells, in place of rows of `columns`: whether panel `i`
    * is the highest of the panels with axes lined up with it that share its
@@ -420,8 +437,8 @@ function alignsTickLabels(config: ChartConfig): boolean {
 /**
  * Whether a configuration uses what only the guide compiler plans: ticks
  * other than a number, formats other than Intl options (patterns,
- * durations, units with prefixes), `scales`, `guides`,
- * and legend settings beyond its place and style.
+ * durations, units with prefixes), `scales`, `guides`, axes' `place` and
+ * `room`, and legend settings beyond its place and style.
  */
 export function needsGuides(config: ChartConfig): boolean {
   const { x, y, yRight, legend, panels, scales } = config;
@@ -454,9 +471,10 @@ export function needsGuides(config: ChartConfig): boolean {
       (axis) =>
         axis &&
         // Tick and grid settings, titles of parts (which name fields by
-        // their labels), and padding, which the guide compiler reads.
+        // their labels), padding, and the axis' side and room, which the
+        // guide compiler reads.
         ([axis.ticks, axis.title, axis.grid].some((v) => typeof v === "object") ||
-          axis.padding !== undefined ||
+          (axis.padding ?? axis.room ?? (axis as { place?: unknown }).place) !== undefined ||
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>
               // Patterns, durations, units with prefixes, and Intl options with a fiscal year, which it refuses.

@@ -1063,6 +1063,34 @@ describe("<Chart>", () => {
     expect(updates).toBe(0);
   });
 
+  it("moves the x axis on top and holds it in its room as the x prop changes", async () => {
+    const ref: { current: HercegChart | null } = { current: null };
+    function App({ x }: { x: { place?: { side: "top" | "bottom" }; room?: number } }) {
+      return (
+        <Chart ref={ref} height={300} x={x}>
+          <Line data={metrics} x="t" y="a" />
+        </Chart>
+      );
+    }
+    const plot = () => {
+      const rect = host.querySelector("svg clipPath rect")!;
+      return { top: Number(rect.getAttribute("y")), height: Number(rect.getAttribute("height")) };
+    };
+    act(() => root.render(<App x={{}} />));
+    await act(() => ref.current!.loading);
+    const plain = plot();
+    // Both are the guide compiler's: it loads as the prop first needs it.
+    act(() => root.render(<App x={{ room: 30 }} />));
+    await act(() => ref.current!.loading);
+    await act(frame);
+    expect(plot().top).toBe(plain.top);
+    // The chart's 2 px of padding below the room.
+    expect(plot().top + plot().height).toBe(300 - 2 - 30);
+    act(() => root.render(<App x={{ place: { side: "top" }, room: 30 }} />));
+    await act(frame);
+    expect(plot().top).toBe(plain.top + 30);
+  });
+
   it("draws OHLC bars, and keeps equal breaks without updating", () => {
     const day = 86_400_000;
     const prices = table({

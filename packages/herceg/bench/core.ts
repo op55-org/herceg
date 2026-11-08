@@ -23,6 +23,7 @@ import { formatWriter } from "../src/format/patterns.ts";
 import { unitWriter } from "../src/format/units.ts";
 import { fromWall } from "../src/format/zone.ts";
 import { createGridModel } from "../src/grid/model.ts";
+import { axis } from "../src/guides/options.ts";
 import { type AttachedLabel, placeAttached } from "../src/layout/attached.ts";
 import { estimateText } from "../src/layout/text.ts";
 import { grid } from "../src/layout.ts";
@@ -513,6 +514,52 @@ measure(
   },
   { repeat: 25 },
 );
+
+// A first scene's axes: a line's default axes, a listed axis of hours over
+// days laid out at its own depth or in a room the day row does not fit, and
+// twenty horizon strips under an axis on top in a fixed room (study B4).
+const DAY_START = Date.UTC(2026, 8, 28);
+const hourly = table({
+  t: time(Array.from({ length: 49 }, (_, i) => DAY_START + i * 3_600_000)),
+  v: Float64Array.from({ length: 49 }, (_, i) => 50 + 40 * Math.sin(i / 5)),
+});
+const days = axis({
+  scale: "x",
+  layers: [{ id: "day", ticks: { every: "day" }, format: { time: "%b %d" }, labels: { row: 1 } }],
+});
+const strips = table({
+  site: Array.from({ length: 20 * 49 }, (_, i) => `site ${Math.floor(i / 49)}`),
+  t: time(Array.from({ length: 20 * 49 }, (_, i) => DAY_START + (i % 49) * 3_600_000)),
+  v: Float64Array.from({ length: 20 * 49 }, (_, i) => Math.abs(Math.sin(i / 7))),
+});
+for (const [name, config, height] of [
+  ["a line, default axes", {}, 300],
+  ["hours over days", { guides: [days] }, 300],
+  ["hours over days, in a room for one row", { x: { room: 18 }, guides: [days] }, 300],
+  [
+    "20 strips under an axis on top in 30 px",
+    {
+      x: { place: { side: "top" }, room: 30 },
+      y: { show: false, grid: false },
+      facet: facet("site", { columns: 1, header: false, gap: 1 }),
+    },
+    30 + 20 * 26,
+  ],
+] as const) {
+  const marks =
+    height === 300
+      ? [line(hourly, { x: "t", y: "v" })]
+      : [area(strips, { x: "t", y: "v", line: false })];
+  measure(`axes: first scene of ${name}`, () => {
+    const model = new ChartModel(
+      { marks, timeZone: "UTC", ...config },
+      undefined,
+      staticCompilers(),
+    );
+    model.setSize(600, height, 1);
+    model.scene(estimateText);
+  });
+}
 
 // Small multiples of a layout mark: a pie of eight products per region, 50
 // regions over 100,000 rows, labeled, at 1600 x 1200. A first scene splits the

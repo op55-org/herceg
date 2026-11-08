@@ -195,13 +195,13 @@ export class Cells {
         const title = (side: typeof left, i: number) => (side.titled.includes(i) ? side.title : 0);
         // Beside a plot, its y labels and titles, and what the guides' axes add there.
         before = Float64Array.from(layout.order, (_, i) =>
-          left.labeled[i] ? left.reach[i]! + title(left, i) + (h.beside?.left ?? 0) : 0,
+          left.labeled[i] ? left.reach[i]! + title(left, i) + (h.beside?.lefts[i] ?? 0) : 0,
         );
         after = Float64Array.from(
           layout.order,
           (_, i) =>
             (right.labeled[i] ? right.reach[i]! + title(right, i) : 0) +
-              (right.labeled[i] || h.beside?.after[i] ? (h.beside?.right ?? 0) : 0) ||
+              (right.labeled[i] || h.beside?.after[i] ? (h.beside?.rights[i] ?? 0) : 0) ||
             (head.auto("right") ? 12 - EDGE : 0),
         );
         // Legends beside a panel take room there, beyond its y labels and titles.

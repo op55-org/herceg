@@ -367,10 +367,11 @@ export interface AxisGuideSpec {
    */
   repeat?: "outer" | "all";
   /**
-   * Pixels a y axis' tick marks and labels take beside the plot: a fixed
-   * room, so that the plots of charts and panels line up, or bounds on the
-   * room its labels need. Labels wider than it are shortened with an
-   * ellipsis. Y axes only. @minimum 0
+   * Pixels the axis' tick marks and labels take beside the plot, its title
+   * apart: a fixed room, so that the plots of charts and panels line up, or
+   * bounds on the room its labels need. A y axis' labels wider than it are
+   * shortened with an ellipsis; an x axis' rows of labels that do not fit
+   * are left out whole, from the plot outward. Unset, the short form's. @minimum 0
    */
   room?:
     | number

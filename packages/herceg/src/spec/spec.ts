@@ -122,7 +122,7 @@ export interface ChartSpec extends StateSpec {
    */
   x?: XAxisSpec;
   /** The left y scale ("y") and its axis. */
-  y?: ChartAxisSpec;
+  y?: YAxisSpec;
   /**
    * A second y axis on the right ("yRight"), for marks with `axis: "right"`,
    * with its own scale and domain; in charts with facets or panels, in every
@@ -225,7 +225,7 @@ export interface ChartSpec extends StateSpec {
    * The vertical axis of 3D charts (`point3d`, `line3d`, and `surface` marks), whose
    * `x` and `y` are the floor's. Only for 3D charts.
    */
-  z?: Omit<PanelAxisSpec, "style">;
+  z?: Omit<PanelAxisSpec, "style" | "room">;
   /** Where a 3D chart is seen from at first; the pointer and keyboard turn it. Only for 3D charts. */
   camera?: CameraSpec;
   /**
@@ -663,6 +663,19 @@ export interface AxisSpec {
   tooltipFormat?: FormatSpec;
   /** Draw the axis. Default true. @default true */
   show?: boolean;
+  /**
+   * Pixels the axis' tick marks and labels take beside the plot, its title
+   * apart: a fixed room, or bounds on the room its labels need (see the
+   * axis guide's `room`). @minimum 0
+   */
+  room?:
+    | number
+    | {
+        /** @minimum 0 */
+        min?: number;
+        /** @minimum 0 */
+        max?: number;
+      };
   /** How the axis' parts look: its line, ticks, tick labels, title, and grid lines. */
   style?: AxisStyles;
 }
@@ -714,8 +727,22 @@ export interface ChartAxisSpec extends AxisSpec {
   repeat?: "outer" | "all";
 }
 
+/**
+ * The y axis: on the left of the plots, or with `place` on their right
+ * (the axis guide `axis({ scale: "y", place })`).
+ */
+export interface YAxisSpec extends ChartAxisSpec {
+  /** The side its axis goes on: left of the plots by default. */
+  place?: { side: "left" | "right" };
+}
+
 /** The x axis: an axis whose time may leave out spans of time. */
 export interface XAxisSpec extends ChartAxisSpec {
+  /**
+   * The side its axis goes on: below the plots by default (the axis guide
+   * `axis({ scale: "x", place })`).
+   */
+  place?: { side: "top" | "bottom" };
   /**
    * Time the axis leaves out, so that what is left is drawn without gaps:
    * weekends, hours outside trading sessions, holidays. Needs a time axis.

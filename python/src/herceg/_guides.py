@@ -1261,43 +1261,11 @@ class AxisGuide:
         if self.repeat is not None:
             _choice(self.repeat, ("outer", "all"), "axis repeat")
         _flags(self, "axis", ("line", "show"))
-        self.place = _built(self.place, Place, "axis place")
-        if isinstance(self.place, Place):
-            sides = {"x": ("bottom", "top"), "y": ("left", "right"), "y_right": ("right",)}
-            side = self.place.side
-            if side is None:
-                raise ChartError("axis place: an axis goes on a side; give side")
-            if not own and side not in sides[self.scale]:
-                raise ChartError(
-                    f"axis place: {self.scale} axes go on the {listed(sides[self.scale])} "
-                    f"side; received {shown(side)}"
-                )
+        self.place = axis_place(self.place, "axis place", None if own else self.scale)
         self.layers = built_list(self.layers, TickLayer, "axis layers")
-        if self.room is not None:
-            across = self.scale == "x" or (
-                isinstance(self.place, Place) and self.place.side in ("top", "bottom")
-            )
-            if across:
-                raise ChartError(
-                    "axis room: x axes take the depth their rows of labels need, and an "
-                    "ellipsis shortens only y axes' labels; drop room"
-                )
-            bounds = self.room if isinstance(self.room, tuple) else (self.room, self.room)
-            if (
-                len(bounds) != 2
-                or not all(
-                    is_number(b) and not isinstance(b, bool) and math.isfinite(b) and b >= 0
-                    for b in bounds
-                )
-                or bounds[0] > bounds[1]
-            ):
-                raise ChartError(
-                    "axis room: expected finite pixels of at least 0, or (least, most); "
-                    f"received {shown(self.room)}"
-                )
+        room_spec(self.room, "axis room")
 
     def _spec(self) -> dict[str, Any]:
-        room = self.room
         spec = {
             "type": "axis",
             "id": self.id,
@@ -1318,10 +1286,62 @@ class AxisGuide:
             else None,
             "show": self.show,
             "repeat": self.repeat,
-            "room": {"min": room[0], "max": room[1]} if isinstance(room, tuple) else room,
+            "room": room_spec(self.room, "axis room"),
             "style": style_spec(self.style, "axis style", AXIS_ROLES),
         }
         return {key: value for key, value in spec.items() if value is not None}
+
+
+#: The sides an axis of the chart's x, y, and y_right goes on, as refusals say them.
+AXIS_SIDES = {
+    "x": (("top", "bottom"), "an x axis goes on the top or the bottom"),
+    "y": (("left", "right"), "a y axis goes on the left or the right"),
+    "y_right": (("right",), "the right y axis is on the right"),
+}
+
+
+def axis_place(place: Any, role: str, scale: str | None) -> Place | None:
+    """An axis' ``place``: an ``hg.Place`` giving only its side, one of
+    those of the chart's ``scale`` (x, y, or y_right; any for a scale of
+    the chart's own ``scales``)."""
+    built: Place | None = _built(place, Place, role)
+    if built is None:
+        return None
+    if built.side is None:
+        raise ChartError(f"{role}: an axis goes on a side; give side")
+    extra = next(
+        (
+            name
+            for name in ("align", "offset", "scope", "panel")
+            if getattr(built, name) is not None
+        ),
+        None,
+    )
+    if extra is not None:
+        raise ChartError(f"{role}: an axis takes only its side; drop {extra}")
+    if scale is not None and built.side not in AXIS_SIDES[scale][0]:
+        raise ChartError(f"{role}: {AXIS_SIDES[scale][1]}; received {shown(built.side)}")
+    return built
+
+
+def room_spec(room: Any, role: str) -> Any:
+    """An axis' ``room`` as the spec takes it: pixels, or ``(least, most)``
+    as ``{"min": least, "max": most}``."""
+    if room is None:
+        return None
+    bounds = room if isinstance(room, tuple) else (room, room)
+    if (
+        len(bounds) != 2
+        or not all(
+            is_number(b) and not isinstance(b, bool) and math.isfinite(b) and b >= 0 for b in bounds
+        )
+        or bounds[0] > bounds[1]
+    ):
+        raise ChartError(
+            f"{role}: expected finite pixels of at least 0, or (least, most); "
+            f"received {shown(room)}"
+        )
+    return {"min": room[0], "max": room[1]} if isinstance(room, tuple) else room
 
 
 @refuses
@@ -1360,9 +1380,11 @@ def axis(scale: str, **options: Any) -> AxisGuide:
     ``ticks``, ``format``, ``tick``, and ``labels`` are its own ticks';
     ``layers`` adds layers of ticks; ``line`` draws its line; ``repeat``
     says where panels sharing its scale draw it (``"outer"`` or ``"all"``, as
-    ``hg.AxisOptions``); ``room`` holds a y axis' ticks and labels in that
-    many pixels beside the plot, or ``(least, most)``, shortening labels
-    wider than it with an ellipsis::
+    ``hg.AxisOptions``); ``room`` holds its ticks and labels in that many
+    pixels beside the plot, or ``(least, most)``: a y axis shortens labels
+    wider than it with an ellipsis, and an x axis leaves out rows of labels
+    that do not fit, the farthest from the plot first (unset, it is the
+    ``room`` of ``x=``, ``y=``, or ``y_right=``)::
 
         hg.axis("x", layers=[hg.TickLayer(id="day", ticks=hg.Ticks(every="day"),
                                           labels=hg.TickLabels(row=1))])

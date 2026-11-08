@@ -225,7 +225,9 @@ export function joinLayers3D(
   // A 3D box fits its data, and draws its grid by depth (as checkDepthOrder
   // says of marks): its axes are the chart's when it has no panels (z
   // always is), else its panel's.
-  type Axis = { grid?: boolean | { zIndex?: number }; padding?: unknown } | undefined;
+  type Axis =
+    | { grid?: boolean | { zIndex?: number }; padding?: unknown; place?: unknown; room?: unknown }
+    | undefined;
   const at = config.panels?.declared.findIndex(({ id }) => id === panel) ?? -1;
   const own = config.panels?.declared[at] as Record<string, Axis> | undefined;
   const chart = config as unknown as Record<string, Axis>;
@@ -281,6 +283,13 @@ export function joinLayers3D(
         path: `${path}.padding`,
         message: `chart ${path}.padding: a 3D box fits its data, padded as it is drawn; drop padding`,
       });
+    for (const option of ["place", "room"] as const)
+      if (axis?.[option] !== undefined)
+        throw new ChartError({
+          code: "unsupported",
+          path: `${path}.${option}`,
+          message: `chart ${path}.${option}: a 3D chart's axes are drawn along its box; drop ${option}`,
+        });
   }
   return new Plot3D(marks as Layer3D[], config, indices, panel);
 }

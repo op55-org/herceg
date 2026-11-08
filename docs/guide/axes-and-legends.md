@@ -27,6 +27,10 @@ and `guides`, of which `x`, `y`, `yRight`, and `legend` are short forms.
 - `scales` sets a scale's settings over its short form's.
 - An axis in `guides` replaces its scale's automatic axis on the same side,
   or adds one on another side.
+- `place` and `room` on `x` and `y` are such an axis: `x: { place: { side:
+  "top" }, room: 30 }` draws the same axis as `guides: [axis({ scale: "x",
+  place: { side: "top" }, room: 30 })]`. A guide listing the same scale on
+  that side too is refused; give its options in one of them.
 - A legend or colorbar in `guides` shows the scales it names; the automatic
   legend shows the rest.
 
@@ -61,7 +65,7 @@ hg.Chart(df, time_zone="UTC",
 ```
 
 Charts asking for more than a tick count, Intl formats, and the automatic
-axes and legend load a guide compiler, once per page, and draw their first
+axes and legend (a short form's `place` or `room` is more) load a guide compiler, once per page, and draw their first
 frame when it has loaded (`chart.loading` settles then). Static output
 brings it along; other charts never load it.
 
@@ -82,6 +86,8 @@ brings it along; other charts never load it.
 | `tooltipFormat` | How tooltips, the keyboard, and crosshair labels write values, without changing tick labels. |
 | `style` | The axis' roles: `tickLabel`, `axisTitle`, `axisLine`, `tick`, `grid` ([Styling](styling.md#role-styles)). |
 | `breaks`, `seams` | Time x axes: [breaks](#time-axis-breaks). |
+| `place` | The chart's `x` on `"top"` or `"bottom"`, its `y` on `"left"` or `"right"` (`{ side }`, Python `hg.Place(side=...)`), as an [axis](#axes) on that side. |
+| `room` | The pixels the axis takes beside the plots, as an [axis'](#axes) `room`. A subplot's own holds that subplot's axis, and subplots without one take the chart's; plots across a layout's track still line up. |
 
 `scales` also holds scales of categories (`{ type: "ordinal", ... }`) that
 channels read by name, and position scales of a mark's own (see
@@ -199,7 +205,18 @@ channels read by name, and position scales of a mark's own (see
 | `line` | Draw the axis line (x axes do, y axes do not, by default). |
 | `layers` | More tick layers `[{ id, ticks, format, tick, labels, style }]`: minor ticks (`labels: false`), day boundaries in a second row. |
 | `repeat` | `"all"` draws the axis by every panel sharing the scale. |
-| `room` | y axes: the pixels their ticks and labels take beside the plot, so plots of charts and panels line up (`room: 28`), or bounds on what the labels need (`{ min, max }`, Python `(min, max)`). Labels wider than the room are shortened with an ellipsis; tick marks are not, so a room shorter than the outward ticks is refused. Refused on x axes and colorbars. |
+| `room` | The pixels the axis' ticks and labels take beside the plot, its title aside, so plots of charts and panels line up (`room: 28`), or bounds on what they need (`{ min, max }`, Python `(min, max)`). Unset, it is the short form's. Tick marks are not shortened, so a room shorter than the outward ticks is refused. Refused on colorbars. |
+
+What does not fit a room is left out, never drawn past it:
+
+- **y axes** shorten labels wider than the room with an ellipsis.
+- **x axes** keep their rows of labels (`labels.row`) from the plot
+  outward and leave out whole the first row that does not fit and those
+  beyond it, with every layer and lane in it; their tick marks stay.
+  Labels inside the plot take no room. Rotations deeper than the room are
+  not tried (the labels thin instead), and wrapped labels keep the lines
+  that fit, the last ending with an ellipsis. Hours over days in a room
+  for one row lose the days, so give such axes a room their rows fit.
 
 An x axis on top needs panels without headers; a y axis on the right
 beside each row's last panel needs rows that share y.

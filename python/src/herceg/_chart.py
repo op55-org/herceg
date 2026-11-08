@@ -139,6 +139,7 @@ from ._fields import (
 from ._guides import (
     _NUMBER_FORMAT,
     _TIME_FORMAT,
+    AXIS_SIDES,
     FORMS,
     ChannelScale,
     Format,
@@ -152,12 +153,14 @@ from ._guides import (
     Scope,
     Ticks,
     _check_format,
+    axis_place,
     format_spec,
     grid_spec,
     guide_problem,
     guides_spec,
     legend_spec,
     padding_spec,
+    room_spec,
     scales_spec,
     scope_spec,
     ticks_spec,
@@ -561,6 +564,16 @@ class AxisOptions:
     room the scale keeps around its data (see ``hg.Scale``), and ``grid``
     draws grid lines, or with ``hg.GridLines(z_index=...)`` places them
     among the marks.
+
+    ``place``, on the chart's ``x`` and ``y`` only, moves the axis to the
+    other side of the plots: ``hg.Place(side="top")`` for x,
+    ``hg.Place(side="right")`` for y. ``room`` holds the axis' ticks and
+    labels in that many pixels beside the plots, or ``(least, most)``: a y
+    axis shortens labels wider than it with an ellipsis, and an x axis
+    leaves out rows of labels that do not fit, the farthest from the plot
+    first. A panel's own room holds its axis; unset, it is the chart's::
+
+        hg.Chart(sales, x=hg.AxisOptions(place=hg.Place(side="top"), room=28))
     """
 
     type: Literal["linear", "log", "time"] | None = None
@@ -578,9 +591,13 @@ class AxisOptions:
     seams: bool | Seams | None = None
     scope: Scope | None = None
     repeat: Literal["outer", "all"] | None = None
+    place: Place | dict[str, Any] | None = None
+    room: float | tuple[float, float] | None = None
     style: Style | dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        self.place = axis_place(self.place, "AxisOptions place", None)
+        room_spec(self.room, "AxisOptions room")
         _seams_spec(self.seams)  # checked as made, before its hints are
         for name in ("format", "tooltip_format"):
             value = getattr(self, name)
@@ -638,6 +655,8 @@ class AxisOptions:
             "seams": seams,
             "scope": scope_spec(self.scope, "AxisOptions scope"),
             "repeat": self.repeat,
+            "place": {"side": self.place.side} if isinstance(self.place, Place) else None,
+            "room": room_spec(self.room, "AxisOptions room"),
             "style": style_spec(self.style, "AxisOptions style", AXIS_ROLES),
         }
         return {key: value for key, value in spec.items() if value is not None}
@@ -8937,6 +8956,19 @@ def _axis(
             raise at.field(name).error(
                 f"only the chart's x, y, and y_right take {name}; move it there"
             )
+    if role == "Chart z" and (axis.place, axis.room) != (None, None):
+        name = "place" if axis.place is not None else "room"
+        raise at.field(name).error(f"a 3D chart's axes are drawn along its box; drop {name}")
+    if isinstance(axis.place, Place):
+        if owner == "Panel":
+            raise at.field("place").error(
+                f"a panel's axes are on the chart's sides; give place on the chart's {option}"
+            )
+        sides, rule = AXIS_SIDES[option]
+        if option == "y_right":
+            raise at.field("place").error(f"{rule}; drop place")
+        if axis.place.side not in sides:
+            raise at.field("place").error(f"{rule}; received {shown(axis.place.side)}")
     return located(at, axis._spec) or None
 
 

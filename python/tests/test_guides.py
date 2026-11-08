@@ -2,6 +2,7 @@
 their specs, their errors in Python's names, and their output."""
 
 import datetime as dt
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -224,11 +225,117 @@ def test_axis_room_lines_plots_up_and_shortens_labels():
     )
     assert "…</text>" in chart.line(x="x", y="v").to_svg()
     assert hg.axis("y", room=(20, 60))._spec()["room"] == {"min": 20, "max": 60}
-    with pytest.raises(hg.ChartError, match="^axis room: x axes take the depth"):
-        hg.axis("x", room=20)
-    for room in [(30, 20), float("inf"), (0, float("inf")), float("nan")]:
+    for room in [(30, 20), float("inf"), (0, float("inf")), float("nan"), -1, True]:
         with pytest.raises(hg.ChartError, match="^axis room: expected finite pixels of at least 0"):
             hg.axis("y", room=room)
+        with pytest.raises(
+            hg.ChartError, match="^AxisOptions room: expected finite pixels of at least 0"
+        ):
+            hg.AxisOptions(room=room)
+
+
+def plot_of(chart: hg.Chart) -> tuple[float, float, float, float]:
+    """The first plot's clip rectangle in the chart's static SVG: x, y, width, height."""
+    root = ET.fromstring(chart.to_svg())
+    rect = root.find(".//{http://www.w3.org/2000/svg}clipPath/{http://www.w3.org/2000/svg}rect")
+    assert rect is not None
+    x, y, width, height = (float(rect.attrib[name]) for name in ("x", "y", "width", "height"))
+    return x, y, width, height
+
+
+@pytest.mark.contract("axis.short-forms.python")
+def test_axis_options_place_and_room_are_the_axis_guide_they_stand_for():
+    def drawn(**options: object) -> str:
+        svg = hg.Chart(WEEK, height=300, **options).line(x="t", y="v").to_svg()  # type: ignore[arg-type]
+        return re.sub(r"herceg-svg-\d+", "", svg)
+
+    top = hg.Place(side="top")
+    assert drawn(x=hg.AxisOptions(place=top, room=30)) == drawn(
+        guides=[hg.axis("x", place=top, room=30)]
+    )
+    assert drawn(y={"place": {"side": "right"}, "room": (20, 60)}) == drawn(
+        guides=[hg.axis("y", place=hg.Place(side="right"), room=(20, 60))]
+    )
+    # A fixed x room: the plot ends that far, and the chart's 2 px of padding,
+    # above the bottom; the day row under the hours is left out.
+    days = hg.axis(
+        "x",
+        layers=[
+            hg.TickLayer(
+                id="day",
+                ticks=hg.Ticks(every="day"),
+                format=hg.Format(time="%b %d"),
+                labels=hg.TickLabels(row=1),
+            )
+        ],
+    )
+    _, y, _, height = plot_of(
+        hg.Chart(WEEK, height=300, x=hg.AxisOptions(room=30), guides=[days]).line(x="t", y="v")
+    )
+    assert y + height == 300 - 2 - 30
+    assert spec_of(hg.Chart(WEEK, x=hg.AxisOptions(place=top, room=(20, 40))).line(x="t", y="v"))[
+        "x"
+    ] == {"place": {"side": "top"}, "room": {"min": 20, "max": 40}}
+
+
+def test_panels_hold_their_own_x_room_and_the_chart_s_otherwise():
+    chart = hg.Chart(WEEK, height=300, x=hg.AxisOptions(room=24))
+    left, right = chart.columns([1, 1])
+    left.panel("own", x=hg.AxisOptions(room=40)).line(x="t", y="v")
+    right.panel("chart's").line(x="t", y="v")
+    spec = spec_of(chart)
+    assert [panel.get("x") for panel in spec["panels"]] == [{"room": 40}, None]
+    assert spec["x"] == {"room": 24}
+    chart.to_svg()
+
+
+def test_axis_options_refuse_places_and_rooms_their_axes_cannot_take():
+    def refused(match: str, **options: object) -> None:
+        with pytest.raises(hg.ChartError, match=match):
+            hg.Chart(WEEK, **options).line(x="t", y="v").to_spec()  # type: ignore[arg-type]
+
+    refused(
+        '^Chart x place: an x axis goes on the top or the bottom; received "left"$',
+        x=hg.AxisOptions(place=hg.Place(side="left")),
+    )
+    refused(
+        '^Chart y place: a y axis goes on the left or the right; received "top"$',
+        y={"place": {"side": "top"}},
+    )
+    refused(
+        "^Chart y_right place: the right y axis is on the right; drop place$",
+        y_right=hg.AxisOptions(place=hg.Place(side="right")),
+    )
+    refused(
+        "^Chart z room: a 3D chart's axes are drawn along its box; drop room$",
+        z=hg.AxisOptions(room=20),
+    )
+    # Drawn: the guides are laid out in the browser's engine.
+    with pytest.raises(
+        hg.ChartError,
+        match="^Chart x.place: guides list an x axis on the top too; give its options in one "
+        "of them$",
+    ):
+        hg.Chart(
+            WEEK,
+            x=hg.AxisOptions(place=hg.Place(side="top")),
+            guides=[hg.axis("x", place=hg.Place(side="top"))],
+        ).line(x="t", y="v").to_svg()
+    column = hg.Chart(WEEK).columns([1])[0]
+    with pytest.raises(
+        hg.ChartError,
+        match="^Panel x place: a panel's axes are on the chart's sides; give place on the "
+        "chart's x$",
+    ):
+        column.panel("a", x=hg.AxisOptions(place=hg.Place(side="top")))
+    with pytest.raises(
+        hg.ChartError, match="^AxisOptions place: an axis takes only its side; drop align$"
+    ):
+        hg.AxisOptions(place=hg.Place(side="top", align="start"))
+    with pytest.raises(
+        hg.ChartError, match="^AxisOptions place: an axis goes on a side; give side$"
+    ):
+        hg.AxisOptions(place=hg.Place(inside="top"))
 
 
 def test_scales_and_guides_write_their_specs():
@@ -305,9 +412,13 @@ def test_guides_refuse_what_they_cannot_say_in_python_names():
     with pytest.raises(ValueError, match="LegendEntry: a swatch or a sample, not both"):
         hg.LegendEntry(key="a", label="A", swatch=hg.Swatch(type="rect", fill="#eee"), sample="a")
     with pytest.raises(
-        ValueError, match='axis place: y_right axes go on the "right" side; received "left"'
+        ValueError, match='axis place: the right y axis is on the right; received "left"'
     ):
         hg.axis("y_right", place=hg.Place(side="left"))
+    with pytest.raises(
+        ValueError, match='axis place: an x axis goes on the top or the bottom; received "left"'
+    ):
+        hg.axis("x", place=hg.Place(side="left"))
     with pytest.raises(ValueError, match='Ticks every: "0 hours" steps by 0; give a count of 1'):
         hg.Ticks(every="0 hours")._spec()
     with pytest.raises(ValueError, match="TickLabels rotation: expected degrees from -90"):

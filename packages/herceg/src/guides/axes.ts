@@ -10,7 +10,7 @@ import { anchorBlock } from "../layout/block.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { AxisPlan } from "../model/axis.ts";
 import type { AxesState, CompiledAxes, GuideKit } from "../model/guides.ts";
-import type { ChartConfig } from "../model/model.ts";
+import type { ChartConfig, PanelPlans } from "../model/model.ts";
 import type { ScaleName } from "../model/scales.ts";
 import type { ChartStyles } from "../model/styles.ts";
 import type { AxisGuide, AxisTick, GuideItem, LabelBox, Rect, TextItem } from "../scene/scene.ts";
@@ -23,12 +23,18 @@ import type {
   TickMarkSpec,
 } from "../spec/spec.ts";
 import type { StrokePaint, TextPaint } from "../style/style.ts";
-import type { AxisGuideOptions, ChartAxisOptions, Format, Ticks } from "./options.ts";
+import type { AxisGuideOptions, ChartAxisOptions, Format, GuideOptions, Ticks } from "./options.ts";
 import { type Read, restroke, restyle } from "./paints.ts";
 import { countOf, tickPlanner } from "./ticks.ts";
 
 /** The side each scale's automatic axis is on. */
 const HOME: Record<ScaleName, Side> = { x: "bottom", y: "left", yRight: "right" };
+/** The sides each scale's axes go on, as messages refusing others say. */
+const SIDES: Record<ScaleName, string> = {
+  x: "an x axis goes on the top or the bottom",
+  y: "a y axis goes on the left or the right",
+  yRight: "the right y axis is on the right",
+};
 /** Whether `scale` is x, y, or yRight, not one of the chart's own (which may be named "constructor"). */
 const builtIn = (scale: string): scale is ScaleName => Object.hasOwn(HOME, scale);
 /** The default x axes' tick marks' length, which their labels' room keeps (axis-guide.ts). */
@@ -39,6 +45,8 @@ const ROW_GAP = 2;
 const GAP = 6;
 /** Pixels kept between labels that must not touch. */
 const PAD = 4;
+/** The most lines a wrapped label takes. */
+const WRAPPED = 3;
 /** Pixels from a y axis' line to its labels, as the default axes draw them. */
 const Y_GAP = 8;
 /** Pixels from labels inside the plot to the ends of the ticks on their side, by default. */
@@ -93,35 +101,50 @@ export interface ListedAxis {
   columns: boolean;
   /** Where panels sharing its scale draw it: on their outer edge, or "all" of them. */
   repeat: "outer" | "all" | undefined;
-  /** The least and most a y axis' ticks and labels take beside the plot, as `room` says. */
-  room: { min: number; max: number } | undefined;
+  /** The least and most its ticks and labels take beside the plot, as `room` says. */
+  room: Room | undefined;
+  /** In subplots: each panel's own room, by its place in the layout, over `room` (see `roomIn`). */
+  rooms?: readonly (Room | undefined)[] | undefined;
+}
+
+/** The least and most pixels an axis' ticks and labels take beside the plot. */
+type Room = { min: number; max: number };
+
+/** A guide, and where it is set, for messages: in `guides`, or by a short form (`short`). */
+interface Listed {
+  guide: GuideOptions;
+  path: string;
+  short?: boolean;
 }
 
 /**
- * The axes `config.guides` lists, and the short forms as the model reads
- * them: each scale's settings with those of its listed axis on its default
- * side, or with the automatic axis hidden when the scale's axes are all
- * elsewhere. With tick labels `aligned` at their ticks, which listed axes
- * draw, a scale the guides list no axis of has one on its default side.
- * Undefined when there are no axes to list.
+ * The axes `config.guides` lists, and those the short forms' `place` and
+ * `room` stand for; and the short forms as the model reads them: each
+ * scale's settings with those of its listed axis on its default side, or
+ * with the automatic axis hidden when the scale's axes are all elsewhere.
+ * With tick labels `aligned` at their ticks, which listed axes draw, a
+ * scale the guides list no axis of has one on its default side. Undefined
+ * when there are no axes to list.
  */
 export function listedAxes(
   config: ChartConfig,
   aligned = false,
 ): { read: Partial<Record<ScaleName, ChartAxisOptions>>; axes: ListedAxis[] } | undefined {
   const right = config.marks.some((mark) => mark.spec.axis === "right");
-  const given = config.guides ?? [];
-  const guides = aligned
-    ? [
-        ...given,
-        ...(["x", "y", ...(right ? ["yRight" as const] : [])] as const).flatMap((scale) =>
-          given.some((guide) => guide.type === "axis" && guide.scale === scale)
-            ? []
-            : [{ type: "axis", scale } as AxisGuideOptions],
-        ),
-      ]
-    : given;
-  if (!guides.some((guide) => guide.type === "axis")) return undefined;
+  const guides: Listed[] = (config.guides ?? []).map((guide, i) => ({
+    guide,
+    path: `chart guides[${i}]`,
+  }));
+  const lists = (scale: string) =>
+    guides.some(({ guide }) => guide.type === "axis" && guide.scale === scale);
+  for (const scale of ["x", "y", "yRight"] as const) {
+    const guide = shortGuide(config, scale, guides);
+    if (guide) guides.push({ guide, path: `chart ${scale}`, short: true });
+  }
+  if (aligned)
+    for (const scale of ["x", "y", ...(right ? ["yRight" as const] : [])] as const)
+      if (!lists(scale)) guides.push({ guide: { type: "axis", scale }, path: `chart ${scale}` });
+  if (!guides.some(({ guide }) => guide.type === "axis")) return undefined;
   const read: Partial<Record<ScaleName, ChartAxisOptions>> = {};
   const axes: ListedAxis[] = [];
   const yScope = config.y?.scope ?? (config.panels ? "panel" : "chart");
@@ -133,21 +156,26 @@ export function listedAxes(
     const sides = new Set<Side>();
     let home: AxisGuideOptions | undefined;
     let first: AxisGuideOptions | undefined;
-    guides.forEach((guide, i) => {
-      if (guide.type !== "axis" || guide.scale !== scale) return;
+    // Subplots' own rooms, by their place in the layout.
+    const own = config.panels?.list.map((panel) => ({
+      room: panel[scale]?.room,
+      path: `chart panels[${config.panels!.declared.indexOf(panel)}].${scale}`,
+    }));
+    for (const { guide, path: at, short: synthesized } of guides) {
+      if (guide.type !== "axis" || guide.scale !== scale) continue;
       const side = guide.place?.side ?? HOME[scale];
-      const path = `chart guides[${i}].place.side`;
+      const path = `${at}.place.side`;
       const along =
         scale === "x"
           ? side === "top" || side === "bottom"
           : side === "right" || (scale === "y" && side === "left");
-      if (!along)
-        throw new Error(
-          `${path}: ${scale} axes go ${scale === "x" ? 'on the "top" or the "bottom"' : scale === "y" ? 'on the "left" or the "right"' : 'on the "right"'}; received "${side}"`,
-        );
+      if (!along) throw new Error(`${path}: ${SIDES[scale]}; received ${JSON.stringify(side)}`);
+      // A short form's side is one guide's: the guides listed before it may not take it.
       if (sides.has(side))
         throw new Error(
-          `${path}: scale ${scale} has an axis on the ${side} already; give this one ${scale === "x" ? (side === "top" ? '"bottom"' : '"top"') : side === "left" ? '"right"' : '"left"'}`,
+          synthesized
+            ? `${at}.place: guides list ${scale === "x" ? "an x" : "a y"} axis on the ${side} too; give its options in one of them`
+            : `${path}: scale ${scale} has an axis on the ${side} already; give this one ${scale === "x" ? (side === "top" ? '"bottom"' : '"top"') : side === "left" ? '"right"' : '"left"'}`,
         );
       if (scale === "y" && side === "right" && right)
         throw new Error(
@@ -156,7 +184,7 @@ export function listedAxes(
       sides.add(side);
       first ??= guide;
       if (side === HOME[scale]) home = guide;
-      const axis = resolve(guide, scale, side, short, `chart guides[${i}]`);
+      const axis = resolve(guide, scale, side, short, at, own, synthesized);
       axes.push({
         ...axis,
         // Aligned labels are the guides' to draw: the model's automatic axes do not align them.
@@ -165,7 +193,7 @@ export function listedAxes(
         columns,
         repeat: guide.repeat ?? short?.repeat,
       });
-    });
+    }
     if (sides.size === 0) continue;
     // Grid lines follow the axis on the default side, or without one, the
     // first listed: the hidden automatic axis plans its ticks as that one's,
@@ -208,9 +236,8 @@ export function listedAxes(
   }
   // Axes of the chart's own position scales go where they are placed: along
   // y on the right, or along x above the plots, where no other axis is.
-  guides.forEach((guide, i) => {
-    if (guide.type !== "axis" || builtIn(guide.scale)) return;
-    const path = `chart guides[${i}]`;
+  for (const { guide, path } of guides) {
+    if (guide.type !== "axis" || builtIn(guide.scale)) continue;
     const side = guide.place?.side;
     if (side !== "right" && side !== "top")
       throw new Error(
@@ -228,16 +255,53 @@ export function listedAxes(
       columns: shared || scope === "column",
       repeat: guide.repeat,
     });
-  });
+  }
   return { read, axes };
 }
 
+/**
+ * The axis guide a short form's `place` or `room` stands for: with `place`,
+ * `axis({ scale, place })`, its side checked as the guides' are; with only
+ * a room (its own or a subplot's), the scale's axis on its default side
+ * where `guides` list none of the scale, which takes the room as it takes
+ * the short form's other settings.
+ */
+function shortGuide(
+  config: ChartConfig,
+  scale: ScaleName,
+  guides: readonly Listed[],
+): AxisGuideOptions | undefined {
+  type Placed = { place?: { side: Side }; room?: unknown } | undefined;
+  const short = config[scale] as Placed;
+  const panels = config.panels?.declared.map((panel) => panel[scale] as Placed) ?? [];
+  const placed = panels.findIndex((axis) => axis?.place !== undefined);
+  if (placed >= 0)
+    throw new Error(
+      `chart panels[${placed}].${scale}.place: a panel's axes are on the chart's sides; give place on the chart's ${scale}`,
+    );
+  if (short?.place !== undefined) {
+    if (scale === "yRight") throw new Error(`chart yRight.place: ${SIDES.yRight}; drop place`);
+    return { type: "axis", scale, place: short.place };
+  }
+  const roomed = [short, ...panels].some((axis) => axis?.room !== undefined);
+  const listed = guides.some(({ guide }) => guide.type === "axis" && guide.scale === scale);
+  return roomed && !listed ? { type: "axis", scale } : undefined;
+}
+
+/**
+ * `guide`, listed at `path`, resolved against the short form `short`; its
+ * room its own or the short form's, and in each subplot the subplot's own
+ * (`own`, by its place in the layout). A guide a short form stands for
+ * (`synthesized`) has the default tick marks, which its room must hold.
+ */
 function resolve(
   guide: AxisGuideOptions,
   scale: string,
   side: Side,
   short: ChartAxisOptions | undefined,
   path: string,
+  own?: readonly { room: AxisGuideOptions["room"]; path: string }[],
+  synthesized = false,
 ): Omit<ListedAxis, "rows" | "columns" | "repeat"> {
   const home = builtIn(scale) && side === HOME[scale];
   const across = side === "top" || side === "bottom";
@@ -245,13 +309,20 @@ function resolve(
     { ...guide, ticks: guide.ticks ?? short?.ticks, format: guide.format ?? short?.format },
     { across, home, path, name: `${scale} axis`, tick: across ? TICK : 3 },
   );
-  const room = roomOf(guide.room, across, path);
-  // The room holds the ticks outside the plot whole; only labels shorten.
+  // The room holds the ticks outside the plot whole; only labels shorten or go.
   const ticks = outward(layers);
-  if (room && ticks > room.max)
-    throw new Error(
-      `${path}.room: its tick marks reach ${ticks} px out from the plot, past the ${room.max} px room; give a room of at least ${ticks} px, or shorter or inward tick marks`,
-    );
+  const roomAt = (given: AxisGuideOptions["room"], at: string) => {
+    const room = roomOf(given, at);
+    if (room && ticks > room.max)
+      throw new Error(
+        `${at}.room: its tick marks reach ${ticks} px out from the plot, past the ${room.max} px room; give a room of at least ${ticks} px${synthesized ? "" : ", or shorter or inward tick marks"}`,
+      );
+    return room;
+  };
+  const room =
+    guide.room !== undefined ? roomAt(guide.room, path) : roomAt(short?.room, `chart ${scale}`);
+  const rooms = own?.map(({ room, path }) => roomAt(room, path));
+  const roomed = room !== undefined || !!rooms?.some((one) => one !== undefined);
   return {
     // Ids and generated keys apart: a guide's id cannot take another's key.
     key: guide.id !== undefined ? `id|${guide.id}` : `${scale}|${side}`,
@@ -269,41 +340,46 @@ function resolve(
     // which take the chart's and subplots' styles already.
     style: home ? undefined : guide.style,
     room,
+    ...(rooms?.some((one) => one !== undefined) && { rooms }),
     plain:
       home &&
       guide.tick === undefined &&
       guide.labels === undefined &&
       guide.line === undefined &&
-      guide.room === undefined &&
+      !roomed &&
       layers.length === 1,
   };
 }
 
-/** A y axis' `room`: a fixed one, or bounds; refused on x axes, whose rows of labels take the depth they need. */
-function roomOf(room: AxisGuideOptions["room"], across: boolean, path: string): ListedAxis["room"] {
+/** An axis' `room`, set at `path`: a fixed one, or bounds. */
+function roomOf(room: AxisGuideOptions["room"], path: string): Room | undefined {
   if (room === undefined) return undefined;
-  if (across)
-    throw new Error(
-      `${path}.room: x axes take the depth their rows of labels need, and an ellipsis shortens only y axes' labels; drop room`,
-    );
   const { min = 0, max = Number.POSITIVE_INFINITY } =
-    typeof room === "number" ? { min: room, max: room } : room;
+    typeof room === "number" ? { min: room, max: room } : (room ?? {});
   // No most where it is left out; pixels where they are given.
-  const given = typeof room === "number" ? [room] : [min, room.max ?? 0];
-  if (!(given.every(Number.isFinite) && min >= 0 && max >= min))
+  const given = typeof room === "number" ? [room] : [min, room?.max ?? 0];
+  if (
+    !(typeof room === "number" || (typeof room === "object" && room !== null)) ||
+    !(given.every(Number.isFinite) && min >= 0 && max >= min)
+  )
     throw new Error(
-      `${path}.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received ${typeof room === "number" ? room : `{ min: ${room.min}, max: ${room.max} }`}`,
+      `${path}.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received ${typeof room === "object" && room !== null ? `{ min: ${room.min}, max: ${room.max} }` : typeof room === "number" ? room : JSON.stringify(room)}`,
     );
   return { min, max };
 }
 
-/** `axis` without its room, its labels as they are. */
+/** The room `axis` takes in panel `i`: the panel's own, or the axis'. */
+function roomIn(axis: ListedAxis, i: number): Room | undefined {
+  return axis.rooms?.[i] ?? axis.room;
+}
+
+/** `axis` without its rooms, its labels as they are. */
 function unroomed(axis: ListedAxis): ListedAxis {
-  return axis.room ? { ...axis, room: undefined } : axis;
+  return axis.room || axis.rooms ? { ...axis, room: undefined, rooms: undefined } : axis;
 }
 
 /** `size` held within `room`'s bounds. */
-function within(size: number, room: ListedAxis["room"]): number {
+function within(size: number, room: Room | undefined): number {
   return room ? Math.min(Math.max(size, room.min), room.max) : size;
 }
 
@@ -316,13 +392,14 @@ function within(size: number, room: ListedAxis["room"]): number {
  */
 function roomFit(
   kit: GuideKit,
-  axis: { layers: readonly Layer[]; room?: ListedAxis["room"] },
+  axis: { layers: readonly Layer[]; across: boolean; room?: Room | undefined },
   labels: TickLabelsSpec,
   label: TextPaint,
   measure: MeasureText,
 ): ((text: string) => string) | undefined {
   const { room } = axis;
-  if (!room || labels.inside) return undefined;
+  // Rows of labels along x are left out whole instead (see `rowsKept`).
+  if (!room || labels.inside || axis.across) return undefined;
   const { css, background, padding } = label;
   const [, right, , left] = background ? padding : [0, 0, 0, 0];
   // Past the box's far side: half its outline, or the halo beyond its padding.
@@ -483,35 +560,127 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
   // room grows for scenes of this width, as margins do, and the model lays
   // the scene out again.
   // Room below may be less than none: an axis on the default side with no
-  // labels outside the plot gives back what the model keeps for them.
-  let kept = { width: Number.NaN, top: 0, bottom: Number.NEGATIVE_INFINITY };
-  let reserved = { top: 0, bottom: 0 };
+  // labels outside the plot gives back what the model keeps for them. Each
+  // panel's is kept apart, as a room of its own holds it to its bounds.
+  let kept = { width: Number.NaN, top: [] as number[], bottom: [] as number[] };
+  let reserved = { top: [] as number[], bottom: [] as number[] };
+  /**
+   * What each panel's x axes take below its plot, beyond what the model
+   * keeps for them (`xRoom`), and above it, as their layers are placed
+   * over `planOf`'s plans; and where a room of the panel's own holds them.
+   */
+  const depths = (
+    state: AxesState,
+    planOf: (axis: ListedAxis, i: number) => AxisPlan | undefined,
+  ) => {
+    const count = state.labeled.x.length;
+    const below = Array<number>(count).fill(Number.NEGATIVE_INFINITY);
+    const above = Array<number>(count).fill(0);
+    const ownBelow = Array<boolean>(count).fill(false);
+    const ownAbove = Array<boolean>(count).fill(false);
+    // Whether the layers kept write labels: a room leaves rows out.
+    const writing = Array<boolean>(count).fill(false);
+    const home = changed("x");
+    if (home)
+      state.labeled.x.forEach((shows, i) => {
+        if (!shows) return;
+        const layers = placedLayers(kit, home, state, i, planOf(home, i));
+        const extra = extraDepth(kit, home, state, layers);
+        const room = roomIn(home, i);
+        below[i] = room ? within(state.xRoom + extra, room) - state.xRoom : extra;
+        ownBelow[i] = !!room;
+        writing[i] = layers.some(({ layer }) => layer.labels);
+      });
+    for (const axis of elsewhere)
+      if (axis.side === "top")
+        for (let i = 0; i < count; i++)
+          if (drawsIn(axis, state, i)) {
+            const layers = placedLayers(kit, axis, state, i, planOf(axis, i));
+            above[i] = Math.max(above[i]!, depthOf(kit, axis, state, i, layers));
+            ownAbove[i] ||= !!roomIn(axis, i);
+            writing[i] ||= layers.some(({ layer }) => layer.labels);
+          }
+    return { below, above, ownBelow, ownAbove, writing };
+  };
   // How far each panel's y labels reach is found before y is planned, from
   // a line of each layer's labels; where the labels planned reach further
   // (several lines), it grows for scenes of this size, and the model lays
   // the scene out again.
   let reaching = { size: "", reach: [] as number[] };
   let reached: readonly number[] = [];
+  /**
+   * Calls `each` with each listed axis panel `index` draws (those on their
+   * scale's default side, then those elsewhere) and its plan in `plans`.
+   */
+  const placings = (
+    state: AxesState,
+    index: number,
+    plot: Rect,
+    plans: PanelPlans,
+    each: (axis: ListedAxis, plan: AxisPlan | undefined) => void,
+  ) => {
+    for (const scale of ["x", "y", "yRight"] as const) {
+      const axis = changed(scale);
+      if (axis) each(axis, plans[scale]);
+    }
+    for (const axis of elsewhere) {
+      const plan = builtIn(axis.scale)
+        ? plans[axis.scale]
+        : plans.own?.plan(
+            axis.scale,
+            index,
+            axis.across ? plot.width : plot.height,
+            axis.across,
+            axis.across ? plot.x : plot.y,
+          );
+      if (plan && drawsIn(axis, state, index)) each(axis, plan);
+    }
+  };
+  /** Panel `index`'s axes (see `CompiledAxes.panel`), leaving out rows of labels from `cuts` on. */
+  const panelAxes = (
+    axes: readonly AxisGuide[],
+    state: AxesState,
+    index: number,
+    plot: Rect,
+    plans: PanelPlans,
+    cuts?: ReadonlyMap<ListedAxis, number>,
+  ): AxisGuide[] => {
+    const out = axes.map((guide) => {
+      const axis = changed(guide.scale);
+      // Axes on their scale's default side are of x, y, and yRight.
+      const plan = axis && plans[axis.scale as ScaleName];
+      return axis
+        ? rebuild(
+            kit,
+            guide,
+            axis,
+            placedLayers(kit, axis, state, index, plan, cuts?.get(axis)),
+            state,
+            index,
+            plan?.scale.categories,
+          )
+        : guide;
+    });
+    placings(state, index, plot, plans, (axis, plan) => {
+      if (axis.home) return;
+      out.push(
+        beyond(
+          kit,
+          axis,
+          placedLayers(kit, axis, state, index, plan, cuts?.get(axis)),
+          state,
+          index,
+          plot,
+          plan!.scale.categories,
+        ),
+      );
+    });
+    return out;
+  };
   return {
     across(state) {
-      if (kept.width !== state.width)
-        kept = { width: state.width, top: 0, bottom: Number.NEGATIVE_INFINITY };
-      let top = 0;
-      let bottom = Number.NEGATIVE_INFINITY;
+      if (kept.width !== state.width) kept = { width: state.width, top: [], bottom: [] };
       const home = changed("x");
-      const labels = state.labeled.x.map((shows) => shows && (!home || writes(home)));
-      state.labeled.x.forEach((shows, i) => {
-        if (shows && home)
-          bottom = Math.max(
-            bottom,
-            extraDepth(
-              kit,
-              home,
-              state,
-              placedLayers(kit, home, state, i, provisional(state, home, i)),
-            ),
-          );
-      });
       const over = state.labeled.x.map(() => false);
       for (const axis of elsewhere) {
         if (axis.side !== "top") continue;
@@ -524,24 +693,14 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
           throw new Error(
             `${axis.path}.place.side: an x axis above the plots stands over each column's first panel, so the panels of a column must share ${axis.scale}; give ${axis.scale} scope "column" or "chart", ${builtIn(axis.scale) ? 'repeat "all" for one above every panel, or keep the axis at the bottom' : 'or repeat "all" for one above every panel'}`,
           );
-        for (let i = 0; i < over.length; i++)
-          if (drawsIn(axis, state, i)) {
-            over[i] = true;
-            if (writes(axis)) labels[i] = true;
-            top = Math.max(
-              top,
-              depthOf(
-                kit,
-                axis,
-                state,
-                i,
-                placedLayers(kit, axis, state, i, provisional(state, axis, i)),
-              ),
-            );
-          }
+        for (let i = 0; i < over.length; i++) if (drawsIn(axis, state, i)) over[i] = true;
       }
-      bottom = Math.max(bottom, kept.bottom);
-      reserved = { top: Math.max(top, kept.top), bottom: Number.isFinite(bottom) ? bottom : 0 };
+      const taken = depths(state, (axis, i) => provisional(state, axis, i));
+      // Panels writing x labels, in the rows their rooms keep.
+      const labels = state.labeled.x.map((shows, i) => (shows && !home) || taken.writing[i]!);
+      const below = settled(taken.below, taken.ownBelow, kept.bottom);
+      const above = settled(taken.above, taken.ownAbove, kept.top);
+      reserved = { top: above.each, bottom: below.each };
       const size = `${state.width}x${state.height}`;
       if (reaching.size !== size) reaching = { size, reach: [] };
       const reach = over.map((_, i) => {
@@ -564,7 +723,15 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
         return most;
       });
       reached = reach;
-      return { ...reserved, over, labels, reach };
+      return {
+        top: above.most,
+        bottom: below.most,
+        tops: above.each,
+        bottoms: below.each,
+        over,
+        labels,
+        reach,
+      };
     },
     tickLabels(scale, i, styles) {
       const home = changed(scale);
@@ -579,23 +746,36 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
     beside(state) {
       let left = 0;
       let right = 0;
+      // A panel whose room is its own takes it, beside the model's room for its labels.
+      const own = { y: [] as number[], right: [] as number[] };
       for (const scale of ["y", "yRight"] as const) {
         const home = changed(scale);
         if (!home) continue;
         // What its ticks and labels outside the plot take, over the room
-        // the model keeps for its labels (as wide as the major layer's).
-        let needs = Number.NEGATIVE_INFINITY;
-        let keeps = Number.NEGATIVE_INFINITY;
+        // the model keeps for its labels (as wide as the major layer's):
+        // the most of the panels without a room, or of all where every
+        // panel has one.
+        const needs = { free: [] as number[], all: [] as number[] };
+        const keeps = { free: [] as number[], all: [] as number[] };
         state.labeled[scale].forEach((shows, i) => {
           if (!shows) return;
           // Its labels as they are, before the room shortens them: what
           // the room holds within its bounds.
           const whole = placedLayers(kit, unroomed(home), state, i, state.plan(scale, i, 0));
-          needs = Math.max(needs, outsideBreadth(kit, whole, state.measure));
-          keeps = Math.max(keeps, Math.ceil(widest(kit, [whole[0]!], state.measure)) + Y_GAP);
+          const room = roomIn(home, i);
+          const takes = within(outsideBreadth(kit, whole, state.measure), room);
+          const keep = Math.ceil(widest(kit, [whole[0]!], state.measure)) + Y_GAP;
+          needs.all.push(takes);
+          keeps.all.push(keep);
+          if (room) own[scale === "y" ? "y" : "right"][i] = takes - keep;
+          else {
+            needs.free.push(takes);
+            keeps.free.push(keep);
+          }
         });
-        const extra = Number.isFinite(needs)
-          ? within(needs, home.room) - keeps
+        const of = needs.free.length ? "free" : "all";
+        const extra = needs.all.length
+          ? mostOf(needs[of]) - mostOf(keeps[of])
           : outward(home.layers);
         if (scale === "y") left = extra;
         else right = extra;
@@ -607,13 +787,24 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
           throw new Error(
             `${axis.path}.place.side: a y axis on the right stands beside each row's last panel, so the panels of a row must share ${axis.scale}; give ${axis.scale} scope "row" or "chart", ${builtIn(axis.scale) ? 'repeat "all" for one beside every panel, or keep the axis on the left' : 'or repeat "all" for one beside every panel'}`,
           );
+        const takes = { free: [] as number[], all: [] as number[] };
         state.drawsY.forEach((_, i) => {
           if (!drawsIn(axis, state, i)) return;
           after[i] = true;
-          right = Math.max(right, breadth(kit, axis, state, i));
+          const breadthIn = breadth(kit, axis, state, i);
+          takes.all.push(breadthIn);
+          if (roomIn(axis, i)) own.right[i] = breadthIn;
+          else takes.free.push(breadthIn);
         });
+        right = Math.max(right, mostOf(takes.free.length ? takes.free : takes.all));
       }
-      return { left, right, after };
+      return {
+        left,
+        right,
+        lefts: state.drawsY.map((_, i) => own.y[i] ?? left),
+        rights: state.drawsY.map((_, i) => own.right[i] ?? right),
+        after,
+      };
     },
     ends(plan, state, i) {
       const { measure } = state;
@@ -653,30 +844,7 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       return lo > hi ? undefined : [lo, hi];
     },
     fits(state, planOf) {
-      let top = 0;
-      let bottom = Number.NEGATIVE_INFINITY;
-      const home = changed("x");
-      state.labeled.x.forEach((shows, i) => {
-        if (shows && home)
-          bottom = Math.max(
-            bottom,
-            extraDepth(kit, home, state, placedLayers(kit, home, state, i, planOf(i))),
-          );
-      });
-      for (const axis of elsewhere)
-        if (axis.side === "top")
-          for (let i = 0; i < state.labeled.x.length; i++)
-            if (drawsIn(axis, state, i))
-              top = Math.max(
-                top,
-                depthOf(
-                  kit,
-                  axis,
-                  state,
-                  i,
-                  placedLayers(kit, axis, state, i, over(state, axis, i, planOf(i))),
-                ),
-              );
+      const taken = depths(state, (axis, i) => over(state, axis, i, planOf(i)));
       // The y labels as planned, every line of them: how far each block
       // reaches from its tick, and its room to the plot's end it reaches toward.
       const blocks = state.labeled.x.map((_, i) => {
@@ -725,73 +893,55 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
           if (need > given + 0.5) reaching.reach[i] = Math.max(reaching.reach[i] ?? 0, need);
         });
       }
-      if (reaches && top <= reserved.top + 0.5 && bottom <= reserved.bottom + 0.5) return true;
+      const deeper = (depths: readonly number[], given: readonly number[]) =>
+        depths.some((depth, i) => depth > (given[i] ?? 0) + 0.5);
+      if (reaches && !deeper(taken.above, reserved.top) && !deeper(taken.below, reserved.bottom))
+        return true;
+      const grown = (depths: readonly number[], before: readonly number[]) =>
+        depths.map((depth, i) => Math.max(before[i] ?? Number.NEGATIVE_INFINITY, Math.ceil(depth)));
       kept = {
         width: kept.width,
-        top: Math.max(kept.top, Math.ceil(top)),
-        bottom: Math.max(kept.bottom, Math.ceil(bottom)),
+        top: grown(taken.above, kept.top),
+        bottom: grown(taken.below, kept.bottom),
       };
       return false;
     },
     panel(axes, state, index, plot, plans) {
-      const out = axes.map((guide) => {
-        const axis = changed(guide.scale);
-        return axis
-          ? rebuild(
-              kit,
-              guide,
-              axis,
-              // Axes on their scale's default side are of x, y, and yRight.
-              placedLayers(kit, axis, state, index, plans[axis.scale as ScaleName]),
-              state,
-              index,
-              plans[axis.scale as ScaleName]?.scale.categories,
-            )
-          : guide;
-      });
-      for (const axis of elsewhere) {
-        const plan = builtIn(axis.scale)
-          ? plans[axis.scale]
-          : plans.own?.plan(
-              axis.scale,
-              index,
-              axis.across ? plot.width : plot.height,
-              axis.across,
-              axis.across ? plot.x : plot.y,
-            );
-        if (!plan) continue;
-        if (drawsIn(axis, state, index))
-          out.push(
-            beyond(
-              kit,
-              axis,
-              placedLayers(kit, axis, state, index, plan),
-              state,
-              index,
-              plot,
-              plan.scale.categories,
-            ),
-          );
-      }
-      return out;
+      return panelAxes(axes, state, index, plot, plans);
     },
-    moving(axes, state, index, plot, own) {
+    moving(axes, state, index, plot, plans) {
+      // The rows of labels the scene's rooms leave out stay out in frames
+      // between, where labels of values between may be shorter: found
+      // when a transition first asks for a frame.
+      let cuts: Map<ListedAxis, number> | undefined;
+      const cutsOf = () => {
+        const found = new Map<ListedAxis, number>();
+        placings(state, index, plot, plans, (axis, plan) => {
+          if (!axis.across || !roomIn(axis, index)) return;
+          const cut = cutRow(axis, placedLayers(kit, axis, state, index, plan));
+          if (cut !== undefined) found.set(axis, cut);
+        });
+        return found;
+      };
       return {
         defaults: axes,
-        at: (defaults, plans) =>
-          this.panel(
+        at: (defaults, frame) => {
+          cuts ??= cutsOf();
+          return panelAxes(
             defaults,
             {
               ...state,
               plan: (scale, k, pixels, start) =>
                 k === index && (scale === "y" || scale === "yRight")
-                  ? plans[scale]
+                  ? frame[scale]
                   : state.plan(scale, k, pixels, start),
             },
             index,
             plot,
-            { ...plans, own },
-          ),
+            { ...frame, own: plans.own },
+            cuts,
+          );
+        },
       };
     },
   };
@@ -815,9 +965,26 @@ function drawsIn(axis: ListedAxis, state: AxesState, i: number): boolean {
     : !!state.drawsY[i] && (cells ? cells.last(i, axis) : all || lastInRow(state, i));
 }
 
-/** Whether any of `axis`' layers writes labels. */
-function writes(axis: ListedAxis): boolean {
-  return axis.layers.some((layer) => !!layer.labels);
+/**
+ * Each panel's depth of axes, at least what earlier scenes kept for it
+ * (`floor`): its own where a room holds it (`own`), else the most any
+ * panel without a room takes, which they all keep; and the most of all.
+ * Depths of panels drawing none (less than any) are none.
+ */
+function settled(
+  depths: readonly number[],
+  own: readonly boolean[],
+  floor: readonly number[],
+): { most: number; each: number[] } {
+  const each = depths.map((depth, i) => Math.max(depth, floor[i] ?? Number.NEGATIVE_INFINITY));
+  const free = mostOf(each.filter((_, i) => !own[i]));
+  const none = (depth: number) => (Number.isFinite(depth) ? depth : 0);
+  return { most: none(mostOf(each)), each: each.map((depth, i) => none(own[i] ? depth : free)) };
+}
+
+/** The most of `values`, less than any where there are none. */
+function mostOf(values: readonly number[]): number {
+  return Math.max(Number.NEGATIVE_INFINITY, ...values);
 }
 
 /** A y label's block: how far it reaches from its tick, its room to the plot's end it reaches toward, and that room as a share of the plot's length. */
@@ -866,17 +1033,11 @@ function reachKept(blocks: readonly LabelReach[], given: number, shrink: number)
  * (as `labelReach` in model/panel-layout.ts for a centered line).
  */
 function blockReach(kit: GuideKit, paint: TextPaint, text = "", align?: Align): number {
-  const box = paint.background;
-  const [top, , bottom] = box ? paint.padding : [0, 0, 0];
   const lines = text.split("\n").length;
-  const height = box ? kit.textHeight(paint, text) : (lines - 1) * paint.lineHeight + paint.size;
-  return Math.ceil(
-    (align === "start" || align === "end" ? height : height / 2) +
-      Math.max(
-        box?.stroke ? (box.strokeWidth ?? 1) / 2 : 0,
-        (kit.textHalo(paint, "")?.width ?? 0) / 2 - Math.min(top, bottom),
-      ),
-  );
+  const height = paint.background
+    ? kit.textHeight(paint, text)
+    : (lines - 1) * paint.lineHeight + paint.size;
+  return Math.ceil((align === "start" || align === "end" ? height : height / 2) + past(kit, paint));
 }
 
 /** Whether panel `i` is the last of its row, where y axes on the right go. */
@@ -948,6 +1109,7 @@ function placedLayers(
   state: AxesState,
   i: number,
   plan: AxisPlan | undefined,
+  cut?: number,
 ): Placed[] {
   const { styles } = state;
   const base = {
@@ -960,8 +1122,22 @@ function placedLayers(
       `${axis.path}.style.tick`,
     ),
   };
-  const within = state.cells?.within(i) ?? [0, state.height];
-  return layered(kit, axis, base, styles.read, state.measure, plan, within);
+  const span = state.cells?.within(i) ?? [0, state.height];
+  // A panel's own room, and below the plots, the gap the model draws labels at.
+  const room = roomIn(axis, i);
+  const gap = axis.home && axis.across ? state.xGap(i) : undefined;
+  const roomed = room === axis.room && cut === undefined ? axis : { ...axis, room, cut };
+  return layered(kit, roomed, base, styles.read, state.measure, plan, span, gap);
+}
+
+/** The first row of labels outside the plot that `placed`, `axis`' layers laid out, leaves out. */
+function cutRow(axis: ListedAxis, placed: readonly Placed[]): number | undefined {
+  let cut: number | undefined;
+  for (const { layer } of placed) {
+    const labels = axis.layers.find(({ id }) => id === layer.id)?.labels;
+    if (labels && !labels.inside && !layer.labels) cut = Math.min(cut ?? labels.row, labels.row);
+  }
+  return cut;
 }
 
 /** How `axis` writes panel `i`'s tick labels, before its layers' own styles. */
@@ -977,7 +1153,10 @@ function baseLabel(kit: GuideKit, axis: ListedAxis, styles: ChartStyles, i: numb
 
 /**
  * The layers of an axis (or a colorbar's) over `plan`, their labels and
- * tick marks drawn with `base`'s paints under their own styles.
+ * tick marks drawn with `base`'s paints under their own styles. Along x, a
+ * room holds rows of labels outside the plot from the line outward: angles
+ * needing more depth than a row has left are not tried, wrapped labels keep
+ * the lines that fit, and rows that do not fit are left out whole.
  */
 export function layered(
   kit: GuideKit,
@@ -986,7 +1165,9 @@ export function layered(
     scale: string;
     across: boolean;
     above: boolean;
-    room?: ListedAxis["room"];
+    room?: Room | undefined;
+    /** The first row of labels outside the plot to leave out, whatever fits. */
+    cut?: number | undefined;
   },
   base: { label: TextPaint; tick: StrokePaint },
   read: Read,
@@ -997,8 +1178,16 @@ export function layered(
    * box); undefined to leave them at their ticks.
    */
   within: readonly [number, number] | undefined,
+  /**
+   * Along x, pixels from the line to the labels as they are drawn (the
+   * model's, below the plots); by default the default axes', for their size.
+   */
+  labelGap?: number,
 ): Placed[] {
-  const placed = axis.layers.map((layer): Placed => {
+  // Labels stand off the line as default axes place them, by the gap for their size.
+  const gap = axis.across ? kit.tickLabelGap(base.label.size) : Y_GAP;
+  /** `layer` placed, its labels outside the plot within `room` px of where its row starts. */
+  const place = (layer: Layer, room: number): Placed => {
     const run = runOf(axis, layer);
     const at = `${layer.path}.style`;
     const label = restyle(kit, read, base.label, layer.style?.tickLabel, `${at}.tickLabel`);
@@ -1031,7 +1220,7 @@ export function layered(
     let align: Align | undefined;
     const labels = layer.labels;
     if (labels) {
-      // Shortened to the axis' room first: what is left out hides and reaches nothing.
+      // Shortened to a y axis' room first: what is left out hides and reaches nothing.
       const fit = roomFit(kit, axis, labels, label, measure);
       if (fit) ticks = ticks.map((t) => ({ ...t, label: fit(t.label) }));
       // Labels that may turn are written on one line.
@@ -1043,11 +1232,23 @@ export function layered(
       // the plot centered by default, outside it where the style says.
       const aligned = (axis.across ? label.align : label.verticalAlign) !== undefined;
       const flat = labels.inside || aligned ? alignAt(axis.across, label) : undefined;
-      angle = angleOf(labels, ticks, label, measure, run, flat);
+      if (labels.overlap === "stagger") lanes = 2;
+      // The depth the room leaves these labels as painted, past their boxes too.
+      const depth = room - past(kit, label);
+      const fits =
+        room < Number.POSITIVE_INFINITY
+          ? (turn: number) =>
+              rowDepth(kit, { ticks, angle: turn, label, lanes }, measure) +
+                past(kit, label, turn) <=
+              room + 0.5
+          : undefined;
+      const turned = angleOf(labels, ticks, label, measure, run, flat, fits);
+      angle = turned.angle;
       if (!angle) align = flat;
-      const overlap = labels.overlap ?? "show";
-      if (overlap === "wrap") ticks = wrapped(ticks, label, measure);
-      if (overlap === "stagger") lanes = 2;
+      // Labels the room keeps from turning further are kept apart as "hide" keeps them.
+      const overlap = turned.thin && !labels.overlap ? "hide" : (labels.overlap ?? "show");
+      if (overlap === "wrap")
+        ticks = wrapped(kit, ticks, label, measure, fits && linesWithin(kit, label, depth));
       // Labels along y stay inside the chart (an inset's box), where the
       // plot's ends leave no room for a layer's taller ones: they meet
       // where they are drawn.
@@ -1077,10 +1278,114 @@ export function layered(
       }
     }
     return { layer, ticks, angle, lanes, lane, at: labelAt, align, label, tick };
+  };
+  const room = axis.across ? axis.room : undefined;
+  const from = labelGap ?? gap;
+  const placed = room
+    ? rowsWithin(kit, axis.layers, room.max, from, measure, place)
+    : axis.layers.map((layer) => place(layer, Number.POSITIVE_INFINITY));
+  const ranked = prioritized(kit, placed, measure, axis, gap);
+  return room ? rowsKept(kit, ranked, room.max, from, measure, axis.cut) : ranked;
+}
+
+/**
+ * `layers` placed by `place` in the order of their rows of labels outside
+ * the plot, from the line outward: each given the pixels from where its
+ * row starts, past the rows before it as placed, to `most` px from the line.
+ */
+function rowsWithin(
+  kit: GuideKit,
+  layers: readonly Layer[],
+  most: number,
+  gap: number,
+  measure: MeasureText,
+  place: (layer: Layer, room: number) => Placed,
+): Placed[] {
+  const out: Placed[] = [];
+  const rows: number[] = [];
+  const rowOf = ({ labels }: Layer) => (labels && !labels.inside ? labels.row : -1);
+  const order = layers.map((_, k) => k).sort((a, b) => rowOf(layers[a]!) - rowOf(layers[b]!));
+  for (const k of order) {
+    const layer = layers[k]!;
+    const row = rowOf(layer);
+    if (row < 0) {
+      out[k] = place(layer, Number.POSITIVE_INFINITY);
+      continue;
+    }
+    let away = firstRow(layer.labels as TickLabelsSpec, gap, true, layers);
+    for (let r = 0; r < row; r++) away += (rows[r] ?? 0) + ROW_GAP;
+    const placed = place(layer, most - away);
+    out[k] = placed;
+    rows[row] = Math.max(rows[row] ?? 0, rowDepth(kit, placed, measure));
+  }
+  return out;
+}
+
+/**
+ * `placed` with its rows of labels outside the plot kept from the line
+ * outward while they end, as painted, within `most` px of it: the first
+ * row reaching past, and every row beyond it, are left out whole, every
+ * layer and lane in them (their labels, not their tick marks). Labels
+ * inside the plot stay.
+ */
+function rowsKept(
+  kit: GuideKit,
+  placed: readonly Placed[],
+  most: number,
+  gap: number,
+  measure: MeasureText,
+  from = Number.POSITIVE_INFINITY,
+): Placed[] {
+  const layers = placed.map(({ layer }) => layer);
+  const rows = rowDepths(kit, placed, measure);
+  let cut = from;
+  for (const { layer, label, angle } of placed) {
+    const { labels } = layer;
+    if (!labels || labels.inside) continue;
+    let end = firstRow(labels, gap, true, layers);
+    for (let r = 0; r < labels.row; r++) end += (rows[r] ?? 0) + ROW_GAP;
+    end += (rows[labels.row] ?? 0) + past(kit, label, angle);
+    if (end > most + 0.5) cut = Math.min(cut, labels.row);
+  }
+  if (cut === Number.POSITIVE_INFINITY) return placed as Placed[];
+  return placed.map((one) => {
+    const { labels } = one.layer;
+    if (!labels || labels.inside || labels.row < cut) return one;
+    return {
+      ...one,
+      layer: { ...one.layer, labels: false },
+      ticks: one.ticks.map((tick) => ({ ...tick, label: "" })),
+      lane: [],
+    };
   });
-  // Labels stand off the line as default axes place them, by the gap for their size.
-  const gap = axis.across ? kit.tickLabelGap(base.label.size) : Y_GAP;
-  return prioritized(kit, placed, measure, axis, gap);
+}
+
+/**
+ * How many lines of wrapped labels in `paint` fit `depth` px, or all they
+ * have where none fits (their row is then left out whole).
+ */
+function linesWithin(kit: GuideKit, paint: TextPaint, depth: number): number {
+  const lines = Math.floor((depth - kit.textHeight(paint)) / paint.lineHeight) + 1;
+  return lines >= 1 ? lines : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * How far what is painted of a label, turned `angle` degrees, reaches
+ * past its box's top and bottom: its outline, which widens the box on
+ * every side (its corners further when turned), or its halo, which
+ * reaches as far every way past the text, less the box's padding as
+ * turned.
+ */
+function past(kit: GuideKit, paint: TextPaint, angle = 0): number {
+  const box = paint.background;
+  const [top, right, bottom, left] = box ? paint.padding : [0, 0, 0, 0];
+  const { cos, sin } = turned(angle);
+  return Math.max(
+    0,
+    box?.stroke ? ((box.strokeWidth ?? 1) / 2) * (cos + sin) : 0,
+    (kit.textHalo(paint, "")?.width ?? 0) / 2 -
+      (Math.min(top, bottom) * cos + Math.min(left, right) * sin),
+  );
 }
 
 /** How an axis' labels lie: side by side below or above the plots, or one above another along y. */
@@ -1260,7 +1565,13 @@ export function turned(
   };
 }
 
-/** The angle labels are drawn at: their rotation, or the first candidate at which neighbors do not overlap. */
+/**
+ * The angle labels are drawn at: their rotation, or the first candidate at
+ * which neighbors do not overlap. Where a room leaves too little depth for
+ * some candidates (`fits`), they are not tried: with none of the others
+ * keeping labels apart, the last of them, and the labels are to be kept
+ * apart as "hide" keeps them (`thin`).
+ */
 function angleOf(
   labels: TickLabelsSpec,
   ticks: readonly AxisTick[],
@@ -1268,12 +1579,20 @@ function angleOf(
   measure: MeasureText,
   run: Run,
   flat?: Align,
-): number {
+  fits?: (angle: number) => boolean,
+): { angle: number; thin: boolean } {
   const rotation = labels.rotation;
-  if (typeof rotation !== "object") return rotation ?? 0;
+  if (typeof rotation !== "object") return { angle: rotation ?? 0, thin: false };
+  const candidates = fits ? rotation.candidates.filter(fits) : rotation.candidates;
+  // With no candidate the room has depth for, flat labels thinned where
+  // they fit, else the row is left out (see `rowsKept`).
+  if (candidates.length === 0)
+    return fits!(0)
+      ? { angle: 0, thin: true }
+      : { angle: rotation.candidates.at(-1)!, thin: false };
   // Neighbors are the labels drawn: blank ticks between them keep no room.
   const shown = ticks.filter((tick) => tick.label);
-  for (const angle of rotation.candidates) {
+  for (const angle of candidates) {
     let fits = true;
     for (let k = 1; k < shown.length && fits; k++)
       fits = !overlaps(
@@ -1285,9 +1604,9 @@ function angleOf(
         run,
         angle ? undefined : flat,
       );
-    if (fits) return angle;
+    if (fits) return { angle, thin: false };
   }
-  return rotation.candidates.at(-1)!;
+  return { angle: candidates.at(-1)!, thin: candidates.length < rotation.candidates.length };
 }
 
 /**
@@ -1356,28 +1675,60 @@ function kept(
   return { ticks, lane: [] };
 }
 
-/** Labels broken at spaces into lines that fit between their neighbors, three lines at most. */
-function wrapped(ticks: AxisTick[], paint: TextPaint, measure: MeasureText): AxisTick[] {
+/**
+ * Labels broken at spaces into lines that fit between their neighbors,
+ * each of their own lines into three at most. Where an axis' room holds
+ * fewer (`most`), a label keeps that many, the last ending with an
+ * ellipsis to say it is cut short; one whose ellipsis does not fit is
+ * left out.
+ */
+function wrapped(
+  kit: GuideKit,
+  ticks: AxisTick[],
+  paint: TextPaint,
+  measure: MeasureText,
+  most?: number,
+): AxisTick[] {
+  const { css } = paint;
   return ticks.map((tick, k) => {
     const near = [ticks[k - 1], ticks[k + 1]].filter((other) => other !== undefined);
     const room = Math.min(...near.map((other) => Math.abs(other.position - tick.position))) - PAD;
-    if (!(room > 0) || measure(tick.label, paint.css) <= room) return tick;
     const lines: string[] = [];
-    for (const word of tick.label.split(" ")) {
-      const last = lines.at(-1);
-      if (
-        last !== undefined &&
-        (lines.length >= 3 || measure(`${last} ${word}`, paint.css) <= room)
-      )
-        lines[lines.length - 1] = `${last} ${word}`;
-      else lines.push(word);
+    for (const line of tick.label.split("\n")) {
+      const from = lines.length;
+      const words = room > 0 && measure(line, css) > room ? line.split(" ") : [line];
+      for (const word of words) {
+        const last = lines.length > from ? lines.at(-1) : undefined;
+        if (
+          last !== undefined &&
+          (lines.length - from >= WRAPPED || measure(`${last} ${word}`, css) <= room)
+        )
+          lines[lines.length - 1] = `${last} ${word}`;
+        else lines.push(word);
+      }
     }
-    return { ...tick, label: lines.join("\n") };
+    if (most !== undefined && lines.length > most) {
+      lines.length = most;
+      const width = room > 0 ? room : Number.POSITIVE_INFINITY;
+      const last = kit.fitText(`${lines[most - 1]}…`, width, measure, css);
+      if (measure(last, css) > width) return { ...tick, label: "" };
+      lines[most - 1] = last;
+    }
+    const label = lines.join("\n");
+    return label === tick.label ? tick : { ...tick, label };
   });
 }
 
+/** How a row of labels' depth is measured: a layer's ticks, turn, paint, and lanes. */
+type RowLabels = Pick<Placed, "ticks" | "angle" | "label" | "lanes">;
+
+/** How deep a layer's row of labels is: its lanes, each as deep as its deepest label. */
+function rowDepth(kit: GuideKit, placed: RowLabels, measure: MeasureText): number {
+  return laneDepth(kit, placed, measure) * placed.lanes + (placed.lanes - 1) * ROW_GAP;
+}
+
 /** How tall a layer's row of labels is: a line (or a wrapped label's lines), or turned labels' extent. */
-function laneDepth(kit: GuideKit, placed: Placed, measure: MeasureText): number {
+function laneDepth(kit: GuideKit, placed: RowLabels, measure: MeasureText): number {
   let deepest = labelDepth(kit, placed, "", measure);
   for (const { label } of placed.ticks)
     deepest = Math.max(deepest, labelDepth(kit, placed, label, measure));
@@ -1387,7 +1738,7 @@ function laneDepth(kit: GuideKit, placed: Placed, measure: MeasureText): number 
 /** How far `text`, a label of `placed` on an x axis, reaches from its row's start, as turned. */
 function labelDepth(
   kit: GuideKit,
-  { angle, label }: Placed,
+  { angle, label }: Pick<Placed, "angle" | "label">,
   text: string,
   measure: MeasureText,
 ): number {
@@ -1408,9 +1759,7 @@ export function rowDepths(
   for (const placed of layers) {
     const { labels } = placed.layer;
     if (!labels || !!labels.inside !== inside) continue;
-    const lane = laneDepth(kit, placed, measure);
-    const depth = lane * placed.lanes + (placed.lanes - 1) * ROW_GAP;
-    rows[labels.row] = Math.max(rows[labels.row] ?? 0, depth);
+    rows[labels.row] = Math.max(rows[labels.row] ?? 0, rowDepth(kit, placed, measure));
   }
   return Array.from(rows, (row) => row ?? 0);
 }
@@ -1418,8 +1767,8 @@ export function rowDepths(
 /**
  * Pixels `layers`' tick marks and labels outside the plot take out from
  * the line of an x axis: its ticks, and each row of labels past them, the
- * first `gap` from the line unless its layer gives its own. Labels inside
- * the plot take none.
+ * first `gap` from the line unless its layer gives its own, with what is
+ * painted past their boxes (`past`). Labels inside the plot take none.
  */
 function outsideDepth(
   kit: GuideKit,
@@ -1430,12 +1779,12 @@ function outsideDepth(
   const all = layers.map(({ layer }) => layer);
   const rows = rowDepths(kit, layers, measure);
   let depth = outward(all);
-  for (const { layer } of layers) {
+  for (const { layer, label, angle } of layers) {
     const { labels } = layer;
     if (!labels || labels.inside) continue;
     let away = firstRow(labels, gap, true, all);
     for (let row = 0; row < labels.row; row++) away += (rows[row] ?? 0) + ROW_GAP;
-    depth = Math.max(depth, away + (rows[labels.row] ?? 0));
+    depth = Math.max(depth, away + (rows[labels.row] ?? 0) + past(kit, label, angle));
   }
   return depth;
 }
@@ -1466,12 +1815,13 @@ function depthOf(
 ): number {
   const text = titleOf(axis, i);
   const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
-  return outsideDepth(kit, layers, state.measure, kit.tickLabelGap(layers[0]!.label.size)) + title;
+  const gap = kit.tickLabelGap(layers[0]!.label.size);
+  return within(outsideDepth(kit, layers, state.measure, gap), roomIn(axis, i)) + title;
 }
 
 /**
  * Pixels the x axis on the default side, `layers` placed, takes beyond
- * what the model keeps for its ticks and one line of labels: less than
+ * what the model keeps for its ticks and labels' lines: less than
  * none with no labels outside the plot, whose room it gives back.
  */
 function extraDepth(
@@ -1485,7 +1835,7 @@ function extraDepth(
   const gap = kit.tickLabelGap(layers[0]!.label.size);
   const ticks = Math.max(0, outward(axis.layers) - TICK);
   const labels = outsideDepth(kit, layers, state.measure, gap) - gap - ticks;
-  return ticks + Math.max(0, labels - kit.textHeight(layers[0]!.label));
+  return ticks + Math.max(0, labels - state.xLabelLines);
 }
 
 /** The widest of `layers`' labels. */
@@ -1503,7 +1853,7 @@ function breadth(kit: GuideKit, axis: ListedAxis, state: AxesState, i: number): 
   const text = titleOf(axis, i);
   const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
   const reach = outward(axis.layers);
-  const beside = within(outsideBreadth(kit, layers, state.measure), axis.room);
+  const beside = within(outsideBreadth(kit, layers, state.measure), roomIn(axis, i));
   // Room past the labels, as the default axes keep.
   return beside + (beside > reach ? GAP + 2 : 0) + title;
 }

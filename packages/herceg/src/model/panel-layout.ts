@@ -32,7 +32,7 @@ import type { ChartSpec, ScaleScope, XAxisSpec } from "../spec/spec.ts";
 import { haloOf, type TextPaint } from "../style/style.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { AxisType } from "./axis.ts";
-import type { AxesState } from "./guides.ts";
+import type { AxesState, CompiledAxes } from "./guides.ts";
 import type { MarkSeries } from "./inspect.ts";
 import { GAP } from "./legend.ts";
 import type { ScaleInstance } from "./model.ts";
@@ -493,10 +493,11 @@ export interface HorizontalPlacing {
   };
   /** The left and right y labels and titles. */
   readonly sides: readonly [YLabelRoom, YLabelRoom];
-  /** What the guides' axes take beside the plots, and which panels draw a y axis on the right. */
-  readonly beside:
-    | { readonly left: number; readonly right: number; readonly after: readonly boolean[] }
-    | undefined;
+  /**
+   * What the guides' axes take beside the plots, the most and each panel's
+   * (see `CompiledAxes.beside`), and which panels draw a y axis on the right.
+   */
+  readonly beside: ReturnType<CompiledAxes["beside"]> | undefined;
   readonly kept: Margins;
   readonly keep: Keep;
   /**
