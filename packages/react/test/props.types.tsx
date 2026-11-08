@@ -50,9 +50,9 @@ import type {
   treemap,
   violin,
 } from "herceg";
-import type { GridOptions as DataGridOptions, GridEvents } from "herceg/grid";
-import type { PivotGridOptions } from "herceg/grid/pivot";
-import type { RemoteGridOptions } from "herceg/grid/remote";
+import type { GridOptions as DataGridOptions, GridEvents, GridModel } from "herceg/grid";
+import type { PivotGridModel, PivotGridOptions } from "herceg/grid/pivot";
+import type { RemoteGridModel, RemoteGridOptions } from "herceg/grid/remote";
 import type { GridOptions, InsetOptions, PanelDefinition, Tracks } from "herceg/layout";
 import type { ReactNode } from "react";
 import type { MarkProps, Mixed, Takes } from "../../herceg/test/helpers/props.ts";
@@ -175,19 +175,22 @@ true satisfies Takes<
   Omit<PropsOf<typeof Chart>, Own>,
   Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> & Listeners
 >;
-type GridListeners = {
-  [E in keyof GridEvents as `on${Capitalize<E>}`]?: ((event: GridEvents[E]) => void) | undefined;
+/** A grid's listeners, `select` typed by its model `M`. */
+type GridListeners<M> = {
+  [E in keyof GridEvents<M> as `on${Capitalize<E>}`]?:
+    | ((event: GridEvents<M>[E]) => void)
+    | undefined;
 };
 // React's grids take React cells in place of DOM renderers (`cells`); pivot grids take none.
 true satisfies Takes<
   Omit<PropsOf<typeof DataGrid<Mixed>>, "model" | "className" | "style" | "ref" | "cells">,
-  Omit<DataGridOptions<Mixed>, "model" | "cells"> & GridListeners
+  Omit<DataGridOptions<Mixed>, "model" | "cells"> & GridListeners<GridModel<Mixed>>
 >;
 true satisfies Takes<
   Omit<PropsOf<typeof RemoteGrid<Mixed>>, "model" | "className" | "style" | "ref" | "cells">,
-  Omit<RemoteGridOptions<Mixed>, "model" | "cells"> & GridListeners
+  Omit<RemoteGridOptions<Mixed>, "model" | "cells"> & GridListeners<RemoteGridModel<Mixed>>
 >;
 true satisfies Takes<
   Omit<PropsOf<typeof PivotGrid<Mixed>>, "model" | "className" | "style" | "ref">,
-  Omit<PivotGridOptions<Mixed>, "model"> & GridListeners
+  Omit<PivotGridOptions<Mixed>, "model"> & GridListeners<PivotGridModel<Mixed>>
 >;

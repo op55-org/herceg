@@ -488,15 +488,12 @@ export class RowLink {
   readonly #cursor: () => Cursor | null;
   readonly #live: { textContent: string | null };
   /**
-   * What each channel held when last seen, and its row set's version, so
-   * each change is reported once, also of a set changed in place.
+   * What each channel held when last seen, so each change is reported
+   * once. Stores freeze what they hold: a selection seen never changes.
    */
-  readonly #seen = new Map<Bound, { selection: DataSelection | null; version: number }>();
-  /**
-   * What the chart's brush wrote, and its row set's version, which clearing
-   * the brush clears while the channel still holds it, unchanged.
-   */
-  readonly #brushed = new Map<Bound, ReturnType<typeof seen>>();
+  readonly #seen = new Map<Bound, DataSelection | null>();
+  /** What the chart's brush wrote, which clearing the brush clears while the channel still holds it. */
+  readonly #brushed = new Map<Bound, DataSelection | null>();
   /**
    * What live channels held before a gesture's first preview, what the
    * brush had written there, and what the previews last wrote there: the
@@ -506,8 +503,8 @@ export class RowLink {
     Bound,
     {
       selection: DataSelection | null;
-      brushed: ReturnType<typeof seen> | undefined;
-      wrote?: ReturnType<typeof seen>;
+      brushed: DataSelection | null | undefined;
+      wrote?: DataSelection | null;
     }
   >();
   readonly #stops: (() => void)[] = [];
@@ -553,7 +550,7 @@ export class RowLink {
     this.#count = count;
     this.#cursor = cursor;
     this.#live = live;
-    for (const b of bound) this.#seen.set(b, seen(b.store.get(b.channel)));
+    for (const b of bound) this.#seen.set(b, b.store.get(b.channel));
     for (const store of new Set(bound.map((b) => b.store)))
       this.#stops.push(store.subscribe((change) => this.#changed(store, change)));
     // After the chart's own key handling, which moves the cursor and clears its brush on Escape.
@@ -634,9 +631,9 @@ export class RowLink {
           held.set(b, { selection: b.store.get(b.channel), brushed: this.#brushed.get(b) });
     } else this.#held = new Map();
     if (phase === "cancel") {
-      const back = [...held].filter(([b, { wrote }]) => wrote && holds(b, wrote));
+      const back = [...held].filter(([b, { wrote }]) => wrote !== undefined && holds(b, wrote));
       for (const [b, { brushed }] of back)
-        if (brushed) this.#brushed.set(b, brushed);
+        if (brushed !== undefined) this.#brushed.set(b, brushed);
         else this.#brushed.delete(b);
       const changes = back.map(([bound, { selection }]) => ({ bound, selection }));
       return written(this.#write(changes, cause, revision, phase));
@@ -644,7 +641,7 @@ export class RowLink {
     // Writes, keeping what a preview wrote, which its gesture's cancel takes back while it is there.
     const apply = (changes: { bound: Bound; selection: DataSelection | null }[]) => {
       if (phase === "preview")
-        for (const { bound, selection } of changes) held.get(bound)!.wrote = seen(selection);
+        for (const { bound, selection } of changes) held.get(bound)!.wrote = selection;
       return written(this.#write(changes, cause, revision, phase));
     };
     if (!selection) {
@@ -664,7 +661,7 @@ export class RowLink {
       return rows ? [{ bound: b, selection: rows }] : [];
     });
     if (commits) this.#brushed.clear();
-    for (const { bound, selection } of changes) this.#brushed.set(bound, seen(selection));
+    for (const { bound, selection } of changes) this.#brushed.set(bound, selection);
     return apply(changes);
   }
 
@@ -834,15 +831,14 @@ export class RowLink {
       if (bound.store !== store || bound.channel !== change.channel) continue;
       // Counted even when a later change heard first already shows what it made.
       by.revision ??= this.#count(by.cause);
-      const now = seen(store.get(bound.channel));
-      const before = this.#seen.get(bound);
-      if (now.selection === before?.selection && now.version === before.version) continue;
+      const now = store.get(bound.channel);
+      if (now === this.#seen.get(bound)) continue;
       this.#seen.set(bound, now);
       if (bound.highlight) this.#invalidate();
       this.#events.emit("rowSelection", {
         table: bound.table,
         channel: bound.channel,
-        selection: now.selection,
+        selection: now,
         cause: by.cause,
         revision: by.revision,
         phase: by.phase,
@@ -919,15 +915,9 @@ function chosenRows(
   return rows.size > 0 ? selectRows(rows) : null;
 }
 
-/** A channel's selection as last seen, with its row set's version. */
-function seen(selection: DataSelection | null) {
-  return { selection, version: selection?.kind === "rows" ? selection.rows.version : -1 };
-}
-
-/** Whether a channel still holds what was written to it, its rows unchanged since. */
-function holds(bound: Bound, wrote: ReturnType<typeof seen>): boolean {
-  const now = seen(bound.store.get(bound.channel));
-  return now.selection === wrote.selection && now.version === wrote.version;
+/** Whether a channel still holds what was written to it. */
+function holds(bound: Bound, wrote: DataSelection | null): boolean {
+  return bound.store.get(bound.channel) === wrote;
 }
 
 /** What a gesture wrote, as its event reports it: undefined when it wrote nothing. */
@@ -941,10 +931,10 @@ function written(rows: readonly RowSelectionChange[]): Written | undefined {
 
 /** A copy of what a channel holds as rows: a condition's rows as they are now. */
 function held(bound: Bound): RowSet {
-  const rows = new RowSet(bound.table);
   const current = bound.store.get(bound.channel);
-  if (current?.kind === "rows") rows.addAll(current.rows.positions());
-  else if (current?.kind === "predicate") {
+  if (current?.kind === "rows") return current.rows.copy();
+  const rows = new RowSet(bound.table);
+  if (current?.kind === "predicate") {
     const { at } = compileExpression(current.expression, bound.table);
     const matching: number[] = [];
     for (let row = 0; row < bound.table.length; row++) if (at(row) === true) matching.push(row);

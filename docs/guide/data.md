@@ -398,7 +398,28 @@ store.subscribe(() => filtered.setQuery({ filter: store.condition(["brush"]) }))
 `store.condition(channels)` is the conjunction of those channels'
 conditions. `store.subscribe` listeners hear each change as it is made
 (`{ channel, selection, revision }`), even one made while others hear an
-earlier change. Nothing propagates on its own: the application decides which
+earlier change: a change a listener makes while another is delivered
+reaches the listeners after it first.
+
+**Selections never change.** A store freezes the selection it is given, in
+place: the selection, its row set (`rows.freeze()`), and a condition's
+expression through. `selectRows` and `selectWhere` return frozen
+selections too. Changing a frozen set throws ("RowSet: the set is frozen,
+as selections hold it; change a copy, rows.copy()"), so a selection a
+listener or an event kept still names the rows selected then. A
+selection's `rows` are typed `ReadonlyRowSet`; to change them, select a
+copy:
+
+```ts
+const held = store.get("picked");
+if (held?.kind === "rows") store.set("picked", selectRows(held.rows.copy().add(12)));
+```
+
+`copy()` copies the set's words, not its rows (125 KB for a million rows;
+over an ordered table, only the words that hold members); a copy of a set
+from before a reset is empty. Freezing copies nothing. Positions, `size`,
+and `current` still follow the table: a frozen set's rows leave as the table
+drops them, and none are left after a reset. Nothing propagates on its own: the application decides which
 views read which channels. Grids and charts bound to a channel write and
 highlight it (see [Selected rows](interaction.md#selected-rows)).
 

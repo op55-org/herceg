@@ -6,7 +6,7 @@
 import { Expr } from "./expr.ts";
 import { compileExpression, type Expression } from "./expression.ts";
 import { rowComparator, type SortKey } from "./order.ts";
-import type { RowSet } from "./row-set.ts";
+import type { ReadonlyRowSet } from "./row-set.ts";
 import {
   type PositionField,
   type Schema,
@@ -79,7 +79,7 @@ export class RowView<S extends Schema = Schema> {
   #query: Readonly<RowQuery<S>> = {};
   /** The comparator of #sort for the table after a number of writes: it holds their arrays. */
   #compare: { writes: number; compare: (a: number, b: number) => number } | undefined;
-  #restriction: RowSet<S> | null = null;
+  #restriction: ReadonlyRowSet<S> | null = null;
   /** Fields the filter and sort read; updates to others keep rows and order. */
   #reads = new Set<string>();
   /** Positions, in view order, up to #length; undefined when every row shows in table order. */
@@ -190,7 +190,7 @@ export class RowView<S extends Schema = Schema> {
   }
 
   /** The row set the view is restricted to, or null. */
-  get restriction(): RowSet<S> | null {
+  get restriction(): ReadonlyRowSet<S> | null {
     return this.#restriction;
   }
 
@@ -199,7 +199,7 @@ export class RowView<S extends Schema = Schema> {
    * with null. The set is read when the view rebuilds: call `restrict` again
    * after changing it.
    */
-  restrict(rows: RowSet<S> | null): void {
+  restrict(rows: ReadonlyRowSet<S> | null): void {
     if (rows && rows.source !== this.source)
       throw new Error("A view can only be restricted to rows of its own table");
     this.#restriction = rows;

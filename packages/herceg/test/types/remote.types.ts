@@ -8,6 +8,7 @@ import { exportGrid } from "../../src/grid/export.ts";
 import { memorySource } from "../../src/grid/memory.ts";
 import type { GridAggregate } from "../../src/grid/query.ts";
 import { createRemoteGridModel, type RemoteGridModel } from "../../src/grid/remote.ts";
+import type { RemoteSelection } from "../../src/grid/remote-selection.ts";
 import type { RemoteTotal, TotalsAnswer, TotalsRequest } from "../../src/grid-remote.ts";
 
 const requests = table({
@@ -27,6 +28,10 @@ expectTypeOf(model).toEqualTypeOf<
 >();
 const grid = createRemoteGrid(document.body, { model, ariaLabel: "Requests" });
 expectTypeOf(grid.model).toEqualTypeOf(model);
+// A remote grid's selection is of keys or a condition.
+grid.on("select", ({ selection }) => {
+  expectTypeOf(selection).toEqualTypeOf<RemoteSelection | null>();
+});
 expectTypeOf(exportGrid(model, { headers: "ids" })).toEqualTypeOf<Promise<Blob>>();
 
 createRemoteGridModel({

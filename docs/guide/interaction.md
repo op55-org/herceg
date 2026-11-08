@@ -907,7 +907,11 @@ before drawing: `store.set("focus", selectWhere(col("fare").gt(20)))`.
   the mark draws (its row view's).
 
 Lassos and clicks write `RowSet`s, which keep their rows while others are
-appended and dropped. `chart.select(selection, { rows: false })` shows a
+appended and dropped. What a chart writes, the store freezes; a click with
+Shift or Ctrl writes a copy of the channel's rows with its own added or
+removed. A grid bound to the channel reports each of the chart's writes as a
+`select` with cause `"sync"` ([Grids](grids.md#events)): a live brush's
+previews, its commit or cancel, and its clear. `chart.select(selection, { rows: false })` shows a
 selection without writing rows, as when mirroring another view's brush.
 
 ### How marks highlight

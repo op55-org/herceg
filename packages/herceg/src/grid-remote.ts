@@ -4,7 +4,12 @@
 // selections by key or condition. Kept apart from `herceg/grid`, so grids
 // over local tables load none of it.
 
-export type { GridEvents, GridInputEvent } from "./dom/grid.ts";
+export type {
+  GridEvents,
+  GridInputEvent,
+  GridSelectEvent,
+  GridSelection,
+} from "./dom/grid.ts";
 export type {
   FrameworkCell,
   FrameworkCells,
@@ -48,6 +53,7 @@ export {
 } from "./grid/remote.ts";
 export {
   type RemoteSelection,
+  type RemoteSelectionChange,
   RemoteSelectionStore,
   remoteSelectionStore,
   selectionCondition,

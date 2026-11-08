@@ -4,7 +4,7 @@
 // come with the components that take them.
 
 import type { Schema } from "herceg";
-import type { GridEvents, GridOptions, Grid as HercegGrid } from "herceg/grid";
+import type { GridEvents, GridOptions, GridSelectEvent, Grid as HercegGrid } from "herceg/grid";
 import {
   type CSSProperties,
   type ReactNode,
@@ -24,6 +24,12 @@ export interface GridComponentProps<G>
   style?: CSSProperties;
   /** The underlying grid, for imperative calls such as `focusCell`; its model keeps its type. */
   ref?: Ref<G | null>;
+  /**
+   * The model's selection changed, by any writer of its channel: what it
+   * holds now (frozen), what changed it (`cause`), and the model's
+   * revision. A click that selects reports it before `onRowClick`.
+   */
+  onSelect?: ((event: GridSelectEvent<ModelOf<G>>) => void) | undefined;
   /** A body row was clicked (after the click selected) or Enter pressed on one of its cells: the row by its identity. */
   onRowClick?: ((event: GridEvents["rowClick"]) => void) | undefined;
   /** The same click, as on its cell (`column`), after `onRowClick`. */
@@ -36,10 +42,16 @@ export interface GridComponentProps<G>
   onRender?: ((event: GridEvents["render"]) => void) | undefined;
 }
 
-/** What the components need of the grids they make. */
-type Made = Pick<HercegGrid, "on" | "destroy" | "render" | "drawnRevision" | "root"> & {
+/** The model of a grid `G`. */
+type ModelOf<G> = G extends { readonly model: infer M } ? M : unknown;
+
+/** What the components need of the grids they make (each listens as `HercegGrid` does). */
+type Made = Pick<HercegGrid, "destroy" | "render" | "drawnRevision" | "root"> & {
   update(options: object): void;
 };
+
+/** A grid of any model, as its events are heard: they differ only in `select`'s selection type. */
+type Listened = Pick<HercegGrid, "on">;
 
 /** What a component makes its grid with. */
 export type Make<S extends Schema, G> = (
@@ -59,6 +71,7 @@ export function useGrid<S extends Schema, G extends Made>(
     className,
     style,
     ref,
+    onSelect,
     onRowClick,
     onCellClick,
     onRender,
@@ -93,6 +106,14 @@ export function useGrid<S extends Schema, G extends Made>(
     };
   }, [model]);
 
+  // Handlers are current before options apply: an update can tell the
+  // model's listeners, which may select.
+  const listened = grid as unknown as RefObject<Listened | null>;
+  useGridEvent(listened, "select", onSelect as ((event: GridEvents["select"]) => void) | undefined);
+  useGridEvent(listened, "rowClick", onRowClick);
+  useGridEvent(listened, "cellClick", onCellClick);
+  const render = useGridEvent(listened, "render", onRender);
+
   useLayoutEffect(() => {
     const current = grid.current;
     const last = applied.current;
@@ -109,10 +130,6 @@ export function useGrid<S extends Schema, G extends Made>(
     // Cells of renderers replaced write their text before this paints.
     current.render();
   });
-
-  useGridEvent(grid, "rowClick", onRowClick);
-  useGridEvent(grid, "cellClick", onCellClick);
-  const render = useGridEvent(grid, "render", onRender);
 
   // A new model makes a new grid, which the ref then gives.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the grid changes with the model
@@ -148,12 +165,12 @@ export function useGrid<S extends Schema, G extends Made>(
  * the latest one, as charts' event props do: no re-render subscribes again.
  */
 function useGridEvent<K extends keyof GridEvents>(
-  grid: RefObject<Pick<HercegGrid, "on"> | null>,
+  grid: RefObject<Listened | null>,
   type: K,
   handler: ((event: GridEvents[K]) => void) | undefined,
 ): RefObject<((event: GridEvents[K]) => void) | undefined> {
   const latest = useRef(handler);
-  const subscribed = useRef<{ grid: Pick<HercegGrid, "on">; stop: () => void } | null>(null);
+  const subscribed = useRef<{ grid: Listened; stop: () => void } | null>(null);
   useLayoutEffect(() => {
     latest.current = handler;
     const current = handler === undefined ? null : grid.current;

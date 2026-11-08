@@ -21,7 +21,7 @@ import {
 import { type GridCellSlots, useVueCells, type VueGridCells } from "./cells.ts";
 
 export type RemoteGridProps<S extends Schema = Schema> = GridComponentProps &
-  GridListeners & {
+  GridListeners<RemoteGridModel<S>> & {
     /**
      * What the grid shows, made with `createRemoteGridModel` and owned by the
      * application; a new model makes a new grid.

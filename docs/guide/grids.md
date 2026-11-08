@@ -92,7 +92,11 @@ a grid's container gets 320 pixels. Grids take the charts'
 - **The selection** is a row set in the model's
   [selection store](data.md#row-sets-and-selection-stores) under its
   channel, where an application or a chart can read it. A condition put in
-  that channel shows as selected rows too.
+  that channel shows as selected rows too. The store freezes what it
+  holds: a click publishes a copy of the set with the row toggled (its
+  words, not its rows), so a selection read once never changes.
+- **From code.** `model.select(i, mode)`, `selectAll()`,
+  `clearSelection()`, and `click(i)` select as the pointer does.
 - **Toggling.** With `selection: { click: "toggle" }`, a plain click on
   the row that is all the selection (or a group's header whose rows are)
   clears it, as dashboards' tables do; otherwise a plain click selects
@@ -104,9 +108,37 @@ a grid's container gets 320 pixels. Grids take the charts'
 
 | Event | Reports |
 | --- | --- |
+| `select` | The selection changed, by any writer of the model's channel: `selection` (what the channel holds, frozen; null for none), `cause`, and the model's `revision` once it applied. One event per command, in the order of the changes; a change replaced before the grid heard it is left out, so the last event holds what the channel holds. |
 | `rowClick` | A body row clicked (a press released in place, after the click selected), or Enter on one of its cells: `ref`, the row as the model names it (`GridRef`: a table row by its identity, a group by its key), its `rowIndex` now, the `column` id, and `cause` (`"pointer"` or `"keyboard"`). A group's expand toggle and checkbox act alone and report nothing. |
 | `cellClick` | The same click, as on its cell, after `rowClick`. |
 | `render` | A frame drawn, with the model's `revision` it drew (`grid.drawnRevision` is the last; the first frame draws as the grid is made). |
+
+`select` says what is selected and why; `rowClick` says a row was
+activated. A click that selects reports `select`, then `rowClick`, then
+`cellClick`; Space selects and reports `select` alone; Enter activates
+and reports `rowClick` alone.
+
+| `cause` | Changed by |
+| --- | --- |
+| `"pointer"` | The grid's click, Ctrl or Cmd click, Shift click, or a group's checkbox. |
+| `"keyboard"` | Space, Shift with arrows, Ctrl+A, or Escape in the grid. |
+| `"api"` | The model's `select`, `selectAll`, `clearSelection`, or `click`, called by the application (in a listener too). |
+| `"sync"` | Another writer of the channel: the application's `store.set`, a chart bound to it (its brush's previews, commits, and cancels too), or another grid, over the store or over the same model. |
+
+```ts
+grid.on("select", ({ selection, cause }) => {
+  if (cause === "sync") return; // other writers: routed where they are made
+  const rows = selection?.kind === "rows" ? selection.rows.positions() : new Uint32Array(0);
+  if (rows.length !== 1) return clearFilter();
+  filterTo(months.value("month", rows[0]!)!, months.value("region", rows[0]!)!);
+});
+```
+
+A selection reported never changes: its rows are read-only
+(`ReadonlyRowSet`), and changing a set or condition a store holds throws.
+To change one, copy it and select the copy:
+`store.set(channel, selectRows(selection.rows.copy().add(row)))`. A row
+set's positions still follow its table's insertions, drops, and resets.
 
 ```ts
 const grid = createGrid(element, { model, ariaLabel: "Orders" });
@@ -120,7 +152,7 @@ grid.on("render", ({ revision }) => revision >= waitingFor && markReady());
 `ref` follows its row through sorting, filtering, and scrolling
 (`model.indexOf(ref)` finds it); `rowIndex` is where it is as listeners
 hear of the click, -1 if the click's selection took it out of the rows
-(a `select` listener filtering the view by the selection). `model.revision` counts the changes
+(a `select` listener filtering the view by the selection, or clearing it). `model.revision` counts the changes
 the grid shows (rows, columns, sort, selection, scroll, focus). Enter on
 a cell reports a click without selecting; Space selects.
 
@@ -733,7 +765,8 @@ model.pinColumn("region", "left");
 - Clicking a header sorts the rows by its column (absent and missing last),
   without touching the view's order.
 - Selecting a row selects its rows of the view, so a chart restricted to
-  them shows them.
+  them shows them; `select` reports those rows, and `selectedCount`
+  counts them, not the pivot's rows.
 - With `totals: true` (or `{ row: true }`), the pivot has a totals row:
   each value's aggregates over every row with that value, and the
   totals' over every row, computed from the rows (never a mean of means).
@@ -856,7 +889,10 @@ loading, what failed, and what is cached.
 key; Shift ranges need every row between loaded; Ctrl+A selects the
 query's filter as a condition; a group header selects rows matching the
 group. `selectionCondition(selection, key)` turns a selection into a filter
-a server can run; `model.selectedCount` is null for conditions.
+a server can run; `model.selectedCount` is null for conditions. The store
+keeps a frozen copy of each selection it is given (keys once each,
+exceptions winning over additions), and its listeners, and `select`, get
+that copy.
 
 **Groups** are asked for as they expand (`setExpanded(key, true)`); headers
 read row counts and aggregates from the source (a column's `aggregate`
@@ -1032,9 +1068,10 @@ function Requests({ data }: { data: typeof requests }) {
 ```
 
 A new `model` makes a new grid; `ariaLabel`, `theme`, `headerHeight`,
-`copy`, and `cells` change in place. `onRowClick`, `onCellClick`, and
-`onRender` hear the grid's [events](#events), the latest handler each
-time. `exportGrid(model)` exports it as any grid's. The `ref` is
+`copy`, and `cells` change in place. `onSelect`, `onRowClick`,
+`onCellClick`, and `onRender` hear the grid's [events](#events), the
+latest handler each time; `onSelect`'s selection is typed by the model
+(a local or pivot model's rows, a remote model's keys or condition). `exportGrid(model)` exports it as any grid's. The `ref` is
 the grid (`grid.current.model` keeps the model's type). A model no one
 keeps stops following its view, so one made with `useMemo` needs no
 cleanup. Cell kinds, links, headings, and a totals row come with the
@@ -1074,7 +1111,7 @@ shows a row's text under another row's content. See
 what they cost.
 
 **In Vue**, the same props are written as a template's (`aria-label`,
-`:header-height`), events as `@row-click`, `@cell-click`, and `@render`,
+`:header-height`), events as `@select`, `@row-click`, `@cell-click`, and `@render`,
 and a template ref's `grid` is the grid. Keep the model in a plain
 `const`, `shallowRef`, or `markRaw`: deep proxies (`ref()`, `reactive()`)
 cannot reach its private fields (the grid itself takes a proxy's
@@ -1104,7 +1141,7 @@ through teleports into their elements, and commit in the microtask after
 the grid's frame, before it paints. A slot for no column, or a column
 drawn by both a slot and a render function, is an error naming them.
 
-**In Svelte**, events are `onrowclick`, `oncellclick`, and `onrender`,
+**In Svelte**, events are `onselect`, `onrowclick`, `oncellclick`, and `onrender`,
 and `bind:grid` is the grid. A column's cells are a snippet:
 
 ```svelte

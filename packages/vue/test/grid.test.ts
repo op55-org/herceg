@@ -142,6 +142,33 @@ describe("<Grid>", () => {
     expect(keys()).not.toContain("Control C copies");
   });
 
+  it("hears selections with their causes before clicks, through the latest handler, until unmounted", async () => {
+    const t = requests(10);
+    const model = createGridModel({
+      data: rowView(t),
+      columns: [{ field: "id" }, { field: "ms" }],
+    });
+    const heard: string[] = [];
+    const tag = shallowRef("first");
+    const shown = shallowRef(true);
+    const rows = (selection: { kind: string; rows?: { positions(): Uint32Array } } | null) =>
+      selection?.kind === "rows" ? [...selection.rows!.positions()].join(" ") : "";
+    mount(
+      `<Grid v-if="shown" :model="model" aria-label="Requests" style="height: 300px"
+        @select="({ selection, cause }) => heard.push(tag + ' select ' + cause + ' ' + rows(selection))"
+        @row-click="({ rowIndex }) => heard.push(tag + ' row ' + rowIndex)" />`,
+      () => ({ model, heard, tag, shown, rows }),
+    );
+    await userEvent.click(host.querySelector('.hg-body [aria-rowindex="4"] [aria-colindex="2"]')!);
+    tag.value = "second";
+    await nextTick();
+    model.select(5, "toggle");
+    shown.value = false;
+    await nextTick();
+    // Unmounted: the model goes on without the grid, unheard.
+    model.clearSelection();
+    expect(heard).toEqual(["first select pointer 2", "first row 2", "second select api 2 5"]);
+  });
   it("never renders Vue for data changes, scrolling, focus, selection, or column layout", async () => {
     const data = requests(1000);
     const model = createGridModel({

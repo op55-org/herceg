@@ -1,5 +1,6 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
-import { selectionStore } from "../../src/data/selection.ts";
+import { type ReadonlyRowSet, RowSet } from "../../src/data/row-set.ts";
+import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { line } from "../../src/marks/line.ts";
@@ -31,6 +32,14 @@ chart.on("select", ({ rows }) => rows?.[0]?.selection);
 chart.on("click", ({ rows }) => rows?.length);
 // A selection shown without writing its rows, as when mirroring another view.
 chart.select([1, 2], { rows: false });
+
+// A selection freezes the set it holds: a set, or a set already read-only, but not a
+// look-alike that cannot be frozen.
+const picked = selectRows(new RowSet(trips).add(0));
+selectRows(picked.rows);
+declare const lookalike: Omit<ReadonlyRowSet, "freeze">;
+// @ts-expect-error a selection's set must freeze
+selectRows(lookalike);
 
 // @ts-expect-error gestures are brushes, lassos, and clicks
 rowSelection({ store: focus, channel: "focus", events: ["drag"] });

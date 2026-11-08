@@ -4,7 +4,7 @@
 // components that take them.
 
 import type { Schema } from "herceg";
-import type { GridEvents, GridOptions, Grid as HercegGrid } from "herceg/grid";
+import type { GridEvents, GridOptions, GridSelectEvent, Grid as HercegGrid } from "herceg/grid";
 import {
   type ComponentPublicInstance,
   h,
@@ -31,8 +31,14 @@ export type GridComponentProps = Pick<GridOptions, "theme" | "headerHeight" | "c
     | { "aria-label": string; ariaLabel?: undefined }
   );
 
-/** The grid's events as listeners, as templates write them (`@row-click`). */
-export interface GridListeners {
+/** The grid's events as listeners, as templates write them (`@row-click`), `select` typed by the model `M`. */
+export interface GridListeners<M = unknown> {
+  /**
+   * The model's selection changed, by any writer of its channel: what it
+   * holds now (frozen), what changed it (`cause`), and the model's
+   * revision. A click that selects emits it before `rowClick`.
+   */
+  onSelect?: ((event: GridSelectEvent<M>) => void) | undefined;
   /** A body row was clicked (after the click selected) or Enter pressed on one of its cells: the row by its identity. */
   onRowClick?: ((event: GridEvents["rowClick"]) => void) | undefined;
   /** The same click, as on its cell (`column`), after `rowClick`. */
@@ -69,8 +75,9 @@ export const gridProps = {
   },
 } as const;
 
-/** The grid's events, emitted as Vue events (`@row-click`, `@cell-click`, `@render`). */
+/** The grid's events, emitted as Vue events (`@select`, `@row-click`, `@cell-click`, `@render`). */
 export const gridEmits = {
+  select: (_: GridEvents["select"]) => true,
   rowClick: (_: GridEvents["rowClick"]) => true,
   cellClick: (_: GridEvents["cellClick"]) => true,
   render: (_: GridEvents["render"]) => true,
@@ -78,8 +85,8 @@ export const gridEmits = {
 
 type Emit = <K extends keyof GridEvents>(type: K, event: GridEvents[K]) => void;
 
-/** What the components need of the grids they make. */
-type Made = Pick<HercegGrid, "on" | "destroy" | "render" | "drawnRevision" | "root"> & {
+/** What the components need of the grids they make (each listens as `HercegGrid` does). */
+type Made = Pick<HercegGrid, "destroy" | "render" | "drawnRevision" | "root"> & {
   update(options: object): void;
 };
 
@@ -135,12 +142,15 @@ export function useGrid<S extends Schema, G extends Made>(
       created.destroy();
       return null;
     }
-    created.on("rowClick", (event) => emit("rowClick", event));
-    created.on("cellClick", (event) => emit("cellClick", event));
+    // Grids of every model listen alike; only `select`'s selection type differs.
+    const listened = created as unknown as Pick<HercegGrid, "on">;
+    listened.on("select", (event) => emit("select", event));
+    listened.on("rowClick", (event) => emit("rowClick", event));
+    listened.on("cellClick", (event) => emit("cellClick", event));
     // The grid's own frames commit their Vue cells in the microtask after
     // the frame's callback, before paint: heard once committed, unless the
     // grid went meanwhile (a cell's hook destroyed it).
-    created.on("render", (event) => {
+    listened.on("render", (event) => {
       if (!cells) emit("render", event);
       else
         cells.store.whenCommitted(() => {

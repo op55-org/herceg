@@ -615,6 +615,17 @@ class SparseWords implements SparseRows {
     return this.#members;
   }
 
+  copy(): SparseWords {
+    const copy = new SparseWords(this.#table, this.#ordinals);
+    copy.#index = this.#index.slice(0, this.#count);
+    copy.#words = this.#words.slice(0, this.#count);
+    copy.#count = this.#count;
+    copy.#members = this.#members;
+    copy.#emptied = this.#emptied;
+    copy.#trimmed = this.#trimmed;
+    return copy;
+  }
+
   positions(): Uint32Array {
     this.#trim(true);
     const ordinals = this.#ordinals();

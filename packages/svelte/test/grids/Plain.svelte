@@ -17,7 +17,11 @@
     ariaLabel: string;
     theme?: "dark" | undefined;
     copy?: false | undefined;
-    onrowclick?: (event: { ref: { id: unknown }; column: string }) => void;
+    onselect?: (event: {
+      selection: { kind: string; rows?: { positions(): Uint32Array } } | null;
+      cause: string;
+    }) => void;
+    onrowclick?: (event: { ref: { id: unknown }; column: string; rowIndex: number }) => void;
     oncellclick?: (event: { rowIndex: number }) => void;
     onrender?: (event: { revision: number }) => void;
   } = $props();

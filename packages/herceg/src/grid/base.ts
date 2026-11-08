@@ -314,6 +314,76 @@ export type FocusMove =
 export type SelectMode = "only" | "toggle" | "range" | "addRange";
 
 /**
+ * What changed a grid's selection: its own pointer (a click, a Ctrl or
+ * Shift click, a group's checkbox) or keys (Space, Shift with arrows,
+ * Ctrl A, Escape); the model's methods called by the application ("api");
+ * or another writer of its channel ("sync": the application's
+ * `store.set`, a chart or another grid bound to it).
+ */
+export type GridSelectCause = "pointer" | "keyboard" | "api" | "sync";
+
+/** A change of a model's channel as its grids report it (`select`). */
+export interface SelectionReport {
+  readonly selection: unknown;
+  readonly cause: GridSelectCause;
+  /** The model's revision once it applied. */
+  readonly revision: number;
+  /** The DOM grid whose input it was; others over the model report it as "sync". */
+  readonly origin: object | null;
+}
+
+/** A selection command, by the token its writes carry. */
+interface Command {
+  readonly cause: GridSelectCause;
+  readonly origin: object | null;
+}
+
+/** A change heard, until reported: its store revision, and the model's once it notified (-1 before). */
+interface Heard {
+  readonly selection: unknown;
+  readonly revision: number;
+  readonly cause: GridSelectCause;
+  readonly command: Command | null;
+  stamp: number;
+}
+
+/** The user's input a DOM grid runs on its model, until a command of that model takes it. */
+let input: { model: object; grid: object; cause: "pointer" | "keyboard" } | null = null;
+
+/**
+ * Runs `run` as the user's input to `model` (dom/grid.ts): the first
+ * command of `model` it runs takes `cause`; commands its listeners run, of
+ * this model or another, are the application's.
+ */
+export function asInput<T>(
+  model: object,
+  grid: object,
+  cause: "pointer" | "keyboard",
+  run: () => T,
+): T {
+  const outer = input;
+  input = { model, grid, cause };
+  try {
+    return run();
+  } finally {
+    input = outer;
+  }
+}
+
+/** Who hears each model's reports: its DOM grids. */
+const reporters = new WeakMap<object, Set<(report: SelectionReport) => void>>();
+
+/** Calls `listener` with each change of `model`'s channel (dom/grid.ts); returns what stops it. */
+export function onSelection(
+  model: object,
+  listener: (report: SelectionReport) => void,
+): () => void {
+  const set = reporters.get(model) ?? new Set();
+  reporters.set(model, set.add(listener));
+  return () => set.delete(listener);
+}
+
+/**
  * What a model shows as of one state of its rows: how many, and whether
  * the row at the top keeps its place since the last (not after a new
  * query, which keeps the pixel offset).
@@ -377,6 +447,15 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   #notified = false;
   /** Counts what listeners were told of: what the grid shows changes with it (see `revision`). */
   #revision = 0;
+  /** The selection command running; null between commands. */
+  #command: Command | null = null;
+  /** The command whose write to the channel is under way, with the store revision it takes. */
+  #writing: { revision: number; command: Command } | null = null;
+  /** Changes of the channel heard and not reported yet, in the order of the store's revisions. */
+  #heard: Heard[] = [];
+  /** The newest store revision of the channel heard. */
+  #newest = 0;
+  #reporting = false;
   /** What a plain click on the one row selected does (`selection.click`). */
   readonly #clicks: "toggle" | "only";
   /**
@@ -852,7 +931,7 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
    */
   moveFocus(move: FocusMove, { extend = false }: { extend?: boolean } = {}): void {
     // Listeners hear once the focus, the scroll, and a range are all in place.
-    this.#batch(() => this.#moveFocus(move, extend));
+    this.#run(() => this.#batch(() => this.#moveFocus(move, extend)));
   }
 
   #moveFocus(move: FocusMove, extend: boolean) {
@@ -895,7 +974,7 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     // The header row is always in view; going to the grid's first cell goes to the top of its rows too.
     if (move === "first") this.#scroll(0, 0);
     if (extend && body(focus.rowIndex) && body(row) && this.rangeAnchorIndex() !== null)
-      this.select(row, "range");
+      this.applySelect(row, "range");
   }
 
   // Selection
@@ -914,14 +993,35 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   /** Increments whenever the selection changes. */
   abstract get selectionRevision(): number;
 
-  /** Selects as clicks do (see `SelectMode`). */
-  abstract select(rowIndex: number, mode?: SelectMode): void;
+  /**
+   * Selects as clicks do (see `SelectMode`). A local grid's selection is a
+   * row set of its table: a group's header stands for every row of the
+   * group the view shows. A remote grid's is by key (a Shift range needs
+   * every row between loaded), and a group's header selects the rows
+   * matching the group, those the source adds later too; what it cannot
+   * select it refuses, saying why.
+   */
+  select(rowIndex: number, mode: SelectMode = "only"): void {
+    this.#run(() => this.applySelect(rowIndex, mode));
+  }
 
-  /** Selects every row the grid shows, those scrolled away or in collapsed groups too. */
-  abstract selectAll(): void;
+  /**
+   * Selects every row the grid shows, those scrolled away or in collapsed
+   * groups too: a local grid's as they are now, a remote grid's as its
+   * query's filter (those the source adds later too).
+   */
+  selectAll(): void {
+    this.#run(() => this.applySelectAll());
+  }
 
   /** Clears the selection and the range anchor; whether there was anything to clear. */
-  abstract clearSelection(): boolean;
+  clearSelection(): boolean {
+    return this.#run(() => this.applyClearSelection());
+  }
+
+  protected abstract applySelect(rowIndex: number, mode: SelectMode): void;
+  protected abstract applySelectAll(): void;
+  protected abstract applyClearSelection(): boolean;
 
   /**
    * Whether the row at `rowIndex` (or a group header's rows) is all that
@@ -935,8 +1035,10 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
    * all of it.
    */
   click(rowIndex: number): void {
-    if (this.#clicks === "toggle" && this.selectedAlone(rowIndex)) this.clearSelection();
-    else this.select(rowIndex, "only");
+    this.#run(() => {
+      if (this.#clicks === "toggle" && this.selectedAlone(rowIndex)) this.applyClearSelection();
+      else this.applySelect(rowIndex, "only");
+    });
   }
 
   /**
@@ -968,7 +1070,78 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
       return;
     }
     this.#revision++;
+    // Changes heard are stamped before listeners run: a command of theirs counts after.
+    for (const heard of this.#heard) if (heard.stamp < 0) heard.stamp = this.#revision;
     for (const listener of [...this.#listeners]) listener();
+    this.#report();
+  }
+
+  /**
+   * Runs a selection command: the application's ("api"), the grid's input
+   * (`asInput`), or one a listener runs, each its own. Its changes are
+   * reported once it is done, its last alone.
+   */
+  #run<T>(command: () => T): T {
+    const given = input?.model === this ? input : null;
+    const outer = this.#command;
+    this.#command = { cause: given?.cause ?? "api", origin: given?.grid ?? null };
+    if (given) input = null;
+    try {
+      return command();
+    } finally {
+      this.#command = outer;
+      this.#report();
+    }
+  }
+
+  /** Writes the model's channel of `store` as the running command's change. */
+  protected writeSelection<T>(
+    store: { readonly revision: number; set(channel: string, selection: T | null): void },
+    channel: string,
+    selection: T | null,
+  ): void {
+    const outer = this.#writing;
+    const command = this.#command ?? { cause: "api", origin: null };
+    this.#writing = { revision: store.revision + 1, command };
+    try {
+      store.set(channel, selection);
+    } finally {
+      this.#writing = outer;
+    }
+  }
+
+  /**
+   * The model's channel changed (`selection`, at the store's `revision`):
+   * kept to report, by the cause of the command that wrote it, or "sync".
+   * A change older than one heard already was replaced before it reached
+   * the model (a store's listener wrote another as it heard it), and is
+   * not reported. Call before notifying.
+   */
+  protected heardSelection(selection: unknown, revision: number): void {
+    if (revision <= this.#newest) return;
+    this.#newest = revision;
+    const writing = this.#writing;
+    const command = writing?.revision === revision ? writing.command : null;
+    // A command reports its last change alone.
+    if (command) this.#heard = this.#heard.filter((heard) => heard.command !== command);
+    this.#heard.push({ selection, revision, cause: command?.cause ?? "sync", command, stamp: -1 });
+  }
+
+  /** Reports the changes heard, once no command runs, in order: those listeners cause go after. */
+  #report() {
+    if (this.#command || this.#reporting || this.#heard.length === 0) return;
+    this.#reporting = true;
+    try {
+      for (let i = 0; i < this.#heard.length; i++) {
+        const { selection, cause, command, stamp } = this.#heard[i]!;
+        const revision = stamp < 0 ? this.#revision : stamp;
+        const report = { selection, cause, revision, origin: command?.origin ?? null };
+        for (const listener of [...(reporters.get(this) ?? [])]) listener(report);
+      }
+    } finally {
+      this.#heard = [];
+      this.#reporting = false;
+    }
   }
 
   /** Runs a command whose steps notify, telling listeners once, when it is done. */

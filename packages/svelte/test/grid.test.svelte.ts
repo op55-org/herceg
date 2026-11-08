@@ -53,6 +53,10 @@ function requests(rows: number) {
 }
 
 const grid = () => host.querySelector<HTMLElement>("[role=grid], [role=treegrid]")!;
+
+type Selected = { kind: string; rows?: { positions(): Uint32Array } } | null;
+const rowsOf = (selection: Selected) =>
+  selection?.kind === "rows" ? [...selection.rows!.positions()].join(" ") : "";
 const firstCells = () =>
   [...host.querySelectorAll(".hg-body [role=row]")].map(
     (row) => row.querySelector("[role=gridcell]")!.textContent,
@@ -90,6 +94,30 @@ describe("<Grid>", () => {
     expect(revisions.at(-1)).toBe(model.revision);
   });
 
+  it("hears selections with their causes before clicks, through the latest handler, until unmounted", async () => {
+    const t = requests(10);
+    const model = createGridModel({
+      data: rowView(t),
+      columns: [{ field: "id" }, { field: "ms" }],
+    });
+    const heard: string[] = [];
+    const handlers = (tag: string) => ({
+      onselect: ({ selection, cause }: { selection: Selected; cause: string }) =>
+        heard.push(`${tag} select ${cause} ${rowsOf(selection)}`),
+      onrowclick: ({ rowIndex }: { rowIndex: number }) => heard.push(`${tag} row ${rowIndex}`),
+    });
+    const props = render(Plain, { model, ariaLabel: "Requests", ...handlers("first") });
+    await userEvent.click(host.querySelector('.hg-body [aria-rowindex="4"] [aria-colindex="2"]')!);
+    Object.assign(props, handlers("second"));
+    flushSync();
+    model.select(5, "toggle");
+    unmount(mounted!);
+    mounted = undefined;
+    flushSync();
+    // Unmounted: the model goes on without the grid, unheard.
+    model.clearSelection();
+    expect(heard).toEqual(["first select pointer 2", "first row 2", "second select api 2 5"]);
+  });
   it("draws its model, and applies changed props without a new grid", async () => {
     const model = createGridModel({
       data: rowView(requests(100)),

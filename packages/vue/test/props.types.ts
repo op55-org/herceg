@@ -52,9 +52,9 @@ import type {
   treemap,
   violin,
 } from "herceg";
-import type { GridOptions as DataGridOptions, GridEvents } from "herceg/grid";
-import type { PivotGridOptions } from "herceg/grid/pivot";
-import type { RemoteGridOptions } from "herceg/grid/remote";
+import type { GridOptions as DataGridOptions, GridEvents, GridModel } from "herceg/grid";
+import type { PivotGridModel, PivotGridOptions } from "herceg/grid/pivot";
+import type { RemoteGridModel, RemoteGridOptions } from "herceg/grid/remote";
 import type { GridOptions, InsetOptions, PanelDefinition, Tracks } from "herceg/layout";
 import type { PublicProps } from "vue";
 import type { MarkProps, Mixed, Takes, Unset } from "../../herceg/test/helpers/props.ts";
@@ -200,20 +200,23 @@ type GridProps<C> = C extends new (
 ) => unknown
   ? Omit<P, keyof PublicProps | "model" | "ariaLabel" | "aria-label">
   : never;
-type GridListeners = {
-  [E in keyof GridEvents as `on${Capitalize<E>}`]?: ((event: GridEvents[E]) => void) | undefined;
+/** A grid's listeners, `select` typed by its model `M`. */
+type GridListeners<M> = {
+  [E in keyof GridEvents<M> as `on${Capitalize<E>}`]?:
+    | ((event: GridEvents<M>[E]) => void)
+    | undefined;
 };
 type Own = "model" | "ariaLabel";
 // Vue's grids take Vue cells in place of DOM renderers (`cells`); pivot grids take none.
 true satisfies Takes<
   Omit<GridProps<typeof DataGrid<Mixed>>, "cells">,
-  Omit<DataGridOptions<Mixed>, Own | "cells"> & GridListeners
+  Omit<DataGridOptions<Mixed>, Own | "cells"> & GridListeners<GridModel<Mixed>>
 >;
 true satisfies Takes<
   Omit<GridProps<typeof RemoteGrid<Mixed>>, "cells">,
-  Omit<RemoteGridOptions<Mixed>, Own | "cells"> & GridListeners
+  Omit<RemoteGridOptions<Mixed>, Own | "cells"> & GridListeners<RemoteGridModel<Mixed>>
 >;
 true satisfies Takes<
   GridProps<typeof PivotGrid<Mixed>>,
-  Omit<PivotGridOptions<Mixed>, Own> & GridListeners
+  Omit<PivotGridOptions<Mixed>, Own> & GridListeners<PivotGridModel<Mixed>>
 >;

@@ -1,17 +1,29 @@
 // The grid components' props (`<Grid>`, `<RemoteGrid>`, `<PivotGrid>`).
 
 import type { Schema } from "herceg";
-import type { GridEvents, GridModel, GridOptions, Grid as HercegGrid } from "herceg/grid";
+import type {
+  GridEvents,
+  GridModel,
+  GridOptions,
+  GridSelectEvent,
+  Grid as HercegGrid,
+} from "herceg/grid";
 import type { PivotGrid as HercegPivotGrid, PivotGridModel } from "herceg/grid/pivot";
 import type { RemoteGrid as HercegRemoteGrid, RemoteGridModel } from "herceg/grid/remote";
 import type { SvelteGridCells } from "./cells.svelte.js";
 
-/** The props every grid component takes besides its model, `cells`, and `grid`. */
-export interface GridComponentProps
+/** The props every grid component takes besides its model, `cells`, and `grid`; `onselect` typed by the model `M`. */
+export interface GridComponentProps<M = unknown>
   extends Pick<GridOptions, "ariaLabel" | "theme" | "headerHeight" | "copy"> {
   class?: string | undefined;
   /** Style of the container. Without a height, the grid is 320 px tall. */
   style?: string | undefined;
+  /**
+   * The model's selection changed, by any writer of its channel: what it
+   * holds now (frozen), what changed it (`cause`), and the model's
+   * revision. A click that selects reports it before `onrowclick`.
+   */
+  onselect?: ((event: GridSelectEvent<M>) => void) | undefined;
   /** A body row was clicked (after the click selected) or Enter pressed on one of its cells: the row by its identity. */
   onrowclick?: ((event: GridEvents["rowClick"]) => void) | undefined;
   /** The same click, as on its cell (`column`), after `onrowclick`. */
@@ -24,7 +36,7 @@ export interface GridComponentProps
   onrender?: ((event: GridEvents["render"]) => void) | undefined;
 }
 
-export interface GridProps<S extends Schema = Schema> extends GridComponentProps {
+export interface GridProps<S extends Schema = Schema> extends GridComponentProps<GridModel<S>> {
   /**
    * What the grid shows, made with `createGridModel` and owned by the
    * application (kept as it is: not in `$state`). Data changes, scrolling,
@@ -46,7 +58,8 @@ export interface GridProps<S extends Schema = Schema> extends GridComponentProps
   grid?: HercegGrid<S> | null;
 }
 
-export interface RemoteGridProps<S extends Schema = Schema> extends GridComponentProps {
+export interface RemoteGridProps<S extends Schema = Schema>
+  extends GridComponentProps<RemoteGridModel<S>> {
   /**
    * What the grid shows, made with `createRemoteGridModel` and owned by the
    * application; a new model makes a new grid.
@@ -62,7 +75,8 @@ export interface RemoteGridProps<S extends Schema = Schema> extends GridComponen
   grid?: HercegRemoteGrid<S> | null;
 }
 
-export interface PivotGridProps<S extends Schema = Schema> extends GridComponentProps {
+export interface PivotGridProps<S extends Schema = Schema>
+  extends GridComponentProps<PivotGridModel<S>> {
   /**
    * What the grid shows, made with `createPivotGridModel` and owned by the
    * application; a new model makes a new grid.

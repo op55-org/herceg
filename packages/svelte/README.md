@@ -57,7 +57,9 @@ made per data point.
   contexts: each cell's state is its row's, a cell that throws draws its
   text, and cells commit before the grid paints, at about 15 KB a mounted
   cell. Type a snippet's parameter with the model's schema
-  (`cell: GridCellContext<Services>`).
+  (`cell: GridCellContext<Services>`). `onselect` hears every change of
+  the selection with its cause (a click, keys, the model's methods, or
+  another writer), before `onrowclick`.
 
 ## Documentation
 
