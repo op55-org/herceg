@@ -136,7 +136,8 @@ parts).
   as `GUIDE_KIT`. A module imported by both would split into a chunk of its
   own, which compresses worse; `test/architecture.test.ts` enforces this.
 - `compile(config)` gives the model the configuration as it reads it (a
-  listed axis on its default side folded into its short form), axis
+  listed axis on its default side folded into its short form, and a short
+  form's `place` or `room` made the listed axis it stands for), axis
   contexts with `plan` and `formatValue`, `axes` (room across and beside the
   plots, label ends, `fits`, each panel's axes), and `legends`.
 - **Ticks** (`guides/ticks.ts`) are counts, steps (numbers from an anchor;
@@ -154,7 +155,11 @@ parts).
   styles. Rotation tries candidates until neighbors' boxes do not overlap;
   "hide" keeps every n-th label for the least n that clears. Labels may go
   inside the plot (`inside`), giving back the room outside. Axes whose tick
-  labels align by style are drawn as listed axes.
+  labels align by style are drawn as listed axes. A `room` is per panel
+  (a panel's own, or the chart's): a y axis shortens labels to it; an x
+  axis keeps rows from the plot outward while their depth, with the gap
+  the axis draws, fits, tries only rotations that fit, and cuts wrapped
+  lines, so the plot's edge is exact.
 - **Colorbars** (`guides/colorbars.ts`) draw a mark's ramp or a contour's
   bands, with ticks planned as an axis' along the bar.
 - **Field displays** (`fields`, [Field displays](../guide/fields.md)) reach

@@ -15,6 +15,7 @@ import type {
   GuideOptions,
   Scales,
   XAxisOptions,
+  YAxisOptions,
 } from "../guides/options.ts";
 import { aligned, alignedAt, insideAt } from "../layout/place.ts";
 import {
@@ -170,7 +171,7 @@ export type ChartConfig = Omit<
    */
   fields?: FieldDisplays | CompiledFields | undefined;
   x?: XAxisConfig | undefined;
-  y?: ChartAxisOptions | undefined;
+  y?: YAxisOptions | undefined;
   yRight?: ChartAxisOptions | undefined;
   /** The position scales' settings by name, over the short forms' (see `ChartSpec.scales`). */
   scales?: Scales | undefined;
@@ -616,7 +617,11 @@ export class ChartModel {
     if (scales) {
       config = { ...config };
       for (const name of ["x", "y", "yRight"] as const)
-        if (scales[name]) config[name] = { ...config[name], ...scales[name] };
+        if (scales[name])
+          (config as Record<typeof name, ChartAxisOptions | undefined>)[name] = {
+            ...config[name],
+            ...scales[name],
+          };
     }
     const compiled = this.#guides?.compile(config);
     const read = compiled?.config ?? config;
@@ -1968,6 +1973,8 @@ export class ChartModel {
     const axesState = (y: boolean[], yRight: boolean[]): AxesState => ({
       measure,
       xRoom: xLabels + xLineHeight,
+      xLabelLines: xLineHeight,
+      xGap: (i) => xGap(styles.axisText("tickLabel", "x", i)),
       styles,
       surface: surface(theme),
       width,
@@ -2001,6 +2008,9 @@ export class ChartModel {
     // Panels' layouts keep room for listed axes above the panels drawing them.
     const top = head.top + (placement ? 0 : (across?.top ?? 0));
     const xLabelHeight = xLineHeight + (across?.bottom ?? 0);
+    // In a layout of cells, each panel's x labels take their own room under
+    // its plot: a room of its own holds them (see `CompiledAxes.across`).
+    const xLabelsAt = (i: number) => xLineHeight + (across?.bottoms[i] ?? 0);
     // Each x scale's title goes once, under the last panel labeled with it
     // (see xTitleOf), or in a layout of cells, each labeled panel's own; only
     // those panels' title styles are read.
@@ -2059,10 +2069,10 @@ export class ChartModel {
       styles,
       ySides,
       axes: panelIndexes.map(axesIn),
-      over: panelIndexes.map((i) => (across?.over[i] ? across.top : 0)),
+      over: panelIndexes.map((i) => (across?.over[i] ? across.tops[i]! : 0)),
       guided: across,
       under: panelIndexes.map((i) =>
-        labelsX(i) ? xLabels + xLabelHeight + (ownTitle(i) ? xTitleHeight + GAP : 0) : 0,
+        labelsX(i) ? xLabels + xLabelsAt(i) + (ownTitle(i) ? xTitleHeight + GAP : 0) : 0,
       ),
       navigator,
       keep,
@@ -2582,7 +2592,7 @@ export class ChartModel {
           scope: xScope,
           align,
           size: xTitleHeight,
-          labels: xLabels + xLabelHeight,
+          labels: xLabels + xLabelsAt(i),
         });
       const along = aligned(align ?? "center", plot.x, plot.width);
       const y = height - head.lift - strip - xTitleHeight / 2 - (head.auto("bottom") ? 2 : 0);
@@ -2865,7 +2875,15 @@ export class ChartModel {
         drawsY: leftIn[i]!,
         inspector,
         plans: { x: xAt, y: yAt, yRight: rightAt, grid: gridAt },
-        ...(placing && { listed: guided.moving(axes, placing, i, plot, ownScales) }),
+        ...(placing && {
+          listed: guided.moving(axes, placing, i, plot, {
+            x: xAt,
+            y: yAt,
+            yRight: rightAt,
+            grid: gridAt,
+            own: ownScales,
+          }),
+        }),
       });
       // Grid lines, under the marks unless their settings say otherwise;
       // only lines drawn read their styles.

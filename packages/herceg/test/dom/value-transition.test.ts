@@ -1473,6 +1473,61 @@ describe("axes moving with values", () => {
     expect(axisOf(middle, "bottom")).toBe(axisOf(tween!.scene, "bottom"));
   });
 
+  it("move a short form's axis on top, in its room, as the guide it stands for", () => {
+    // b6.05: a bar race's value axis above the bars, as the short form says it.
+    const race = (axes: Pick<ChartConfig, "x" | "guides">) => {
+      const data = table({ brand: ["a", "b", "c"], value: [10, 20, 30] });
+      const model = new ChartModel(
+        {
+          locale: "en-US",
+          animation: { values: true },
+          marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "brand" })],
+          ...axes,
+        },
+        undefined,
+        [guideCompiler(GUIDE_KIT)],
+      );
+      model.setSize(600, 300, 1);
+      const before = model.scene(estimateText);
+      const { tween } = change(model, () => data.set("value", 2, 60));
+      return { before, tween: tween! };
+    };
+    const short = race({ x: { place: { side: "top" }, room: 30 } });
+    const guide = race({ guides: [axis({ scale: "x", place: { side: "top" }, room: 30 })] });
+    expect(short.tween).toBeDefined();
+    const middle = axisOf(frameAt(short.tween, 100), "top");
+    expect(labels(middle)).not.toEqual(labels(axisOf(short.tween.scene, "top")));
+    for (const t of [0, 100, 200])
+      expect(axisOf(frameAt(short.tween, t), "top")).toEqual(
+        axisOf(frameAt(guide.tween, t), "top"),
+      );
+    expectTicks(axisOf(frameAt(short.tween, 200), "top"), axisOf(short.tween.scene, "top"));
+  });
+
+  it("keep out between frames the rows of labels a room leaves out at the end", () => {
+    // Turned labels as deep as "1,000" do not fit 35 px; shorter ones between would.
+    const data = table({ brand: ["a", "b", "c"], value: [1000, 80, 60] });
+    const model = new ChartModel(
+      {
+        locale: "en-US",
+        animation: { values: true },
+        padding: { top: 8, right: 60, bottom: 8, left: 60 },
+        marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "brand" })],
+        x: { room: 35 },
+        guides: [axis({ scale: "x", labels: { rotation: -90 } })],
+      },
+      undefined,
+      [guideCompiler(GUIDE_KIT)],
+    );
+    model.setSize(600, 300, 1);
+    const written = (scene: Scene) => labels(axisOf(scene, "bottom")).filter((label) => label);
+    expect(written(model.scene(estimateText))).toEqual([]);
+    const { tween } = change(model, () => data.set("value", 0, -1000));
+    expect(tween).toBeDefined();
+    expect(written(tween!.scene)).toEqual([]);
+    for (const t of [50, 100, 150]) expect(written(frameAt(tween!, t))).toEqual([]);
+  });
+
   it("move axes the guides list with their scales, their layers laid out between", () => {
     // b6.05: a bar race's x axis on top, without tick marks, moving with the bars.
     const data = table({ x: [1, 2, 3], y: [10, 20, 30] });

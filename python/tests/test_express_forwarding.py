@@ -352,6 +352,20 @@ def test_chart_options_of_round_2_reach_the_chart_as_given():
     assert spec["theme"] == {"style": {"title": {"verticalAlign": "bottom"}}}
 
 
+def test_axes_places_and_rooms_reach_the_chart_and_a_panel():
+    top = hg.Place(side="top")
+    chart = hx.lineplot(DATA, x="t", y="v", x_axis=hg.AxisOptions(place=top, room=28))
+    assert chart.to_spec()[0]["x"] == {"title": "t", "place": {"side": "top"}, "room": 28}
+    host = hg.Chart(DATA)
+    left, _ = host.columns(2)
+    hx.lineplot(DATA, x="t", y="v", x_axis={"room": (20, 40)}, panel=left.panel("lines"))
+    assert host.to_spec()[0]["panels"][0]["x"] == {"title": "t", "room": {"min": 20, "max": 40}}
+    # A panel's axes are on the chart's sides.
+    with pytest.raises(hg.ChartError, match="^Panel x place: a panel's axes are on the chart's"):
+        hx.lineplot(DATA, x="t", y="v", x_axis={"place": top}, panel=left.panel("other"))
+        host.to_spec()
+
+
 def test_rugplot_names_each_tick_by_a_column_of_the_data():
     data = {"v": [1.0, None, 3.0], "id": ["a", "b", "c"]}
     for axis in ("x", "y"):

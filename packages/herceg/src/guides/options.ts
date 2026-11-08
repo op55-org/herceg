@@ -19,6 +19,7 @@ import type {
   TickLayerSpec,
   TicksSpec,
   XAxisSpec,
+  YAxisSpec,
 } from "../spec/spec.ts";
 
 /** What a tick generator is told about the axis it chooses ticks for. */
@@ -80,8 +81,10 @@ interface Functions {
 
 /** A panel's axis settings, or a 3D chart's. */
 export type AxisOptions = Omit<AxisSpec, keyof Functions> & Functions;
-/** The chart's `y` or `yRight`: a scale with its axis. */
+/** The chart's `yRight`: a scale with its axis. */
 export type ChartAxisOptions = Omit<ChartAxisSpec, keyof Functions> & Functions;
+/** The chart's `y`: a scale with its axis, on the left of the plots or with `place` on their right. */
+export type YAxisOptions = Omit<YAxisSpec, keyof Functions> & Functions;
 /** The chart's `x`, without its breaks (built with `timeBreaks`). */
 export type XAxisOptions = Omit<XAxisSpec, keyof Functions | "breaks"> & Functions;
 /** A position scale's settings in the chart's `scales`. */

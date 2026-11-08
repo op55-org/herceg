@@ -17,10 +17,10 @@ it("draws nothing for a configuration the loading compiler refuses, until an upd
     y: { title: "Load" },
     guides: [axis({ scale: "x", place: { side: "left" } })],
   });
-  await expect(chart.loading).rejects.toThrow(/x axes go on the "top" or the "bottom"/);
+  await expect(chart.loading).rejects.toThrow(/an x axis goes on the top or the bottom/);
   chart.render();
   expect(texts()).toEqual([]);
-  expect(() => chart.toSVG()).toThrow(/x axes go on the "top" or the "bottom"/);
+  expect(() => chart.toSVG()).toThrow(/an x axis goes on the top or the bottom/);
   chart.update({ guides: [axis({ scale: "x", place: { side: "top" } })] });
   await chart.loading;
   chart.render();

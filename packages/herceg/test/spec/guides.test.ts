@@ -127,7 +127,7 @@ describe("scales and guides", () => {
       }),
     ).not.toThrow();
     expect(valid({ guides: [{ type: "axis", scale: "x", place: { side: "left" } }] })).toThrow(
-      'guides[0].place.side: expected "top" or "bottom" for an x axis; received "left"',
+      'guides[0].place.side: an x axis goes on the top or the bottom; received "left"',
     );
     expect(valid({ guides: [{ type: "axis", scale: "y", layers: [{ id: "major" }] }] })).toThrow(
       /^guides\[0\]\.layers\[0\]\.id: expected a name other than "major"/,

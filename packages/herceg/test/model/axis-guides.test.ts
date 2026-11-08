@@ -9,6 +9,7 @@ import { estimateText, lineCount } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
+import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -310,7 +311,7 @@ describe("axes on other sides", () => {
 
   it("refuse sides an axis cannot take", () => {
     expect(() => build({ marks, guides: [axis({ scale: "x", place: { side: "left" } })] })).toThrow(
-      'chart guides[0].place.side: x axes go on the "top" or the "bottom"; received "left"',
+      'chart guides[0].place.side: an x axis goes on the top or the bottom; received "left"',
     );
     expect(() => build({ marks, guides: [axis({ scale: "x" }), axis({ scale: "x" })] })).toThrow(
       'chart guides[1].place.side: scale x has an axis on the bottom already; give this one "top"',
@@ -1144,10 +1145,7 @@ describe("axis room", () => {
     expect(800 - (fixed.x + fixed.width)).toBeLessThan(800 - (plot().x + plot().width));
   });
 
-  it("is refused on x axes, colorbars, and below zero", () => {
-    expect(() => build({ marks, guides: [axis({ scale: "x", room: 20 })] })).toThrow(
-      "chart guides[0].room: x axes take the depth their rows of labels need, and an ellipsis shortens only y axes' labels; drop room",
-    );
+  it("is refused on colorbars, below zero, and short of its tick marks", () => {
     expect(() =>
       build({ marks, guides: [axis({ scale: "y", room: { min: 30, max: 20 } })] }),
     ).toThrow(
@@ -1171,6 +1169,519 @@ describe("axis room", () => {
       "guides[0].room: colorbars take their own room; drop room",
     );
     expect(spec({ type: "axis", scale: "y", room: -1 })).toThrow(/^guides\[0\]\.room: expected/);
+    expect(spec({ type: "axis", scale: "x", room: { min: 40, max: 20 } })).toThrow(
+      "guides[0].room: expected finite pixels of at least 0, or { min, max } with min no more than max; received { min: 40, max: 20 }",
+    );
+  });
+});
+
+describe("x axis room", () => {
+  const days = {
+    id: "day",
+    ticks: { every: "day" },
+    format: { time: "%b %d" },
+    labels: { row: 1 },
+  } as const;
+  const twoRows = axis({ scale: "x", layers: [days] });
+  const bottomOf = (scene: Scene) => {
+    const { plot } = scene.panels[0]!;
+    return plot.y + plot.height;
+  };
+  /** The layers whose labels the axis on `side` draws, by their ids. */
+  const drawnLayers = (scene: Scene, side: AxisGuide["side"] = "bottom") => [
+    ...new Set((sideOf(scene, side)?.labelBoxes ?? []).map(({ layer }) => layer)),
+  ];
+  /** Every label drawn on `side` ends within `room` px of the plot. */
+  const expectWithin = (scene: Scene, room: number, side: "top" | "bottom" = "bottom") => {
+    const { plot } = scene.panels[0]!;
+    for (const { box } of sideOf(scene, side)?.labelBoxes ?? [])
+      if (side === "bottom")
+        expect(box.y + box.height).toBeLessThanOrEqual(bottomOf(scene) + room + 0.5);
+      else expect(box.y).toBeGreaterThanOrEqual(plot.y - room - 0.5);
+  };
+
+  contractTest("axis.room.x", () => {
+    // Charts whose x labels need different depths keep their plots' bottoms
+    // level with a fixed room: the axis takes exactly it, over 2 px of the
+    // chart's own padding.
+    const one = build({ marks, x: { room: 30 } }).scene;
+    const two = build({ marks, x: { room: 30 }, guides: [twoRows] }).scene;
+    expect(bottomOf(build({ marks }).scene)).not.toBe(
+      bottomOf(build({ marks, guides: [twoRows] }).scene),
+    );
+    expect(bottomOf(one)).toBe(320 - 2 - 30);
+    expect(bottomOf(two)).toBe(bottomOf(one));
+    // The day row does not fit the room: it is left out whole, never drawn past it.
+    expect(drawnLayers(two)).toEqual(["major"]);
+    expectWithin(two, 30);
+    // With room for both rows, both are drawn within it.
+    const roomy = build({ marks, x: { room: 60 }, guides: [twoRows] }).scene;
+    expect(bottomOf(roomy)).toBe(320 - 2 - 60);
+    expect(drawnLayers(roomy)).toEqual(["major", "day"]);
+    expectWithin(roomy, 60);
+    // Above the plots, the room is taken from the top.
+    const top = build({ marks, x: { place: { side: "top" }, room: 30 } }).scene;
+    const below = build({ marks, x: { show: false } }).scene;
+    expect(top.panels[0]!.plot.y).toBe(below.panels[0]!.plot.y + 30);
+    expectWithin(top, 30, "top");
+  });
+
+  it("draws as without it at the depth the axis takes by itself", () => {
+    const plain = build({ marks }).scene;
+    const natural = 320 - 2 - bottomOf(plain);
+    const roomed = build({ marks, x: { room: natural } }).scene;
+    expect(renderSvg(roomed, { idPrefix: "a" })).toBe(renderSvg(plain, { idPrefix: "a" }));
+  });
+
+  it("leaves out rows by number from the plot outward, every layer and lane in them", () => {
+    // Two layers share the second row: both are left out with it.
+    const noon = {
+      id: "noon",
+      ticks: { values: [start + 12 * HOUR, start + 36 * HOUR] },
+      format: () => "noon",
+      labels: { row: 1 },
+    } as const;
+    const shared = (room: number) =>
+      build({ marks, x: { room }, guides: [axis({ scale: "x", layers: [days, noon] })] }).scene;
+    expect(drawnLayers(shared(60)).sort()).toEqual(["day", "major", "noon"]);
+    expect(drawnLayers(shared(30))).toEqual(["major"]);
+    // A row past a row left out goes too, though it would fit alone.
+    const far = { ...noon, id: "far", labels: { row: 2, gap: 0 } } as const;
+    const third = build({
+      marks,
+      x: { room: 30 },
+      guides: [axis({ scale: "x", layers: [days, far] })],
+    }).scene;
+    expect(drawnLayers(third)).toEqual(["major"]);
+    // A staggered row takes both its lanes or neither.
+    const data = table({ x: [0, 100], v: [0, 1] });
+    const staggered = (room?: number) =>
+      build(
+        {
+          marks: [line(data, { x: "x", y: "v" })],
+          ...(room !== undefined && { x: { room } }),
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { every: 1 },
+              format: { number: ".1f" },
+              labels: { overlap: "stagger" },
+            }),
+          ],
+        },
+        400,
+      ).scene;
+    const lanes = (scene: Scene) => new Set(texts(sideOf(scene, "bottom")).map(({ y }) => y)).size;
+    expect(lanes(staggered())).toBe(2);
+    const deep = 320 - 2 - bottomOf(staggered());
+    expect(lanes(staggered(deep))).toBe(2);
+    // Room for one lane, not two: the row is left out, both lanes.
+    expect(texts(sideOf(staggered(deep - 12), "bottom"))).toEqual([]);
+    // Labels inside the plot take no room and stay.
+    const inside = build({
+      marks,
+      x: { room: 5 },
+      guides: [
+        axis({
+          scale: "x",
+          layers: [{ id: "in", ticks: { every: "day" }, labels: { inside: true } }],
+        }),
+      ],
+    }).scene;
+    expect(drawnLayers(inside)).toEqual(["in"]);
+  });
+
+  it("draws its line and tick marks only where the room holds them and no row", () => {
+    const plain = build({ marks });
+    const { model, scene } = build({ marks, x: { room: 5 } });
+    expect(bottomOf(scene)).toBe(320 - 2 - 5);
+    const bottom = sideOf(scene, "bottom")!;
+    expect(texts(bottom)).toEqual([]);
+    // The line and its tick marks, as without a room.
+    const strokes = (guide: AxisGuide) => segments(guide).map(({ coords }) => coords.length);
+    expect(strokes(bottom)).toEqual(strokes(sideOf(plain.scene, "bottom")!));
+    // The chart's description still reads the axis' range.
+    expect(describeChart(model)).toBe(describeChart(plain.model));
+  });
+
+  it("does not try angles the room has no depth for, keeping labels apart instead", () => {
+    const names = table({
+      name: ["Northern Hemisphere", "Southern Hemisphere", "Equatorial Belt", "Polar Regions"],
+      v: [3, 5, 2, 4],
+    });
+    const turned = (
+      room?: number,
+      rotation: number | { candidates: number[] } = { candidates: [0, -90] },
+    ) =>
+      build(
+        {
+          marks: [bar(names, { x: "name", y: "v" })],
+          ...(room !== undefined && { x: { room } }),
+          guides: [axis({ scale: "x", labels: { rotation } })],
+        },
+        300,
+      ).scene;
+    expect(texts(sideOf(turned(), "bottom")).map(({ angle }) => angle)).toEqual([
+      -90, -90, -90, -90,
+    ]);
+    // A quarter turn needs more than 40 px: flat labels, some left out to keep them apart.
+    const flat = turned(40);
+    const shown = texts(sideOf(flat, "bottom"));
+    expect(shown.map(({ angle }) => angle)).toEqual(shown.map(() => 0));
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.length).toBeLessThan(4);
+    expectWithin(flat, 40);
+    // With depth for it, the quarter turn again.
+    expect(texts(sideOf(turned(200), "bottom"))[0]!.angle).toBe(-90);
+    // A fixed angle is kept: its row fits, or it is left out.
+    expect(texts(sideOf(turned(40, -90), "bottom"))).toEqual([]);
+    // With no candidate the room has depth for, flat labels thinned, as above.
+    const none = texts(sideOf(turned(40, { candidates: [-45, -90] }), "bottom"));
+    expect(none.map(({ text }) => text)).toEqual(shown.map(({ text }) => text));
+    expect(none.map(({ angle }) => angle)).toEqual(none.map(() => 0));
+    expect(texts(sideOf(turned(8, { candidates: [-45, -90] }), "bottom"))).toEqual([]);
+  });
+
+  it("keeps what is painted past the labels' boxes within the room it takes", () => {
+    // Outlines 10 px wide reach 5 px past the boxes: a room of at most 60 px
+    // takes them, so the labels above the plot stay in the chart.
+    const outlined = build({
+      marks,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      y: { show: false },
+      x: {
+        place: { side: "top" },
+        room: { max: 60 },
+        style: { tickLabel: { background: { fill: "#eee", stroke: "#999", strokeWidth: 10 } } },
+      },
+    }).scene;
+    const boxes = sideOf(outlined, "top")!.labelBoxes!;
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const { box } of boxes) expect(box.y - 5).toBeGreaterThanOrEqual(-0.5);
+  });
+
+  it("keeps turned labels' halos within the room, past whichever side faces out", () => {
+    // Turned a quarter, the box's unpadded ends face up: its halo reaches 10 px past them.
+    const haloed = build({
+      marks,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      y: { show: false },
+      guides: [
+        axis({
+          scale: "x",
+          place: { side: "top" },
+          room: { max: 100 },
+          labels: { rotation: -90 },
+          style: {
+            tickLabel: {
+              background: { fill: "#eee" },
+              padding: { top: 10, bottom: 10 },
+              halo: { color: "red", width: 20 },
+            },
+          },
+        }),
+      ],
+    }).scene;
+    const boxes = sideOf(haloed, "top")!.labelBoxes!;
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const { box } of boxes) expect(box.y - 10).toBeGreaterThanOrEqual(-0.5);
+  });
+
+  it("measures a turned label's halo past its padding as turned", () => {
+    // Turned 15°, the box's padded top and bottom still face out: its halo
+    // reaches 10 px past the text, all but 0.3 px within the padding.
+    const tilted = (room?: number) =>
+      build(
+        {
+          marks: [line(table({ x: [0, 1, 2], v: [1, 3, 2] }), { x: "x", y: "v" })],
+          padding: { top: 0, right: 0, bottom: 0, left: 0 },
+          y: { show: false },
+          guides: [
+            axis({
+              scale: "x",
+              place: { side: "top" },
+              ticks: { values: [0, 1, 2] },
+              ...(room !== undefined && { room }),
+              labels: { rotation: -15 },
+              style: {
+                tickLabel: {
+                  background: { fill: "#eee" },
+                  padding: { top: 10, bottom: 10 },
+                  halo: { color: "red", width: 20 },
+                },
+              },
+            }),
+          ],
+        },
+        600,
+        300,
+      ).scene;
+    // In 45 px, every label fits.
+    expect(texts(sideOf(tilted(45), "top")).map(({ text }) => text)).toEqual(["0", "1", "2"]);
+    // Without a room, the depth before turned labels' overhang was measured
+    // (43.7 px), and the 0.3 px the halo reaches past the turned padding.
+    const depth = tilted().panels[0]!.plot.y;
+    expect(depth).toBeGreaterThanOrEqual(43.7);
+    expect(depth).toBeLessThan(43.7 + 0.5);
+  });
+
+  it("takes for labels of several lines what they need, bounds or not", () => {
+    const lines = table({ name: ["one\ntwo\nthree", "four\nfive\nsix"], v: [1, 2] });
+    const depth = (x?: ChartConfig["x"], labels?: { overlap: "wrap" }) => {
+      const scene = build(
+        {
+          marks: [bar(lines, { x: "name", y: "v" })],
+          ...(x && { x }),
+          ...(labels && { guides: [axis({ scale: "x", labels })] }),
+        },
+        400,
+      ).scene;
+      return { below: 320 - 2 - bottomOf(scene), texts: texts(sideOf(scene, "bottom")) };
+    };
+    // Bounds that do not bind take what the labels' three lines take.
+    const natural = depth().below;
+    expect(depth({ room: { min: 0 } }).below).toBe(natural);
+    expect(depth({ room: { max: 100 } }).below).toBe(natural);
+    // Wrapped in a room for one line: their first lines, cut short.
+    const cut = depth({ room: 30 }, { overlap: "wrap" });
+    expect(cut.below).toBe(30);
+    expect(cut.texts.map(({ text }) => text)).toEqual(["one…", "four…"]);
+  });
+
+  it("asks no least width of plots for labels it leaves out", () => {
+    // Two plots in 100 px take 48 px each for x labels, which a room of 5 px leaves out.
+    const narrow = (room?: number) =>
+      build(
+        {
+          panels: panels([{ id: "a" }, { id: "b" }], grid({ columns: 2 })),
+          marks: ["a", "b"].map((panel) => line(week, { x: "t", y: "v", panel })),
+          y: { show: false },
+          ...(room !== undefined && { x: { room } }),
+        },
+        100,
+      ).scene;
+    expect(() => narrow()).toThrow(/needs at least \d+ px of width/);
+    const plots = narrow(5).panels.map(({ plot }) => plot);
+    expect(plots).toHaveLength(2);
+    expect(plots.every(({ width }) => width > 20 && width < 48)).toBe(true);
+  });
+
+  it("keeps the lines of wrapped labels that fit, the last ending with an ellipsis", () => {
+    const data = table({ x: [0, 2], v: [0, 1] });
+    const wrapping = (room?: number) =>
+      build(
+        {
+          marks: [line(data, { x: "x", y: "v" })],
+          ...(room !== undefined && { x: { room } }),
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { values: [0, 1, 2] },
+              format: (v) => `${v} one two three four five`,
+              labels: { overlap: "wrap" },
+            }),
+          ],
+        },
+        300,
+      ).scene;
+    const labelsOf = (scene: Scene) =>
+      (sideOf(scene, "bottom")!.labelBoxes ?? []).map(({ text }) => text);
+    const plain = wrapping();
+    const whole = labelsOf(plain);
+    expect(whole.map(lineCount)).toEqual([2, 2, 2]);
+    // Room for one line: each label keeps its first, ending with an ellipsis.
+    const deep = 320 - 2 - bottomOf(plain);
+    const { lineHeight } = texts(sideOf(plain, "bottom"))[0]!.paint;
+    const room = Math.floor(deep - lineHeight);
+    const cut = wrapping(room);
+    expect(labelsOf(cut)).toEqual(whole.map((text) => `${text.split("\n")[0]}…`));
+    expectWithin(cut, room);
+  });
+
+  it("holds its depth within { min, max }, leaving out rows past the most", () => {
+    const natural = 320 - 2 - bottomOf(build({ marks }).scene);
+    expect(320 - 2 - bottomOf(build({ marks, x: { room: { min: 50 } } }).scene)).toBe(50);
+    expect(320 - 2 - bottomOf(build({ marks, x: { room: { min: 10 } } }).scene)).toBe(natural);
+    // The rows kept take what they need, not the most: the room of a row left out is given back.
+    const most = build({ marks, x: { room: { max: 30 } }, guides: [twoRows] }).scene;
+    expect(drawnLayers(most)).toEqual(["major"]);
+    expect(320 - 2 - bottomOf(most)).toBe(natural);
+  });
+
+  it("lines up subplots' plots at a room they share, whatever their labels need", () => {
+    const long = table({ name: ["one two three four", "five six seven eight"], v: [1, 2] });
+    const short = table({ name: ["a", "b"], v: [1, 2] });
+    const chart = (data: typeof short, room?: number) =>
+      build(
+        {
+          panels: panels(
+            ["a", "b"].map((id) => ({ id, ...(room !== undefined && { x: { room } }) })),
+            grid({ columns: 2 }),
+          ),
+          marks: [
+            bar(data, { x: "name", y: "v", panel: "a" }),
+            bar(short, { x: "name", y: "v", panel: "b" }),
+          ],
+          guides: [axis({ scale: "x", labels: { overlap: "wrap" } })],
+        },
+        240,
+      ).scene;
+    const bottoms = (scene: Scene) => scene.panels.map(({ plot }) => plot.y + plot.height);
+    expect(bottoms(chart(long))).not.toEqual(bottoms(chart(short)));
+    expect(bottoms(chart(long, 40))).toEqual(bottoms(chart(short, 40)));
+    expect(bottoms(chart(long, 40))).toEqual([320 - 2 - 40, 320 - 2 - 40]);
+  });
+
+  it("holds each subplot's y labels in its own room, and the others in the chart's", () => {
+    const big = table({ name: ["a", "b"], v: [1_000_000, 2_000_000] });
+    const small = table({ name: ["a", "b"], v: [1, 2] });
+    const chart = (y: ChartConfig["y"], own?: number) =>
+      build(
+        {
+          ...(y && { y }),
+          panels: panels(
+            [{ id: "a", ...(own !== undefined && { y: { room: own } }) }, { id: "b" }],
+            grid({ columns: 2 }),
+          ),
+          marks: [
+            bar(big, { x: "name", y: "v", panel: "a" }),
+            bar(small, { x: "name", y: "v", panel: "b" }),
+          ],
+        },
+        640,
+      ).scene;
+    const ends = (scene: Scene) =>
+      scene.panels.map(({ plot, axes }) => {
+        const right = axes.find(({ side }) => side === "right")!;
+        return {
+          plot: plot.x + plot.width,
+          labels: Math.max(...(right.labelBoxes ?? []).map(({ box }) => box.x + box.width)),
+        };
+      });
+    // On the right: the first panel's labels within its own 100 px, the
+    // second's within the chart's 20 px, as without the first's room.
+    const right = { place: { side: "right" as const }, room: 20 };
+    const [a, b] = ends(chart(right, 100));
+    expect(a!.labels).toBeLessThanOrEqual(a!.plot + 100 + 0.5);
+    expect(a!.labels).toBeGreaterThan(a!.plot + 20 + 0.5);
+    expect(b!.labels).toBeLessThanOrEqual(b!.plot + 20 + 0.5);
+    expect(640 - b!.plot).toBe(640 - ends(chart(right))[1]!.plot);
+    // On the left: the second panel keeps the chart's room, whatever the first's own.
+    const between = ({ panels: [a, b] }: Scene) => b!.plot.x - (a!.plot.x + a!.plot.width);
+    expect(between(chart({ room: 30 }, 90))).toBe(between(chart({ room: 30 }, 30)));
+    expect(between(chart(undefined, 90))).toBe(between(chart(undefined)));
+  });
+});
+
+describe("short forms' place and room", () => {
+  const svg = (config: Partial<ChartConfig>) =>
+    renderSvg(build({ marks, ...config }).scene, { idPrefix: "a" });
+
+  contractTest("axis.short-forms.place-room", () => {
+    // Each short form lays out as the axis guide it stands for.
+    expect(svg({ x: { place: { side: "top" }, room: 30 } })).toBe(
+      svg({ guides: [axis({ scale: "x", place: { side: "top" }, room: 30 })] }),
+    );
+    expect(svg({ x: { room: 28 } })).toBe(svg({ guides: [axis({ scale: "x", room: 28 })] }));
+    expect(svg({ y: { room: 48 } })).toBe(svg({ guides: [axis({ scale: "y", room: 48 })] }));
+    expect(svg({ y: { place: { side: "right" } } })).toBe(
+      svg({ guides: [axis({ scale: "y", place: { side: "right" } })] }),
+    );
+    // One axis: a short form's place lists no second one.
+    const top = build({ marks, x: { place: { side: "top" } } }).scene;
+    expect(
+      axesOf(top)
+        .map(({ side }) => side)
+        .sort(),
+    ).toEqual(["left", "top"]);
+    // A guide of the scale takes the short form's room as it takes its other settings.
+    expect(svg({ x: { room: 28 }, guides: [axis({ scale: "x", line: false })] })).toBe(
+      svg({ guides: [axis({ scale: "x", line: false, room: 28 })] }),
+    );
+    // Its own room comes first.
+    const own = build({ marks, x: { room: 60 }, guides: [axis({ scale: "x", room: 28 })] }).scene;
+    const plot = own.panels[0]!.plot;
+    expect(320 - 2 - (plot.y + plot.height)).toBe(28);
+  });
+
+  it("are refused where the axis cannot go, in the caller's spelling", () => {
+    const refused = (config: object, message: string) =>
+      expect(() => build({ marks, ...config } as ChartConfig)).toThrow(message);
+    refused(
+      { x: { place: { side: "left" } } },
+      'chart x.place.side: an x axis goes on the top or the bottom; received "left"',
+    );
+    refused(
+      { y: { place: { side: "top" } } },
+      'chart y.place.side: a y axis goes on the left or the right; received "top"',
+    );
+    refused(
+      { yRight: { place: { side: "left" } } },
+      "chart yRight.place: the right y axis is on the right; drop place",
+    );
+    refused(
+      { panels: panels([{ id: "a", x: { place: { side: "top" } } } as never]) },
+      "chart panels[0].x.place: a panel's axes are on the chart's sides; give place on the chart's x",
+    );
+    refused(
+      { x: { place: { side: "top" } }, guides: [axis({ scale: "x", place: { side: "top" } })] },
+      "chart x.place: guides list an x axis on the top too; give its options in one of them",
+    );
+    refused(
+      { x: { place: { side: "bottom" } }, guides: [axis({ scale: "x" })] },
+      "chart x.place: guides list an x axis on the bottom too; give its options in one of them",
+    );
+    refused(
+      { x: { room: { min: 40, max: 20 } } },
+      "chart x.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received { min: 40, max: 20 }",
+    );
+    refused(
+      { panels: panels([{ id: "a", y: { room: -2 } }]) },
+      "chart panels[0].y.room: expected finite pixels of at least 0",
+    );
+    // A short form has the default tick marks; a guide taking its room has its own.
+    refused(
+      { x: { room: 4 } },
+      "chart x.room: its tick marks reach 5 px out from the plot, past the 4 px room; give a room of at least 5 px",
+    );
+    refused(
+      { x: { room: 4 }, guides: [axis({ scale: "x", tick: { length: 6 } })] },
+      "chart x.room: its tick marks reach 6 px out from the plot, past the 4 px room; give a room of at least 6 px, or shorter or inward tick marks",
+    );
+    refused(
+      { y: { place: { side: "right" } }, marks: [line(week, { x: "t", y: "v", axis: "right" })] },
+      `chart y.place.side: marks with axis: "right" put yRight's axis on the right; keep y's on the left`,
+    );
+    // Specs say where, as the spec spells it.
+    const spec = (options: object) => () =>
+      validateSpec({ marks: [{ type: "line", x: "t", y: "v" }], ...options } as never);
+    expect(spec({ x: { place: { side: "left" } } })).toThrow(
+      'x.place.side: an x axis goes on the top or the bottom; received "left"',
+    );
+    expect(spec({ y: { place: { side: "top" } } })).toThrow(
+      'y.place.side: a y axis goes on the left or the right; received "top"',
+    );
+    expect(spec({ yRight: { place: { side: "right" } } })).toThrow(
+      "yRight.place: the right y axis is on the right; drop place",
+    );
+    expect(spec({ panels: [{ id: "a", x: { place: { side: "top" } } }] })).toThrow(
+      "panels[0].x.place: a panel's axes are on the chart's sides; give place on the chart's x",
+    );
+    expect(
+      spec({
+        x: { place: { side: "top" } },
+        guides: [{ type: "axis", scale: "x", place: { side: "top" } }],
+      }),
+    ).toThrow("x.place: guides list an x axis on the top too; give its options in one of them");
+    expect(spec({ x: { room: { min: 40, max: 20 } } })).toThrow(
+      "x.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received { min: 40, max: 20 }",
+    );
+    expect(spec({ z: { room: 20 } })).toThrow(
+      "z.room: a 3D chart's axes are drawn along its box; drop room",
+    );
+    expect(
+      spec({ x: { place: { side: "top" }, room: 30 }, y: { room: { min: 20, max: 40 } } }),
+    ).not.toThrow();
   });
 });
 

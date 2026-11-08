@@ -148,6 +148,7 @@ export {
   type Ticks,
   type ValueFormatter,
   type XAxisOptions,
+  type YAxisOptions,
 } from "./guides/options.ts";
 export type { MeasureText } from "./layout/text.ts";
 export type { AtThresholds, TextField } from "./marks/annotation.ts";

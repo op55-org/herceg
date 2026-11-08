@@ -126,6 +126,11 @@ right.panel("share", title="By region").pie("region", "requests")
   (`{ px: 220 }`, `hg.Pixels(220)`). Tracks size the panels' plots, as
   matplotlib's ratios do: titles, axes, and legends take room beside them.
   Plots line up across a track. `gap` is 12 px by default.
+- **Rooms.** An axis' `room` fixes the depth its ticks and labels take
+  beside the plots ([Axes](axes-and-legends.md#axes)): charts in a row
+  with `x: { room: 28 }` end their plots at one line, and a panel's own
+  `x: { room }` or `y: { room }` holds its axis, panels without one taking
+  the chart's (plots across a track still line up, at the deepest).
 - **Marks** name their panel with `panel`, or `"*"` for all. In a chart
   with panels, a mark without one is an error.
 - **Ids** may be left out (`"panel-1"`, `"panel-2"`, ...); give ids where

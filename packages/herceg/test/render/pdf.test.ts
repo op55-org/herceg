@@ -16,6 +16,7 @@ import { EMBED_FONTS } from "../../src/fonts/prepared.ts";
 import { parseSfnt } from "../../src/fonts/sfnt.ts";
 import { type FontOptions, type FontSource, prepareFonts } from "../../src/fonts.ts";
 import { specToPDF, specToSVG } from "../../src/from-spec.ts";
+import { axis } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { area } from "../../src/marks/area.ts";
@@ -1326,6 +1327,51 @@ describe("renderToPDF", () => {
     expect(content).toMatch(
       /\/Span << \/ActualText \(\) >> BDC BT [^\n]+ 1 Tr [^\n]+\(10\) Tj ET EMC/,
     );
+  });
+
+  it("holds an x axis' rows in a fixed room as the static SVG does", () => {
+    // Hours over days: the day row does not fit in 30 px, and is left out of both.
+    const start = Date.UTC(2026, 8, 28);
+    const hours = table({
+      t: time(Array.from({ length: 49 }, (_, i) => start + i * 3_600_000)),
+      v: Array.from({ length: 49 }, (_, i) => 50 + 40 * Math.sin(i / 5)),
+    });
+    const options: StaticOptions = {
+      width: 600,
+      height: 300,
+      timeZone: "UTC",
+      locale: "en-US",
+      marks: [line(hours, { x: "t", y: "v" })],
+      x: { room: 30 },
+      guides: [
+        axis({
+          scale: "x",
+          layers: [
+            { id: "day", ticks: { every: "day" }, format: { time: "%b %d" }, labels: { row: 1 } },
+          ],
+        }),
+      ],
+    };
+    const svg = renderToSVG(options);
+    const { content } = readPdf(renderToPDF(options));
+    // The plot ends 30 px and the chart's 2 px of padding above the bottom, in
+    // both (across, PDF's Helvetica measures the y labels a little apart).
+    const [, top, , height] =
+      /<clipPath[^>]*><rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/
+        .exec(svg)!
+        .slice(1)
+        .map(Number);
+    expect(top! + height!).toBe(300 - 2 - 30);
+    const plots = [...content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re W n/g)].map(
+      (match) => [Number(match[2]), Number(match[4])],
+    );
+    expect(plots).toContainEqual([top, height]);
+    // The hour row's days, once: the day row under it is not drawn.
+    for (const label of ["Sep 28", "12:00", "Sep 29", "Sep 30"]) {
+      const count = label === "12:00" ? 2 : 1;
+      expect(svg.split(`>${label}<`)).toHaveLength(count + 1);
+      expect(content.split(`(${label}) Tj`)).toHaveLength(count + 1);
+    }
   });
 
   it("draws rugs as vector segments in PDF and static SVG", () => {

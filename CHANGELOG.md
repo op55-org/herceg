@@ -133,6 +133,21 @@ charts and widgets) reads a key from an event as a reference to a mark's
 the series and items they stand for as `references` (`getLegend()`,
 `legendEntry` targets, `hg.LegendEntryTarget`).
 
+x axes take `room` as y axes do, the depth beside the plot before the
+title, so plots of charts in a row and of panels end at one line: rows of
+labels that do not fit are left out whole, the farthest from the plot
+first, rotations deeper than the room are not tried, and wrapped labels
+keep the lines that fit, the last ending with an ellipsis. The chart's `x`
+and `y` take `place` (`x: { place: { side: "top" } }`) and every axis short
+form takes `room`, as the axis guide they stand for, value animation
+moving it too; Python's `hg.AxisOptions` takes both (`place=hg.Place(side="top")`,
+`room=28` or `(least, most)`), and `herceg.express` through `x_axis` and
+`y_axis`. Fixed: in subplots, a fixed y room did not line plots up, since
+each panel's own labels' width was added to one shared extra; each panel
+now takes exactly its room. x axes keep room for their labels' outlines
+and halos, which were drawn past it, and an x axis listed in `guides` no
+longer keeps the room of category labels' extra lines twice.
+
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,
