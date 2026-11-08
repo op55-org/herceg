@@ -125,6 +125,10 @@ model.rowAt(0);
 
 const grid = createPivotGrid(document.body, { model, ariaLabel: "Requests" });
 expectTypeOf(grid.model).toEqualTypeOf(model);
+// Selecting a pivot's row selects its records of the view, of the pivot's table.
+grid.on("select", ({ selection }) => {
+  if (selection?.kind === "rows") expectTypeOf(selection.rows.source).toEqualTypeOf(requests);
+});
 
 // Cells' looks by aggregate read their combination's row: the rows and
 // pivot fields, and every aggregate.

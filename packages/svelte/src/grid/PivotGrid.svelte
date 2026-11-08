@@ -18,6 +18,7 @@
     theme,
     headerHeight,
     copy,
+    onselect,
     onrowclick,
     oncellclick,
     onrender,
@@ -27,7 +28,7 @@
     (container, given, options) =>
       createPivotGrid(container, { ...options, model: given as PivotGridModel }),
     () => ({ model, options: { ariaLabel, theme, headerHeight, copy } }),
-    () => ({ onrowclick, oncellclick, onrender }),
+    () => ({ onselect, onrowclick, oncellclick, onrender }),
     (made) => {
       grid = made as typeof grid;
     },

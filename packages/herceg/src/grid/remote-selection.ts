@@ -14,17 +14,25 @@ import { groupCondition } from "./source.ts";
 
 export type { RemoteSelection } from "./remote-types.ts";
 
+/** A change of a remote store's channel, as its listeners hear it: the channel, what it holds now, and the store's revision then. */
+export interface RemoteSelectionChange {
+  readonly channel: string;
+  readonly selection: RemoteSelection | null;
+  readonly revision: number;
+}
+
 /**
  * Selections of one remote source's rows by channel, as `SelectionStore`
  * holds a local table's: each channel one owner's selection, set and
- * cleared on its own. Selections are frozen when set.
+ * cleared on its own. A selection set is checked and frozen as a copy,
+ * which the channel holds from then on.
  */
 export class RemoteSelectionStore {
   readonly schema: GridSchema;
   #channels = new Map<string, RemoteSelection>();
   /** Each channel's changes, counted. */
   #versions = new Map<string, number>();
-  #listeners = new Set<() => void>();
+  #listeners = new Set<(change: RemoteSelectionChange) => void>();
   #revision = 0;
 
   constructor(schema: GridSchema) {
@@ -51,15 +59,22 @@ export class RemoteSelectionStore {
 
   /** Sets a channel's selection, or clears it with null. */
   set(channel: string, selection: RemoteSelection | null): void {
+    let held: RemoteSelection | null = null;
     if (selection === null) {
       if (!this.#channels.delete(channel)) return;
-    } else this.#channels.set(channel, this.#checked(selection));
+    } else {
+      held = this.#checked(selection);
+      this.#channels.set(channel, held);
+    }
     this.#versions.set(channel, this.version(channel) + 1);
     this.#revision++;
-    for (const listener of [...this.#listeners]) listener();
+    // Each listener hears each change, even when one sets another as it hears it.
+    const change = { channel, selection: held, revision: this.#revision };
+    for (const listener of [...this.#listeners]) listener(change);
   }
 
-  subscribe(listener: () => void): () => void {
+  /** Calls `listener` with each change of a channel; the function that stops it. */
+  subscribe(listener: (change: RemoteSelectionChange) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }

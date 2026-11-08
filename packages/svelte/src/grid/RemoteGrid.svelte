@@ -21,6 +21,7 @@
     theme,
     headerHeight,
     copy,
+    onselect,
     onrowclick,
     oncellclick,
     onrender,
@@ -30,7 +31,7 @@
     (container, given, options) =>
       createRemoteGrid(container, { ...options, model: given as RemoteGridModel }),
     () => ({ model, options: { ariaLabel, theme, headerHeight, copy }, cells }),
-    () => ({ onrowclick, oncellclick, onrender }),
+    () => ({ onselect, onrowclick, oncellclick, onrender }),
     (made) => {
       grid = made as typeof grid;
     },

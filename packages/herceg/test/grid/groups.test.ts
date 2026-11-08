@@ -246,7 +246,7 @@ describe("grouped grids", () => {
     expect(model.selectionState(0)).toBe("none");
   });
 
-  it("count a row set put in the channel again after it changed", () => {
+  it("count each selection put in the channel, copies of one another", () => {
     const t = requests();
     const store = selectionStore(t);
     const view = rowView(t);
@@ -258,14 +258,11 @@ describe("grouped grids", () => {
     });
     // db's rows are 3 and 7.
     const rows = new RowSet(t).add(3);
-    const selection = selectRows(rows);
-    store.set("grid-rows", selection);
+    store.set("grid-rows", selectRows(rows));
     expect(model.selectionState(2)).toBe("some");
-    rows.add(7);
-    store.set("grid-rows", selection);
+    store.set("grid-rows", selectRows(rows.copy().add(7)));
     expect(model.selectionState(2)).toBe("all");
-    rows.delete(3).delete(7);
-    store.set("grid-rows", selection);
+    store.set("grid-rows", selectRows(rows.copy().delete(3)));
     expect(model.selectionState(2)).toBe("none");
     // Toggling the group then selects all of it.
     model.select(2, "toggle");

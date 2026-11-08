@@ -19,7 +19,7 @@ export type { GridComponentProps, GridInstance, GridListeners } from "./grid/bas
 export type { GridCellRender, GridCellSlots, VueGridCell, VueGridCells } from "./grid/cells.ts";
 
 export type GridProps<S extends Schema = Schema> = GridComponentProps &
-  GridListeners & {
+  GridListeners<GridModel<S>> & {
     /**
      * What the grid shows, made with `createGridModel` and owned by the
      * application (kept as it is: not in `ref()` or `reactive()`). Data

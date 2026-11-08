@@ -87,7 +87,14 @@ to the page, failing with a `GridExportError` where they changed, and
 reads a remote grid's rows from its snapshot, which it keeps until it
 ends. Ctrl+C (Cmd+C) in a grid copies the selected rows, or the focused
 cell, as TSV within limits (`createGrid`'s `copy`, the components' `copy` prop),
-and announces what it copied. Series marks' `label`
+and announces what it copied. Grids report `select` (React `onSelect`, Vue
+`@select`, Svelte `onselect`) after every change of their selection
+store's channel, by any writer, with its cause (`"pointer"`, `"keyboard"`,
+`"api"`, `"sync"`) and the model's revision: once per command, in the
+order of the changes, before a click's `rowClick`, in local, pivot, and
+remote grids. Selection stores freeze what they hold in place, so a
+selection reported never changes (`RowSet.freeze()`, `rows.copy()`,
+`ReadonlyRowSet`); remote stores hand their listeners each change. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,

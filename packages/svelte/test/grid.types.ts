@@ -38,6 +38,13 @@ Grid(internals, {
   },
   onrowclick: ({ ref }) => ref.id,
   onrender: ({ revision }) => revision,
+  onselect: ({ selection, cause }) => {
+    // A local grid's selection is of its table's rows, read-only.
+    if (selection?.kind === "rows") selection.rows.copy().add(0);
+    // @ts-expect-error a reported selection's rows are read-only: change a copy
+    if (selection?.kind === "rows") selection.rows.add(0);
+    return cause;
+  },
 });
 // @ts-expect-error grids need an accessible name
 Grid(internals, { model });

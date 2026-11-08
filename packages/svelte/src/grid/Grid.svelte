@@ -21,6 +21,7 @@
     theme,
     headerHeight,
     copy,
+    onselect,
     onrowclick,
     oncellclick,
     onrender,
@@ -29,7 +30,7 @@
   const attach = useGrid(
     (container, given, options) => createGrid(container, { ...options, model: given as GridModel }),
     () => ({ model, options: { ariaLabel, theme, headerHeight, copy }, cells }),
-    () => ({ onrowclick, oncellclick, onrender }),
+    () => ({ onselect, onrowclick, oncellclick, onrender }),
     (made) => {
       grid = made as typeof grid;
     },

@@ -7,6 +7,8 @@ export {
   type GridEvents,
   type GridInputEvent,
   type GridOptions,
+  type GridSelectEvent,
+  type GridSelection,
   type GridUpdate,
 } from "./dom/grid.ts";
 export type {

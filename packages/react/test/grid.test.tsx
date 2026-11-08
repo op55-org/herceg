@@ -82,6 +82,65 @@ describe("<Grid>", () => {
     expect(revisions.at(-1)).toBe(model.revision);
   });
 
+  it("hears selections with their causes before clicks, through the latest inline handler, until unmounted", async () => {
+    const t = requests(10);
+    const model = createGridModel({
+      data: rowView(t),
+      columns: [{ field: "id" }, { field: "ms" }],
+    });
+    const heard: string[] = [];
+    const draw = (tag: string) =>
+      root.render(
+        <Grid
+          model={model}
+          ariaLabel="Requests"
+          style={{ height: 300 }}
+          onSelect={({ selection, cause, revision }) => {
+            const rows = selection?.kind === "rows" ? [...selection.rows.positions()] : [];
+            heard.push(`${tag} select ${cause} ${rows.join(" ")}`);
+            expect(revision).toBe(model.revision);
+          }}
+          onRowClick={({ rowIndex }) => heard.push(`${tag} row ${rowIndex}`)}
+        />,
+      );
+    act(() => draw("first"));
+    await userEvent.click(host.querySelector('.hg-body [aria-rowindex="4"] [aria-colindex="2"]')!);
+    act(() => draw("second"));
+    act(() => model.select(5, "toggle"));
+    act(() => root.render(null));
+    // Unmounted: the model goes on without the grid, unheard.
+    model.clearSelection();
+    expect(heard).toEqual(["first select pointer 2", "first row 2", "second select api 2 5"]);
+  });
+
+  it("hears a selection that applying its new props causes through the new handler", () => {
+    const model = createGridModel({
+      data: rowView(requests(10)),
+      columns: [{ field: "id" }, { field: "ms" }],
+    });
+    const heard: string[] = [];
+    const draw = (tag: string, headerHeight: number) =>
+      root.render(
+        <Grid
+          model={model}
+          ariaLabel="Requests"
+          headerHeight={headerHeight}
+          style={{ height: 300 }}
+          onSelect={({ cause }) => heard.push(`${tag} ${cause}`)}
+        />,
+      );
+    act(() => draw("first", 32));
+    // The header's new height changes the viewport, and this subscriber selects on it.
+    let height = model.viewportHeight;
+    model.subscribe(() => {
+      if (model.viewportHeight === height) return;
+      height = model.viewportHeight;
+      model.select(3);
+    });
+    act(() => draw("second", 48));
+    expect(heard).toEqual(["second api"]);
+  });
+
   it("draws its model, and applies changed props without a new grid", async () => {
     const model = createGridModel({
       data: rowView(requests(100)),

@@ -26,7 +26,23 @@ export function Requests() {
     [],
   );
   const ref = useRef<HercegGrid<Requests> | null>(null);
-  return <Grid model={model} ariaLabel="Requests" theme="dark" headerHeight={36} ref={ref} />;
+  return (
+    <Grid
+      model={model}
+      ariaLabel="Requests"
+      theme="dark"
+      headerHeight={36}
+      ref={ref}
+      onSelect={({ selection, cause }) => {
+        // A local grid's selection is of its table's rows, read-only.
+        if (selection?.kind === "rows") selection.rows.copy().add(0);
+        // @ts-expect-error a reported selection's rows are read-only: change a copy
+        if (selection?.kind === "rows") selection.rows.add(0);
+        // @ts-expect-error a grid's selection has no state options
+        return cause === "options";
+      }}
+    />
+  );
 }
 
 export function Unnamed() {
@@ -133,6 +149,8 @@ export function Remote({ source }: { source: GridSource<Requests> }) {
       model={model}
       ariaLabel="Requests"
       ref={ref}
+      // A remote grid's selection is of keys or a condition.
+      onSelect={({ selection }) => selection?.kind === "keys" && selection.keys.length}
       cells={{ host: { fields: ["latency"], render: (cell) => cell.read("latency") } }}
     />
   );

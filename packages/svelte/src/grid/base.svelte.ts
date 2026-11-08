@@ -9,8 +9,8 @@ import type { Attachment } from "svelte/attachments";
 import type { CellMounts, CellRenderers, SvelteGridCell, SvelteGridCells } from "./cells.svelte.js";
 import type { GridComponentProps } from "./props.js";
 
-/** What the components need of the grids they make. */
-type Made = Pick<HercegGrid, "on" | "destroy" | "render" | "drawnRevision" | "root"> & {
+/** What the components need of the grids they make (each listens as `HercegGrid` does). */
+type Made = Pick<HercegGrid, "destroy" | "render" | "drawnRevision" | "root"> & {
   update(options: object): void;
 };
 
@@ -30,7 +30,7 @@ export interface Settings {
   cells?: SvelteGridCells | undefined;
 }
 
-type Handlers = Pick<GridComponentProps, "onrowclick" | "oncellclick" | "onrender">;
+type Handlers = Pick<GridComponentProps, "onselect" | "onrowclick" | "oncellclick" | "onrender">;
 
 /**
  * A grid of the `model` prop made by `make` in the element the returned
@@ -69,9 +69,12 @@ export function useGrid<G extends Made>(
       created.destroy();
       return;
     }
-    created.on("rowClick", (event) => handlers().onrowclick?.(event));
-    created.on("cellClick", (event) => handlers().oncellclick?.(event));
-    created.on("render", (event) => handlers().onrender?.(event));
+    // Grids of every model listen alike; only `select`'s selection type differs.
+    const listened = created as unknown as Pick<HercegGrid, "on">;
+    listened.on("select", (event) => handlers().onselect?.(event));
+    listened.on("rowClick", (event) => handlers().onrowclick?.(event));
+    listened.on("cellClick", (event) => handlers().oncellclick?.(event));
+    listened.on("render", (event) => handlers().onrender?.(event));
     grid = created;
     applied = { model: next.model, key, renderers };
     bind(created);

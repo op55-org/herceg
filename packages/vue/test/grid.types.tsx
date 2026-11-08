@@ -28,6 +28,12 @@ export const Requests = () => (
       },
     }}
     onRowClick={({ ref }) => ref.id}
+    onSelect={({ selection }) => {
+      // A local grid's selection is of its table's rows, read-only.
+      if (selection?.kind === "rows") selection.rows.copy().add(0);
+      // @ts-expect-error a reported selection's rows are read-only: change a copy
+      if (selection?.kind === "rows") selection.rows.add(0);
+    }}
   />
 );
 

@@ -63,7 +63,9 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   `provide` and `inject`: each cell's state is its row's, a cell that
   throws draws its text, and cells commit before the grid paints, at
   about 15 KB a mounted cell. `h()` takes the generic `Grid` cast as
-  `Component`; templates and TSX infer its model's schema.
+  `Component`; templates and TSX infer its model's schema. `@select` hears
+  every change of the selection with its cause (a click, keys, the
+  model's methods, or another writer), before `@row-click`.
 
 ## Documentation
 

@@ -308,7 +308,14 @@ Dropped rows' bits leave as the set is counted or listed, or once a quarter
 of the table's rows have dropped since. `SelectionStore` (`data/selection.ts`) keeps
 selections by channel as portable conditions or local row sets; readers
 choose which channels they read and whether to filter or highlight, so a
-chart's brush need not filter the chart that drew it.
+chart's brush need not filter the chart that drew it. The store freezes
+what it holds in place (the selection, its set's membership by a flag
+mutators check, a condition's arrays), keeping identity, which bindings
+compare with what they wrote; writers change a copy (`RowSet.copy`, of the
+words: dense bits, or a sparse set's words and index), never a published
+set. Delivery is synchronous: a change a listener makes while another is
+delivered reaches later listeners first, so readers that report in order
+(grids) skip a change older than one they heard.
 
 Series marks over a view keep the view's table as their table and the view
 as `mark.view`, and read the view's rows as every mark reads its rows

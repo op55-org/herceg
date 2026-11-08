@@ -15,6 +15,7 @@ import { RowSet } from "../data/row-set.ts";
 import type { MarkRows, RowSnapshot, RowView } from "../data/row-view.ts";
 import {
   type DataSelection,
+  type SelectionChange,
   type SelectionStore,
   selectionStore,
   selectRows,
@@ -94,6 +95,7 @@ export {
   type GridPresentation,
   type GridRange,
   type GridRef,
+  type GridSelectCause,
   type GridSelectionOptions,
   type GridSettings,
   type GridTotalsRow,
@@ -383,8 +385,6 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     arrangement: -1,
   };
 
-  /** The row set the model last put in the channel, with the store's revision then. */
-  #published: { rows: RowSet<S>; revision: number } | null = null;
   #condition: { expression: Expression; version: number; test: (row: number) => boolean } | null =
     null;
   #count: { selection: unknown; version: number; count: number } | null = null;
@@ -419,7 +419,13 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       if (model) model.#changed();
       else stop();
     };
-    const stops = [data.subscribe(changed), this.selectionStore.subscribe(changed)];
+    const selected = ({ channel, selection, revision }: SelectionChange<S>) => {
+      const model = ref.deref();
+      if (!model) return stop();
+      if (channel === model.channel) model.heardSelection(selection, revision);
+      model.#changed();
+    };
+    const stops = [data.subscribe(changed), this.selectionStore.subscribe(selected)];
     const stop = () => {
       for (const unsubscribe of stops) unsubscribe();
     };
@@ -918,12 +924,12 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   /**
-   * Selects as clicks do (see `SelectMode`); the selection is a row set in
-   * the channel. Selecting a group's header selects every row of the group
-   * the view shows, in its groups below too, collapsed or not; toggling it
-   * clears them when all are selected.
+   * The selection becomes a row set in the channel (a copy of the one
+   * there, which is frozen). A group's header stands for every row of the
+   * group the view shows, in its groups below too, collapsed or not;
+   * toggling it clears them when all are selected.
    */
-  select(rowIndex: number, mode: SelectMode = "only"): void {
+  protected applySelect(rowIndex: number, mode: SelectMode): void {
     const { group, depth, position } = this.#entry(rowIndex);
     if (this.#pivot?.stopped) return;
     if (mode === "only" || mode === "toggle") {
@@ -964,8 +970,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     this.#publish(rows, null);
   }
 
-  /** Selects every row the view shows, those scrolled away or in collapsed groups too, as they are now. */
-  selectAll(): void {
+  protected applySelectAll(): void {
     const { snapshot } = this.current() as Display;
     if (this.#pivot?.stopped) return;
     const rows = new RowSet(this.data.source);
@@ -984,11 +989,11 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     return this.selectionState(rowIndex) === "all" && this.selectedCount === rows;
   }
 
-  /** Clears the channel and the range anchor; whether there was anything to clear. */
-  clearSelection(): boolean {
-    const had = this.selectionStore.get(this.channel) !== null || this.rangeAnchor !== null;
+  protected applyClearSelection(): boolean {
+    const store = this.selectionStore;
+    const had = store.get(this.channel) !== null || this.rangeAnchor !== null;
     this.rangeAnchor = null;
-    if (this.selectionStore.get(this.channel) !== null) this.selectionStore.set(this.channel, null);
+    if (store.get(this.channel) !== null) this.writeSelection(store, this.channel, null);
     return had;
   }
 
@@ -1578,25 +1583,15 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   /**
-   * The row set to change: the one the model last published, if the
-   * channel still holds it, nothing replaced it since, and the table was
-   * not reset; else a new set with the channel's rows (a condition's rows as
-   * they are now: toggling a row of it keeps the others selected).
+   * The row set to change: a copy of the channel's (it is frozen there),
+   * of its words alone, not its rows; or a new set with a condition's rows
+   * as they are now (toggling a row of it keeps the others selected).
    */
   #writable(): RowSet<S> {
     const current = this.selectionStore.get(this.channel);
-    const published = this.#published;
-    if (
-      published &&
-      current?.kind === "rows" &&
-      current.rows === published.rows &&
-      published.rows.current &&
-      this.selectionStore.revision === published.revision
-    )
-      return published.rows;
+    if (current?.kind === "rows") return current.rows.copy();
     const rows = new RowSet(this.data.source);
-    if (current?.kind === "rows") rows.addAll(current.rows.positions());
-    else if (current?.kind === "predicate") {
+    if (current?.kind === "predicate") {
       const test = this.#test(current.expression);
       const matching: number[] = [];
       for (let row = 0; row < this.#table.length; row++) if (test(row)) matching.push(row);
@@ -1626,8 +1621,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       after = stamped(groups, store.revision + 1, view, counts);
     }
     this.#counts = null;
-    store.set(this.channel, selectRows(rows));
-    this.#published = { rows, revision: store.revision };
+    this.writeSelection(store, this.channel, selectRows(rows));
     // Unless a listener showed other groups meanwhile, which these counts must not keep.
     if (after && this.#groups === groups) this.#counts = after;
   }

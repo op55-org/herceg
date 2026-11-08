@@ -19,7 +19,7 @@ import {
 } from "./base.ts";
 
 export type PivotGridProps<S extends Schema = Schema> = GridComponentProps &
-  GridListeners & {
+  GridListeners<PivotGridModel<S>> & {
     /**
      * What the grid shows, made with `createPivotGridModel` and owned by the
      * application; a new model makes a new grid.

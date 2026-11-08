@@ -11,8 +11,9 @@ import { groupRows } from "../src/data/groups.ts";
 import { fromMatrix } from "../src/data/matrix.ts";
 import { orderedTable } from "../src/data/ordered.ts";
 import { pivotRows } from "../src/data/pivot.ts";
+import { RowSet } from "../src/data/row-set.ts";
 import { type RowQuery, type RowView, rowView } from "../src/data/row-view.ts";
-import { selectionStore, selectWhere } from "../src/data/selection.ts";
+import { selectionStore, selectRows, selectWhere } from "../src/data/selection.ts";
 import { type Table, table } from "../src/data/table.ts";
 import { rowTotals } from "../src/data/totals.ts";
 import { wholeTable } from "../src/encoding/channel-scales.ts";
@@ -1815,6 +1816,48 @@ for (const rows of [100_000, 1_000_000]) {
     const grown = process.memoryUsage().heapUsed - before;
     console.log(
       `${`grid looks: category churn heap, ${domain ? "a domain of 10" : "no domain"}`.padEnd(48)} ${(grown / 1024).toFixed(0)} KiB after 100k new categories`,
+    );
+    model.dispose();
+  }
+}
+
+// A grid's selection over a million rows: each toggle is a command
+// publishing a copy of the selected set, which stores freeze. Over an ordered
+// table after late insertions and rolling drops, the copy is of the words
+// where members are (a thousand rows selected a thousand apart); over a plain
+// table, of its bits (half its rows selected).
+{
+  const ROWS = 1_000_000;
+  const ordered = orderedTable(
+    { t: Float64Array.from({ length: ROWS }, (_, i) => i * 10), v: new Float64Array(ROWS) },
+    { orderBy: "t", maxRows: ROWS },
+  );
+  for (let k = 0; k < 20; k++) {
+    // A thousand late rows among the others; as many of the oldest drop.
+    const late = Float64Array.from(
+      { length: 1000 },
+      (_, i) => ((i * 9973 + k * 31) % ROWS) * 10 + 5,
+    );
+    ordered.append({ t: late, v: late });
+    ordered.append({ t: Float64Array.of(ROWS * 10 + k), v: Float64Array.of(0) });
+  }
+  const plain = table({ v: new Float64Array(ROWS) });
+  for (const [name, t, every] of [
+    ["1,000 of 1M ordered rows, after late rows and drops", ordered, 1000],
+    ["500k of 1M rows", plain, 2],
+  ] as const) {
+    const model = createGridModel({ data: rowView(t as Table), columns: [{ field: "v" }] });
+    const rows = new RowSet(t as Table);
+    for (let row = 0; row < ROWS; row += every) rows.add(row);
+    model.selectionStore.set(model.channel, selectRows(rows));
+    let at = 499;
+    measure(
+      `grid selection: toggle a row, ${name} selected`,
+      () => {
+        model.select(at, "toggle");
+        at = (at + 7919) % ROWS;
+      },
+      { warmup: 20, samples: 200 },
     );
     model.dispose();
   }

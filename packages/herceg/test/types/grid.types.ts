@@ -44,6 +44,18 @@ const model = createGridModel({
 expectTypeOf(model).toEqualTypeOf<GridModel<{ at: "time"; latency: "number"; host: "category" }>>();
 const grid = createGrid(document.body, { model, ariaLabel: "Requests" });
 expectTypeOf(grid.model).toEqualTypeOf(model);
+// `select` holds the model's table's selection, its rows read-only, and narrows its cause.
+grid.on("select", ({ selection, cause }) => {
+  expectTypeOf(cause).toEqualTypeOf<"pointer" | "keyboard" | "api" | "sync">();
+  if (selection?.kind === "rows") {
+    expectTypeOf(selection.rows.source).toEqualTypeOf(requests);
+    // @ts-expect-error a reported selection's rows are read-only: change a copy
+    selection.rows.add(0);
+    selection.rows.copy().add(0);
+  }
+  // @ts-expect-error a grid's selection has no state options
+  if (cause === "options") return;
+});
 
 createGridModel({
   data: rowView(requests),

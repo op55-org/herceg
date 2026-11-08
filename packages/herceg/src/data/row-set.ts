@@ -18,8 +18,29 @@ export interface SparseRows {
   size(): number;
   /** The members' positions, ascending. */
   positions(): Uint32Array;
+  /** The same members, apart: changing one changes nothing of the other. */
+  copy(): SparseRows;
   readonly byteLength: number;
 }
+
+/**
+ * A row set to read: what a selection holds, which never changes (see
+ * `RowSet.freeze`). `copy` gives a set of the same rows to change.
+ */
+export interface ReadonlyRowSet<S extends Schema = Schema>
+  extends Pick<
+    RowSet<S>,
+    | "source"
+    | "generation"
+    | "current"
+    | "size"
+    | "byteLength"
+    | "version"
+    | "has"
+    | "positions"
+    | "copy"
+    | "freeze"
+  > {}
 
 /**
  * A set of a table's rows, such as the rows selected in a grid. Rows are
@@ -28,6 +49,10 @@ export interface SparseRows {
  * are dropped themselves. A reset starts identities again, so a set made
  * before one is empty after it. One bit per row, from the first row the set
  * could hold; over an ordered table, words only where members are.
+ *
+ * A set in a selection is frozen (`freeze`): its members never change, so
+ * whoever kept the selection reads what was selected. Its positions still
+ * follow the table's insertions, drops, and resets.
  */
 export class RowSet<S extends Schema = Schema> {
   readonly source: Table<S>;
@@ -42,6 +67,7 @@ export class RowSet<S extends Schema = Schema> {
   #count = 0;
   /** Counts the changes of membership: adding, deleting, and clearing rows. */
   #version = 0;
+  #frozen = false;
 
   constructor(source: Table<S>) {
     this.source = source;
@@ -84,8 +110,7 @@ export class RowSet<S extends Schema = Schema> {
   }
 
   add(position: number): this {
-    this.addRange(position, position + 1);
-    return this;
+    return this.addRange(position, position + 1);
   }
 
   /** Adds the rows at positions `start` to `end` (exclusive). */
@@ -124,9 +149,41 @@ export class RowSet<S extends Schema = Schema> {
   }
 
   clear(): this {
+    this.#check(false);
     this.#version++;
     this.#empty();
     return this;
+  }
+
+  /**
+   * Makes the set read-only, in place: adding, deleting, or clearing rows
+   * throws from then on. Selections freeze the sets they hold.
+   */
+  freeze(): this {
+    // A flag, not Object.freeze: a frozen object takes another hidden class,
+    // which every reader of row sets would then see as well.
+    this.#frozen = true;
+    return this;
+  }
+
+  /**
+   * A set of the same rows to change, apart from this one (which may be
+   * frozen): of the table's rows now, so empty after a reset.
+   */
+  copy(): RowSet<S> {
+    const copy = new RowSet(this.source);
+    if (!this.current) return copy;
+    if (this.#sparse) copy.#sparse = this.#sparse.copy();
+    else {
+      this.#trim();
+      // Words up to the last member's: room to grow is the copy's to make.
+      let used = this.#words.length;
+      while (used > 0 && this.#words[used - 1] === 0) used--;
+      copy.#base = this.#base;
+      copy.#words = this.#words.slice(0, used);
+      copy.#count = this.#count;
+    }
+    return copy;
   }
 
   /** The positions of the members, ascending. */
@@ -187,8 +244,13 @@ export class RowSet<S extends Schema = Schema> {
     this.#count = 0;
   }
 
-  #check() {
-    if (!this.current) throw new Error("The table was reset after this row set was made");
+  #check(current = true) {
+    if (this.#frozen)
+      throw new Error(
+        "RowSet: the set is frozen, as selections hold it; change a copy, rows.copy()",
+      );
+    if (current && !this.current)
+      throw new Error("The table was reset after this row set was made");
   }
 
   #positions(start: number, end: number) {

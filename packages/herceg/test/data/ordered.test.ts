@@ -499,6 +499,28 @@ describe("row sets and views of ordered tables", () => {
     for (const position of positions) expect(selected.has(position)).toBe(true);
   });
 
+  it("copy their words after late rows and drops, not the table's rows", () => {
+    const t = orderedTable(
+      { t: Array.from({ length: 1000 }, (_, i) => i * 10), v: new Float64Array(1000) },
+      { orderBy: "t", maxRows: 1000 },
+    );
+    const set = new RowSet(t).addAll([10, 500, 999]).freeze();
+    // Late rows go before members; the oldest rows drop.
+    t.append({ t: [5, 4995, 20_000], v: [0, 0, 0] });
+    expect(Array.from(set.positions())).toEqual([8, 499, 998]);
+    const copy = set.copy();
+    expect(copy.byteLength).toBeLessThanOrEqual(set.byteLength);
+    copy.delete(499).add(0);
+    expect(Array.from(copy.positions())).toEqual([0, 8, 998]);
+    expect(Array.from(set.positions())).toEqual([8, 499, 998]);
+    // Rows before 100 drop: 20 to 90, the copy's first among them.
+    t.dropBefore("t", 100);
+    expect([Array.from(copy.positions()), Array.from(set.positions())]).toEqual([
+      [0, 990],
+      [0, 491, 990],
+    ]);
+  });
+
   it("let go of words their members left, though the table drops none", () => {
     const t = orderedTable(
       { t: Array.from({ length: 32_000 }, (_, i) => i), v: new Float64Array(32_000) },

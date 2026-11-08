@@ -353,6 +353,20 @@ row and a spacer as tall as the rows.
   (`@herceg/svelte/grid`) as a component mounted into each host with the
   grid component's contexts, committed with `flushSync` in the grid's
   frame and acknowledged from an effect after the content's own.
+- **Selection reports** (`select`): the model owns them. Its public
+  selection methods (`select`, `selectAll`, `clearSelection`, `click`,
+  `moveFocus`) are commands over protected implementations, each with a
+  cause: "api", or the input cause the DOM grid hands the model's first
+  command (`asInput`), so a listener's command is its own. Input keeps the
+  grid it came through; another DOM grid over the same model reports it as
+  "sync", as any other writer's. The model's
+  writes carry their command; a change heard with that write's store
+  revision is the command's, any other "sync". Changes are queued while a
+  command runs, a command's own collapsed to its last, stamped with the
+  model's revision when it notifies, and reported to the DOM grids
+  (`onSelection`) once no command runs, in store-revision order, a nested
+  report waiting until the current one reached every listener; a change
+  older than one heard (synchronous delivery out of order) is dropped.
 - **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
   model's `GridRef`, taken before the click selects (listeners of the
   selection may move or restrict rows), and give its index after; Enter on

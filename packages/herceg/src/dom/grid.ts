@@ -11,20 +11,24 @@
 // (grid-headings.ts); a model's totals row is a footer rowgroup, sticky at
 // the bottom.
 
+import type { DataSelection, SelectionStore } from "../data/selection.ts";
 import type { Schema } from "../data/table.ts";
 import type {
   BaseGridModel,
   GridFocus,
   GridRange,
   GridRef,
+  GridSelectCause,
   GridTotalsRow,
   SelectionState,
   ShownRow,
 } from "../grid/base.ts";
-import { TOTAL } from "../grid/base.ts";
+import { asInput, onSelection, TOTAL } from "../grid/base.ts";
 import type { ColumnContent, GridColumnLayout, PlacedColumn } from "../grid/columns.ts";
 import type { CellLook } from "../grid/looks.ts";
 import type { GridModel } from "../grid/model.ts";
+import type { RemoteSelectionStore } from "../grid/remote-selection.ts";
+import type { RemoteSelection } from "../grid/remote-types.ts";
 import type { ThemeName, ThemeSpec } from "../spec/spec.ts";
 import { resolveTokens, themeReadsPage } from "../theme.ts";
 import {
@@ -91,8 +95,41 @@ export interface GridInputEvent {
   readonly cause: "pointer" | "keyboard";
 }
 
-/** A grid's events by name, with what their listeners receive. */
-export interface GridEvents {
+/**
+ * The selection a grid's model keeps: rows of its table (a local or pivot
+ * grid's), or a remote source's keys or condition (a remote grid's).
+ */
+export type GridSelection<M> = M extends { readonly selectionStore: SelectionStore<infer S> }
+  ? DataSelection<S>
+  : M extends { readonly selectionStore: RemoteSelectionStore }
+    ? RemoteSelection
+    : DataSelection | RemoteSelection;
+
+/** What a grid's `select` reports. */
+export interface GridSelectEvent<M = BaseGridModel> {
+  /**
+   * What the model's channel held once the change applied; null for
+   * nothing selected. Selections are frozen, so it never changes (a row
+   * set's positions still follow its table's insertions, drops, and
+   * resets): to change it, select a copy (`rows.copy()`).
+   */
+  readonly selection: GridSelection<M> | null;
+  /** What changed it (see `GridSelectCause`). */
+  readonly cause: GridSelectCause;
+  /** The model's `revision` once it applied, which a `render` of it or later reports drawn. */
+  readonly revision: number;
+}
+
+/** A grid's events by name, with what their listeners receive, by its model `M`. */
+export interface GridEvents<M = BaseGridModel> {
+  /**
+   * The model's selection changed, by any writer of its channel: the
+   * grid's pointer or keys, the model's methods, or another writer. One
+   * for each command, in the order of the changes; one replaced before the
+   * grid heard it is left out, so the last holds what the channel holds.
+   * A click selecting reports it before `rowClick`.
+   */
+  select: GridSelectEvent<M>;
   /**
    * A body row was clicked (a press released in place on one of its
    * cells, after the click selected) or Enter pressed on one of its cells.
@@ -366,6 +403,16 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       this.#listen();
       this.#stops.push(this.model.subscribe(() => this.#invalidate()));
       this.#stops.push(
+        onSelection(this.model, ({ selection, cause, revision, origin }) =>
+          // Another grid's input over the same model is another writer's.
+          this.#emit("select", {
+            selection: selection as GridSelection<M>,
+            cause: origin !== null && origin !== this ? "sync" : cause,
+            revision,
+          }),
+        ),
+      );
+      this.#stops.push(
         observeVisibility(this.root, (visible) => {
           this.#visible = visible;
           if (visible && (this.#dirty || this.#pageChanged || this.#host.pending)) schedule(this);
@@ -428,7 +475,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   }
 
   /** Listens to `type`; returns what stops it. A listener that throws is reported; the others still run. */
-  on<K extends keyof GridEvents>(type: K, listener: (event: GridEvents[K]) => void): () => void {
+  on<K extends keyof GridEvents<M>>(
+    type: K,
+    listener: (event: GridEvents<M>[K]) => void,
+  ): () => void {
     let set = this.#listeners.get(type);
     if (!set) {
       set = new Set();
@@ -438,12 +488,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     return () => set.delete(listener);
   }
 
-  #emit<K extends keyof GridEvents>(type: K, event: GridEvents[K]): void {
+  #emit<K extends keyof GridEvents<M>>(type: K, event: GridEvents<M>[K]): void {
     for (const listener of [...(this.#listeners.get(type) ?? [])]) {
       // A listener may destroy the grid: the rest hear nothing more.
       if (this.#destroyed) return;
       try {
-        (listener as (event: GridEvents[K]) => void)(event);
+        (listener as (event: GridEvents<M>[K]) => void)(event);
       } catch (error) {
         report(error);
       }
@@ -1453,7 +1503,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         target === "left" || target === "right" || target === "rowStart" || target === "rowEnd";
       const before = model.selectionRevision;
       const expansion = this.#expansion(focus.rowIndex);
-      model.moveFocus(target, { extend: event.shiftKey && !across });
+      asInput(model, this, "keyboard", () =>
+        model.moveFocus(target, { extend: event.shiftKey && !across }),
+      );
       if (model.selectionRevision !== before) this.#announceSelection();
       // Left and Right expand and collapse groups on their first cell.
       expansion(true);
@@ -1473,12 +1525,12 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       // Enter on a row's cell is a click on it, without selecting (Space selects).
       this.#clicked(model.row(focus.rowIndex).ref, focus.column, "keyboard");
     } else if (key === " ") {
-      model.select(focus.rowIndex, "toggle");
+      asInput(model, this, "keyboard", () => model.select(focus.rowIndex, "toggle"));
       this.#announceSelection();
     } else if (command && key.toLowerCase() === "a") {
-      model.selectAll();
+      asInput(model, this, "keyboard", () => model.selectAll());
       this.#announceSelection();
-    } else if (key === "Escape" && model.clearSelection()) {
+    } else if (key === "Escape" && asInput(model, this, "keyboard", () => model.clearSelection())) {
       this.#announceSelection();
     } else return;
     event.preventDefault();
@@ -1551,14 +1603,16 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       model.setExpanded(group.key, !group.expanded);
       expansion(false);
     } else if (clicked.closest(".hg-check")) {
-      model.select(rowIndex, "toggle");
+      asInput(model, this, "pointer", () => model.select(rowIndex, "toggle"));
       this.#announceSelection();
     } else {
       // The row, named before selecting: listeners of the selection may move it.
       const { ref } = model.row(rowIndex);
       const command = event.ctrlKey || event.metaKey;
-      if (!command && !event.shiftKey) model.click(rowIndex);
-      else model.select(rowIndex, command ? (event.shiftKey ? "addRange" : "toggle") : "range");
+      const mode = command ? (event.shiftKey ? "addRange" : "toggle") : "range";
+      asInput(model, this, "pointer", () =>
+        !command && !event.shiftKey ? model.click(rowIndex) : model.select(rowIndex, mode),
+      );
       this.#announceSelection();
       this.#focusRequested = true;
       this.render();

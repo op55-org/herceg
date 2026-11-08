@@ -46,6 +46,42 @@ describe("row sets", () => {
     expect(() => set.addAll([1.5])).toThrow(RangeError);
   });
 
+  it("freeze in place: reads still follow the table, changes throw", () => {
+    const t = table({ x: Float64Array.from({ length: 64 }, (_, i) => i) }, { maxRows: 64 });
+    const set = new RowSet(t).addAll([3, 40, 63]);
+    expect(set.freeze()).toBe(set);
+    const frozen =
+      /^RowSet: the set is frozen, as selections hold it; change a copy, rows.copy\(\)$/;
+    expect(() => set.add(0)).toThrow(frozen);
+    expect(() => set.addRange(0, 2)).toThrow(frozen);
+    expect(() => set.addAll([1])).toThrow(frozen);
+    expect(() => set.delete(3)).toThrow(frozen);
+    expect(() => set.clear()).toThrow(frozen);
+    const version = set.version;
+    // Rows 0 to 31 drop: row 40 is now at 8, 63 at 31; row 3 has left.
+    t.append({ x: Float64Array.from({ length: 32 }, (_, i) => 64 + i) });
+    expect(Array.from(set.positions())).toEqual([8, 31]);
+    expect([set.size, set.version]).toEqual([2, version]);
+  });
+
+  it("copy their members apart, of the table's current rows", () => {
+    const t = table({ x: Float64Array.from({ length: 100 }, (_, i) => i) }, { maxRows: 100 });
+    const set = new RowSet(t).addAll([2, 50, 99]).freeze();
+    t.append({ x: [100, 101, 102, 103] });
+    const copy = set.copy();
+    expect(Array.from(copy.positions())).toEqual([46, 95]);
+    copy.add(0).delete(46);
+    expect(Array.from(copy.positions())).toEqual([0, 95]);
+    expect(Array.from(set.positions())).toEqual([46, 95]);
+    // No more words than its members need.
+    expect(copy.byteLength).toBeLessThanOrEqual(new RowSet(t).add(95).byteLength);
+    // From before a reset, a copy is empty, and of the rows now.
+    t.reset({ x: [7, 8] });
+    const after = set.copy();
+    expect([after.current, after.size]).toEqual([true, 0]);
+    expect(Array.from(after.add(1).positions())).toEqual([1]);
+  });
+
   it("are empty after their table resets, which starts identities again", () => {
     const t = table({ x: [1, 2, 3] });
     const set = new RowSet(t).add(1);

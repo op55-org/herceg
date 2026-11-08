@@ -586,13 +586,11 @@ describe("a mounted chart's row selection", () => {
     expect(late.counts).toEqual([["sync", 1]]);
     expect(late.changes.map((c) => c.selection)).toEqual([replaced]);
     expect(late.revision()).toBe(2);
-    // An earlier listener adds a row to what a click wrote and writes it back.
+    // An earlier listener writes what a click wrote with a row added.
     const reused = selectionStore(trips);
     reused.subscribe(({ selection }) => {
-      if (selection?.kind === "rows" && !selection.rows.has(2)) {
-        selection.rows.add(2);
-        reused.set("focus", selection);
-      }
+      if (selection?.kind === "rows" && !selection.rows.has(2))
+        reused.set("focus", selectRows(selection.rows.copy().add(2)));
     });
     const clicked = mounted({ store: reused });
     const [panel] = clicked.model.panels();
@@ -732,7 +730,7 @@ describe("a mounted chart's row selection", () => {
     expect(cleared?.rows.map((change) => change.table)).toEqual([trips]);
   });
 
-  it("clears no rows a listener changed in place and wrote back since its lasso wrote them", () => {
+  it("clears no rows a listener wrote since its lasso wrote them, which cannot change in place", () => {
     const { store, link } = mounted({ events: ["lasso"] });
     const outline: [number, number][] = [
       [0.5, 4],
@@ -744,9 +742,12 @@ describe("a mounted chart's row selection", () => {
     const held = store.get("focus");
     expect(held?.kind === "rows" && Array.from(held.rows.positions())).toEqual([0]);
     const clear = link.release();
-    // A listener adds a row to the lasso's set and writes the same selection back.
-    if (held?.kind === "rows") held.rows.add(2);
-    store.set("focus", held);
+    // The lasso's set is frozen; a listener writes a copy with a row added.
+    const rows = held?.kind === "rows" ? held.rows : null;
+    expect(() => (rows as RowSet).add(2)).toThrow(
+      "RowSet: the set is frozen, as selections hold it; change a copy, rows.copy()",
+    );
+    store.set("focus", selectRows(rows!.copy().add(2)));
     clear("pointer", 2);
     const after = store.get("focus");
     expect(after?.kind === "rows" && Array.from(after.rows.positions())).toEqual([0, 2]);
@@ -764,13 +765,14 @@ describe("a mounted chart's row selection", () => {
     expect(host.cleared).toEqual(["pointer"]);
   });
 
-  it("reports a row set changed in place and written again", () => {
+  it("reports a selection written again once: its rows cannot change in place", () => {
     const { store, changes } = mounted();
     const set = new RowSet(trips).add(0);
     const rows = selectRows(set);
     store.set("focus", rows);
-    set.add(1);
+    expect(() => set.add(1)).toThrow(/frozen/);
     store.set("focus", rows);
+    store.set("focus", selectRows(set.copy().add(1)));
     expect(changes).toHaveLength(2);
   });
 

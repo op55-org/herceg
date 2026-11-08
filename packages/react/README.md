@@ -68,6 +68,8 @@ export function Latency() {
   event listeners, growing with the cells on screen, not with the rows.
   `copy={{ maxCells }}` sets what Ctrl+C copies (`copy={false}` leaves the
   key to the page); `exportGrid(model)` from `herceg/grid` writes CSV.
+  `onSelect` hears every change of the selection with its cause (a click,
+  keys, the model's methods, or another writer), before `onRowClick`.
 
 ## Documentation
 

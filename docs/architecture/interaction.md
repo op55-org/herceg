@@ -579,7 +579,9 @@ chart's gestures wrote, and the model's `highlight` hook. The chart calls
 the link where gestures end. Selections from synced charts and
 `select(…, { rows: false })` write nothing. The link handles Space and
 Escape after the chart's own keys. The model directory stays free of the
-DOM: the link reads the chart through a structural interface.
+DOM: the link reads the chart through a structural interface. Stores
+freeze what they hold, so the link tells its own writes and what it saw
+by the selection's identity alone.
 
 **What a gesture selects** (`model/selected-rows.ts`) comes from what the
 last scene drew, so rows not drawn (outside bands, in breaks, unplaceable)

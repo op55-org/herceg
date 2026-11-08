@@ -7,7 +7,13 @@
 import type { Schema } from "../data/table.ts";
 import type { GridModel } from "../grid/model.ts";
 import { type PivotGridModel, pivotOfModel } from "../grid/pivot.ts";
-import { Grid, type GridExtras, type GridOptions, type GridUpdate } from "./grid.ts";
+import {
+  Grid,
+  type GridEvents,
+  type GridExtras,
+  type GridOptions,
+  type GridUpdate,
+} from "./grid.ts";
 
 export interface PivotGridOptions<S extends Schema = Schema>
   extends Omit<GridOptions, "model" | "cells"> {
@@ -16,10 +22,18 @@ export interface PivotGridOptions<S extends Schema = Schema>
 }
 
 /** A pivot's grid (`createPivotGrid`): a `Grid` whose model is a pivot grid model. */
-export type PivotGrid<S extends Schema = Schema> = Omit<Grid, "model" | "update"> & {
+export type PivotGrid<S extends Schema = Schema> = Omit<Grid, "model" | "update" | "on"> & {
   readonly model: PivotGridModel<S>;
   /** Changes options; one given as undefined goes back to its default. Pivot grids take no `cells`. */
   update(options: Omit<GridUpdate, "cells">): void;
+  /**
+   * Listens to `type`; returns what stops it (see `Grid.on`). Selecting a
+   * pivot's row selects its records of the view, which `select` reports.
+   */
+  on<K extends keyof GridEvents<PivotGridModel<S>>>(
+    type: K,
+    listener: (event: GridEvents<PivotGridModel<S>>[K]) => void,
+  ): () => void;
 };
 
 const CSS =

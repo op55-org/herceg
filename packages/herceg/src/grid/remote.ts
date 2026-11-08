@@ -112,6 +112,7 @@ import type {
 import { bytesOf, later, ownColumns } from "./remote-requests.ts";
 import {
   matchingSelection,
+  type RemoteSelectionChange,
   type RemoteSelectionStore,
   remoteSelectionStore,
   rowSelected,
@@ -338,10 +339,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     // below, which must hold the model only weakly.
     this.subscribe(this.#schedule.bind(this));
     const ref = new WeakRef(this);
-    const changed = () => {
+    const changed = ({ channel, selection, revision }: RemoteSelectionChange) => {
       const model = ref.deref();
-      if (model) model.#selectionChanged();
-      else stop();
+      if (!model) return stop();
+      if (channel === model.channel) model.heardSelection(selection, revision);
+      model.#selectionChanged();
     };
     const stop = selection.subscribe(changed);
     this.#stop = stop;
@@ -923,13 +925,13 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   }
 
   /**
-   * Selects as clicks do (see `SelectMode`), by key: a record (or with
-   * Shift a range of records, every one between loaded, all within one
-   * group), or a group's header, which selects the rows matching the group
-   * (those the source adds to it later too). A selection the model cannot
-   * make (rows not loaded, a source without keys) is refused, saying why.
+   * By key: a record (or with Shift a range of records, every one between
+   * loaded, all within one group), or a group's header, which selects the
+   * rows matching the group (those the source adds to it later too). A
+   * selection the model cannot make (rows not loaded, a source without
+   * keys) is refused, saying why.
    */
-  select(rowIndex: number, mode: SelectMode = "only"): void {
+  protected applySelect(rowIndex: number, mode: SelectMode): void {
     const { list, ordinal } = this.#at(rowIndex);
     const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
     if (block?.state !== "loaded") {
@@ -949,7 +951,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       this.rangeAnchor = ref;
       // Toggling the group selected as a whole clears it; any other selects the group alone.
       if (mode === "toggle" && this.selectedAlone(rowIndex)) {
-        store.set(this.channel, null);
+        this.writeSelection(store, this.channel, null);
         return;
       }
       this.#selectMatching(path);
@@ -1020,8 +1022,7 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     }
   }
 
-  /** Selects every row matching the query's filter, those the source adds later too. */
-  selectAll(): void {
+  protected applySelectAll(): void {
     this.#selectMatching(null);
   }
 
@@ -1050,10 +1051,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     );
   }
 
-  clearSelection(): boolean {
-    const had = this.selectionStore.get(this.channel) !== null || this.rangeAnchor !== null;
+  protected applyClearSelection(): boolean {
+    const store = this.selectionStore;
+    const had = store.get(this.channel) !== null || this.rangeAnchor !== null;
     this.rangeAnchor = null;
-    if (this.selectionStore.get(this.channel) !== null) this.selectionStore.set(this.channel, null);
+    if (store.get(this.channel) !== null) this.writeSelection(store, this.channel, null);
     return had;
   }
 
@@ -2112,6 +2114,8 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   #publish(selection: RemoteSelection, path?: GroupKey | null) {
     const store = this.selectionStore;
     const scope = this.#scopeNow();
+    // A listener's publication within this one's has its own scope, then this one's again.
+    const outer = this.#pending;
     // The scope is of this publication alone: the channel's next version.
     const version = store.version(this.channel) + 1;
     if (path !== undefined)
@@ -2123,10 +2127,11 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
       };
     else if (scope && selection.kind === "matching")
       this.#pending = { path: scope.path, filter: scope.filter, by: scope.by, version };
+    else this.#pending = null;
     try {
-      store.set(this.channel, selection);
+      this.writeSelection(store, this.channel, selection);
     } finally {
-      this.#pending = null;
+      this.#pending = outer;
     }
   }
 }

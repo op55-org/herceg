@@ -698,13 +698,13 @@ describe("highlighting", () => {
     expect(Array.from(membership(source, condition))).toEqual([1]);
   });
 
-  it("follows a row set changed in place, and shares memberships between charts", () => {
+  it("follows each selection, and shares memberships between charts", () => {
     const source = table({ x: [1, 2, 3], y: [1, 2, 3] });
     const set = new RowSet(source).add(0);
     const rows = selectRows(set);
     expect(Array.from(membership(source, rows))).toEqual([1, 0, 0]);
-    set.add(1);
-    expect(Array.from(membership(source, rows))).toEqual([1, 1, 0]);
+    const more = selectRows(set.copy().add(1));
+    expect(Array.from(membership(source, more))).toEqual([1, 1, 0]);
     expect(membership(source, rows)).toBe(membership(source, rows));
   });
 
