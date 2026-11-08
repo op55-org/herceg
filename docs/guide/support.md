@@ -21,7 +21,7 @@ the generated [capability matrix](../capabilities.md).
 | 2D histogram | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | · | ✓ |
 | contour | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | · | · | · | · | ✓ | · | — |
 | rule, region, text | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | · | · | · | · | ◐ | · | ✓ |
-| custom | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ◐ | · | ✓ | ◐ | ◐ | — |
+| custom | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ◐ | · | ✓ | ◐ | ◐ | ◐ |
 | pie | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | ✓ |
 | treemap, sunburst | ✓ | ✓ | ✓ | · | · | drilling | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | ◐ |
 | radar | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | ✓ | · | ✓ | ✓ | ✓ | — |
@@ -83,7 +83,9 @@ the generated [capability matrix](../capabilities.md).
   [Dragging rules](interaction.md#dragging-rules)
 - **Value animation.** Lines and areas move when no labels follow them and
   their rows stay; areas along y show changes at once. Sunbursts move
-  their sectors and drills; treemaps refuse value animation.
+  their sectors and drills; treemaps refuse value animation. Custom marks
+  move the fields they declare (`x`, `y`, and those `encode` reads); what
+  else `draw` reads shows at once.
   [Animation](interaction.md#animation)
 - **Everywhere.** Marks on the chart's scales take `clip`, `zIndex`
   ([Paint order](styling.md#paint-order)), and `legend: false`; lines,

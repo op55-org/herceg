@@ -1276,14 +1276,26 @@ export interface AnimationSpec {
    * `reset`), and axes whose automatic domains change move with them, as
    * well as the axes moving to views asked for: bars, pie slices, gauges,
    * points (by row, so not across `reset`), lines and areas whose rows
-   * keep their positions, error bars, candlesticks, annotations, and
-   * heatmaps' cells. Appended and dropped rows, changed options, and
-   * changes that move a plot or the categories show at once. Box plots,
-   * boxen plots, violins, rugs, contours, dendrograms, custom marks, and
-   * layout marks other than pies and gauges refuse it.
+   * keep their positions, error bars, candlesticks, annotations,
+   * heatmaps' cells, and custom marks' declared fields. Appended and
+   * dropped rows, changed options, and changes that move a plot or the
+   * categories show at once. Box plots, boxen plots, violins, rugs,
+   * contours, dendrograms, and layout marks other than pies and gauges
+   * refuse it.
    */
   values?: boolean;
+  /** How changes of view, of values, and drills move over their duration. @default "cubic-out" */
+  easing?: Easing;
 }
+
+/**
+ * How a transition moves over its duration, as d3's curves of these
+ * names: "cubic-out" starts fast and settles (`1 - (1 - t)^3`);
+ * "linear" moves at an even pace; "cubic-in-out" speeds up, then
+ * settles (d3's default for transitions). Not CSS's timing functions,
+ * which are other curves.
+ */
+export type Easing = "cubic-out" | "linear" | "cubic-in-out";
 
 export type ZoomSpec = "x" | "y" | "xy";
 export type BrushSpec = "x" | "y" | "xy" | "lasso";

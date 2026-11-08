@@ -175,6 +175,32 @@ describe("architecture", () => {
       ).toEqual([]);
   });
 
+  // What moves custom marks' values (dom/value-custom.ts) loads only for
+  // charts with custom marks that animate values: value transitions load
+  // it, importing only its types, and it imports only types itself. Value
+  // transitions take their easing from the view transitions they load
+  // beside, importing only their types too: a module both imported would
+  // move into a chunk of its own, which both would then load.
+  it("value transitions load custom marks' motion apart, and import only types of the view transitions", () => {
+    const runtime = (file: string) =>
+      [
+        ...readFileSync(file, "utf8").matchAll(
+          /^(?:import|export) (?!type )[^;]*?from "([^"]+)"/gm,
+        ),
+      ].map(([, path]) => resolve(dirname(file), path!));
+    const custom = join(SRC, "dom/value-custom.ts");
+    const values = join(SRC, "dom/value-transition.ts");
+    expect(runtime(custom)).toEqual([]);
+    expect(runtime(values)).not.toContain(join(SRC, "dom/transition.ts"));
+    for (const file of files(SRC)) {
+      expect(runtime(file), `${file} imports value-custom.ts`).not.toContain(custom);
+      const loads = [...readFileSync(file, "utf8").matchAll(/\bimport\("([^"]+)"\)/g)].map(
+        ([, path]) => resolve(dirname(file), path!),
+      );
+      if (loads.includes(custom)) expect(file, "loads value-custom.ts").toBe(values);
+    }
+  });
+
   // Marks import their drawings, so drawings must load and write SVG without
   // a DOM. Canvas painting reaches the DOM only through the canvas it is
   // handed (rasters fall back to creating a canvas in its document).

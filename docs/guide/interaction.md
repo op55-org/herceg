@@ -1050,16 +1050,38 @@ widget = chart.widget()
 widget.replace(next_data)  # points with matching ids move, even reordered
 ```
 
-A bar race is bars keyed by `itemKey` on a rank axis, reset each keyframe:
+A bar race is bars keyed by `itemKey` on a rank axis, reset each keyframe,
+moving at an even pace from one to the next:
 
 ```ts
 const race = createChart(element, {
   marks: [bar(brands, { itemKey: "brand", orient: "y", x: "value", y: "rank", labels: true })],
   y: { domain: [11.5, -0.5] }, // ranks 0 to 11 shown, the first at the top
-  animation: { values: true, duration: 750 },
+  x: { place: { side: "top" } },
+  animation: { values: true, duration: 250, easing: "linear" },
 });
 brands.reset(nextKeyframe); // bars change places, come and go past the last rank, labels count
 ```
+
+`easing` says how views, values, and drills move over the duration, as
+d3's curves of these names (not CSS's timing functions, which are other
+curves):
+
+| `easing` | Moves | For |
+| --- | --- | --- |
+| `"cubic-out"` (default) | fast, then settling: `1 - (1 - t)^3` | most changes |
+| `"linear"` | at an even pace | races and streams of keyframes |
+| `"cubic-in-out"` | speeding up, then settling | d3's default for transitions |
+
+A spec writes it as a string (`"animation": { "easing": "linear" }`), and
+Python as `hg.Animation(easing="linear")`; React, Vue, and Svelte take it
+in `animation` too. One easing serves the whole chart. The types and the
+spec refuse other names (`animation.easing: expected "cubic-out",
+"linear", or "cubic-in-out"; received "bounce"`). Plain JavaScript given
+one moves by `"cubic-out"` and tells of it once per `animation` option, as
+`onError`, "error" listeners, or the console hear of other options
+refused (the error's `path` is `animation.easing`), without keeping the
+chart from drawing or failing `chart.ready`.
 
 | Mark | Moves |
 | --- | --- |
@@ -1071,6 +1093,7 @@ brands.reset(nextKeyframe); // bars change places, come and go past the last ran
 | Lines, areas along x | When both scenes draw every row through the same positions (no level of detail, missing values, or breaks). |
 | Error bars, candlesticks, regions | When both scenes draw as many at the same places along one axis. |
 | Heatmap and 2D histogram cells | Fade to new colors over the same grid. |
+| Custom marks | `draw` runs again each frame over a table of the fields the mark declares (`x`, `y`, and those `encode` reads) between their values, on the frame's scales ([custom marks](marks.md#animating-custom-marks)). Items match by `itemKey`, else by row. |
 
 A bar or text label whose key is missing matches its row while the table
 keeps its rows (not across `reset`); a point whose key is missing, and
@@ -1081,25 +1104,29 @@ bars, points, labels, and sectors keep moving from where they are, so a
 reset every 250 ms with a 750 ms duration plays as one motion. The picture
 then trails the data until changes stop.
 
-**Refused.** Box plots, boxen, violins, rugs, contours, dendrograms, custom
-marks, treemaps, funnels, radars, Sankey diagrams, networks, maps, and 3D
-marks refuse `values` with a `ChartError` (`unsupported`, path
+**Refused.** Box plots, boxen, violins, rugs, contours, dendrograms,
+treemaps, funnels, radars, Sankey diagrams, networks, maps, and 3D marks
+refuse `values` with a `ChartError` (`unsupported`, path
 `animation.values`).
 
 **Shown at once instead:** appended and dropped rows, and changes until
 data has been still for a change's duration after them (so streams never
 animate forever); changes of options or hidden series; category axes
 gaining or losing categories, and lines and areas over categories that
-change order; pies whose kept slices change order; scenes over 2,000 bars,
-slices, sectors, and rules or 10,000 points (of points or lines), counting
-items going; point clouds, sampled points, marks over row views;
-charts with a navigator or `sync`, off screen, read by the pointer or
-keyboard, or slow (over 10 ms a frame); pages preferring reduced motion. A
-pointer reads a chart unless it has `inspection: false` and no hover
-listener; drills play on under it. Charts of several panels or with `sync`
-do not animate their views. Only the drawing moves: data, tooltips, and
-events have the new values at once (during a drill, the pointer reads the
-sectors as drawn).
+change order, and custom marks over categories that change order; pies
+whose kept slices change order; scenes over 2,000 bars, slices, sectors,
+rules, and custom marks' rows or 10,000 points (of points or lines),
+counting items going; point clouds, sampled points; a row view's own
+changes (`setQuery`, `restrict`; its table's values changing in place move
+as a table's do); changes before the code that moves them has loaded (it
+loads with the chart's first frames: `await chart.loading`; charts with
+custom marks load theirs a request later); charts with a navigator or
+`sync`, off screen, read by the pointer or keyboard, or slow (over 10 ms a
+frame); pages preferring reduced motion. A pointer reads a chart unless it
+has `inspection: false` and no hover listener; drills play on under it.
+Charts of several panels or with `sync` do not animate their views. Only
+the drawing moves: data, tooltips, and events have the new values at once
+(during a drill, the pointer reads the sectors as drawn).
 
 ## Hiding series
 

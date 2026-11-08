@@ -5,7 +5,7 @@
 // with the charts that use it: a live chart imports it before drawing such
 // a configuration, and static output brings it with it.
 
-import type { Table } from "../data/table.ts";
+import type { ReadonlyTable, Table } from "../data/table.ts";
 import type { ChartFieldKit, ChartFields } from "../fields/chart.ts";
 import type { mappedColors, stepsAt } from "../fields/colors.ts";
 import type { CompiledFields, Steps } from "../fields/display.ts";
@@ -270,12 +270,14 @@ export interface MarkFeatures {
   /**
    * For custom marks: a channel's output for a row of their table (a
    * color, a width, an opacity) as an item of `series`, undefined where the
-   * row has none or the channel is not given.
+   * row has none or the channel is not given; in a frame between two
+   * scenes, continuous channels read `frame`, the frame's values.
    */
   encoded?(
     channel: "color" | "strokeWidth" | "opacity",
     row: number,
     series?: CustomSeries,
+    frame?: ReadonlyTable,
   ): string | number | undefined;
   /**
    * Labels placed so far, which later ones keep off (bars' labels that

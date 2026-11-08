@@ -7,6 +7,7 @@ import { RowSet } from "../../src/data/row-set.ts";
 import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Table, type TableChange, table } from "../../src/data/table.ts";
 import { fieldReader } from "../../src/dom/tooltip-content.ts";
+import { ViewAnimation } from "../../src/dom/transition.ts";
 import { drawSectors, moveSunburst, sectorAt, sectorsOf } from "../../src/dom/value-sectors.ts";
 import {
   followedOf,
@@ -72,6 +73,7 @@ import {
   type SunburstSectors,
   type TextGeometry,
 } from "../../src/scene/scene.ts";
+import { ChartError } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
@@ -2577,6 +2579,35 @@ describe("value animation", () => {
     // Ended early (by a pointer, say), nothing more plays.
     expect(animation.settle()).toBe(true);
     expect(animation.step(0)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("show changes at once until the chart's easing has loaded, then move by it", () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(0);
+    const data = table({ region: ["N", "S", "E"], sales: [10, 20, 30] });
+    const model = chart({
+      marks: [bar(data, { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+      animation: { ...VALUES, easing: "linear" },
+    });
+    let views: ViewAnimation | undefined;
+    const animation = new ValueAnimation(model, null, scene(model), BUILDERS, () => views);
+    animation.changed(scene(model), VALUES_CHANGED, 0);
+    data.setColumn("sales", [30, 20, 10]);
+    const destination = scene(model);
+    expect(animation.start(destination, 0)).toBe(destination);
+    expect(animation.playing).toBe(false);
+    // Loaded, the next change moves linearly: half way at half time.
+    views = new ViewAnimation(model, null, () => {}, ChartError);
+    const from = rects(bars(destination)[0]!);
+    animation.changed(destination, VALUES_CHANGED, 0);
+    data.setColumn("sales", [10, 20, 30]);
+    const to = rects(bars(scene(model))[0]!);
+    animation.start(scene(model), 0);
+    expect(animation.playing).toBe(true);
+    now.mockReturnValue(100);
+    const [n] = rects(bars(animation.step(0)!)[0]!);
+    expect(n![3]).toBeCloseTo((from[0]![3]! + to[0]![3]!) / 2, 3);
     vi.restoreAllMocks();
   });
 

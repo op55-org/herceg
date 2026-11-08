@@ -74,6 +74,26 @@ def test_animation_is_off_true_a_duration_or_options():
         hg.Chart(DATA, animation=hg.Animation(duration=-5))
 
 
+def test_animation_easing_is_one_of_three_and_left_out_by_default():
+    def animation(easing):
+        spec, _ = (
+            hg.Chart(DATA, animation=hg.Animation(values=True, easing=easing))
+            .line(x="t", y="p50")
+            .to_spec()
+        )
+        return spec["animation"]
+
+    assert animation("cubic-out") == {"duration": 250, "values": True}
+    assert animation("linear") == {"duration": 250, "values": True, "easing": "linear"}
+    assert animation("cubic-in-out")["easing"] == "cubic-in-out"
+    with pytest.raises(
+        ValueError,
+        match='Animation easing: expected "cubic-out", "linear", or "cubic-in-out"; '
+        'received "ease-out"',
+    ):
+        animation("ease-out")
+
+
 @pytest.mark.parametrize("key", ["host", "unused", "t"])
 def test_point_item_keys_serialize_and_send_the_key_column(key):
     spec, buffers = hg.scatter(DATA, "p50", "p99", item_key=key).to_spec()

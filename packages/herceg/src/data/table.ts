@@ -227,6 +227,38 @@ function requireCount(value: number, name: string): void {
 }
 
 /**
+ * A table's reading methods: what a custom mark's `draw` reads its rows
+ * from. In frames between two scenes of a value transition, it holds the
+ * frame's values of the fields the mark declares, and is valid during that
+ * call only; otherwise it is the table itself. Read-only to TypeScript: its
+ * arrays are the chart's or the table's own.
+ */
+export interface ReadonlyTable<S extends Schema = Schema>
+  extends Pick<
+    Table<S>,
+    | "length"
+    | "generation"
+    | "fields"
+    | "has"
+    | "kind"
+    | "value"
+    | "extent"
+    | "isSorted"
+    | "identity"
+    | "positionOf"
+    | "geometries"
+  > {
+  /** A number or time field's values, by row (see `Table.numbers`). */
+  numbers(field: NumericField<S>): ArrayLike<number>;
+  /** A category field's codes by row (-1 for missing), its dictionary, and its revision (see `Table.categories`). */
+  categories(field: CategoryField<S>): {
+    readonly codes: ArrayLike<number>;
+    readonly dictionary: readonly string[];
+    readonly revision: number;
+  };
+}
+
+/**
  * Columnar data with equal-length typed columns.
  *
  * Create tables with `table()`, which infers the schema so marks only accept

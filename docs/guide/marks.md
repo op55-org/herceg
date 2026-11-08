@@ -922,7 +922,7 @@ custom(requests, {
 | `x`, `y` | Data value to pixel (band index on category axes). |
 | `domain`, `bandwidth`, `plot`, `theme` | The scales' domains, band width, plot rectangle, theme. |
 | `path`, `rect`, `circle`, `line`, `text` | Shapes, each with an optional style (`fill`, `stroke`, `strokeWidth`, `opacity`, `dash`); they paint the same in SVG and on a canvas. |
-| `table`, `series` | With a table: the series to draw (hidden ones left out), each with `label`, `color`, `x` and `y` columns, `length`, `rows`, and `rowAt(k)`. |
+| `table`, `series` | With a table: its rows to read (a `ReadonlyTable`: `numbers`, `categories`, `value`, `extent`, and the other reading methods), and the series to draw (hidden ones left out), each with `label`, `color`, `x` and `y` columns, `length`, `rows`, and `rowAt(k)`. |
 | `item(series, row, draw)` | The shapes `draw` makes are that row's item: picked by their shapes (inside a fill, on a stroke), read by tooltips and the keyboard, dimmed while a selection leaves the row out, and named in events by `itemKey`. |
 | `encoded(channel, row, series?)` | The row's output of an `encode` channel (`color`, `strokeWidth`, `opacity`) through the chart's scales; undefined where the row has none. A `color` of the series' names colors series (`series.color`), given as `series`, also as a list's last entry; widths and opacities read fields, values, conditions, or lists of them. |
 | `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
@@ -972,6 +972,54 @@ custom(forecasts, {
 - Custom marks take `tooltip: { fields }` with series.
 - **Limits.** JavaScript only (a spec cannot hold a function); meant for
   shapes in the thousands, not millions (2,000 comets of three shapes each
-  draw in about 3 ms and are picked in about 30 µs); no value animation.
-  The built-in marks' internals (series resolution, layout) are not a
-  public extension API.
+  draw in about 3 ms and are picked in about 30 µs). The built-in marks'
+  internals (series resolution, layout) are not a public extension API.
+
+### Animating custom marks
+
+With `animation: { values: true }`, a custom mark moves to changed values
+by its data, not its shapes: each frame calls `draw` again, the same code,
+with `table` holding the frame's values and `series`' `x` and `y`
+following them.
+
+```ts
+createChart(element, {
+  animation: { values: true, duration: 300, easing: "cubic-in-out" },
+  marks: [custom(forecasts, { itemKey: "id", x: ["start", "end"], y: "id", draw })],
+});
+forecasts.replace(0, { end: nextEnds }); // the comets' heads move; the start dots stay
+```
+
+- **What moves.** The fields the mark declares: its `x` and `y` fields
+  and the fields its `encode` channels read, where both ends are finite
+  numbers or times (along a log axis, positive ones, moving evenly in log
+  space). A field `draw` reads without declaring it shows its new values
+  at once: declare it in `encode` to move it. The key and series fields
+  never move.
+- **Encodings.** `encoded` gives a frame's widths, opacities, and ramp
+  colors from its values, through the chart's scales; conditions, lists,
+  categories, and display colors give the new values' outputs at once.
+- **Matching.** Items match by `itemKey`, else by row (so not across
+  `reset`). Items that come or go, whose key repeats, whose series or a
+  category field the mark declares (in `x`, `y`, or `encode`) changed,
+  that a panel or view did not draw before, or with a declared value
+  missing at either end show their new values at once, as points whose
+  category color changes do.
+- **What is kept.** The chart keeps the declared fields as last drawn, by
+  row of the table (a row view's source), once per table however many
+  marks, views, and panels read it: 8 bytes a row and field, while the
+  table has at most 2,000 rows; a transition adds its frames' values of
+  each mark until it ends. A mark over a larger table, or past the chart's
+  budget (2,000 bars, slices, rules, and custom marks' rows together),
+  shows its changes at once. A mark without a table draws again on the
+  frame's scales, so shapes placed with `x` and `y` follow moving axes.
+- **Loading.** What moves custom marks loads only for charts that have
+  them, a request after the rest of value transitions; changes before it
+  arrives show at once, and `chart.loading` waits for it.
+- **Read-only.** `table` is typed `ReadonlyTable`, with or without
+  animation; a frame's table is valid during that call only, and its
+  arrays are rewritten for the next frame.
+- **Input.** As for every mark, a change made while the pointer or the
+  keyboard reads the chart shows at once, a pointer move or press
+  settles a change playing, and picks and tooltips read the new values.
+  Static exports draw them too.
