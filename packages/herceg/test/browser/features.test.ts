@@ -99,8 +99,9 @@ describe("charts drawing marks' features", () => {
       theme: { style: { plot: { fill: "#eeeeee" } } },
       x: { domain: [2, 10] },
       marks: [
-        // Entering the view at its left edge, and ending at its right edge on the right axis.
-        line(table({ t: [0, 10], limit: [57, 57] }), {
+        // At its first observation in view, on the view's left edge, and its
+        // last at the right edge, on the right axis.
+        line(table({ t: [0, 2, 10], limit: [57, 57, 57] }), {
           x: "t",
           y: "limit",
           labels: { at: "visible-start", content: ["Limit ", { value: true }] },

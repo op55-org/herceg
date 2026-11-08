@@ -26,9 +26,10 @@
 // they are kept by priority, then series order: those that outrank every
 // label that moves before the movers are placed (and the movers keep off
 // them), the others after. A label moved more than LEADER_MOVE pixels draws
-// a leader back to its point when asked. The feature compiler places labels with it, and hands it the
-// chart's code it uses (`AttachedKit`), so the line chart's first chunk
-// does not load it.
+// a leader back to its point when asked, in its series' color unless the
+// leader's look gives one. The feature compiler places labels with it, and
+// hands it the chart's code it uses (`AttachedKit`), so the line chart's
+// first chunk does not load it.
 
 import { leaderDrawingOf } from "../draw/leaders.ts";
 import type { markupOf, n } from "../draw/markup.ts";
@@ -79,8 +80,9 @@ const EPSILON = 1e-6;
 /** Blocks meeting only some of the others solved as such; larger groups are solved as columns. */
 const GROUP = 48;
 
-/** How a leader looks: resolved from `leader: true` or its own look (the theme's muted color by default). */
+/** How a leader looks: resolved from `leader: true` or its own look. */
 export interface LeaderLook {
+  /** One color for every leader of the mark; by default, each in the color of what its label labels. */
   readonly stroke: string | undefined;
   /** Names the stroke in messages: `line labels.leader.stroke`. */
   readonly path: string;
@@ -121,6 +123,8 @@ export interface AttachedLabel {
   readonly priority: number;
   /** The mark it labels the series of, which draws it. */
   readonly owner: LabelOwner;
+  /** Its series' color: its leader's, where the leader's look gives none. */
+  readonly color: string;
 }
 
 /**
@@ -218,14 +222,15 @@ export function placeAttached(
   const kept = arrange(blocks, plot);
   if (kept.length === 0) return { geometry, boxes };
   const under = frame.surface ?? surface(frame.theme);
-  const drawn = new Map<LabelOwner, { items: TextItem[]; leaders: number[] }>();
+  // Each owner's labels, and its leaders by color.
+  const drawn = new Map<LabelOwner, { items: TextItem[]; leaders: Map<string, number[]> }>();
   for (const block of kept) {
     const { label, text, parts, reach, lines, x, top, lift, room: taken, extent, height } = block;
     const { owner, paint, halo, at } = label;
     if (taken) owner.room[taken[0]] = Math.max(owner.room[taken[0]], taken[1]);
     let own = drawn.get(owner);
     if (!own) {
-      own = { items: [], leaders: [] };
+      own = { items: [], leaders: new Map() };
       drawn.set(owner, own);
     }
     const align = paint.align ?? "start";
@@ -248,26 +253,37 @@ export function placeAttached(
       own.items.push(halo ? { ...item, halo } : item);
     }
     boxes.push({ x: extent[0], y: top, width: extent[1] - extent[0], height });
-    if (owner.leader && Math.abs(top - block.wanted) > LEADER_MOVE)
-      own.leaders.push(...leaderOf(at, block, align));
+    const look = owner.leader;
+    if (look && Math.abs(top - block.wanted) > LEADER_MOVE) {
+      const stroke = look.stroke === undefined ? label.color : look.stroke;
+      let coords = own.leaders.get(stroke);
+      if (!coords) {
+        coords = [];
+        own.leaders.set(stroke, coords);
+      }
+      coords.push(...leaderOf(at, block, align));
+    }
   }
-  for (const [owner, { items, leaders: coords }] of drawn) {
+  for (const [owner, { items, leaders: byColor }] of drawn) {
     const parts: Geometry[] = [];
     const look = owner.leader;
-    if (look && coords.length > 0) {
+    // One geometry per color, in the order colors first drew a leader.
+    let k = 0;
+    for (const [stroke, coords] of byColor) {
       leaders ??= leaderDrawingOf(markupOf, n);
       const segments: SegmentGeometry = {
         kind: "segments",
         draw: leaders,
-        key: `${owner.key}|leaders`,
-        stroke: look.stroke === undefined ? frame.theme.muted : frame.paint(look.stroke, look.path),
-        strokeWidth: look.strokeWidth,
+        key: k === 0 ? `${owner.key}|leaders` : `${owner.key}|leaders|${k}`,
+        stroke: look!.stroke === undefined ? stroke : frame.paint(stroke, look!.path),
+        strokeWidth: look!.strokeWidth,
         coords: Float32Array.from(coords),
         count: coords.length / 4,
       };
-      if (look.dash) segments.dash = look.dash;
-      if (look.opacity !== undefined) segments.opacity = look.opacity;
+      if (look!.dash) segments.dash = look!.dash;
+      if (look!.opacity !== undefined) segments.opacity = look!.opacity;
       parts.push(segments);
+      k++;
     }
     drawing ??= labelsDrawingOf(textItemMarkup);
     parts.push({ kind: "labels", draw: drawing, key: owner.key, items } as LabelsGeometry);

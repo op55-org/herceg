@@ -108,6 +108,7 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
     "TextStyle": ("theme.style.text", _styled("text"), {}),
     "PlotStyle": ("theme.style.plot", _styled("plot"), {}),
     "StrokeStyle": ("theme.style.axis_line", _styled("axis_line"), {}),
+    "PaintStyle": ("theme.style.brush", _styled("brush"), {}),
     "Scale": ("scales.x", lambda o: hg.Chart(DATA, scales={"x": o}).line(x="t", y="v"), {}),
     "OrdinalScale": (
         "scales.c",
@@ -499,6 +500,7 @@ LIST_FIELDS: dict[tuple[str, str], list[Any]] = {
     ("ChannelScale", "domain"): [0.0, 10.0],
     ("Tokens", "palette"): ["#d1495b", "#00798c"],
     ("StrokeStyle", "dash"): [4.0, 2.0],
+    ("PaintStyle", "dash"): [4.0, 2.0],
     ("Grid", "columns"): [1.0, 2.0],
     ("AxisOptions", "breaks"): [hg.Break(weekdays=["sat", "sun"])],
     ("LegendOptions", "entries"): [hg.LegendEntry("k", "L")],

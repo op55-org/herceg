@@ -4965,7 +4965,7 @@
       "additionalProperties": false
     },
     "LabelAt": {
-      "description": "Which point of a series a label follows: its first or last observation drawn (\"first\", \"last\"), or where its line enters or leaves the view (\"visible-start\", \"visible-end\"), along the series' own order.",
+      "description": "Which observation of a series a label follows, before level of detail, in the series' own order: its first or last drawn (\"first\", \"last\"), or its first or last drawn whose position is in the view along the series' axis (\"visible-start\", \"visible-end\"); none where the series has none in view. A label whose observation is outside the plot is not drawn.",
       "type": "string",
       "enum": ["first", "last", "visible-start", "visible-end"]
     },
@@ -5443,7 +5443,7 @@
         },
         "labels": {
           "title": "Labels",
-          "description": "A label following each line: at its first or last point, or where it enters or leaves the view.",
+          "description": "A label following each line: at its first or last observation drawn, or its first or last in view.",
           "$ref": "#/$defs/SeriesLabelsSpec"
         },
         "selected": {
@@ -5967,6 +5967,31 @@
       "type": "object",
       "properties": { "type": { "title": "Type", "const": "pageScroll" } },
       "required": ["type"],
+      "additionalProperties": false
+    },
+    "PaintStyle": {
+      "description": "How a filled shape looks: a fill and an outline.",
+      "type": "object",
+      "properties": {
+        "fill": { "title": "Fill", "type": "string" },
+        "fillOpacity": { "title": "Fill opacity", "type": "number", "minimum": 0, "maximum": 1 },
+        "strokeOpacity": {
+          "title": "Stroke opacity",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stroke": { "title": "Stroke", "type": "string" },
+        "strokeWidth": { "title": "Stroke width", "type": "number", "minimum": 0 },
+        "dash": { "title": "Dash", "$ref": "#/$defs/Dash" },
+        "opacity": {
+          "title": "Opacity",
+          "description": "From 0 to 1.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
       "additionalProperties": false
     },
     "PanAction": {
@@ -7802,7 +7827,7 @@
       "additionalProperties": false
     },
     "SeriesLabelsSpec": {
-      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label displaced more than 6 pixels from its place at its point back to that point.",
+      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label displaced more than 6 pixels from its place at its point back to that point, in its series' color unless the leader's look gives a stroke.",
       "type": "object",
       "properties": {
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },
@@ -8030,6 +8055,11 @@
           "title": "Crosshair",
           "description": "The line the pointer's, the keyboard's, and other charts' cursors draw across a plot.",
           "$ref": "#/$defs/StrokeStyle"
+        },
+        "brush": {
+          "title": "Brush",
+          "description": "Brushes and lassos, of charts, maps, and networks, while drawn and after (and a brush that zooms, while drawn): the theme's muted color at `fillOpacity` 0.18 by default. A brush has no outline unless `stroke` gives one; a lasso's is its fill's color at `strokeOpacity` 0.6 unless `stroke` gives one (`\"none\"` for none). `opacity` scales both.",
+          "$ref": "#/$defs/PaintStyle"
         },
         "line": {
           "title": "Line",
@@ -8436,7 +8466,7 @@
         },
         "from": {
           "title": "From",
-          "description": "Where the text is on another mark's geometry, following it: the series of mark `from.mark` at `from.at`, such as where a line leaves the view, one label per series; or with `from.item`, the item of a layout mark each row names, at an anchor of its box. Not with `x`, `y`, or `at`.",
+          "description": "Where the text is on another mark's geometry, following it: the series of mark `from.mark` at `from.at`, such as its last observation in view, one label per series; or with `from.item`, the item of a layout mark each row names, at an anchor of its box. Not with `x`, `y`, or `at`.",
           "anyOf": [{ "$ref": "#/$defs/MarkAnchorSpec" }, { "$ref": "#/$defs/ItemAnchor" }]
         },
         "label": {

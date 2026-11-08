@@ -3,8 +3,8 @@
 // `Topology` the row each crossing of `where` arrives at (`crossingOwner`);
 // a recorder writes the points on to the path and keeps their positions,
 // -1 for points written to it otherwise. Markers read
-// their rows from it, highlights where paths end (`PathEnds`), and labels
-// following a series which observation owns their point (`TracedEdge`).
+// their rows from it, and highlights where paths end (`PathEnds`). Labels
+// following a series read the series as traced (`TracedEdge`).
 
 import type { NumericArray } from "../../data/column.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
@@ -125,15 +125,18 @@ export function pathEnds(path: Polyline, recorder: Recorder, series: Series): Pa
  * (attach.ts): the series as traced (positions as x, a copy's rows in
  * `sources`), the edge's values as drawn and a band's other edge, the
  * frame it was traced on (along y, x and y swapped, a dodged series'
- * shift in its positions' mapping), the path traced before steps and
- * curves, and each of its points' position in the series (as `Recorder`
- * keeps them).
+ * shift in its positions' mapping), the positions [`start`, `end`) it
+ * traced, before level of detail: those in the view, and the next past
+ * each end; and where `where` or `continuity` leave rows out, the runs of
+ * positions they keep (start, end, and crossings of each, as
+ * marks/features/continuity.ts finds them once per data version).
  */
 export interface TracedEdge {
   readonly series: Series;
   readonly values: NumericArray;
   readonly other: NumericArray | undefined;
   readonly frame: TraceFrame;
-  readonly path: Polyline;
-  readonly positions: Int32Array;
+  readonly start: number;
+  readonly end: number;
+  readonly kept?: { readonly runs: Int32Array; readonly count: number } | undefined;
 }

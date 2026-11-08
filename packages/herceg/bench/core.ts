@@ -787,6 +787,111 @@ for (const labelled of [false, true]) {
     },
   );
 }
+// Labels at the last observation in view while 30 series stream: one mark,
+// a row arriving and the first dropped each frame, the view following 500
+// rows behind the newest (panned back while streaming).
+{
+  const live = table({
+    t: Float64Array.from({ length: 3000 }, (_, t) => t),
+    ...Object.fromEntries(
+      SERIES_NAMES.map((name, k) => [
+        name,
+        Float64Array.from({ length: 3000 }, (_, t) => converging(k, t)),
+      ]),
+    ),
+  });
+  const model = new ChartModel(
+    {
+      y: { domain: [0, 1000] },
+      legend: false,
+      marks: [
+        line(live, {
+          x: "t",
+          y: SERIES_NAMES as never,
+          labels: { at: "visible-end", place: { outside: true }, leader: true },
+        }),
+      ],
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(1100, 640, 1);
+  let next = 3000;
+  model.applyViews(model.viewChanges([next - 2500, next - 500]));
+  drawsLabels(model, 30, true);
+  measure("labels: 30 lines at their last rows in view, a row arriving, the view following", () => {
+    live.appendRow({
+      t: next,
+      ...Object.fromEntries(SERIES_NAMES.map((name, k) => [name, converging(k, next)])),
+    });
+    live.dropFirst(1);
+    next++;
+    model.applyViews(model.viewChanges([next - 2500, next - 500]));
+    model.scene(estimateText);
+  });
+}
+// Labels drawn again on unchanged data, the view moving between two
+// places: a line along y of 1M rows whose points are copied each frame
+// (breaks on its value axis) and `where` keeps one; and a series field's
+// stack under continuity, 1M rows at one position just before the view.
+{
+  const n = 1_000_000;
+  const rows = table({
+    t: time(Float64Array.from({ length: n }, (_, i) => i)),
+    p: Float64Array.from({ length: n }, (_, i) => i),
+  });
+  const model = new ChartModel(
+    {
+      x: { breaks: timeBreaks([{ from: n / 2, to: n / 2 + 10 }]) },
+      legend: false,
+      marks: [
+        line(rows, { x: "t", y: "p", orient: "y", where: col("p").lt(1), labels: { at: "last" } }),
+      ],
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(800, 400, 1);
+  let moved = false;
+  measure("labels: a line along y of 1M copied points, `where` keeping one, drawn again", () => {
+    moved = !moved;
+    model.applyViews(model.viewChanges({ y: moved ? [0, n] : [0, n - 1] }));
+    model.scene(estimateText);
+  });
+}
+{
+  const n = 1_000_000;
+  const rows = table({
+    t: Float64Array.from({ length: n + 2 }, (_, i) => (i < n ? 1 : i - n + 2)),
+    v: Float64Array.from({ length: n + 2 }, () => 1),
+    g: Array.from({ length: n + 2 }, () => "a"),
+  });
+  const model = new ChartModel(
+    {
+      y: { domain: [0, 2] },
+      legend: false,
+      marks: [
+        area(rows, {
+          x: "t",
+          y: "v",
+          series: "g",
+          stack: true,
+          continuity: { maxGap: 100 },
+          labels: { at: "visible-start" },
+        }),
+      ],
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(800, 400, 1);
+  let moved = false;
+  measure("labels: a stack's 1M rows at one position before the view, drawn again", () => {
+    moved = !moved;
+    model.applyViews(model.viewChanges([moved ? 1.5 : 1.6, 2.5]));
+    model.scene(estimateText);
+  });
+}
 // A6 as its application draws it: a line mark per series, and an update
 // each tick moving the x domain with the window (a new layout, which starts
 // from the room the labels took).
@@ -863,6 +968,7 @@ const crowd = (count: number, outside: boolean): AttachedLabel[] => {
     overlap: "move",
     priority: k % 3,
     owner,
+    color: "#333333",
   }));
 };
 const column300 = crowd(300, true);

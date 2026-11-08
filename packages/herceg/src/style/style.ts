@@ -4,8 +4,8 @@
 // Resolving a role's levels gives a paint: plain values renderers read,
 // made once per configuration and shared by every element of the role.
 
-import type { Dash } from "../spec/spec.ts";
 import type { Halo, Insets, PlotStyle, StrokeStyle, TextBox, TextStyle } from "../spec/style.ts";
+import { dashPattern } from "./dash.ts";
 
 /** Text as resolved: what layout measures and renderers draw with. */
 export interface TextPaint {
@@ -145,20 +145,4 @@ export interface PlotPaint {
 export function plotPaint(levels: Levels<PlotStyle>): PlotPaint | undefined {
   const { fill, stroke, strokeWidth = 1 } = cascade(levels);
   return fill || stroke ? { fill, stroke, strokeWidth } : undefined;
-}
-
-/** A dash pattern in pixels: arrays as they are, matplotlib's styles scaled by the stroke width. */
-export function dashPattern(value: Dash | undefined, width: number): readonly number[] | undefined {
-  if (typeof value !== "string") return value;
-  switch (value) {
-    case "-":
-      return [];
-    case "--":
-      return [3.7 * width, 1.6 * width];
-    case ":":
-      return [width, 1.65 * width];
-    case "-.":
-      return [6.4 * width, 1.6 * width, width, 1.6 * width];
-  }
-  throw new Error("dash: expected -, --, :, -.");
 }

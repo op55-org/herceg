@@ -36,7 +36,7 @@ number and time fields, `series` category fields.
 ## More examples
 
 ```ts
-import { bar, col, heatmap, point, selectionStore, rowSelection } from "herceg";
+import { bar, col, createChart, heatmap, line, point, rowSelection, selectionStore } from "herceg";
 
 bar(sales, { x: "region", y: ["q1", "q2"] }); // grouped bars
 point(cars, { x: "weight", y: "mpg", color: "origin", size: "power" });
@@ -54,6 +54,15 @@ createChart(c, {
   fields: { p99: { label: "99th percentile", format: { duration: "millisecond" },
     thresholds: { steps: [{ value: 500, color: "#c62828" }] } } },
   marks: [line(metrics, { x: "time", y: "p99" }), rule({ y: { thresholds: "p99" } })],
+});
+
+// Each series named at its last row in view as rows stream in, its leader in its line's color,
+// and the brush in the product's colors, the theme's brush role.
+createChart(d, {
+  marks: [line(metrics, { x: "time", y: ["p50", "p99"],
+    labels: { at: "visible-end", place: { outside: true }, leader: true } })],
+  interaction: { brush: "x" },
+  theme: { style: { brush: { fill: "#4c78a8", fillOpacity: 0.2 } } },
 });
 
 // Brushing one chart highlights the same rows in another.

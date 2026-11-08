@@ -58,6 +58,7 @@ import { keyLegendWith } from "../key-legend.ts";
 import type { LayoutMark } from "../layout-mark.ts";
 import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
+import type { TraceFrame } from "../trace.ts";
 import { outputCheck } from "./channels.ts";
 import { writeContent } from "./content.ts";
 import { bandRuns, indexedBand, Topology } from "./continuity.ts";
@@ -67,7 +68,6 @@ import { IdentityColors } from "./identity-colors.ts";
 import {
   checkAt,
   checkContent,
-  checkOwners,
   checkPlace,
   Drawings,
   edgeOf,
@@ -576,14 +576,6 @@ function compile(
     const features = byMark.get(mark)!;
     recording(features, drawn);
     drawings.set(mark, drawn);
-    if (labels?.content)
-      checkOwners(
-        kit,
-        mark,
-        labels.at,
-        labels.content,
-        (i) => `marks[${where.index}].labels.content[${i}]`,
-      );
     if (labels)
       Object.assign(
         features,
@@ -810,9 +802,6 @@ function followingText(
       ? { field: label.field, ...(label.format && { format: label.format }) }
       : label.text!,
   ];
-  checkOwners(kit, source, from.at, content, (i) =>
-    label.content ? `${own}.content[${i}]` : `${own}.field`,
-  );
   return {
     use() {},
     palette: (base) => base,
@@ -844,6 +833,27 @@ function followingText(
       },
       JSON.stringify([where.mark, "text"]),
     ),
+  };
+}
+
+/**
+ * A band's or stack layer's edges as traced over positions [`start`,
+ * `end`), in the runs `kept` where rows are left out, for labels: each
+ * edge's values, over the other's.
+ */
+function layerTrace(
+  series: Series,
+  frame: TraceFrame,
+  top: Series["y"],
+  bottom: Series["y"] | undefined,
+  start: number,
+  end: number,
+  kept?: TracedEdge["kept"],
+): { upper?: TracedEdge; lower?: TracedEdge } {
+  const at = { series, frame, start, end, kept };
+  return {
+    upper: { ...at, values: top, other: bottom },
+    ...(bottom && { lower: { ...at, values: bottom, other: top } }),
   };
 }
 
@@ -1097,10 +1107,10 @@ function lineFeatures(
       let count = 0;
       const markerRuns: number[] = [];
       const rowsOf = new WeakMap<Geometry, ArrayLike<number>>();
-      // Which observation each point traced is, where markers, `continuity`,
-      // or labels ask: the rows ending the series' paths, by panel, as last
-      // traced there, and the line as last traced, for labels.
-      const recorder = marker || topology || labeled ? new Recorder() : undefined;
+      // Which observation each point traced is, where markers or
+      // `continuity` ask: the rows ending the series' paths, by panel, as
+      // last traced there; and the line as last traced, for labels.
+      const recorder = marker || topology ? new Recorder() : undefined;
       const endsIn = new Map<string, PathEnds>();
       let traced: { upper?: TracedEdge } = {};
       // With runs: the points tracing reduced (before curves and steps), and the run of each.
@@ -1298,17 +1308,15 @@ function lineFeatures(
             const ends = tracedEnds(s, series, paint.runs!.ends);
             each = (a, b) => reduceRuns(out, marks, ends, series.length, a, b, step);
           }
-          if (topology) topology.trace(series, y, frame, sink ?? out, start, end, each);
-          else each(start, end);
+          const runs = topology?.trace(series, y, frame, sink ?? out, start, end, each);
+          if (!topology) each(start, end);
+          if (labeled && stage === "line")
+            traced = {
+              upper: { series, values: y, other: undefined, frame, start, end, kept: runs },
+            };
           if (!sink) return;
           sink.settle();
           if (topology) endsIn.set(endsKey(series, frame), pathEnds(out, sink, series));
-          if (labeled) {
-            const { positions } = sink;
-            traced = {
-              upper: { series, values: y, other: undefined, frame, path: out, positions },
-            };
-          }
         };
       if (labeled)
         features.takeTrace = () => {
@@ -1750,12 +1758,11 @@ function areaFeatures(
           };
         };
       if (topology || marks || labeled) {
-        // Which observation each point traced is, where `continuity` or
-        // labels ask: the rows ending the series' paths, by panel, as last
-        // traced there (its upper edge's: both edges' runs end alike), and
-        // its edges as last traced, for labels.
-        const recorder = topology || labeled ? new Recorder() : undefined;
-        const lowerRecorder = labeled ? new Recorder() : undefined;
+        // Which observation each point traced is, where `continuity` asks:
+        // the rows ending the series' paths, by panel, as last traced there
+        // (its upper edge's: both edges' runs end alike); and its edges as
+        // last traced, for labels.
+        const recorder = topology ? new Recorder() : undefined;
         const endsIn = new Map<string, PathEnds>();
         let traced: { upper?: TracedEdge; lower?: TracedEdge } = {};
         features.trace = (series, y, frame, stage, out, start, end, reduce) => {
@@ -1768,24 +1775,19 @@ function areaFeatures(
             const ends = tracedEnds(s, series, runs!.ends);
             each = (a, b) => reduceRuns(out, marks.upper, ends, series.length, a, b, step);
           }
-          if (topology) topology.trace(series, y, frame, recorder ?? out, start, end, each);
-          else each(start, end);
+          const kept = topology?.trace(series, y, frame, recorder ?? out, start, end, each);
+          if (!topology) each(start, end);
+          if (labeled)
+            traced = { upper: { series, values: y, other: undefined, frame, start, end, kept } };
           if (!recorder) return;
           recorder.settle();
           if (topology) endsIn.set(endsKey(series, frame), pathEnds(out, recorder, series));
-          if (labeled) {
-            const { positions } = recorder;
-            traced = {
-              upper: { series, values: y, other: undefined, frame, path: out, positions },
-            };
-          }
         };
         features.band = (series, top, bottom, frame, upper, lower, start, end, reduce, indexes) => {
           traced = {};
           recorder?.start(upper, positionBuffer(frame, series.key, "upper"));
-          lowerRecorder?.start(lower, positionBuffer(frame, series.key, "lower"));
-          // Each edge written through its recorder, where it has one.
-          const [up, down]: [PointSink, PointSink] = [recorder ?? upper, lowerRecorder ?? lower];
+          // The upper edge written through the recorder, where there is one.
+          const [up, down]: [PointSink, PointSink] = [recorder ?? upper, lower];
           let each: (edge: Series["y"], a: number, b: number, out: PointSink) => void = reduce;
           if (marks) {
             reduced = { upper, lower };
@@ -1803,7 +1805,9 @@ function areaFeatures(
                 (from, to) => reduce(edge, from, to, out),
               );
           }
-          if (topology) topology.band(series, top, bottom, frame, up, down, start, end, each);
+          let kept: TracedEdge["kept"];
+          if (topology)
+            kept = topology.band(series, top, bottom, frame, up, down, start, end, each);
           else if (
             !marks &&
             indexes &&
@@ -1814,29 +1818,11 @@ function areaFeatures(
           } else bandRuns(series, top, bottom, frame, up, down, start, end, each);
           // A stack's layer drawn through its edges (no series of the mark's)
           // runs through the stack's positions, which name none of its rows.
-          if (!recorder || !series.features) return;
+          if (!series.features) return;
+          if (labeled) traced = layerTrace(series, frame, top, bottom, start, end, kept);
+          if (!recorder) return;
           recorder.settle();
           if (topology) endsIn.set(endsKey(series, frame), pathEnds(upper, recorder, series));
-          if (labeled) {
-            lowerRecorder!.settle();
-            const at = { series, frame };
-            traced = {
-              upper: {
-                ...at,
-                values: top,
-                other: bottom,
-                path: upper,
-                positions: recorder.positions,
-              },
-              lower: {
-                ...at,
-                values: bottom,
-                other: top,
-                path: lower,
-                positions: lowerRecorder!.positions,
-              },
-            };
-          }
         };
         if (topology) features.pathEnds = (series, frame) => endsOf(endsIn, series, frame);
         if (labeled) {
@@ -1845,16 +1831,9 @@ function areaFeatures(
             traced = {};
             return taken;
           };
-          // Layers curved together: both edges' points stand at the same rows.
-          features.curved = (series, { upper, lower }, kept, frame) => {
-            const positions = positionBuffer(frame, series.key, "upper")(kept.length);
-            positions.set(kept);
-            const [top, bottom] = [series.y, series.y0];
-            const at = { series, frame, positions };
-            traced = {
-              upper: { ...at, values: top, other: bottom, path: upper },
-              ...(bottom && { lower: { ...at, values: bottom, other: top, path: lower } }),
-            };
+          // Layers curved together are traced together, without `band`.
+          features.curved = (series, frame, [start, end]) => {
+            traced = layerTrace(series, frame, series.y, series.y0, start, end);
           };
         }
       }

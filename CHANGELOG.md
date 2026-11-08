@@ -156,3 +156,18 @@ click, a drag, a brush) draws no focus ring until a key is pressed;
 keyboard focus draws one, also under a page's `:focus` reset. A clicked
 tooltip pins the value its inspection read, and bar labels of several
 lines align each line as `style.align` says.
+
+Series labels at `"visible-start"` and `"visible-end"` stand at the first
+and last observation in view (of the source rows, before level of
+detail), through zoom, pan, and streaming, and write that observation's
+fields, a series field's stack's too; a series with no observation in
+view has none, and a label whose observation is outside the plot is not
+drawn. Leaders take the color of what their label labels: a series', a
+rule's stroke, a text mark's color, unless `leader.stroke` gives one, so
+one line mark of many series draws each leader in its line's color. The
+theme's `brush` role (`theme.style.brush`, a paint: `hg.Style(brush=hg.PaintStyle(...))`
+in Python) paints brushes and lassos of charts, maps, and networks, and
+high-contrast themes outline them. Fixed: a dodged line or area whose
+category axis' positions have an `offset` drew from the second of two
+rows at a category the dodge brings into the plot, leaving out the
+first.

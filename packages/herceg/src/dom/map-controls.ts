@@ -254,8 +254,10 @@ export class Controls implements ChartControls {
       if (state !== "") toolbar.place(plot, scene.width, scene.height);
     }
     this.#showToolbars();
-    // The lasso selected stays on the plane as it pans and zooms.
-    if (this.#press?.mode !== "lasso") this.#drawLasso();
+    // The lasso selected stays on the plane as it pans and zooms; one being
+    // drawn takes the scene's theme.
+    if (this.#press?.mode === "lasso" && this.#brush?.dragging) this.#drawDrag();
+    else this.#drawLasso();
   }
 
   dispose(): void {
@@ -308,6 +310,20 @@ export class Controls implements ChartControls {
       visible: this.#visible.get(key),
       ...plane,
     };
+  }
+
+  /** Draws the lasso being dragged, in the theme last drawn; facet panels share the plane, so it shows in each. */
+  #drawDrag(): void {
+    const press = this.#press;
+    if (!press || !this.#brush?.dragging || !this.#theme) return;
+    const pressed = { key: press.panel, plane: press.plane };
+    const state = this.#planeOf(press.panel)?.state;
+    const panels = this.#planes().filter((panel) => state === "" && panel.state === "");
+    this.#brush.draw(
+      (panels.length > 0 ? panels : [pressed]).map((panel) => this.#brushPanel(panel)),
+      this.#theme,
+      null,
+    );
   }
 
   /** Draws the chart's lasso in the panels of the family it belongs to. */
@@ -515,17 +531,10 @@ export class Controls implements ChartControls {
       }
       const brush = this.#brush;
       if (!brush || !this.#theme) return;
-      const pressed = { key: press.panel, plane: press.plane };
-      if (!brush.dragging) brush.start(press.x, press.y, this.#brushPanel(pressed));
+      if (!brush.dragging)
+        brush.start(press.x, press.y, this.#brushPanel({ key: press.panel, plane: press.plane }));
       brush.move(x, y);
-      // Facet panels share the plane: the lasso shows in each.
-      const state = this.#planeOf(press.panel)?.state;
-      const panels = this.#planes().filter((panel) => state === "" && panel.state === "");
-      brush.draw(
-        (panels.length > 0 ? panels : [pressed]).map((panel) => this.#brushPanel(panel)),
-        this.#theme,
-        null,
-      );
+      this.#drawDrag();
     });
     on("pointerup", (event) => {
       const press = this.#press;

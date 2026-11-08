@@ -27,7 +27,8 @@ import type { Side } from "../spec/place.ts";
 import type { BarLabelsSpec, BarSpec, BarStack, Clip, Dash, Frozen } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
-import { dashPattern, type TextPaint, textPaint } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
+import { type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type {

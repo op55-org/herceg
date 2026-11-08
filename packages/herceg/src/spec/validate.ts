@@ -100,6 +100,7 @@ import {
   type LegendTarget,
   type MarkSpec,
   type NavigatorSpec,
+  type PaintStyle,
   type PanelAxisSpec,
   type PanelInteractionSpec,
   type PanelLayoutSpec,
@@ -1399,6 +1400,17 @@ const strokeStyle: Check = (v, path) => {
   properties(v as Record<string, unknown>, path, strokeChecks);
 };
 
+/** A fill and an outline: the brush's paint. */
+const paintStyle: Check = (v, path) => {
+  object(v, path);
+  properties(v as Record<string, unknown>, path, {
+    ...strokeChecks,
+    fill: string,
+    fillOpacity: fraction,
+    strokeOpacity: fraction,
+  } satisfies ChecksOf<PaintStyle>);
+};
+
 /** The checks of each style role. */
 const ROLES = {
   text: textStyle,
@@ -1420,6 +1432,7 @@ const ROLES = {
   axisLine: strokeStyle,
   tick: strokeStyle,
   crosshair: strokeStyle,
+  brush: paintStyle,
   line: (v, path) => {
     object(v, path);
     properties(v as Record<string, unknown>, path, { strokeWidth: positive });

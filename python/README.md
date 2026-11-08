@@ -46,6 +46,13 @@ chart = (
     .rule(y=250, label="SLO")
 )
 
+# Each series named at its last row in view, its leader in its line's color,
+# and the brush in the product's colors, the theme's brush role
+hg.Chart(df, brush="x", theme=hg.Theme(style=hg.Style(
+    brush=hg.PaintStyle(fill="#4c78a8", fill_opacity=0.2)))).line(
+    x="time", y=["p50", "p99"],
+    labels=hg.SeriesLabels(at="visible-end", place=hg.LabelPlace(outside=True), leader=True))
+
 # Output
 chart.save("latency.html")  # self-contained page
 chart.save("latency.pdf")  # vector PDF (the export extra)

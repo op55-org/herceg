@@ -1186,9 +1186,9 @@ def _layout_spec(owner: Any) -> dict[str, Any]:
 @refuses
 @dataclass
 class SeriesLabels:
-    """Labels following each series of a line or area: at its ``at``
-    (``"first"`` or ``"last"`` observation drawn, or where it enters or
-    leaves the view, ``"visible-start"`` or ``"visible-end"``), saying
+    """Labels following each series of a line or area: at the observation
+    ``at`` names (its ``"first"`` or ``"last"`` drawn, or its first or last
+    drawn in view, ``"visible-start"`` or ``"visible-end"``), saying
     ``content`` (the series' name by default; see ``hg.LabelPart``), placed
     by ``place`` (an ``hg.LabelPlace``) and styled by ``style``. A band
     (``y1`` and ``y2``) follows the edge ``edge`` names.
@@ -1199,7 +1199,8 @@ class SeriesLabels:
     is too short for all; ``"hide"`` leaves out those that would cover
     another; ``"show"`` draws them at their points. ``leader=True`` (or an
     ``hg.StrokeStyle``) joins labels displaced more than 6 pixels from their
-    places at their points back to them."""
+    places at their points back to them, in their series' colors unless
+    the style gives a ``stroke``."""
 
     at: LabelAt
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
@@ -1275,7 +1276,8 @@ class Label:
     nearest free place (``"move"``: along its rule, around its point) and left
     out where none is; higher ``priority`` labels are placed first.
     ``leader=True`` (or an ``hg.StrokeStyle``) joins moved labels to what
-    they label."""
+    they label, in its color (a rule's stroke, a text mark's color) unless
+    the style gives a ``stroke``."""
 
     text: str | None = None
     field: str | None = None

@@ -114,19 +114,30 @@ describe("annotation labels of an overlap group", () => {
 
   it("slide labels along their rule where both sides are taken, with leaders when asked", () => {
     // At the plot's left edge, the second label's mirror image lands on the first.
-    const marks = (leader: boolean) => [
+    const marks = (leader: boolean | { stroke: string }, stroke?: string) => [
       rule({ x: 0.2, label: { text: "Black Friday", overlap: "move", overlapGroup: "events" } }),
-      rule({ x: 0, label: { text: "Outage", overlap: "move", overlapGroup: "events", leader } }),
+      rule({
+        x: 0,
+        ...(stroke && { stroke }),
+        label: { text: "Outage", overlap: "move", overlapGroup: "events", leader },
+      }),
     ];
     const scene = build({ marks: marks(true), x: { domain: [0, 10] } });
     const boxes = labelBoxes(scene);
     const [first, second] = boxes.map(({ box }) => box);
     expect(overlaps(first!, second!)).toBe(false);
     expect(second!.y).toBeGreaterThan(first!.y);
-    const leaders = scene.panels[0]!.marks.filter((g) => g.kind === "segments");
-    expect(leaders).toHaveLength(1);
+    const leaders = (made: Scene) =>
+      made.panels[0]!.marks.filter((g): g is SegmentGeometry => g.kind === "segments");
+    // In its rule's color: the muted color it is drawn in, or its own stroke.
+    expect(leaders(scene).map(({ stroke }) => stroke)).toEqual([scene.theme.muted]);
+    const red = build({ marks: marks(true, "#c0392b"), x: { domain: [0, 10] } });
+    expect(leaders(red).map(({ stroke }) => stroke)).toEqual(["#c0392b"]);
+    // The leader's own stroke wins.
+    const own = build({ marks: marks({ stroke: "#999999" }, "#c0392b"), x: { domain: [0, 10] } });
+    expect(leaders(own).map(({ stroke }) => stroke)).toEqual(["#999999"]);
     const plain = build({ marks: marks(false), x: { domain: [0, 10] } });
-    expect(plain.panels[0]!.marks.filter((g) => g.kind === "segments")).toHaveLength(0);
+    expect(leaders(plain)).toHaveLength(0);
   });
 
   it("leave out a label that moves where no place of it fits its bounds", () => {
@@ -293,8 +304,8 @@ describe("series labels of a panel", () => {
 describe("30 series labels with leaders while streaming", () => {
   contractTest("label.series.streaming", () => {
     // A6: thirty lines converging on their ends, named outside the plot in
-    // their ends' order, kept apart, with leaders from those moved, as rows
-    // stream in and old ones drop.
+    // their ends' order, kept apart, with leaders in their lines' colors
+    // from those moved, as rows stream in and old ones drop.
     const names = Array.from({ length: 30 }, (_, k) => `s${k}`);
     const at = (k: number, t: number) =>
       500 + (k - 14.5) * 30 * Math.max(0.03, 1 - t / 100) + 4 * Math.sin(k * 1.7 + t / 3);
@@ -350,9 +361,18 @@ describe("30 series labels with leaders while streaming", () => {
         expect(item.y + height / 2).toBeLessThanOrEqual(plot.y + plot.height + 1e-6);
       }
       const moved = items.filter((item) => Math.abs(item.y - end(item.text)) > 6);
-      const leaders = marks.find((g) => g.kind === "segments") as SegmentGeometry | undefined;
-      expect(leaders?.count ?? 0).toBe(moved.length);
+      // One geometry of leaders per color, each leader in its series' color
+      // (its name's, here): the one whose label its end is at.
+      const leaders = marks.filter((g): g is SegmentGeometry => g.kind === "segments");
+      expect(leaders.reduce((sum, { count }) => sum + count, 0)).toBe(moved.length);
       expect(moved.length).toBeGreaterThan(0);
+      const colors = model.series().map(({ color }) => color);
+      expect(new Set(leaders.map(({ stroke }) => stroke)).size).toBe(leaders.length);
+      for (const { stroke, coords, count } of leaders)
+        for (let k = 0; k < count; k++) {
+          const label = moved.find((item) => Math.abs(item.y - coords[k * 4 + 3]!) < 0.5)!;
+          expect(stroke).toBe(colors[names.indexOf(label.text)]);
+        }
     }
   });
 });

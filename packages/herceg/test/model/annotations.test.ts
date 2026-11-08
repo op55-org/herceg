@@ -400,7 +400,8 @@ describe("text", () => {
       // Drawn whole, in the mark's place among the others, on a canvas too.
       expect(leaders!.draw.defaultClip).toBe(false);
       expect(leaders!.draw.canvas).toBeTypeOf("function");
-      expect(leaders!.stroke).toBe(scene.theme.muted);
+      // In the text's color, as it has no leader look of its own.
+      expect(leaders!.stroke).toBe(scene.theme.text);
       expect(leaders!.count).toBeGreaterThan(0);
       expect(leaders!.count).toBeLessThan(label!.count);
       // Labels come in row order, whichever pass placed them.
@@ -469,7 +470,7 @@ describe("text", () => {
       y: { domain: [0, 10] },
     });
     expect(of(close.scene, "segments")).toEqual([]);
-    // Static SVG draws the lines too, in the muted color.
+    // Static SVG draws the lines too, in the text's color.
     const svg = renderToSVG({
       width: 600,
       height: 300,
@@ -483,7 +484,7 @@ describe("text", () => {
         }),
       ],
     });
-    expect(svg).toContain(`fill="none" stroke="${LIGHT.muted}" stroke-width="1"`);
+    expect(svg).toContain(`fill="none" stroke="${LIGHT.text}" stroke-width="1"`);
   });
 
   it("keep lines from crossing each other", () => {

@@ -10,6 +10,7 @@ import { bar } from "../../../src/marks/bar.ts";
 import { line } from "../../../src/marks/line.ts";
 import { panels } from "../../../src/model/panels.ts";
 import type { BrushSpec } from "../../../src/spec/spec.ts";
+import { resolveTheme } from "../../../src/theme.ts";
 import { contractTest } from "../../helpers/contracts.ts";
 import { brushOf } from "../../helpers/selections.ts";
 import {
@@ -19,6 +20,7 @@ import {
   mount,
   panelsSharing,
   placements,
+  pointer,
   rows,
   viewsOf,
   within,
@@ -212,5 +214,138 @@ describe("brush variants", () => {
       }
     },
     "a lasso over a subplot's category axis outlines its band positions, of that panel",
+  );
+});
+
+describe("the brush's look", () => {
+  /** The paint of the brush drawn in `chart`: its outline's attributes. */
+  function brushPaint(chart: Chart) {
+    const path = [...chart.root.querySelectorAll("path[clip-path*='-brush-']")].find(
+      (node) => node.getAttribute("visibility") === "visible",
+    );
+    if (!path) return undefined;
+    const names = ["fill", "fill-opacity", "stroke", "stroke-opacity", "stroke-width"] as const;
+    const paint = Object.fromEntries(names.map((name) => [name, path.getAttribute(name)]));
+    return {
+      ...(paint as Record<(typeof names)[number], string | null>),
+      dash: path.getAttribute("stroke-dasharray"),
+    };
+  }
+  /** A drag of `shape` in the chart's plot, its last move left pending: the brush as drawn. */
+  function dragging(chart: Chart, shape: BrushSpec) {
+    const [[x0, y0], [x1, y1]] = corners(chart, "");
+    const moves: [number, number][] =
+      shape === "lasso"
+        ? [
+            [x1, y0],
+            [x1, y1],
+            [x0, y1],
+          ]
+        : [[x1, y1]];
+    pointer(chart, "pointerdown", x0, y0);
+    for (const [x, y] of moves) pointer(chart, "pointermove", x, y);
+    chart.render();
+    return () => pointer(chart, "pointerup", ...moves.at(-1)!);
+  }
+  const OWN = {
+    fill: "#4c78a8",
+    fillOpacity: 0.2,
+    stroke: "#1f3b57",
+    strokeWidth: 2,
+    dash: [4, 2],
+  } as const;
+
+  contractTest(
+    "interaction.brush.look.engine",
+    async () => {
+      for (const shape of ["x", "xy", "lasso"] as const) {
+        const chart = await mount({
+          marks: [line(rows(), { x: "t", y: "v" })],
+          interaction: { brush: shape },
+          theme: { style: { brush: OWN } },
+        });
+        const end = dragging(chart, shape);
+        const own = {
+          fill: "#4c78a8",
+          "fill-opacity": "0.2",
+          stroke: "#1f3b57",
+          "stroke-opacity": "1",
+          "stroke-width": "2",
+          dash: "4 2",
+        };
+        // While drawn, and after.
+        expect(brushPaint(chart), `${shape} drawn`).toEqual(own);
+        end();
+        chart.render();
+        expect(brushOf(chart.selection), shape).not.toBeNull();
+        expect(brushPaint(chart), `${shape} selected`).toEqual(own);
+        chart.destroy();
+      }
+    },
+    "a brush and a lasso paint in the theme's brush role, while drawn and after",
+  );
+
+  contractTest(
+    "interaction.brush.look.default.engine",
+    async () => {
+      for (const shape of ["xy", "lasso"] as const) {
+        const chart = await mount({
+          marks: [line(rows(), { x: "t", y: "v" })],
+          interaction: { brush: shape },
+        });
+        dragging(chart, shape)();
+        chart.render();
+        const { muted } = resolveTheme("light");
+        // The muted color at 0.18; a lasso outlined in it at 0.6, a brush not at all.
+        expect(brushPaint(chart)).toMatchObject({
+          fill: muted,
+          "fill-opacity": "0.18",
+          stroke: shape === "lasso" ? muted : "none",
+          dash: null,
+        });
+        if (shape === "lasso") expect(brushPaint(chart)!["stroke-opacity"]).toBe("0.6");
+        // A fill of its own outlines a lasso in that color.
+        chart.update({ theme: { style: { brush: { fill: "#4c78a8" } } } });
+        chart.render();
+        expect(brushPaint(chart)).toMatchObject({
+          fill: "#4c78a8",
+          stroke: shape === "lasso" ? "#4c78a8" : "none",
+        });
+        chart.destroy();
+      }
+    },
+    "a brush is the muted color at 0.18 by default, and a lasso is outlined in its fill's color",
+  );
+
+  contractTest(
+    "interaction.brush.look.theme-change.engine",
+    async () => {
+      const chart = await mount({
+        marks: [line(rows(), { x: "t", y: "v" })],
+        interaction: { brush: "xy" },
+      });
+      // A brush being drawn takes a theme given while it is drawn.
+      const end = dragging(chart, "xy");
+      chart.update({ theme: { style: { brush: OWN } } });
+      chart.render();
+      expect(brushPaint(chart)).toMatchObject({ fill: "#4c78a8", stroke: "#1f3b57" });
+      end();
+      chart.render();
+      expect(brushOf(chart.selection)).not.toBeNull();
+      // A brush selected takes the next theme: dark, and high contrast, which outlines it.
+      chart.update({ theme: "dark" });
+      chart.render();
+      expect(brushPaint(chart)).toMatchObject({ fill: resolveTheme("dark").muted, stroke: "none" });
+      chart.update({ theme: "high-contrast" });
+      chart.render();
+      const { muted } = resolveTheme("high-contrast");
+      expect(brushPaint(chart)).toMatchObject({
+        fill: muted,
+        stroke: muted,
+        "stroke-opacity": "1",
+      });
+      expect(brushOf(chart.selection)).not.toBeNull();
+    },
+    "a theme change repaints a brush being drawn and one selected",
   );
 });

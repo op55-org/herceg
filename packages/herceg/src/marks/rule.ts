@@ -25,7 +25,8 @@ import type {
   RuleSpec,
 } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
-import { cssFont, dashPattern, type TextPaint } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
+import { cssFont, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
   AnnotationData,
@@ -637,7 +638,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         leader,
         bounds: outside ? null : bounds,
       };
-      out.push({ row, at, request });
+      out.push({ row, at, request, stroke: rule.stroke });
     }
     return out;
   }
@@ -652,13 +653,18 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     const placed: PlacedLabel[] = [];
     // The row of each label drawn, for drawn-mark records.
     const rows: number[] = [];
+    // Leaders, and the stroke of each one's rule.
     const leaders: number[] = [];
-    labels.forEach(({ row, at }, k) => {
+    const strokes: string[] = [];
+    labels.forEach(({ row, at, stroke }, k) => {
       const placement = placements[k];
       if (placement === null || placement === undefined) return;
       placed.push(movedLabel(at, [placement.dx, placement.dy]));
       rows.push(row);
-      if (placement.leader) leaders.push(...placement.leader);
+      if (placement.leader) {
+        leaders.push(...placement.leader);
+        strokes.push(stroke);
+      }
     });
     if (placed.length === 0) return [];
     const id = JSON.stringify(key);
@@ -683,7 +689,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       );
     if (leaders.length === 0) return [geometry];
     const { look } = this.#data.layout;
-    return [leadersGeometry(`${id}|leaders`, leaders, look, frame, "rule label.leader"), geometry];
+    return [
+      ...leadersGeometry(`${id}|leaders`, leaders, strokes, look, frame, "rule label.leader"),
+      geometry,
+    ];
   }
 
   /**
@@ -897,9 +906,10 @@ interface ApartRule {
   parts: PartText | undefined;
 }
 
-/** A label placed apart from its rule: its row, its place by the rule, and its request. */
+/** A label placed apart from its rule: its row, its place by the rule, its request, and its rule's stroke. */
 interface ApartLabel {
   row: number;
   at: PlacedLabel;
   request: LabelRequest;
+  stroke: string;
 }

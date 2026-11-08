@@ -55,6 +55,19 @@ const chart = createChart(element, {
 chart.setViewport([0, 1]);
 chart.update({ theme: "dark", interaction: { zoom: true, sync: "dashboard" } });
 
+// More examples: labels at the last rows in view, and the brush role
+createChart(element, {
+  marks: [
+    line(metrics, {
+      x: "time",
+      y: ["p50", "p99"],
+      labels: { at: "visible-end", place: { outside: true }, leader: true },
+    }),
+  ],
+  interaction: { brush: "x" },
+  theme: { style: { brush: { fill: "#4c78a8", fillOpacity: 0.2 } } },
+});
+
 // Data
 const requests = table({
   time: time(["2026-01-21T09:30:00Z", "2026-01-21T09:31:00Z"]),

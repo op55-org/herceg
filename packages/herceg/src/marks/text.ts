@@ -635,9 +635,10 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     const out: Geometry[] = [];
     if (leaders.length > 0)
       out.push(
-        leadersGeometry(
+        ...leadersGeometry(
           `${id}|leaders`,
           leaders,
+          paint.color,
           this.#data.layout.look,
           frame,
           "text label.leader",

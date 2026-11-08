@@ -141,12 +141,17 @@ export function bandOrder(
   });
 }
 
-/** A positions scale's tracing fields, moved by a dodged series' offset. */
+/**
+ * A positions scale's tracing fields, moved by a dodged series' offset:
+ * its domain is the positions moved to where the scale's domain was, so a
+ * trace keeps every row the move brings into view.
+ */
 function shifted(scale: PositionScale, by: number): TraceFrame["x"] {
   const mapping = scale.mapping();
+  const [from, to] = scale.domain;
   return {
     type: scale.type,
-    domain: scale.domain,
+    domain: [scale.invert(scale.map(from) - by), scale.invert(scale.map(to) - by)],
     mapping: () => ({ ...mapping, offset: mapping.offset + by }),
   };
 }

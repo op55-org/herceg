@@ -383,7 +383,9 @@ export type Overlap = "show" | "hide" | "move";
  * which labels keep apart (`overlapGroup`: annotation labels of every mark
  * naming the group; by default, a mark's own), a line from each label
  * moved more than 6 pixels back to what it labels (`leader`: `true`, or its
- * look), and which labels stay where some must go (`priority`, the
+ * look; in the color of what it labels, a series', a rule's stroke, or a
+ * text mark's color, unless its look gives a stroke), and which labels
+ * stay where some must go (`priority`, the
  * higher; 0 by default). Each kind takes the parts it honors (see
  * docs/guide/marks.md, "Labels that would overlap").
  */
@@ -402,9 +404,11 @@ export interface LabelLayoutSpec {
 export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec } & LabelLayoutSpec;
 
 /**
- * Which point of a series a label follows: its first or last observation
- * drawn ("first", "last"), or where its line enters or leaves the view
- * ("visible-start", "visible-end"), along the series' own order.
+ * Which observation of a series a label follows, before level of detail,
+ * in the series' own order: its first or last drawn ("first", "last"), or
+ * its first or last drawn whose position is in the view along the series'
+ * axis ("visible-start", "visible-end"); none where the series has none in
+ * view. A label whose observation is outside the plot is not drawn.
  */
 export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
 
@@ -418,7 +422,8 @@ export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
  * (then the last in series order) where the plot is too short for all;
  * "show" draws each at its point; "hide" leaves out those that would cover
  * one of higher priority. `leader` draws a line from each label displaced
- * more than 6 pixels from its place at its point back to that point.
+ * more than 6 pixels from its place at its point back to that point, in
+ * its series' color unless the leader's look gives a stroke.
  */
 export interface SeriesLabelsSpec extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;

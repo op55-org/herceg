@@ -735,11 +735,11 @@ draws has no place.
 ### Labels that follow series
 
 Lines and areas label each series with `labels`, in the series' color, at
-its `"first"` or `"last"` observation drawn, or where it enters or leaves
-the view. Labels stay inside the plot (shortened with an ellipsis when too
-wide), or go beside the axis with `place: { outside: true }`. A band names
-the edge they follow (`edge: "y2"`). Text follows another mark's series
-with `from`:
+an observation: its `"first"` or `"last"` drawn, or its first or last
+drawn in view (`"visible-start"`, `"visible-end"`). Labels stay inside the
+plot (shortened with an ellipsis when too wide), or go beside the axis
+with `place: { outside: true }`. A band names the edge they follow
+(`edge: "y2"`). Text follows another mark's series with `from`:
 
 ```ts
 line(services, {
@@ -759,9 +759,19 @@ hg.Chart(df, legend=False).line(
 ).text(label="now", from_=hg.MarkAnchor(mark="latency", at="visible-end"))
 ```
 
-Where the view cuts a stack split by a series field, labels at the view's
-edges write series and values, not fields. A panel's series labels, and
-text following series, keep apart as the next section describes.
+- **In view.** `"visible-end"` is the last observation, in the series'
+  order, whose position is in the view along its axis, of the source rows
+  before level of detail. As the view zooms, pans, or follows streaming
+  data, a label moves to another observation when one enters or leaves the
+  view, and with its observation in between; a series with no observation
+  in view has none, even where its line crosses the view.
+- **In the plot.** A label whose observation is outside the plot (its
+  value past the view, as on a zoomed y axis) is not drawn, at any `at`.
+- **What it writes.** `{ field }` parts read the observation's row, and
+  `{ value: true }` the value drawn there (a stack's top).
+
+A panel's series labels, and text following series, keep apart as the
+next section describes.
 
 ### Parts with a look of their own
 
@@ -816,7 +826,7 @@ the same fields:
 | --- | --- |
 | `overlap` | `"show"`: drawn at its place anyway. `"hide"`: left out. `"move"`: moved to the nearest free place its kind allows, and left out where there is none. |
 | `overlapGroup` (Python `overlap_group`) | A name: labels of every mark in a panel naming it keep apart, as one mark's labels do. |
-| `leader` | `true`, or a stroke style (`stroke`, `strokeWidth`, `dash`, `opacity`): a line from each moved label back to what it labels. Labels that did not move draw none. |
+| `leader` | `true`, or a stroke style (`stroke`, `strokeWidth`, `dash`, `opacity`): a line from each moved label back to what it labels, in the color of what it labels (a series', a rule's stroke, a text mark's color) unless it gives a `stroke`. Labels that did not move draw none. |
 | `priority` | A number: higher-priority labels are placed first and stay where they would meet lower ones. 0 by default. |
 
 ```ts
@@ -854,9 +864,9 @@ Each kind takes only the fields it can honour and refuses the others:
   of higher priority than any that move. Where the plot is too short for
   all of them, "move" leaves out the lowest priority, then the last
   series, until the rest fit. A label displaced more than 6 pixels from
-  where it would sit at its point draws a leader when asked: the threshold
-  is on how far layout moved it from that place, not on where its glyphs
-  fall. They are placed first in a panel;
+  where it would sit at its point draws a leader when asked, in its
+  series' color: the threshold is on how far layout moved it from that
+  place, not on where its glyphs fall. They are placed first in a panel;
   annotation labels keep off them.
 - **Annotation labels** are placed by priority, then mark order, then row
   order. A rule's label that moves tries the mirror place across its rule,

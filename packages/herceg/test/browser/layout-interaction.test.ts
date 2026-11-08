@@ -22,6 +22,7 @@ import { ChartModel, type ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { renderToSVG } from "../../src/render/static.ts";
+import { resolveTheme } from "../../src/theme.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
 
@@ -51,6 +52,25 @@ async function mount(options: ChartOptions): Promise<Chart> {
 }
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+/** The fill of the lasso a map or network draws, being drawn or selected; undefined while none shows. */
+function lassoFill(chart: Chart): string | null | undefined {
+  const paths = chart.root.querySelectorAll("path[clip-path*='-lasso-']");
+  const shown = [...paths].find((path) => path.getAttribute("visibility") === "visible");
+  return shown?.getAttribute("fill");
+}
+
+/**
+ * A lasso held: pressed at `points[0]` and moved through the others, the
+ * pointer still down; the release, to call when done.
+ */
+async function holdLasso(chart: Chart, points: readonly [number, number][]) {
+  const [start, ...rest] = points;
+  await mouse(chart, "mouseMoved", ...start!);
+  await mouse(chart, "mousePressed", ...start!);
+  for (const point of rest) await mouse(chart, "mouseMoved", ...point);
+  return () => mouse(chart, "mouseReleased", ...(rest.at(-1) ?? start)!);
+}
 
 /** Where the chart's root is in the page the browser's input lands on. */
 const origin = (chart: Chart) => pageOrigin(chart.root);
@@ -492,6 +512,67 @@ describe("maps", () => {
     chart.select({ kind: "brush", x: null, y: null, lasso });
     await frame();
     expect(shown()).toBe(true);
+  });
+
+  it("paint the lasso in the theme's brush role, and repaint it as the theme changes", async () => {
+    const chart = await map({
+      interaction: { brush: "lasso" },
+      theme: { style: { brush: { fill: "#4c78a8", fillOpacity: 0.3, stroke: "#1f3b57" } } },
+    });
+    const lasso = [
+      [22 * radians, 4 * radians],
+      [48 * radians, 4 * radians],
+      [48 * radians, -4 * radians],
+      [22 * radians, -4 * radians],
+    ] as const;
+    chart.select({ kind: "brush", x: null, y: null, lasso });
+    await frame();
+    const paint = () => {
+      const path = [
+        ...chart.root.querySelectorAll("path[clip-path^='url(#herceg-map-lasso']"),
+      ].find((node) => node.getAttribute("visibility") === "visible")!;
+      return ["fill", "fill-opacity", "stroke", "stroke-opacity"].map((name) =>
+        path.getAttribute(name),
+      );
+    };
+    expect(paint()).toEqual(["#4c78a8", "0.3", "#1f3b57", "1"]);
+    chart.update({ theme: { style: { brush: { fill: "#c0392b" } } } });
+    await frame();
+    // Without a stroke, the lasso is outlined in its fill's color.
+    expect(paint()).toEqual(["#c0392b", "0.18", "#c0392b", "0.6"]);
+  });
+
+  it("repaint a lasso being drawn as the theme changes, the pointer held", async () => {
+    const chart = await map({
+      interaction: { brush: "lasso" },
+      theme: { style: { brush: { fill: "#c0392b" } } },
+    });
+    const { x, y } = plane(chart);
+    const [top, bottom] = [y.map(4 * radians), y.map(-4 * radians)];
+    const [left, right] = [x.map(22 * radians), x.map(48 * radians)];
+    const release = await holdLasso(chart, [
+      [left, top],
+      [right, top],
+      [right, bottom],
+      [left, bottom],
+    ]);
+    await frame();
+    expect(lassoFill(chart)).toBe("#c0392b");
+    chart.update({ theme: { style: { brush: { fill: "#2266cc" } } } });
+    await frame();
+    expect(lassoFill(chart)).toBe("#2266cc");
+    await release();
+    await frame();
+    expect(brushOf(chart.selection)?.lasso).not.toBeNull();
+    expect(lassoFill(chart)).toBe("#2266cc");
+    // Pressed again, not moved yet: the lasso selected repaints.
+    const pressed = await holdLasso(chart, [[(left + right) / 2, (top + bottom) / 2]]);
+    chart.update({ theme: { style: { brush: { fill: "#2a9d8f" } } } });
+    await frame();
+    expect(lassoFill(chart)).toBe("#2a9d8f");
+    await pressed();
+    await frame();
+    expect(lassoFill(chart)).toBe("#2a9d8f");
   });
 
   it("clear a lasso as its bindings say: a double-click, or a key", async () => {
@@ -1195,6 +1276,36 @@ describe("networks", () => {
       expect(chart.selection).toBeNull();
     },
   );
+
+  it("repaint a lasso being drawn as the theme changes, the pointer held", async () => {
+    const chart = await network({
+      interaction: { zoom: true, brush: "lasso" },
+      theme: { style: { brush: { fill: "#c0392b" } } },
+    });
+    const [x, y] = where(chart, "a");
+    const release = await holdLasso(chart, [
+      [x - 12, y - 12],
+      [x + 12, y - 12],
+      [x + 12, y + 12],
+      [x - 12, y + 12],
+    ]);
+    await frame();
+    expect(lassoFill(chart)).toBe("#c0392b");
+    chart.update({ theme: "dark" });
+    await frame();
+    expect(lassoFill(chart)).toBe(resolveTheme("dark").muted);
+    await release();
+    await frame();
+    expect(brushOf(chart.selection)?.lasso).not.toBeNull();
+    // Pressed again, not moved yet: the lasso selected repaints.
+    const pressed = await holdLasso(chart, [[x + 4, y + 4]]);
+    chart.update({ theme: "light" });
+    await frame();
+    expect(lassoFill(chart)).toBe(resolveTheme("light").muted);
+    await pressed();
+    await frame();
+    expect(lassoFill(chart)).toBe(resolveTheme("light").muted);
+  });
 
   it("keep a node's drag when the page's selection spans the drawing pressed", async () => {
     const chart = await network({ renderer: "canvas" });

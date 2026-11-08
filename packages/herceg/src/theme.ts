@@ -72,6 +72,8 @@ interface Base {
   lineWidth: number;
   barRadius: number;
   tooltip: { fill: string; stroke: string };
+  /** Whether brushes draw an outline (in the muted color) by default; dom/brush.ts gives the rest of their look. */
+  brushOutline?: boolean;
 }
 
 // The platform's interface font: SF Pro on Apple systems, Segoe UI on
@@ -207,6 +209,8 @@ const HIGH_CONTRAST_BASE: Base = {
   titleSize: 16,
   lineWidth: 2.5,
   tooltip: { fill: "#ffffff", stroke: "#000000" },
+  // A brush's fill alone is faint: its outline marks its edges at 3:1 or more.
+  brushOutline: true,
 };
 
 const HIGH_CONTRAST_DARK_BASE: Base = {
@@ -263,6 +267,7 @@ function baseRoles(base: Base, { text, muted, grid, axis }: Required<ThemeTokens
     axisLine: line(axis),
     tick: line(axis),
     crosshair: line(axis),
+    brush: base.brushOutline ? { stroke: muted } : {},
     line: { strokeWidth: base.lineWidth },
     bar: { radius: base.barRadius },
     tooltip: { ...base.tooltip },
@@ -317,6 +322,7 @@ const ROLES = [
   "line",
   "bar",
   "tooltip",
+  "brush",
 ] as const;
 
 /**

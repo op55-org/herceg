@@ -389,7 +389,8 @@ export class Topology {
 
   /**
    * Traces positions [start, end) of `s` into `path`, a run at a time,
-   * each reduced by `reduce`, with `where`'s crossings at their ends.
+   * each reduced by `reduce`, with `where`'s crossings at their ends; the
+   * series' runs, as `runs` finds them.
    */
   trace(
     s: Series,
@@ -399,15 +400,16 @@ export class Topology {
     start: number,
     end: number,
     reduce: (start: number, end: number) => void,
-  ): void {
-    this.#runsIn(s, frame, start, end, [{ y, path }], reduce);
+  ): Runs {
+    return this.#runsIn(s, frame, start, end, [{ y, path }], reduce);
   }
 
   /**
    * Traces positions [start, end) of a band's edges `top` and `bottom` into
    * `upper` and `lower`: the runs both edges share, split where either has
    * no place (as bands are), each edge reduced by `reduce`; crossings meet
-   * both edges at the same place along the band.
+   * both edges at the same place along the band. The series' runs, as
+   * `runs` finds them.
    */
   band(
     s: Series,
@@ -419,8 +421,8 @@ export class Topology {
     start: number,
     end: number,
     reduce: (edge: Series["y"], start: number, end: number, out: PointSink) => void,
-  ): void {
-    this.#runsIn(
+  ): Runs {
+    return this.#runsIn(
       s,
       frame,
       start,
@@ -441,8 +443,9 @@ export class Topology {
     end: number,
     edges: readonly { y: Series["y"]; path: PointSink }[],
     reduce: (start: number, end: number) => void,
-  ): void {
-    const { runs, count } = this.runs(s);
+  ): Runs {
+    const kept = this.runs(s);
+    const { runs, count } = kept;
     const xMap = frame.x.mapping();
     const yMap = frame.y.mapping();
     const { mapValue } = this.#kit;
@@ -483,6 +486,7 @@ export class Topology {
       reduce(from, to);
       if (crossing & 2 && b < end) cross(b - 1, b);
     }
+    return kept;
   }
 
   /**

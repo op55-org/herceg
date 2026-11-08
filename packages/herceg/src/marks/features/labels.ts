@@ -3,19 +3,18 @@
 // painted as the text is. Each scene, the source mark's series record what
 // they drew in each panel (`Drawings`); the labels then find their anchors
 // on it (attach.ts), write their content (content.ts), take their looks
-// (the series' color unless their style gives one), and are placed beside
-// their points or outside the plot (layout/attached.ts), whose room the
-// chart keeps. Hidden series draw nothing, so their labels are left out;
+// (the series' color unless their style gives one, and their leaders' unless
+// the leader's look gives one), and are placed beside their points or
+// outside the plot (layout/attached.ts), whose room the chart keeps. Hidden series draw nothing, so their labels are left out;
 // labels make no rows.
 
 import { type AttachedLabel, type LabelOwner, placeAttached } from "../../layout/attached.ts";
 import type { PanelDrawing } from "../../layout/placer.ts";
 import type { FeatureKit, MarkFeatures } from "../../model/features.ts";
-import type { AreaGeometry, Geometry, LineGeometry, Rect } from "../../scene/scene.ts";
+import type { AreaGeometry, Geometry, Rect } from "../../scene/scene.ts";
 import type {
   AreaLabelsSpec,
   LabelAt,
-  LabelContent,
   LabelLayoutSpec,
   LabelPlaceSpec,
 } from "../../spec/encoding.ts";
@@ -91,22 +90,21 @@ export class Drawings {
     const across = frame[along === "x" ? "y" : "x"];
     const zeros =
       area && spec.stack && across.type === "log" ? Math.min(...across.domain) : undefined;
+    // Layers curve together where the value axis is not log (marks/area.ts);
+    // continuity cuts a stack with breaks between its entries.
+    const curved = layered && spec.curve === "monotone" && across.type !== "log";
+    const cut = !!spec.stack && spec.continuity !== undefined;
     const anchors = new Map<string, Anchor | undefined>();
     for (const { key, at, edge } of this.#wanted) {
-      const path =
-        edge === "lower" ? area?.lower : (area?.upper ?? (geometry as LineGeometry).path);
-      if (!path) continue;
+      // A band's lower edge; every series' upper one.
+      if (edge === "lower" && !area?.lower) continue;
       const [values, other] = edge === "lower" ? [bottom!, top] : [top, bottom];
       const seams = layered && along === "y";
-      const drawnEdge: DrawnEdge = {
-        along,
-        path,
-        curve: spec.curve,
-        traced: traced[edge],
-        series,
-        values,
-      };
-      anchors.set(key, anchorOf({ ...drawnEdge, other, shift, seams, zeros }, frame, at));
+      const drawnEdge: DrawnEdge = { along, traced: traced[edge], series, values };
+      anchors.set(
+        key,
+        anchorOf({ ...drawnEdge, other, shift, seams, zeros, curved, cut }, frame, at),
+      );
     }
     drawn.set(series.key, { series, frame, anchors });
   }
@@ -195,6 +193,7 @@ export function followingLabels(
       overlap: layout?.overlap ?? "move",
       priority: layout?.priority ?? 0,
       owner,
+      color: s.color,
     });
   }
   return labels;
@@ -333,32 +332,6 @@ export function seriesLabels(
   if (labels.style !== undefined && (typeof labels.style !== "object" || labels.style === null))
     throw new Error(`${at}.style: expected a text style such as { fontSize: 12 }`);
   return { edge: edgeOf(mark, labels.edge, at) };
-}
-
-/**
- * Refuses fields read where labels following `source` stand at no known
- * observation: where the layers of a series field's stack (drawn through
- * the stack's edges) enter or leave the view. `path` names each part of
- * `content`.
- */
-export function checkOwners(
-  kit: FeatureKit,
-  source: Mark,
-  at: LabelAt,
-  content: LabelContent,
-  path: (part: number) => string,
-): void {
-  if ((at !== "visible-start" && at !== "visible-end") || source.spec.type !== "area") return;
-  const spec = source.spec as AreaSpec & { stack?: unknown };
-  const edged = !!spec.stack && source.identity?.field !== undefined;
-  const field = content.findIndex((part) => typeof part === "object" && part?.field !== undefined);
-  if (!edged || field < 0) return;
-  const where = path(field);
-  throw new kit.ChartError({
-    code: "invalid-option",
-    path: where,
-    message: `${where}: where the view cuts a stack split by a series field, which row stands there is not known, so no field is read; write the series or the value there, or label at "first" or "last"`,
-  });
 }
 
 /** Checks that a label's `content`, where given, is a list of parts. */
