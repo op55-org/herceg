@@ -1,12 +1,14 @@
 // Brushing: dragging across the plot selects a range along x or y, a
-// rectangle, or a freehand region (a lasso), drawn in the pointer overlay.
-// The selection is kept in data values, so it stays on its data as the chart
-// zooms, pans, or resizes. On a category axis the values are whole category
-// indices, and the selection covers their slots.
+// rectangle, or a freehand region (a lasso), drawn in the pointer overlay
+// in the theme's `brush` paint. The selection is kept in data values, so it
+// stays on its data as the chart zooms, pans, or resizes. On a category axis
+// the values are whole category indices, and the selection covers their
+// slots.
 
 import type { PositionScale } from "../scale/scale.ts";
 import type { Rect } from "../scene/scene.ts";
 import type { BrushOptions, BrushSpec } from "../spec/spec.ts";
+import { dashPattern } from "../style/dash.ts";
 import type { Theme } from "../theme.ts";
 import type { BrushSelection, normalize } from "./brushed.ts";
 
@@ -253,6 +255,14 @@ export class Brush {
     }
     this.#shown = true;
     const document = this.element.ownerDocument;
+    // The theme's brush, the muted color at 0.18 by default; a lasso's
+    // outline in its fill's color unless it gives a stroke.
+    const { fill = theme.muted, fillOpacity = 0.18, stroke, opacity = 1 } = theme.roles.brush;
+    const { strokeWidth = 1, dash, strokeOpacity } = theme.roles.brush;
+    const outline =
+      stroke ??
+      (!selection.lasso ? "none" : fill === "none" || fill === "transparent" ? theme.muted : fill);
+    const pattern = dashPattern(dash, strokeWidth);
     while (this.#outlines.length < panels.length) {
       const id = `${this.#id}-${this.#outlines.length}`;
       const clip = document.createElementNS(SVG, "clipPath");
@@ -282,10 +292,16 @@ export class Brush {
         node.setAttribute("height", String(rect.height));
       });
       path.setAttribute("d", d);
-      path.setAttribute("fill", theme.muted);
-      path.setAttribute("fill-opacity", "0.18");
-      path.setAttribute("stroke", selection.lasso ? theme.muted : "none");
-      path.setAttribute("stroke-opacity", "0.6");
+      path.setAttribute("fill", fill);
+      path.setAttribute("fill-opacity", String(fillOpacity * opacity));
+      path.setAttribute("stroke", outline);
+      path.setAttribute(
+        "stroke-opacity",
+        String((strokeOpacity ?? (stroke === undefined ? 0.6 : 1)) * opacity),
+      );
+      path.setAttribute("stroke-width", String(strokeWidth));
+      if (pattern?.length) path.setAttribute("stroke-dasharray", pattern.join(" "));
+      else path.removeAttribute("stroke-dasharray");
       path.setAttribute("visibility", "visible");
     });
   }

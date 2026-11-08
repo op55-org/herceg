@@ -7,7 +7,7 @@ import { asksFeatures } from "../model/features.ts";
 import type { Geometry, LineGeometry } from "../scene/scene.ts";
 import type { Clip, Curve, Dash, Frozen, LineSpec, SymbolName } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type {
   Condition,
@@ -113,7 +113,7 @@ interface LineStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   curve?: Curve;
   /** Name of a single line in legends and tooltips. Defaults to the value field. */
   label?: SeriesName<S>;
-  /** A label following each line: at its first or last point, or where it enters or leaves the view. */
+  /** A label following each line: at its first or last observation drawn, or its first or last in view. */
   labels?: SeriesLabels<S>;
   /** Where the lines are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;

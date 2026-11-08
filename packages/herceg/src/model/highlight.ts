@@ -42,7 +42,7 @@ import type {
   SvgElement,
 } from "../scene/scene.ts";
 import type { ChartSelection, Look, SelectionLooks } from "../spec/state.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
 import type { DotLook } from "./features.ts";
 import type { GuideKit } from "./guides.ts";
 import { itemResolver } from "./items.ts";

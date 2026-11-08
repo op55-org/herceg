@@ -82,11 +82,12 @@ describe("dashboard", () => {
         true,
       );
     }
-    // Its label at the view's start, beside the axis, clear of the tick labels.
-    const [label] = texts(overview, (t) => t === "Limit 57");
+    // Its label at its first step in view (59, the view starting in 57's
+    // hold), beside the axis, clear of the tick labels.
+    const [label] = texts(overview, (t) => t === "Limit 59");
     const labelBox = boxOf(overview, label!);
     expect(labelBox.right).toBeLessThanOrEqual(now.plot.x);
-    expect(Math.abs((labelBox.top + labelBox.bottom) / 2 - yOf(overview, "now", 57))).toBeLessThan(
+    expect(Math.abs((labelBox.top + labelBox.bottom) / 2 - yOf(overview, "now", 59))).toBeLessThan(
       8,
     );
     expect(ticks.filter((tick) => overlaps(tick, labelBox))).toEqual([]);

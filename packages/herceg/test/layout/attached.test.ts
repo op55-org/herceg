@@ -49,6 +49,7 @@ const frame = {
   measure: estimateText,
   theme,
   outside: [30, 350],
+  paint: (value: string) => value,
 } as unknown as Frame;
 
 let n = 0;
@@ -71,6 +72,7 @@ function label(
     overlap: "move",
     priority: 0,
     owner: { key: "labels", leader: undefined, room: [0, 0] },
+    color: "#333333",
   };
 }
 
@@ -569,35 +571,48 @@ describe("series labels keeping apart", () => {
   });
 
   contractTest("label.series.leader", () => {
-    // Leaders join labels moved more than 6 pixels to their points; others draw none.
-    const own = owner("labels", {
-      stroke: undefined,
-      path: "line labels.leader.stroke",
-      strokeWidth: 1,
-    });
-    const { geometry } = place(
-      [
-        series(100, "a", "move", own),
-        series(100, "b", "move", own),
-        series(100, "c", "move", own),
-        series(180, "d", "move", own),
-      ],
+    // Leaders join labels moved more than 6 pixels to their points, each in
+    // its series' color; others draw none.
+    const look = { stroke: undefined, path: "line labels.leader.stroke", strokeWidth: 1 };
+    const own = owner("labels", look);
+    const colors = ["#aa0000", "#00bb00", "#0000cc", "#dd00dd"];
+    const labels = [
+      series(100, "a", "move", own),
+      series(100, "b", "move", own),
+      series(100, "c", "move", own),
+      series(180, "d", "move", own),
+    ].map((label, k) => ({ ...label, color: colors[k]! }));
+    const { geometry } = place(labels, frame, GUIDE_KIT);
+    const parts = geometry.get(own)!;
+    expect(parts.map(({ kind }) => kind)).toEqual(["segments", "segments", "labels"]);
+    // "a" and "c" moved a line's height; "b" and "d" stayed.
+    const leaders = parts.slice(0, 2) as SegmentGeometry[];
+    expect(leaders.map(({ stroke, count }) => [stroke, count])).toEqual([
+      ["#aa0000", 1],
+      ["#0000cc", 1],
+    ]);
+    expect(leaders.map(({ key }) => key)).toEqual(["labels|leaders", "labels|leaders|1"]);
+    for (const segments of leaders) {
+      // From beside the point, to the label's near edge.
+      expect(segments.coords[0]!).toBeGreaterThan(340);
+      expect(Math.abs(segments.coords[1]! - 100)).toBeLessThanOrEqual(2);
+      expect(segments.coords[2]!).toBeCloseTo(350, 6);
+    }
+    // A leader's own stroke draws every one in it, as one geometry.
+    const own2 = owner("labels", { ...look, stroke: "#999999", strokeWidth: 2, opacity: 0.5 });
+    const placed = place(
+      labels.map((label) => ({ ...label, owner: own2 })),
       frame,
       GUIDE_KIT,
-    );
-    const [leaders, labels] = geometry.get(own)!;
-    expect(leaders!.kind).toBe("segments");
-    expect(labels!.kind).toBe("labels");
-    const segments = leaders as SegmentGeometry;
-    // "a" and "c" moved a line's height; "b" and "d" stayed.
-    expect(segments.count).toBe(2);
-    expect(segments.stroke).toBe(theme.muted);
-    for (let k = 0; k < segments.count; k++) {
-      // From beside the point, to the label's near edge.
-      expect(segments.coords[k * 4]!).toBeGreaterThan(340);
-      expect(Math.abs(segments.coords[k * 4 + 1]! - 100)).toBeLessThanOrEqual(2);
-      expect(segments.coords[k * 4 + 2]!).toBeCloseTo(350, 6);
-    }
+    ).geometry.get(own2)!;
+    const [one] = placed as SegmentGeometry[];
+    expect(placed.map(({ kind }) => kind)).toEqual(["segments", "labels"]);
+    expect([one!.stroke, one!.count, one!.strokeWidth, one!.opacity]).toEqual([
+      "#999999",
+      2,
+      2,
+      0.5,
+    ]);
   });
 
   it("draw a leader from labels displaced more than 6 pixels from their points, either way", () => {

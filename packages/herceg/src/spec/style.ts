@@ -153,6 +153,14 @@ export interface StyleRoles {
   tick?: StrokeStyle;
   /** The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. */
   crosshair?: StrokeStyle;
+  /**
+   * Brushes and lassos, of charts, maps, and networks, while drawn and
+   * after (and a brush that zooms, while drawn): the theme's muted color at
+   * `fillOpacity` 0.18 by default. A brush has no outline unless `stroke`
+   * gives one; a lasso's is its fill's color at `strokeOpacity` 0.6 unless
+   * `stroke` gives one (`"none"` for none). `opacity` scales both.
+   */
+  brush?: PaintStyle;
   /** Lines, area outlines, and contour lines that do not set their own width. */
   line?: {
     /** @exclusiveMinimum 0 */

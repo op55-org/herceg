@@ -7,7 +7,7 @@ import { shapesDrawing } from "../draw/shapes.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Rect, ShapesGeometry } from "../scene/scene.ts";
 import type { Coordinate, InsetAnchor, InsetSpec } from "../spec/spec.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import { layoutError } from "./compile.ts";
 

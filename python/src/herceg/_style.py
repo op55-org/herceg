@@ -344,16 +344,51 @@ class StrokeStyle:
             widths=("stroke_width",),
             fractions=("opacity",),
         )
-        if isinstance(self.dash, str):
-            _choice(self.dash, ("-", "--", ":", "-."), "StrokeStyle dash")
-        elif self.dash is not None:
-            if not listlike(self.dash):
-                raise ChartError(
-                    'StrokeStyle dash: expected a pixel pattern such as [4, 2], or "-", "--", '
-                    f'":", or "-."; received {shown(self.dash)}'
-                )
-            for i, step in enumerate(self.dash):
-                _number(step, f"StrokeStyle dash[{i}]")
+        _dash_checked(self.dash, "StrokeStyle")
+
+
+def _dash_checked(dash: Any, owner: str) -> None:
+    """Refuses a ``dash`` that is neither a pixel pattern nor a named one,
+    in the words of the builder it was given to."""
+    if isinstance(dash, str):
+        _choice(dash, ("-", "--", ":", "-."), f"{owner} dash")
+    elif dash is not None:
+        if not listlike(dash):
+            raise ChartError(
+                f'{owner} dash: expected a pixel pattern such as [4, 2], or "-", "--", '
+                f'":", or "-."; received {shown(dash)}'
+            )
+        for i, step in enumerate(dash):
+            _number(step, f"{owner} dash[{i}]")
+
+
+@refuses
+@dataclass
+class PaintStyle:
+    """How a filled shape looks: its ``fill``, its outline (``stroke``,
+    ``stroke_width``, ``dash``), their opacities, and ``opacity``, which
+    scales both. The theme's ``brush`` role takes one::
+
+        hg.Theme(style=hg.Style(brush=hg.PaintStyle(fill="#4c78a8", fill_opacity=0.2)))
+    """
+
+    fill: str | None = None
+    fill_opacity: float | None = None
+    stroke: str | None = None
+    stroke_width: float | None = None
+    dash: Sequence[float] | Literal["-", "--", ":", "-."] | None = None
+    opacity: float | None = None
+    stroke_opacity: float | None = None
+
+    def __post_init__(self) -> None:
+        _checked(
+            self,
+            "PaintStyle",
+            colors=("fill", "stroke"),
+            widths=("stroke_width",),
+            fractions=("opacity", "fill_opacity", "stroke_opacity"),
+        )
+        _dash_checked(self.dash, "PaintStyle")
 
 
 @refuses
@@ -388,7 +423,7 @@ class Look:
             widths=("stroke_width", "radius"),
             fractions=("opacity", "fill_opacity", "stroke_opacity"),
         )
-        StrokeStyle(dash=self.dash)
+        _dash_checked(self.dash, "Look")
 
 
 def look_spec(value: Any, role: str) -> Any:
@@ -459,6 +494,7 @@ _ROLES: dict[str, type[Any]] = {
     "axis_line": StrokeStyle,
     "tick": StrokeStyle,
     "crosshair": StrokeStyle,
+    "brush": PaintStyle,
     "line": LineStyle,
     "bar": BarStyle,
     "tooltip": TooltipStyle,
@@ -481,9 +517,11 @@ class Style:
     an ``hg.TextStyle``; ``plot`` an ``hg.PlotStyle``; ``grid``,
     ``axis_line``, ``tick``, and ``crosshair`` (the line the pointer's, the
     keyboard's, and other charts' cursors draw across a plot) an
-    ``hg.StrokeStyle``; ``line`` an
-    ``hg.LineStyle``, ``bar`` an ``hg.BarStyle``, and ``tooltip`` an
-    ``hg.TooltipStyle``::
+    ``hg.StrokeStyle``; ``brush`` (brushes and lassos, of charts, maps, and
+    networks: the muted color at ``fill_opacity`` 0.18 by default, a lasso
+    outlined in its fill's color at ``stroke_opacity`` 0.6) an
+    ``hg.PaintStyle``; ``line`` an ``hg.LineStyle``, ``bar`` an
+    ``hg.BarStyle``, and ``tooltip`` an ``hg.TooltipStyle``::
 
         hg.Style(tick_label=hg.TextStyle(color="#555"), grid=hg.StrokeStyle(dash="--"))
     """
@@ -500,6 +538,7 @@ class Style:
     axis_line: StrokeStyle | Mapping[str, Any] | None = None
     tick: StrokeStyle | Mapping[str, Any] | None = None
     crosshair: StrokeStyle | Mapping[str, Any] | None = None
+    brush: PaintStyle | Mapping[str, Any] | None = None
     line: LineStyle | Mapping[str, Any] | None = None
     bar: BarStyle | Mapping[str, Any] | None = None
     tooltip: TooltipStyle | Mapping[str, Any] | None = None

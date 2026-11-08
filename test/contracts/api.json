@@ -934,7 +934,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "settings MarkTooltipSpec hg.Tooltip": {
@@ -1284,7 +1285,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "settings LegendStyles hg.Style": {
@@ -1300,7 +1302,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "chart python guides style": {
@@ -1312,7 +1315,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "chart update guides style": {
@@ -1324,7 +1328,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "chart python guides layers style": {
@@ -1341,7 +1346,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "chart update guides layers style": {
@@ -1358,7 +1364,8 @@
         "line": "As text.",
         "bar": "As text.",
         "tooltip": "As text.",
-        "crosshair": "As text."
+        "crosshair": "As text.",
+        "brush": "As text."
       }
     },
     "settings TickLabelsSpec hg.TickLabels": {

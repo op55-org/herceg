@@ -433,16 +433,31 @@ widest line.
   series labels are placed so.
 
 **Labels following series.** Lines' and areas' `labels`, and text marks
-with `from: { mark, at, edge }`, put a label per drawn series at its first
-or last drawn observation, or where its edge enters or leaves the plot
-(`visible-start`, `visible-end`; `marks/features/attach.ts`). The owner of
-each point is as drawn: traces record which observation each edge point
-is (`TracedEdge`), so a step's hold reads the row whose value it holds.
-Where a series field's stack hides which row stands at a view's edge,
-labels writing a field are refused (`checkOwners`). Content is a list of
-parts (`writeContent`, `marks/features/content.ts`): text, `{ field }`,
-`{ series: true }`, `{ value: true }`, each with a format; bar value labels
-and annotation labels take the same parts.
+with `from: { mark, at, edge }`, put a label per drawn series at an
+observation (`marks/features/attach.ts`): its first or last drawn, or with
+`visible-start` and `visible-end`, its first or last drawn whose position
+is in the view along the series' axis, of the source rows before level of
+detail. A label whose observation is outside the plot (its value past the
+view across the series' axis) is not drawn, and a series with no
+observation in view has none, even where its line crosses the view. The
+search is the trace's (`TracedEdge`: the series and frame as traced, so
+`where`, `continuity`, breaks, and a dodged series' shift count as they
+draw, and the rows it traced: those in the view and the next past each
+end); layers drawn through a stack's shared edges are read as the stack
+draws them, at the positions its trace runs through, found by binary
+search (a layer's n-th row at a position is the stack's n-th entry there,
+past breaks continuity writes between entries). In view, the walk starts
+at the end of those rows and goes a run of those `where` and `continuity`
+keep at a time (the runs continuity finds once per data version), jumping
+a break, or rows at one position outside the plot, at once, so it costs
+the rows kept but not placed between (and O(log n) for layers), each
+frame; `first` and `last` of a series with `continuity` start from its
+drawn rows, found once per data version. Labels move to another observation as one enters
+or leaves the view, and with their observation's point in between.
+Content is a list of parts (`writeContent`, `marks/features/content.ts`):
+text, `{ field }` (the observation's), `{ series: true }`, `{ value: true }`
+(the value drawn there), each with a format; bar value labels and
+annotation labels take the same parts.
 
 **Placement** (`placeAttached` in `layout/attached.ts`). Inside the plot,
 labels sit beside their point and slide along their row to stay within
@@ -491,8 +506,11 @@ marks', and text following series) is placed in one call, by its
   the movers are placed, the others after.
 
 Labels moved more than `LEADER_MOVE` (6) pixels draw a leader from their
-point when asked (`LabelOwner.leader`), as a segments geometry under the
-owner's labels.
+point when asked (`LabelOwner.leader`), as segments geometries under the
+owner's labels: one per color, each leader in its series' color unless
+the leader's look gives a stroke. Annotation leaders (`leadersGeometry`,
+`marks/annotation.ts`) take their rule's stroke or their text's color the
+same way.
 
 **The panel placer** (`layout/placer.ts`). After a panel's marks draw,
 `placePanel` places their labels together, once per panel: series labels

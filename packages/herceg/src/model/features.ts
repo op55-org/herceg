@@ -388,20 +388,15 @@ export interface SeriesFeatures {
   markerRows?(markers: Geometry): ArrayLike<number> | undefined;
   /**
    * For series labels follow, drawn with the other layers of their band or
-   * stack curved together: their edges as drawn on `frame`, and the
-   * position in the series of each of their points (both edges').
+   * stack curved together on `frame` (not through `band`), over positions
+   * `range` ([start, end)).
    */
-  curved?(
-    series: Series,
-    edges: { readonly upper: Polyline; readonly lower: Polyline },
-    positions: readonly number[],
-    frame: TraceFrame,
-  ): void;
+  curved?(series: Series, frame: TraceFrame, range: readonly [number, number]): void;
   /**
    * For series labels follow: takes the edges (a line's or an area's upper,
-   * a band's lower) of the series' last trace, which observation each point
-   * is, so a geometry drawn next without them reads none; none where the
-   * series was not traced so (a stack's layers drawn through its edges).
+   * a band's lower) of the series' last trace, so a geometry drawn next
+   * without one reads none; none where the series was not traced so (a
+   * stack's layers drawn through its edges).
    */
   takeTrace?(): { readonly upper?: TracedEdge; readonly lower?: TracedEdge };
   /** The series' drawn observations, as a series of those rows: what text summaries read. */

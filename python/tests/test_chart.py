@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import herceg as hg
+import herceg.express as hx
 from herceg import _render as hg_render
 from herceg._errors import python_path
 
@@ -1227,6 +1228,8 @@ def test_theme_builders_match_typescript():
     ]:
         assert {_camel(f.name) for f in fields(builder)} == keys(interface), interface
     assert {_camel(f.name) for f in fields(hg.StrokeStyle)} == keys("StrokeStyle")
+    paint = keys("PaintStyle") | keys("StrokeStyle")
+    assert {_camel(f.name) for f in fields(hg.PaintStyle)} == paint
     with pytest.raises(ValueError, match='Theme style: unknown key "fontsize"'):
         hg.Chart(DATA, theme={"style": {"fontsize": 12}})
     with pytest.raises(ValueError, match="TextStyle font_weight: expected a whole number"):
@@ -2288,6 +2291,38 @@ def test_inspection_options():
     theme = hg.Theme(style=hg.Style(crosshair=hg.StrokeStyle(stroke="#888", dash="--")))
     spec, _ = hg.Chart(data, theme=theme).line(x="t", y="v").to_spec()
     assert spec["theme"]["style"]["crosshair"]["stroke"] == "#888"
+
+
+def test_the_brush_role_reaches_the_spec_and_takes_a_paint():
+    data = {"t": [0, 1, 2], "v": [1.0, 2.0, 3.0]}
+    brush = hg.PaintStyle(fill="#4c78a8", fill_opacity=0.2, stroke="#4c78a8", stroke_width=1)
+    spec, _ = (
+        hg.Chart(data, theme=hg.Theme(style=hg.Style(brush=brush))).line(x="t", y="v").to_spec()
+    )
+    assert spec["theme"]["style"]["brush"] == {
+        "fill": "#4c78a8",
+        "fillOpacity": 0.2,
+        "stroke": "#4c78a8",
+        "strokeWidth": 1,
+    }
+    # A dict of its options too, in herceg.express as in charts.
+    styled = {"style": {"brush": {"fill": "#4c78a8", "stroke_opacity": 0.5}}}
+    spec, _ = hx.histplot(data, x="v", theme=styled).to_spec()
+    assert spec["theme"]["style"]["brush"] == {"fill": "#4c78a8", "strokeOpacity": 0.5}
+    # A brush is a paint: no radius, and an opacity from 0 to 1.
+    with pytest.raises(
+        ValueError, match="Style brush: expected an hg.PaintStyle or a dict of its options"
+    ):
+        hg.Style(brush=hg.Look(fill="#4c78a8"))
+    with pytest.raises(ValueError, match='Style brush: unknown key "radius"'):
+        hg.Style(brush={"radius": 3})
+    with pytest.raises(ValueError, match="PaintStyle fill_opacity: expected a number from 0 to 1"):
+        hg.PaintStyle(fill_opacity=2)
+    # A dash is checked in the words of the builder it was given to.
+    with pytest.raises(ValueError, match='PaintStyle dash: expected "-", "--"'):
+        hg.PaintStyle(dash="~")
+    with pytest.raises(ValueError, match=r"Look dash\[1\]: expected a number"):
+        hg.Look(dash=[4, "x"])
 
 
 def test_inspection_reach_may_be_zero_as_a_duration_too():

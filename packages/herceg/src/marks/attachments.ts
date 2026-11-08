@@ -5,15 +5,14 @@
 // producer and reader keeps:
 // - `first` and `last` are the first and last drawable observations of the
 //   series in its traversal order, before level of detail reduces it.
-// - `visible-start` and `visible-end` are the ends of the series' visible
-//   connected path, where it crosses the view's edge too, as the path is
-//   drawn (steps held, monotone curves as curved), in traversal order,
-//   which reversed axes do not change. A series with nothing visible has no
-//   visible-edge label.
-// - A point on a segment is owned by the observation the segment arrives
-//   at, a point on a step's flat run by the observation whose value it
-//   holds, as a segment's style is. Field parts of a label read the owning
-//   observation; `{ value: true }` reads the value drawn at the point.
+// - `visible-start` and `visible-end` are the first and last of those
+//   whose position is in the view along the series' axis, in traversal
+//   order, which reversed axes do not change. A series with no observation
+//   in view has no such label, even where its line crosses the view.
+// - A label whose observation is outside the plot (its value past the view
+//   across the series' axis) is not drawn.
+// - Field parts of a label read the observation; `{ value: true }` reads
+//   the value drawn at its point (a stack's top).
 // - A band's labels follow its `edge` (y1 or y2, x1 or x2, as declared);
 //   other areas follow their value edge.
 // - Attachments resolve within the source mark's panel; a reference that

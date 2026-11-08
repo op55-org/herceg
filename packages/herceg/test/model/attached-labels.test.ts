@@ -1,33 +1,44 @@
 // Labels following series (marks/attachments.ts, marks/features/labels.ts):
 // `labels` on lines and areas and text `from` a mark, at a series' first or
-// last observation drawn, or where its line enters or leaves the view, as
-// it is drawn; reading the observation owning that point, and the value
-// drawn there; following hidden series out, and making no rows.
-import { describe, expect, it } from "vitest";
+// last observation drawn, or its first or last drawn in view, before level
+// of detail; reading that observation's fields and the value drawn there;
+// following hidden series out, and making no rows.
+import { inflateSync } from "node:zlib";
+import { describe, expect, it, vi } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { table } from "../../src/data/table.ts";
 import { estimateText, textLines } from "../../src/layout/text.ts";
 import { columns, inset, panel } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
+import { Topology } from "../../src/marks/features/continuity.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { text } from "../../src/marks/text.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
+import { renderToPDF } from "../../src/pdf.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
+import { num } from "../../src/render/pdf-document.ts";
+import { measurePdfText } from "../../src/render/pdf-fonts.ts";
+import { renderToSVG } from "../../src/render/static.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type {
   AreaGeometry,
   Geometry,
   LabelsGeometry,
+  LineGeometry,
   Scene,
+  SegmentGeometry,
   TextItem,
 } from "../../src/scene/scene.ts";
+import type { LabelAt } from "../../src/spec/encoding.ts";
 import { chartError, errorInfo } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function model(config: ChartConfig, width = 400, height = 200) {
   const made = new ChartModel(
@@ -94,6 +105,9 @@ const rows = table({
   note: ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"],
 });
 
+/** Labels writing their observation's note. */
+const noted = { content: [{ field: "note" }] } as const;
+
 describe("labels following series", () => {
   contractTest("labels.attach.first-last", () => {
     const chart = model({
@@ -148,58 +162,84 @@ describe("labels following series", () => {
   });
 
   contractTest("labels.attach.visible-edges", () => {
-    // Zoomed to [0.5, 2.5]: the line leaves the view half way from t = 2 to 3.
-    const chart = model({
-      x: { domain: [0.5, 2.5] },
+    // Zoomed to [0.5, 2.5]: "a"'s last observation in view is at t = 2; "b"'s
+    // there is NaN, not drawn, so its last is at t = 1.
+    const config = (at: "visible-start" | "visible-end"): ChartConfig => ({
+      x: { domain: [0.5, 2.5], nice: false },
       marks: [
         line(rows, {
           x: "t",
           y: "v",
           series: "g",
           labels: {
-            at: "visible-end",
+            at,
             content: [{ field: "note" }, " ", { value: true, format: { number: ".1f" } }],
           },
         }),
       ],
     });
-    const scene = chart.scene(estimateText);
+    const scene = model(config("visible-end")).scene(estimateText);
     const { plot } = scene.panels[0]!;
-    const [a] = labelsOf(scene);
-    // The segment's end owns the point, and the value is the line's there.
-    expect(a!.text).toBe("a3 3.5");
-    // It stands inside the plot, at the edge.
-    expect(extent(a!)[1]).toBeCloseTo(plot.x + plot.width, 6);
-    // Entering the view: "a" from t = 0 to 1, owned by t = 1.
-    const start = model({
-      x: { domain: [0.5, 2.5] },
-      marks: [
-        line(rows, {
-          x: "t",
-          y: "v",
-          series: "g",
-          labels: { at: "visible-start", content: [{ field: "note" }, " ", { value: true }] },
-        }),
-      ],
-    });
-    expect(texts(start.scene(estimateText))).toEqual(["a1 1.5", "b1 3.5"]);
+    expect(texts(scene)).toEqual(["a2 3.0", "b1 3.0"]);
+    // Beside its observation, three quarters of the way across the plot, not at its edge.
+    const a = labelsOf(scene).find(({ text }) => text.startsWith("a"))!;
+    expect(a.x).toBeCloseTo(plot.x + (plot.width * 3) / 4 + 4, 6);
+    // Entering the view: the first observations in view, at t = 1.
+    expect(texts(model(config("visible-start")).scene(estimateText))).toEqual(["a1 2.0", "b1 3.0"]);
   });
 
-  contractTest("labels.attach.step-hold", () => {
-    // A step held from t = 0 to 1 at 1: entering the view at 0.5, it holds t = 0's value.
+  contractTest("labels.attach.view-follow", () => {
+    // A label at the last observation in view follows the view as it zooms
+    // and pans, moving to another observation when one enters or leaves the
+    // view; rows streaming in past the view leave it where it is; and a
+    // view holding no observation has none, even where the line crosses it.
+    const live = table(
+      { t: [0, 1, 2, 3, 4], v: [1, 2, 3, 4, 5], note: ["n0", "n1", "n2", "n3", "n4"] },
+      { maxRows: 100 },
+    );
     const chart = model({
-      x: { domain: [0.5, 3] },
-      marks: [
-        line(rows, {
-          x: "t",
-          y: "v",
-          series: "g",
-          curve: "step-after",
-          labels: { at: "visible-start", content: [{ field: "note" }, " ", { value: true }] },
-        }),
-      ],
+      x: { nice: false },
+      marks: [line(live, { x: "t", y: "v", labels: { at: "visible-end", ...noted } })],
     });
-    expect(texts(chart.scene(estimateText))).toEqual(["a0 1", "b0 4"]);
+    const drawn = () => {
+      const scene = chart.scene(estimateText);
+      const [label] = labelsOf(scene);
+      return { text: label?.text, x: label?.x, plot: scene.panels[0]!.plot };
+    };
+    expect(drawn().text).toBe("n4");
+    setViewport(chart, [0, 2.5]);
+    const zoomed = drawn();
+    expect(zoomed.text).toBe("n2");
+    // Panned by 0.2: the same observation, its label moved with it.
+    setViewport(chart, [0.2, 2.7]);
+    const panned = drawn();
+    expect(panned.text).toBe("n2");
+    expect(panned.x! - zoomed.x!).toBeCloseTo((-0.2 * zoomed.plot.width) / 2.5, 6);
+    // Panned until t = 3 is in view: its label.
+    setViewport(chart, [0.6, 3.1]);
+    expect(drawn().text).toBe("n3");
+    live.append({ t: [5, 6], v: [6, 7], note: ["n5", "n6"] });
+    expect(drawn().text).toBe("n3");
+    setViewport(chart, [3.2, 3.8]);
+    expect(drawn().text).toBeUndefined();
+    setViewport(chart, null);
+    expect(drawn().text).toBe("n6");
+  });
+
+  contractTest("labels.attach.view-across", () => {
+    // The last observation in view along x is outside the plot along y: no
+    // label, though rows before it are in the plot, as "last" does.
+    const rising = table({ t: [0, 1, 2], v: [1, 2, 9], note: ["n0", "n1", "n2"] });
+    const labels = (at: "last" | "visible-end") =>
+      texts(
+        model({
+          x: { domain: [0, 2], nice: false },
+          y: { domain: [0, 5], nice: false },
+          marks: [line(rising, { x: "t", y: "v", labels: { at, ...noted } })],
+        }).scene(estimateText),
+      );
+    expect(labels("visible-end")).toEqual([]);
+    expect(labels("last")).toEqual([]);
   });
 
   contractTest("labels.attach.series-order", () => {
@@ -583,9 +623,8 @@ describe("text following a mark", () => {
 describe("the observation a label is at", () => {
   /** The notes labels at `at` read, on `marks` drawn along fixed domains. */
   const notes = (config: ChartConfig) => texts(model(config).scene(estimateText));
-  const noted = { content: [{ field: "note" }] } as const;
 
-  it("is the one an edge between rows at one position arrives at", () => {
+  it("is the last or first in view of rows at one position, in the series' order", () => {
     const steps = table({ t: [0, 1, 1, 2], v: [1, 2, 3, 4], note: ["n0", "n1", "n2", "n3"] });
     const at = (labels: "visible-start" | "visible-end", domain: [number, number]) =>
       notes({
@@ -593,12 +632,12 @@ describe("the observation a label is at", () => {
         y: { domain: [0, 5], nice: false },
         marks: [line(steps, { x: "t", y: "v", labels: { at: labels, ...noted } })],
       });
-    // Leaving the view at t = 1 from the row at 3; entering it at t = 1 at the row at 2.
+    // The rows at t = 1 in their order: n1, then n2.
     expect(at("visible-end", [0, 1])).toEqual(["n2"]);
     expect(at("visible-start", [1, 2])).toEqual(["n1"]);
   });
 
-  it("is the one a segment entering the view arrives at, where positions do not ascend", () => {
+  it("is the first in view in the series' order, where positions do not ascend", () => {
     const back = table({ t: [5, 1, 3], v: [1, 2, 3], note: ["n0", "n1", "n2"] });
     expect(
       notes({
@@ -609,7 +648,40 @@ describe("the observation a label is at", () => {
     ).toEqual(["n1"]);
   });
 
-  it("is the one a crossing of where arrives at", () => {
+  it("is the first of its position a dodge moves into view, past a coordinate's offset", () => {
+    // Two rows at "a" in each series: an offset of 0.7 bands puts "a" past
+    // the plot's edge, and the dodge brings one series' back into it.
+    const twice = table({
+      cat: ["a", "a", "b", "a", "a", "b"],
+      v: [1, 2, 3, 2, 3, 4],
+      g: ["A", "A", "A", "B", "B", "B"],
+      note: ["a0", "a1", "a2", "b0", "b1", "b2"],
+    });
+    const config = (make: typeof line | typeof area, at: LabelAt, offset: number) => ({
+      y: { domain: [0, 5] as [number, number], nice: false },
+      marks: [
+        make(twice, {
+          x: { field: "cat", offset },
+          y: "v",
+          series: "g",
+          dodge: true,
+          labels: { at, overlap: "show" as const, ...noted },
+        }),
+      ],
+    });
+    for (const make of [line, area]) {
+      const plain = model(config(make, "visible-start", 0));
+      plain.scene(estimateText);
+      const band = plain.panels()[0]!.x.mapping().factor;
+      const at = (labels: LabelAt, bands: number) => notes(config(make, labels, bands * band));
+      expect(at("visible-start", -0.7)).toEqual(["a2", "b0"]);
+      expect(at("visible-end", -0.7)).toEqual(["a2", "b2"]);
+      expect(at("visible-start", 0.7)).toEqual(["a0", "b0"]);
+      expect(at("visible-end", 0.7)).toEqual(["a2", "b1"]);
+    }
+  });
+
+  it("is one where keeps, not where the line crosses where's bound", () => {
     const rising = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], note: ["n0", "n1", "n2", "n3"] });
     expect(
       notes({
@@ -624,10 +696,10 @@ describe("the observation a label is at", () => {
           }),
         ],
       }),
-    ).toEqual(["n2"]);
+    ).toEqual(["n1"]);
   });
 
-  it("is on the plot's edge whatever widths round its path to", () => {
+  it("is in view on the plot's edge, whatever widths round its path to", () => {
     // A path's 32-bit pixels fall a little past the edge of a plot 400.1 wide.
     const upright = table({ t: [1, 1], v: [1, 2], note: ["n0", "n1"] });
     const config: ChartConfig = {
@@ -664,28 +736,29 @@ describe("the observation a label is at", () => {
     ).toEqual(["n1"]);
   });
 
-  it("is the one the drawn step arrives at, where level of detail keeps rows apart", () => {
-    // A column of a hundred rows rising to 0.99, then one at 1 far off:
-    // level of detail keeps rows 0 and 99 of the column, whose jump leaves the view.
-    const n = 100;
-    const steps = table({
-      t: [...Array.from({ length: n }, (_, i) => i / 10_000), 1000],
-      v: [...Array.from({ length: n }, (_, i) => i / 100), 1],
-      note: Array.from({ length: n + 1 }, (_, i) => `n${i}`),
+  it("is a source row, where level of detail reduces the line", () => {
+    const n = 10_000;
+    const dense = table({
+      t: Float64Array.from({ length: n }, (_, i) => i),
+      v: Float64Array.from({ length: n }, (_, i) => i % 7),
+      note: Array.from({ length: n }, (_, i) => `n${i}`),
     });
+    const labels = {
+      at: "visible-end",
+      content: [{ field: "note" }, " ", { value: true }],
+    } as const;
     expect(
       notes({
-        x: { domain: [0, 1000], nice: false },
-        y: { domain: [0, 0.5], nice: false },
-        marks: [
-          line(steps, { x: "t", y: "v", curve: "step", labels: { at: "visible-end", ...noted } }),
-        ],
+        x: { domain: [0, 5000.4], nice: false },
+        y: { domain: [0, 7], nice: false },
+        marks: [line(dense, { x: "t", y: "v", labels })],
       }),
-    ).toEqual(["n99"]);
+    ).toEqual(["n5000 2"]);
   });
 
-  it("is the one a step's hold holds, where positions do not ascend", () => {
-    // Back from t = 5 to 0, the hold of row 1's value enters the view at t = 4.
+  it("is an observation, not a step's hold, where positions do not ascend", () => {
+    // Back from t = 5 to 0, the hold of row 1's value enters the view at t =
+    // 4; the first observation in view is row 2's.
     const back = table({ t: [5, 0, 2], v: [1, 4, 6], note: ["n0", "n1", "n2"] });
     expect(
       notes({
@@ -700,7 +773,7 @@ describe("the observation a label is at", () => {
           }),
         ],
       }),
-    ).toEqual(["n1"]);
+    ).toEqual(["n2"]);
   });
 
   it("is never a row continuity leaves out, though it stands where one drawn does", () => {
@@ -820,9 +893,9 @@ describe("the observation a label is at", () => {
       expect(notes({ x: { domain: [0, 10], nice: false, breaks }, marks: [mark] })).toEqual(["n2"]);
   });
 
-  it("is the one a crossing of where arrives at, past rows a break hides", () => {
-    // Rows 1 and 2 are in the break; v < 6 ends where the line leaves row 3 for
-    // row 4, and v > 2 starts where it leaves row 0 for row 1 (at the seam).
+  it("is one where keeps outside a break, never a crossing", () => {
+    // Rows 1 and 2 are in the break: v < 6 keeps rows 0 to 2, of which row
+    // 0 is drawn; v > 2 keeps rows 1 to 4, of which row 3 is drawn first.
     const hidden = table({
       t: time([0, 3, 4, 8, 10]),
       v: [0, 3, 4, 8, 10],
@@ -847,13 +920,13 @@ describe("the observation a label is at", () => {
       });
     };
     for (const banded of [false, true]) {
-      expect(at(true, banded)).toEqual(["n3"]);
-      expect(at(false, banded)).toEqual(["n1"]);
+      expect(at(true, banded)).toEqual(["n0"]);
+      expect(at(false, banded)).toEqual(["n3"]);
     }
   });
 
-  it("is where the curve drawn meets the plot's edge, however little of it the view holds", () => {
-    // The view holds a sliver of the curve from row 0 to 1, entering at its left edge.
+  it("is none where the view holds no observation, though the curve drawn crosses it", () => {
+    // The view holds a sliver of the curve from row 0 to 1.
     expect(
       notes({
         x: { domain: [0.53, 0.53001], nice: false },
@@ -867,44 +940,49 @@ describe("the observation a label is at", () => {
           }),
         ],
       }),
-    ).toEqual(["n1"]);
+    ).toEqual([]);
   });
 
-  it("is refused at the view's edges for fields of a series field's stack", () => {
-    const layers = table({ t: [0, 1, 2], lo: [0, 0, 0], hi: [1, 4, 6], g: ["a", "a", "a"] });
-    const content = [{ series: true }, ": ", { field: "hi" }] as const;
+  it("reads the fields of a series field's stack in view", () => {
+    // A series field's layers are drawn through the stack's edges; their
+    // labels in view are at observations of their own, whose fields they read.
+    const layers = table({ t: [0, 1, 2], hi: [1, 4, 6], g: ["a", "a", "a"] });
     const stack = { x: "t", y: "hi", series: "g", stack: true } as const;
+    const view = {
+      x: { domain: [0.5, 1.5], nice: false },
+      y: { domain: [0, 10], nice: false },
+    } as const;
+    const content = [{ series: true }, ": ", { field: "hi" }, " ", { value: true }] as const;
     expect(
-      refusal({ marks: [area(layers, { ...stack, labels: { at: "visible-end", content } })] }),
-    ).toMatchObject({ code: "invalid-option", path: "marks[0].labels.content[2]" });
+      notes({
+        ...view,
+        marks: [area(layers, { ...stack, labels: { at: "visible-end", content } })],
+      }),
+    ).toEqual(["a: 4 4"]);
     expect(
-      refusal({
+      notes({
+        ...view,
         marks: [
           area(layers, { id: "a", ...stack }),
           text({ from: { mark: "a", at: "visible-start" }, label: { field: "hi" } }),
         ],
       }),
-    ).toMatchObject({ code: "invalid-option", path: "marks[1].label.field" });
-    // Its series and values are written there, and its fields at either end.
-    const view = {
-      x: { domain: [0, 2], nice: false },
-      y: { domain: [0, 10], nice: false },
-    } as const;
-    for (const labels of [
-      { at: "visible-end", content: [{ value: true }] },
-      { at: "last", content: [{ field: "hi" }] },
-    ] as const)
-      expect(notes({ ...view, marks: [area(layers, { ...stack, labels })] })).toEqual(["6"]);
+    ).toEqual(["4"]);
   });
 
-  it("is the one a curve of layers drawn together arrives at", () => {
-    // A band's curve back from t = 5 to 0 enters the view at t = 4, arriving
-    // at row 1, and leaves it on the way to row 2, on a linear and a log axis.
-    const back = table({ t: [5, 0, 2], lo: [1, 1, 1], hi: [2, 4, 6], note: ["n0", "n1", "n2"] });
+  it("is an observation of layers curved together", () => {
+    // A band's curve back from t = 5: its first observation in view is row
+    // 2's, its last row 3's, on a linear and a log axis.
+    const back = table({
+      t: [5, 0, 2, 3],
+      lo: [1, 1, 1, 1],
+      hi: [2, 4, 6, 5],
+      note: ["n0", "n1", "n2", "n3"],
+    });
     for (const type of ["linear", "log"] as const)
       for (const [at, note] of [
-        ["visible-start", "n1"],
-        ["visible-end", "n2"],
+        ["visible-start", "n2"],
+        ["visible-end", "n3"],
       ] as const)
         expect(
           notes({
@@ -922,7 +1000,8 @@ describe("the observation a label is at", () => {
           }),
           `${type} ${at}`,
         ).toEqual([note]);
-    // Level of detail keeps rows 0 and 99 of a dense column: the curve leaving the view arrives at 99.
+    // A dense column, then a row far out of view: the last in view is row
+    // 99, whose band edge (0.99) is above the plot, so it has no label.
     const n = 100;
     const t = [...Array.from({ length: n }, (_, i) => i / 10_000), 1000];
     const dense = table({
@@ -932,13 +1011,14 @@ describe("the observation a label is at", () => {
       v: t.map(() => 0.1),
       note: t.map((_, i) => `n${i}`),
     });
-    const view = {
-      x: { domain: [0, 1000], nice: false },
-      y: { domain: [0, 0.5], nice: false },
-    } as const;
-    expect(
+    const view = (top: number): ChartConfig => ({
+      x: { domain: [0, 500], nice: false },
+      y: { domain: [0, top], nice: false },
+      marks: [],
+    });
+    const band = (top: number) =>
       notes({
-        ...view,
+        ...view(top),
         marks: [
           area(dense, {
             x: "t",
@@ -948,13 +1028,14 @@ describe("the observation a label is at", () => {
             labels: { at: "visible-end", edge: "y2", ...noted },
           }),
         ],
-      }),
-    ).toEqual(["n99"]);
-    // A stack of fields curves its layers together too: v's top stays in
-    // view to row 100, on the plot's edge; hi's leaves it on the way to 99.
+      });
+    expect(band(0.5)).toEqual([]);
+    expect(band(2)).toEqual(["n99"]);
+    // A stack of fields curves its layers together too: v's top (0.1) is in
+    // the plot, hi's (1.09) above it.
     expect(
       notes({
-        ...view,
+        ...view(0.5),
         marks: [
           area(dense, {
             x: "t",
@@ -965,7 +1046,7 @@ describe("the observation a label is at", () => {
           }),
         ],
       }),
-    ).toEqual(["n100", "n99"]);
+    ).toEqual(["n99"]);
   });
 
   it("is each panel's own, where panels draw a series on scales of their own", () => {
@@ -1037,9 +1118,11 @@ describe("the observation a label is at", () => {
           },
         });
       const [mark, series, frame, key] = drawn!;
+      // Drawn as in a scene of its own, so labels find their places again.
+      const again = { ...frame, scene: frame.scene + 1 };
       mark.geometry(
         series.map((s) => ({ ...s, y: counted(s.y), ...(s.y0 && { y0: counted(s.y0) }) })),
-        frame,
+        again,
         key,
       );
       return count;
@@ -1047,6 +1130,470 @@ describe("the observation a label is at", () => {
     const unlabeled = reads(false);
     expect(unlabeled).toBeLessThan(n / 10);
     expect(reads(true)).toBeLessThan(2 * unlabeled);
+  });
+
+  it("is in the stack's order, where a series field's layer's positions do not ascend", () => {
+    // The layer is drawn through positions 1, 3, 5: in view [2, 6], it
+    // starts at 3 and ends at 5, whatever order its rows are in.
+    const back = table({
+      t: [5, 1, 3],
+      v: [1, 2, 3],
+      g: ["a", "a", "a"],
+      note: ["n5", "n1", "n3"],
+    });
+    for (const orient of ["x", "y"] as const)
+      for (const [at, note] of [
+        ["visible-start", "n3"],
+        ["visible-end", "n5"],
+        ["first", "n1"],
+        ["last", "n5"],
+      ] as const) {
+        const view = { domain: [2, 6] as [number, number], nice: false };
+        const values = { domain: [0, 10] as [number, number], nice: false };
+        const along = orient === "x" ? { x: "t", y: "v" } : { x: "v", y: "t", orient };
+        expect(
+          notes({
+            ...(orient === "x" ? { x: view, y: values } : { x: values, y: view }),
+            marks: [
+              area(back, {
+                ...along,
+                series: "g",
+                stack: true,
+                labels: { at, place: { outside: false }, ...noted },
+              } as never),
+            ],
+          }),
+          `${orient} ${at}`,
+        ).toEqual(at === "first" ? [] : [note]);
+      }
+  });
+
+  it("is found in view by a search, where a series field's stack is drawn through its edges", () => {
+    // Reads of the layer's positions as a scene draws it again, with a label
+    // at its last observation in a narrow view and without.
+    const n = 100_000;
+    const rows = table({
+      t: Float64Array.from({ length: n }, (_, i) => i),
+      v: Float64Array.from({ length: n }, () => 1),
+      g: Array.from({ length: n }, () => "a"),
+    });
+    const reads = (labeled: boolean) => {
+      const labels = labeled ? ({ labels: { at: "visible-end" } } as const) : {};
+      const chart = model({
+        x: { domain: [0, 20], nice: false },
+        y: { domain: [0, 2], nice: false },
+        marks: [area(rows, { x: "t", y: "v", series: "g", stack: true, ...labels })],
+      });
+      let drawn: Parameters<NonNullable<ChartModel["highlight"]>> | undefined;
+      chart.highlight = (mark, series, frame, key) => {
+        drawn = [mark, series, frame, key];
+        return mark.geometry(series, frame, key);
+      };
+      const scene = chart.scene(estimateText);
+      if (labeled) expect(texts(scene)).toEqual(["a"]);
+      let count = 0;
+      const counted = <T extends object>(values: T): T =>
+        new Proxy(values, {
+          get: (target, key) => {
+            if (typeof key === "string" && /^\d+$/.test(key)) count++;
+            return Reflect.get(target, key);
+          },
+        });
+      const [mark, series, frame, key] = drawn!;
+      const again = { ...frame, scene: frame.scene + 1 };
+      mark.geometry(
+        series.map((s) => ({ ...s, x: counted(s.x) })),
+        again,
+        key,
+      );
+      return count;
+    };
+    expect(reads(true)).toBeLessThan(reads(false) + 1000);
+  });
+
+  it("is found in view by a search past many rows at one position beside the view", () => {
+    // Reads of the positions as a scene draws again: 200,000 rows at t = 1
+    // after the view's one row, or before it.
+    const n = 200_000;
+    const cases = [
+      ["visible-end", (i: number) => (i === 0 ? 0 : 1), [-0.5, 0.5]],
+      ["visible-start", (i: number) => (i === n - 1 ? 2 : 1), [1.5, 2.5]],
+    ] as const;
+    for (const [at, t, domain] of cases)
+      for (const make of [line, area]) {
+        const rows = table({
+          t: Float64Array.from({ length: n }, (_, i) => t(i)),
+          v: Float64Array.from({ length: n }, () => 1),
+          g: Array.from({ length: n }, () => "a"),
+        });
+        const reads = (labeled: boolean) => {
+          const labels = labeled ? ({ labels: { at } } as const) : {};
+          const options = make === area ? ({ series: "g", stack: true } as const) : {};
+          const chart = model({
+            x: { domain: [...domain], nice: false },
+            y: { domain: [0, 2], nice: false },
+            marks: [make(rows, { x: "t", y: "v", ...options, ...labels })],
+          });
+          let drawn: Parameters<NonNullable<ChartModel["highlight"]>> | undefined;
+          chart.highlight = (mark, series, frame, key) => {
+            drawn = [mark, series, frame, key];
+            return mark.geometry(series, frame, key);
+          };
+          const scene = chart.scene(estimateText);
+          if (labeled) expect(texts(scene), `${at} of ${make.name}`).toHaveLength(1);
+          let count = 0;
+          const counted = <T extends object>(values: T): T =>
+            new Proxy(values, {
+              get: (target, key) => {
+                if (typeof key === "string" && /^\d+$/.test(key)) count++;
+                return Reflect.get(target, key);
+              },
+            });
+          const [mark, series, frame, key] = drawn!;
+          mark.geometry(
+            series.map((s) => ({ ...s, x: counted(s.x) })),
+            { ...frame, scene: frame.scene + 1 },
+            key,
+          );
+          return count;
+        };
+        expect(reads(true), `${at} of ${make.name}`).toBeLessThan(reads(false) + 200);
+      }
+  });
+
+  it("is found in view without listing the rows continuity keeps, as rows stream in", () => {
+    // A line of 100,000 rows with continuity, a row arriving past a narrow
+    // view each frame: the label in view reads the rows' drawn flags as it
+    // goes, and never lists the rows kept, which each new row would make again.
+    const n = 100_000;
+    const live = table({
+      t: Float64Array.from({ length: n }, (_, i) => i),
+      v: Float64Array.from({ length: n }, (_, i) => i % 7),
+      note: Array.from({ length: n }, (_, i) => `n${i}`),
+    });
+    const chart = model({
+      x: { domain: [0, 20.5], nice: false },
+      y: { domain: [0, 7], nice: false },
+      marks: [
+        line(live, {
+          x: "t",
+          y: "v",
+          continuity: { maxGap: 100 },
+          labels: { at: "visible-end", ...noted },
+        }),
+      ],
+    });
+    let listed = 0;
+    const counted = new WeakSet<object>();
+    chart.highlight = (mark, series, frame, key) => {
+      for (const { features } of series) {
+        if (!features?.shown || counted.has(features)) continue;
+        counted.add(features);
+        const shown = features.shown;
+        features.shown = (of) => {
+          listed++;
+          return shown(of);
+        };
+      }
+      return mark.geometry(series, frame, key);
+    };
+    for (let k = 0; k < 3; k++) {
+      live.append({ t: [n + k], v: [1], note: [`n${n + k}`] });
+      expect(texts(chart.scene(estimateText))).toEqual(["n20"]);
+    }
+    expect(listed).toBe(0);
+  });
+
+  it("is found in view past a break a break at a time, where `where` leaves out what it hides", () => {
+    // Reads of the positions as a scene draws again, with labels at the
+    // first and last observation in view and without: a break hides all but
+    // the last rows, which are all `where` keeps; a line, and a band.
+    const n = 100_000;
+    const rows = table({
+      t: time(Float64Array.from({ length: n }, (_, i) => i)),
+      v: Float64Array.from({ length: n }, () => 1),
+      lo: Float64Array.from({ length: n }, () => 0),
+    });
+    const where = col("t").ge(n - 10);
+    const reads = (at: LabelAt | undefined, band: boolean) => {
+      const labels = at ? { labels: { at, ...(band && { edge: "y2" as const }) } } : {};
+      const chart = model({
+        x: { domain: [0, n], nice: false, breaks: timeBreaks([{ from: 0, to: n - 10 }]) },
+        y: { domain: [0, 2], nice: false },
+        marks: [
+          band
+            ? area(rows, { x: "t", y1: "lo", y2: "v", where, ...labels })
+            : line(rows, { x: "t", y: "v", where, ...labels }),
+        ],
+      });
+      let drawn: Parameters<NonNullable<ChartModel["highlight"]>> | undefined;
+      chart.highlight = (mark, series, frame, key) => {
+        drawn = [mark, series, frame, key];
+        return mark.geometry(series, frame, key);
+      };
+      const scene = chart.scene(estimateText);
+      if (at) expect(texts(scene), `${at}, band: ${band}`).toHaveLength(1);
+      let count = 0;
+      const counted = <T extends object>(values: T): T =>
+        new Proxy(values, {
+          get: (target, key) => {
+            if (typeof key === "string" && /^\d+$/.test(key)) count++;
+            return Reflect.get(target, key);
+          },
+        });
+      const [mark, series, frame, key] = drawn!;
+      mark.geometry(
+        series.map((s) => ({ ...s, x: counted(s.x) })),
+        { ...frame, scene: frame.scene + 1 },
+        key,
+      );
+      return count;
+    };
+    for (const band of [false, true])
+      for (const at of ["visible-start", "visible-end"] as const)
+        expect(reads(at, band), `${at}, band: ${band}`).toBeLessThan(reads(undefined, band) + 1000);
+  });
+
+  it("is a row the trace draws, at the view's edge among rows at one position", () => {
+    // Rows at t = 1 a ten-millionth past the view's end (or before its
+    // start) stand on its edge; a straight trace draws one of them, the next
+    // past the domain, and a curved one all, with those past them, and the
+    // label names the last (or first) drawn in every family and along y.
+    const content = [{ field: "note" }];
+    const cases = [
+      ["visible-end", [0, 1, 1, 1], [1, 2, 6, 9], [0, 0.9999999], "n1", "n3"],
+      ["visible-start", [1, 1, 1, 2], [9, 6, 2, 1], [1.0000001, 2], "n2", "n0"],
+    ] as const;
+    for (const [at, t, v, domain, note, curvedNote] of cases) {
+      const rows = table({
+        t: [...t],
+        v: [...v],
+        lo: [0, 0, 0, 0],
+        g: ["a", "a", "a", "a"],
+        note: ["n0", "n1", "n2", "n3"],
+      });
+      for (const orient of ["x", "y"] as const) {
+        const [position, value, low] = orient === "x" ? ["x", "y", "y1"] : ["y", "x", "x1"];
+        const high = orient === "x" ? "y2" : "x2";
+        const common = { [position]: "t", ...(orient === "y" && { orient: "y" }) };
+        const labels = { at, content };
+        const fields = { ...common, [value]: ["v"], stack: true, labels };
+        const field = { ...common, [value]: "v", series: "g", stack: true, labels };
+        const marks = {
+          line: line(rows, { ...common, [value]: "v", labels } as never),
+          area: area(rows, { ...common, [value]: "v", labels } as never),
+          band: area(rows, {
+            ...common,
+            [low]: "lo",
+            [high]: "v",
+            labels: { ...labels, edge: high },
+          } as never),
+          "stack of fields": area(rows, fields as never),
+          "series field's stack": area(rows, field as never),
+          "curved stack of fields": area(rows, { ...fields, curve: "monotone" } as never),
+          "curved series field's stack": area(rows, { ...field, curve: "monotone" } as never),
+        };
+        for (const [family, mark] of Object.entries(marks)) {
+          const axes = {
+            [position]: { domain: [...domain], nice: false },
+            [value]: { domain: [0, 10], nice: false },
+          };
+          const curved = family.startsWith("curved");
+          const scene = model({ ...axes, marks: [mark] } as ChartConfig).scene(estimateText);
+          const named = `${at} of a ${family} along ${orient}`;
+          expect(texts(scene), named).toEqual([curved ? curvedNote : note]);
+          if (curved) continue;
+          // The trace's point there is that row's: 2.
+          const [drawn] = scene.panels[0]!.marks.filter(
+            (g): g is LineGeometry | AreaGeometry => g.kind === "line" || g.kind === "area",
+          );
+          const path = drawn!.kind === "line" ? drawn!.path : drawn!.upper;
+          const k = at === "visible-end" ? path.count - 1 : 0;
+          const across = orient === "x" ? path.coords[k * 2 + 1]! : path.coords[k * 2]!;
+          const scale = model({ ...axes, marks: [mark] } as ChartConfig);
+          scale.scene(estimateText);
+          expect(across, named).toBeCloseTo(scale.panels()[0]![value as "x" | "y"].map(2), 3);
+        }
+      }
+    }
+  });
+
+  it("is a row the trace draws, where continuity cuts a stack between rows at one position", () => {
+    // Continuity breaks the stack between n1 and n2, both at t = 1: a stack
+    // of a series field draws a break between their entries, which stands
+    // for no row; it labels the row a stack of fields does, along x and y.
+    const rows = table({
+      t: [0, 1, 1, 1, 2],
+      v: [1, 2, 4, 6, 1],
+      phase: ["A", "A", "B", "B", "B"],
+      g: ["a", "a", "a", "a", "a"],
+      note: ["n0", "n1", "n2", "n3", "n4"],
+    });
+    const cases = [
+      ["visible-start", [1.0000001, 2], "n3"],
+      ["visible-end", [0, 0.9999999], "n1"],
+    ] as const;
+    for (const [at, domain, note] of cases)
+      for (const orient of ["x", "y"] as const)
+        for (const reversed of [false, true])
+          for (const field of [false, true]) {
+            const [position, value] = orient === "x" ? ["x", "y"] : ["y", "x"];
+            const mark = area(rows, {
+              [position]: "t",
+              [value]: "v",
+              ...(orient === "y" && { orient: "y" }),
+              ...(field && { series: "g" }),
+              stack: true,
+              continuity: { breakBy: { field: "phase" } },
+              labels: { at, content: [{ field: "note" }] },
+            } as never);
+            const scene = model({
+              [position]: { domain: reversed ? [domain[1], domain[0]] : [...domain], nice: false },
+              [value]: { domain: [0, 10], nice: false },
+              marks: [mark],
+            } as ChartConfig).scene(estimateText);
+            const named = `${at} along ${orient}${reversed ? ", reversed" : ""}, field: ${field}`;
+            expect(texts(scene), named).toEqual([note]);
+          }
+  });
+
+  it("is found in view a run of those `where` keeps at a time, as scenes are drawn again", () => {
+    // Reads of the positions as a scene draws again, with a label at the
+    // last (or first) observation in view and without: `where` keeps one
+    // row of 200,000 at the other end, or one every 50,000.
+    const n = 200_000;
+    const rows = table({
+      t: Float64Array.from({ length: n }, (_, i) => i),
+      v: Float64Array.from({ length: n }, () => 1),
+      lo: Float64Array.from({ length: n }, () => 0),
+    });
+    const cases = [
+      ["visible-end", col("t").lt(1)],
+      ["visible-start", col("t").ge(n - 1)],
+      ["visible-end", col("t").mod(50_000).lt(1)],
+    ] as const;
+    for (const [at, where] of cases)
+      for (const band of [false, true]) {
+        const reads = (labeled: boolean) => {
+          const labels = labeled ? { labels: { at, ...(band && { edge: "y2" as const }) } } : {};
+          const chart = model({
+            x: { domain: [0, n], nice: false },
+            y: { domain: [-1, 2], nice: false },
+            marks: [
+              band
+                ? area(rows, { x: "t", y1: "lo", y2: "v", where, ...labels })
+                : line(rows, { x: "t", y: "v", where, ...labels }),
+            ],
+          });
+          let drawn: Parameters<NonNullable<ChartModel["highlight"]>> | undefined;
+          chart.highlight = (mark, series, frame, key) => {
+            drawn = [mark, series, frame, key];
+            return mark.geometry(series, frame, key);
+          };
+          const scene = chart.scene(estimateText);
+          if (labeled) expect(texts(scene), `${at}, band: ${band}`).toHaveLength(1);
+          let count = 0;
+          const counted = <T extends object>(values: T): T =>
+            new Proxy(values, {
+              get: (target, key) => {
+                if (typeof key === "string" && /^\d+$/.test(key)) count++;
+                return Reflect.get(target, key);
+              },
+            });
+          const [mark, series, frame, key] = drawn!;
+          // Twice, as panning draws again without a change of data.
+          for (const again of [1, 2])
+            mark.geometry(
+              series.map((s) => ({ ...s, x: counted(s.x) })),
+              { ...frame, scene: frame.scene + again },
+              key,
+            );
+          return count;
+        };
+        expect(reads(true), `${at}, band: ${band}`).toBeLessThan(reads(false) + 200);
+      }
+  });
+
+  it("is a row the trace draws, at a log axis' domain among rows at one position", () => {
+    // Three rows at t = 11, the domain's end (or start): every one in view,
+    // and the label at the last (or first) of them, whatever the family.
+    const content = [{ field: "note" as const }];
+    const rows = table({
+      t: [1, 11, 11, 11, 20],
+      v: [1, 2, 6, 9, 1],
+      g: ["a", "a", "a", "a", "a"],
+      note: ["n0", "n1", "n2", "n3", "n4"],
+    });
+    const cases = [
+      ["visible-end", [1, 11], "n3"],
+      ["visible-start", [11, 20], "n1"],
+    ] as const;
+    for (const [at, domain, note] of cases) {
+      const labels = { at, content };
+      const marks = {
+        line: line(rows, { x: "t", y: "v", labels }),
+        "stack of fields": area(rows, { x: "t", y: ["v"], stack: true, labels }),
+        "series field's stack": area(rows, { x: "t", y: "v", series: "g", stack: true, labels }),
+      };
+      for (const [family, mark] of Object.entries(marks)) {
+        const scene = model({
+          x: { type: "log", domain: [...domain], nice: false },
+          y: { domain: [0, 10], nice: false },
+          marks: [mark],
+        }).scene(estimateText);
+        expect(texts(scene), `${at} of a ${family}`).toEqual([note]);
+      }
+    }
+  });
+
+  it("reads the runs `where` keeps as the trace found them, not again, where points are copied", () => {
+    // A line along y whose points are copied each frame (a break on its
+    // value axis), so the runs of a copy are found anew each time they are
+    // asked for: once a draw, by its trace.
+    const n = 1000;
+    const rows = table({
+      t: time(Float64Array.from({ length: n }, (_, i) => i)),
+      p: Float64Array.from({ length: n }, (_, i) => i),
+    });
+    const chart = model({
+      x: { breaks: timeBreaks([{ from: n / 2, to: n / 2 + 10 }]) },
+      marks: [
+        line(rows, { x: "t", y: "p", orient: "y", where: col("p").lt(1), labels: { at: "last" } }),
+      ],
+    });
+    expect(texts(chart.scene(estimateText))).toHaveLength(1);
+    const runs = vi.spyOn(Topology.prototype, "runs");
+    setViewport(chart, { y: [0, n - 1] });
+    expect(texts(chart.scene(estimateText))).toHaveLength(1);
+    expect(runs.mock.calls.filter(([series]) => series.sources)).toHaveLength(1);
+    runs.mockRestore();
+  });
+
+  it("is the first or last row `where` keeps of a copy's points, read a run at a time", () => {
+    // A break on the value axis copies the points; `where` keeps rows in two runs.
+    const depths = table({
+      depth: [0, 1, 2, 3, 4, 5],
+      at: time([1, 2, 3, 4, 3, 2]),
+      note: ["n0", "n1", "n2", "n3", "n4", "n5"],
+    });
+    for (const [at, note] of [
+      ["first", "n1"],
+      ["last", "n4"],
+    ] as const)
+      expect(
+        notes({
+          x: { breaks: timeBreaks([{ from: 10, to: 12 }]), domain: [0, 20] },
+          marks: [
+            line(depths, {
+              x: "at",
+              y: "depth",
+              orient: "y",
+              where: col("depth").isIn(1, 3, 4),
+              labels: { at, ...noted },
+            }),
+          ],
+        }),
+      ).toEqual([note]);
   });
 
   it("is found past a break a break at a time, not a row at a time", () => {
@@ -1210,5 +1757,96 @@ describe("the observation a label is at", () => {
       ).filter((text) => text.includes("2026"));
     expect(written({ year: "numeric", month: "2-digit", day: "2-digit" })).toEqual(["10/26/2026"]);
     expect(written()).toEqual([expect.stringMatching(/^Oct 26, 2026/)]);
+  });
+});
+
+describe("labels in static exports", () => {
+  /** A PDF's page content, its streams inflated. */
+  function pdfContent(pdf: Uint8Array): string {
+    const text = Buffer.from(pdf).toString("latin1");
+    let content = "";
+    for (const match of text.matchAll(/\/FlateDecode \/Length (\d+) >>\nstream\n/g)) {
+      const at = match.index + match[0].length;
+      const bytes = Buffer.from(text.slice(at, at + Number(match[1])), "latin1");
+      content += inflateSync(bytes).toString("latin1");
+    }
+    return content;
+  }
+  /** A hex color as PDF writes it. */
+  const pdfColor = (hex: string) =>
+    [1, 3, 5]
+      .map((i) => Number((Number.parseInt(hex.slice(i, i + 2), 16) / 255).toFixed(3)))
+      .join(" ");
+
+  contractTest("labels.attach.export", () => {
+    // Four lines meeting at t = 8, the last time in view: named there, outside
+    // the plot, moved apart, with leaders in their colors; and two red rules
+    // whose labels keep apart, the second moved along its rule with a leader
+    // in its rule's color. Static SVG and PDF draw what the scene does, where it does.
+    const meeting = table({
+      t: [0, 8, 10, 0, 8, 10, 0, 8, 10, 0, 8, 10],
+      v: [10, 50, 90, 30, 51, 70, 70, 52, 30, 90, 53, 10],
+      g: ["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"],
+      note: ["a0", "a8", "a10", "b0", "b8", "b10", "c0", "c8", "c10", "d0", "d8", "d10"],
+    });
+    const event = (x: number, text: string) =>
+      rule({
+        x,
+        stroke: "#c0392b",
+        label: { text, overlap: "move", overlapGroup: "events", leader: true },
+      });
+    const options = {
+      width: 600,
+      height: 300,
+      locale: "en-US",
+      timeZone: "UTC",
+      legend: false,
+      x: { domain: [0, 9] as [number, number], nice: false },
+      y: { domain: [0, 100] as [number, number], nice: false },
+      marks: [
+        line(meeting, {
+          x: "t",
+          y: "v",
+          series: "g",
+          labels: { at: "visible-end", place: { outside: true }, leader: true, ...noted },
+        }),
+        event(0.2, "Black Friday"),
+        event(0, "Outage"),
+      ],
+    };
+    const scene = model(options, 600, 300).scene(estimateText);
+    const marks = scene.panels[0]!.marks;
+    const leaders = marks.filter((g): g is SegmentGeometry => g.kind === "segments");
+    const colors = model(options)
+      .series()
+      .map(({ color }) => color);
+    expect(texts(scene)).toEqual(["Black Friday", "Outage", "a8", "b8", "c8", "d8"]);
+    // Every series label moved more than 6 pixels from its point draws a
+    // leader in its line's color; the moved rule label, in its rule's.
+    expect(leaders.length).toBeGreaterThan(2);
+    for (const { stroke } of leaders) expect([...colors, "#c0392b"]).toContain(stroke);
+    expect(leaders.filter(({ stroke }) => stroke === "#c0392b")).toHaveLength(1);
+    const svg = renderToSVG(options);
+    const context = { theme: scene.theme, encodeRaster: undefined };
+    for (const g of marks)
+      if (g.kind === "segments" || g.kind === "labels")
+        expect(svg).toContain(g.draw.svg(g, context));
+    // PDF measures text in its own fonts: its scene places what it draws.
+    const pdf = pdfContent(renderToPDF(options));
+    const inPdf = model(options, 600, 300).scene(measurePdfText).panels[0]!.marks;
+    for (const leader of inPdf.filter((g): g is SegmentGeometry => g.kind === "segments")) {
+      const painted = new RegExp(
+        `q(?: /\\w+ gs)? ${pdfColor(leader.stroke)} RG [^\\n]*\\n([^Q]*?)S\\nQ`,
+        "g",
+      );
+      const c = leader.coords;
+      const path = Array.from(
+        { length: leader.count },
+        (_, k) =>
+          `${num(c[k * 4]!)} ${num(c[k * 4 + 1]!)} m\n${num(c[k * 4 + 2]!)} ${num(c[k * 4 + 3]!)} l\n`,
+      ).join("");
+      expect([...pdf.matchAll(painted)].map(([, drawn]) => drawn)).toContain(path);
+    }
+    for (const label of labelsOf(scene)) expect(pdf).toContain(`(${label.text}) Tj`);
   });
 });

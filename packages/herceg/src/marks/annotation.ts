@@ -23,7 +23,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { Coordinate, ItemCoordinate, ItemRef } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen, ThresholdPlace } from "../spec/spec.ts";
 import type { StrokeStyle } from "../spec/style.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { markKey, rowKey, shownItems } from "./hidden.ts";
 import { type Frame, type Mark, type MarkKey, type RowParts, requireField } from "./mark.ts";
@@ -293,31 +293,41 @@ export function labelLayout(label: Label | undefined, role: string): LabelLayout
 
 /**
  * The leaders of an annotation's labels (x0, y0, x1, y1 each in `coords`),
- * keyed `key`, in their `look` (the theme's muted color, a pixel wide, by
- * default); `path` names the look in messages.
+ * keyed `key`, in their `look` (a pixel wide by default), or without a
+ * stroke of its own, each in the color of what its label labels (`colors`,
+ * one for all or one each): one geometry per color, the first keyed `key`.
+ * `path` names the look in messages.
  */
 export function leadersGeometry(
   key: string,
   coords: readonly number[],
+  colors: string | readonly string[],
   look: Frozen<StrokeStyle> | undefined,
   frame: Frame,
   path: string,
-): SegmentGeometry {
+): SegmentGeometry[] {
   const strokeWidth = look?.strokeWidth ?? 1;
-  leaders ??= leaderDrawingOf(markupOf, n);
-  const segments: SegmentGeometry = {
-    kind: "segments",
-    draw: leaders,
-    key,
-    stroke: (look?.stroke && frame.paint(look.stroke, `${path}.stroke`)) || frame.theme.muted,
-    strokeWidth,
-    coords: Float32Array.from(coords),
-    count: coords.length / 4,
-  };
   const dash = dashPattern(look?.dash, strokeWidth);
-  if (dash) segments.dash = dash;
-  if (look?.opacity !== undefined) segments.opacity = look.opacity;
-  return segments;
+  const own = look?.stroke && frame.paint(look.stroke, `${path}.stroke`);
+  const byColor = new Map<string, number[]>();
+  coords.forEach((c, i) => {
+    const stroke = own || (typeof colors === "string" ? colors : colors[i >> 2]!);
+    const into = byColor.get(stroke) ?? [];
+    into.push(c);
+    byColor.set(stroke, into);
+  });
+  leaders ??= leaderDrawingOf(markupOf, n);
+  return [...byColor].map(([stroke, at], k) => ({
+    kind: "segments",
+    draw: leaders!,
+    key: k ? `${key}|${k}` : key,
+    stroke,
+    strokeWidth,
+    coords: Float32Array.from(at),
+    count: at.length / 4,
+    ...(dash && { dash }),
+    ...(look?.opacity !== undefined && { opacity: look.opacity }),
+  }));
 }
 
 /** How leaders draw (made once). */

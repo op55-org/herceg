@@ -913,12 +913,9 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       let i = 0;
       return groups.flatMap((group, g) => {
         const layers = group.map((s) => ({ series: s, top: s.y, bottom: s.y0 }));
-        // A band whose looks change along it keeps the points where they do,
-        // and layers labels follow which rows their points are.
+        // A band whose looks change along it keeps the points where they do.
         const runs = stacked ? undefined : group[0]!.features?.runs;
-        const kept = group.map((s, k) =>
-          (k === 0 && runs) || s.features?.curved ? [] : undefined,
-        );
+        const kept = group.map((_, k) => (k === 0 && runs ? [] : undefined));
         const edges = traceCurvedLayers(
           layers,
           view,
@@ -930,7 +927,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
         if (runs) runs.kept(group[0]!, kept[0]!);
         return group.flatMap((s, k) => {
           const whole = visible[i++]!;
-          s.features?.curved?.(s, edges[k]!, kept[k]!, view);
+          s.features?.curved?.(s, view, rows[g]!);
           const area = { ...this.#area(s, edges[k]!, style, frame), curve, stacked };
           return dressed(area, whole, frame);
         });

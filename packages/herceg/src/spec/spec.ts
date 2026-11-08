@@ -1521,7 +1521,7 @@ export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   continuity?: ContinuitySpec;
   /** Rows the lines leave out, as gaps: they draw only where it holds. */
   where?: Expression;
-  /** A label following each line: at its first or last point, or where it enters or leaves the view. */
+  /** A label following each line: at its first or last observation drawn, or its first or last in view. */
   labels?: SeriesLabelsSpec;
 }
 
@@ -1823,7 +1823,7 @@ export interface TextSpec extends AnnotationBase, RowItems {
   at?: Position;
   /**
    * Where the text is on another mark's geometry, following it: the series
-   * of mark `from.mark` at `from.at`, such as where a line leaves the view,
+   * of mark `from.mark` at `from.at`, such as its last observation in view,
    * one label per series; or with `from.item`, the item of a layout mark
    * each row names, at an anchor of its box. Not with `x`, `y`, or `at`.
    */

@@ -41,7 +41,8 @@ import { type AxisGuide, type Panel, type Rect, tickLabelGap } from "../scene/sc
 import { ChartError } from "../spec/errors.ts";
 import type { Place } from "../spec/place.ts";
 import type { ScaleScope } from "../spec/spec.ts";
-import { cssFont, dashPattern, insets, type TextPaint, textPaint } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
+import { cssFont, insets, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import {
   type AxisContext,

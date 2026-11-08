@@ -11,6 +11,7 @@ import { point } from "../../src/marks/point.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { staticCompilers } from "../../src/render/compilers.ts";
 import type {
   AreaGeometry,
   LineGeometry,
@@ -94,6 +95,46 @@ describe("lines over category axes", () => {
     expect(drawn!.path.count).toBe(3);
     expect(xScale(model)!.categories).toEqual(["Jan", "Feb", "Mar", "Apr"]);
     expect(describeChart(model)).toContain("v: 4 points, from 1 to 4");
+  });
+
+  it("draw every row a dodge moves into view, past a coordinate's offset", () => {
+    // Two rows at "a" in each series: an offset of 0.7 bands puts "a" past
+    // the plot's left edge, and the dodge brings the second series' back in.
+    const twice = table({
+      cat: ["a", "a", "b", "a", "a", "b"],
+      v: [1, 2, 3, 2, 3, 4],
+      g: ["A", "A", "A", "B", "B", "B"],
+    });
+    for (const make of [line, area]) {
+      const config = (offset: number): ChartConfig => ({
+        legend: false,
+        y: { domain: [0, 5], nice: false },
+        marks: [make(twice, { x: { field: "cat", offset }, y: "v", series: "g", dodge: true })],
+      });
+      // Offsets are placed by the compilers charts load for them.
+      const built = (offset: number) => {
+        const model = new ChartModel(
+          { locale: "en-US", ...config(offset) },
+          undefined,
+          staticCompilers(),
+        );
+        model.setSize(600, 300, 1);
+        return { model, scene: model.scene(estimateText) };
+      };
+      const band = built(0).model.panels()[0]!.x.mapping().factor;
+      const { model, scene } = built(-0.7 * band);
+      const second =
+        make === line
+          ? of<LineGeometry>(scene, "line")[1]!.path
+          : of<AreaGeometry>(scene, "area")[1]!.upper;
+      const plot = scene.panels[0]!.plot;
+      // Its rows from the first at "a", which is in the plot.
+      const drawn = vertices(second);
+      expect(drawn.map(([, py]) => py)).toEqual(
+        [2, 3, 4].map((v) => expect.closeTo(yScale(model)!.map(v), 3)),
+      );
+      expect(drawn[0]![0]).toBeGreaterThan(plot.x);
+    }
   });
 
   it("dodge with grouped bars and dodged points splitting rows by one field", () => {

@@ -17,7 +17,7 @@ import { shapesDrawing } from "../draw/shapes.ts";
 import type { PathShape, PlotRect, Rect, ShapesGeometry, TextShape } from "../scene/scene.ts";
 import type { ChannelsSpec, RowChannelsSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern } from "../style/dash.ts";
 import type { Theme } from "../theme.ts";
 import { ShapeIndex } from "./custom-shapes.ts";
 import type {

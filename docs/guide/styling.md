@@ -238,6 +238,7 @@ subplot's axis.
 | `legendLabel`, `legendTitle` | text | Legend entries; titles of color and size legends. |
 | `grid`, `axisLine`, `tick` | line | Grid lines, axis lines, tick marks. |
 | `crosshair` | line | The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. |
+| `brush` | paint | Brushes and lassos, of charts, maps, and networks, while drawn and after, and a brush that zooms while drawn: the muted color at `fillOpacity` 0.18 by default, with no outline; a lasso is outlined in its fill's color at `strokeOpacity` 0.6 unless `stroke` gives one (`"none"` for none). High-contrast themes outline brushes in their muted color. |
 | `plot` | plot | `fill` behind the plot, `stroke` and `strokeWidth` around it. |
 | `line`, `bar`, `tooltip` | marks | Lines' default `strokeWidth`, bars' corner `radius`, the tooltip's `fill` and `stroke`. |
 
@@ -245,6 +246,7 @@ subplot's axis.
 | --- | --- |
 | Text (`hg.TextStyle`) | `font`, `fontSize`, `fontWeight` (100–900), `fontStyle`, `color`, `opacity`, `lineHeight` (a multiple of the size), `align` (`"start"`, `"center"`, `"end"`), `halo`, `background` (`{ fill, stroke?, strokeWidth?, radius? }`) with `padding` |
 | Line (`hg.StrokeStyle`) | `stroke`, `strokeWidth`, `dash`, `opacity` |
+| Paint (`hg.PaintStyle`) | `fill`, `fillOpacity`, and a line's (`stroke`, `strokeWidth`, `dash`), with `strokeOpacity`; `opacity` scales both |
 
 Text is colored by `color`, never `fill`. Marks keep their own `stroke`,
 `fill`, and `strokeWidth`, which win over the theme's `line` and `bar`
@@ -257,6 +259,22 @@ createChart(element, {
   theme: { style: { plot: { fill: "#f6f8fb" }, grid: { stroke: "#ffffff", strokeWidth: 2 } } },
   marks: [/* ... */],
 });
+```
+
+A brush is drawn in the product's colors through the theme, as the
+crosshair is, so every chart of a theme brushes alike:
+
+```ts
+createChart(element, {
+  marks: [histogram(flights, { x: "delay" })],
+  interaction: { brush: { shape: "x", edit: true } },
+  theme: { style: { brush: { fill: "#4c78a8", fillOpacity: 0.2, stroke: "#4c78a8" } } },
+});
+```
+
+```python
+brush = hg.PaintStyle(fill="#4c78a8", fill_opacity=0.2, stroke="#4c78a8")
+hg.Chart(flights, brush="x", theme=hg.Theme(style=hg.Style(brush=brush))).histogram(x="delay")
 ```
 
 How labels break into lines is in

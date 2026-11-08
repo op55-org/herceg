@@ -55,6 +55,8 @@ unless the chart zooms. Maps and networks take every touch.
 
 - Escape during a drag ends it: a brush goes back to the selection before
   it, a pan returns, a moved node goes back.
+- Brushes and lassos are painted in the theme's `brush` role
+  ([Styling](styling.md#role-styles)).
 - Interaction code loads right after the first frame; input arriving
   earlier is kept and handled in order once it loads.
 - Drags prevent page text selection; static chart text stays selectable.
