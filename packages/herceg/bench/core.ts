@@ -31,6 +31,7 @@ import { MinMaxIndex } from "../src/lod/minmax-index.ts";
 import { Polyline } from "../src/lod/polyline.ts";
 import { area } from "../src/marks/area.ts";
 import { type BarMark, bar } from "../src/marks/bar.ts";
+import { boxen } from "../src/marks/boxen.ts";
 import { boxplot } from "../src/marks/boxplot.ts";
 import { candlestick } from "../src/marks/candlestick.ts";
 import { contour } from "../src/marks/contour.ts";
@@ -1588,6 +1589,52 @@ measure(
     ]),
   ),
 );
+// A chart of 2,000 candles, merged into pixel columns at 960 px or drawn one
+// by one at 3,200 (about 1.5 px each): made and drawn, and drawn again as a
+// candle arrives and the oldest leaves.
+const CHART_CANDLES = 2000;
+const candleAt = (i: number) => ({
+  t: i * 60_000,
+  o: 100 + 10 * Math.sin(i / 20),
+  c: 100 + 10 * Math.sin((i + 3) / 20),
+  h: 112 + 10 * Math.sin(i / 20),
+  l: 88 + 10 * Math.sin(i / 20),
+});
+for (const width of [960, 3200]) {
+  const prices = table(
+    {
+      t: Float64Array.from({ length: CHART_CANDLES }, (_, i) => candleAt(i).t),
+      o: Float64Array.from({ length: CHART_CANDLES }, (_, i) => candleAt(i).o),
+      c: Float64Array.from({ length: CHART_CANDLES }, (_, i) => candleAt(i).c),
+      h: Float64Array.from({ length: CHART_CANDLES }, (_, i) => candleAt(i).h),
+      l: Float64Array.from({ length: CHART_CANDLES }, (_, i) => candleAt(i).l),
+    },
+    { maxRows: CHART_CANDLES },
+  );
+  const chart = () => {
+    const model = new ChartModel(
+      {
+        locale: "en-US",
+        timeZone: "UTC",
+        legend: false,
+        marks: [candlestick(prices, { x: "t", open: "o", high: "h", low: "l", close: "c" })],
+      },
+      undefined,
+      staticCompilers(),
+    );
+    model.setSize(width, 400, 1);
+    return model;
+  };
+  const how = width === 960 ? "merged into pixel columns" : "one by one";
+  measure(`candles: make and draw a chart of 2,000, ${how}`, () => chart().scene(estimateText));
+  const streamed = chart();
+  streamed.scene(estimateText);
+  let next = CHART_CANDLES;
+  measure(`candles: 2,000 drawn again as one arrives, ${how}`, () => {
+    prices.appendRow(candleAt(next++));
+    streamed.scene(estimateText);
+  });
+}
 const pickSamples = table({
   g: Array.from({ length: 20 * 500 }, (_, i) => `g${i % 20}`),
   v: Float64Array.from({ length: 20 * 500 }, (_, i) => ((i * 7919) % 1000) / 10),
@@ -1595,6 +1642,10 @@ const pickSamples = table({
 measure(
   "pick: box plots of 20 groups × 500, under 100 places",
   pickUnder(picking([boxplot(pickSamples, { x: "g", y: "v" })])),
+);
+measure(
+  "pick: boxen of 20 groups × 500, under 100 places",
+  pickUnder(picking([boxen(pickSamples, { x: "g", y: "v" })])),
 );
 const pickShares = table({
   k: Array.from({ length: 12 }, (_, i) => `k${i}`),

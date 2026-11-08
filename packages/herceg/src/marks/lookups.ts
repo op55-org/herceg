@@ -87,9 +87,11 @@ export function lookups(kit: LookupKit) {
     const shown = drawn.series.filter(
       (s) => !frame.hidden.has(s.key) && s.length > 0 && (query.series ?? s.key) === s.key,
     );
-    const hit = reading.lookup
-      ? reading.lookup(shown, query.x, query.y, frame)
-      : mark.pick(shown, query.x, query.y, frame);
+    const hit = query.owner
+      ? { ...query.owner, distance: 0 }
+      : reading.lookup
+        ? reading.lookup(shown, query.x, query.y, frame)
+        : mark.pick(shown, query.x, query.y, frame);
     if (!hit) return undefined;
     const { series, position, distance } = hit;
     // Lookups find the nearest, however far; a pick reaches `slop` past a shape.
@@ -193,8 +195,11 @@ export function lookups(kit: LookupKit) {
             const column = columnOf(center, frame);
             const lit = frame.highlighted?.(mark.table);
             const [found] = columnsOf(mark, candles, s, frame, column, column, lit);
-            // A selected row is drawn in the selected rows' own candle.
-            const part = lit?.[row] === 1 ? found?.selected : found;
+            // A selected row is drawn in the selected rows' own candle; a
+            // shape named says which it is of.
+            const part = (query.owner ? query.owner.selected : lit?.[row] === 1)
+              ? found?.selected
+              : found;
             return (
               part &&
               cut(

@@ -184,6 +184,38 @@ describe("reach", () => {
     expect(pickAt(one, dx + 20, dy)).toBeUndefined();
   });
 
+  it("names the row of the nearest run holding the point, and reaches a run by its edge alone", () => {
+    // Runs at 8 drawn opposite ways cancel; the fill below 2 holds (4, 1),
+    // named by its own edge, upright or lying.
+    const along = [0, 10, Number.NaN, 0, 10, Number.NaN, 10, 0];
+    const at = [8, 8, Number.NaN, 2, 2, Number.NaN, 8, 8];
+    for (const orient of ["x", "y"] as const) {
+      const lying = orient === "y";
+      const runs = table(lying ? { x: at, y: along } : { x: along, y: at });
+      const model = build({
+        marks: [area(runs, { x: "x", y: "y", orient, line: false })],
+        x: { domain: [0, 10], nice: false },
+        y: { domain: [0, 10], nice: false },
+      });
+      const [px, py] = lying ? pixel(model, 1, 4) : pixel(model, 4, 1);
+      expect(pickAt(model, px, py), orient).toEqual({ mark: 0, row: 3 });
+    }
+    // A run of one place (an upright edge) before a run whose end is there:
+    // the second, reached on its closing edge.
+    const edged = build({
+      marks: [
+        area(table({ x: [5, 5, Number.NaN, 0, 5], y: [2, 8, Number.NaN, 8, 8] }), {
+          x: "x",
+          y: "y",
+          line: false,
+        }),
+      ],
+      x: { domain: [0, 10], nice: false },
+      y: { domain: [0, 10], nice: false },
+    });
+    expect(pickAt(edged, ...pixel(edged, 5, 4))).toEqual({ mark: 0, row: 4 });
+  });
+
   it("reaches an area along y across y, its rows in order or not", () => {
     const model = build({
       marks: [
