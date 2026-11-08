@@ -270,8 +270,10 @@ describe("Streamlit component", () => {
     expect((value as { selection: { kind: string } }).selection.kind).toBe("predicate");
     // New data: the kept brush selects its rows of it, which the script hears of.
     const next = run(parent, bound("After", "e2"));
-    await frame();
-    expect(next.state.at(-1)).toMatchObject(["rows", { epoch: "e2", channel: "focus" }]);
+    // Once the new chart has restored the brush, which waits for what it loads.
+    await expect
+      .poll(() => next.state.at(-1))
+      .toMatchObject(["rows", { epoch: "e2", channel: "focus" }]);
   });
 
   it("keeps rows selected in the same data on a run that changes only how the chart looks", async () => {
@@ -347,8 +349,9 @@ describe("Streamlit component", () => {
     expect((brushed as { selection: { kind: string } }).selection.kind).toBe("predicate");
     // A log x axis: the brush's range cannot carry over, and nor do its rows.
     const next = run(parent, bound({ type: "log" }));
-    await frame();
-    expect(next.state.at(-1)).toMatchObject(["rows", { channel: "focus", selection: null }]);
+    await expect
+      .poll(() => next.state.at(-1))
+      .toMatchObject(["rows", { channel: "focus", selection: null }]);
     expect(parent.querySelector('svg [opacity="0.25"]')).toBeNull();
   });
 
@@ -390,8 +393,9 @@ describe("Streamlit component", () => {
     const [, brushed] = first.state.at(-1)!;
     expect((brushed as { selection: { kind: string } }).selection.kind).toBe("rows");
     const next = run(parent, bound({ type: "log" }));
-    await frame();
-    expect(next.state.at(-1)).toMatchObject(["rows", { channel: "focus", selection: null }]);
+    await expect
+      .poll(() => next.state.at(-1))
+      .toMatchObject(["rows", { channel: "focus", selection: null }]);
   });
 
   it("reports rows selected while the script did not listen once it listens again", async () => {
