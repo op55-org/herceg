@@ -1,8 +1,9 @@
 // Moving marks from the values a chart showed to changed ones (`animation:
 // { values: true }`): bars, pie slices, a gauge's value, points, small
 // lines and areas, labels, lists drawn in row order (error bars, candles,
-// regions), and heatmaps' cells, in every panel, with the axes when the
-// change moves their domains or reorders their categories. Charts load this
+// regions), heatmaps' cells, and custom marks' declared fields, in every
+// panel, with the axes when the change moves their domains or reorders
+// their categories. Charts load this
 // module only when they ask for it. The data is current at once; what moves
 // is a picture of the change. When a table's values change, the chart keeps
 // a copy of what is on screen, a scene or a frame between two, matched by
@@ -37,12 +38,15 @@ import type {
   RectGeometry,
   RuleGeometry,
   Scene,
+  ShapesGeometry,
   SunburstSectors,
   TextGeometry,
 } from "../scene/scene.ts";
 import type { AnimationSpec } from "../spec/spec.ts";
 import { lastFrameTime } from "./scheduler.ts";
+import type { ViewAnimation } from "./transition.ts";
 import { barsAt, copyBars, type MovingBars, moveBars, type ShownBars } from "./value-bars.ts";
+import type { CustomFrames, CustomMotion, ShownCustom } from "./value-custom.ts";
 import {
   copyList,
   copyRaster,
@@ -174,6 +178,8 @@ export interface Shown {
   theme: Scene["theme"];
   /** What each panel showed, in the scene's order: a change bringing or taking away panels shows at once. */
   panels: ShownPanel[];
+  /** What custom marks drew of their tables, kept since (see value-custom.ts). */
+  custom?: ShownCustom | undefined;
 }
 
 /** What one panel showed when its chart's data changed. */
@@ -232,6 +238,8 @@ interface MovingDial {
 export interface Tween {
   start: number;
   duration: number;
+  /** The chart's `easing`, from 0 to 1 over the duration; cubic-out without one. */
+  ease?: ((t: number) => number) | undefined;
   /** It plays a drill, the tree's view, which the pointer does not stop. */
   drill?: boolean;
   /** What frames place axes with. */
@@ -240,6 +248,17 @@ export interface Tween {
   scene: Scene;
   /** How each panel's marks and axes move, in the scene's order. */
   panels: PanelTween[];
+  /** How custom marks move (value-custom.ts); undefined for a scene without them. */
+  custom: CustomMotion | undefined;
+}
+
+/** One panel's geometry of a custom mark, which frames draw again. */
+interface MovingCustom {
+  /** The geometry's place among its panel's. */
+  index: number;
+  /** The y scale it is on. */
+  side: "y" | "yRight";
+  frames: CustomFrames;
 }
 
 /** One panel's marks and axes moving. */
@@ -263,6 +282,8 @@ export interface PanelTween {
   rules: MovingRule[];
   lists: MovingList[];
   rasters: MovingRaster[];
+  /** Custom marks, which frames draw again. */
+  customs: MovingCustom[];
   pie: MovingPie | undefined;
   dial: MovingDial | undefined;
   sunburst: MovingSunburst | undefined;
@@ -296,29 +317,81 @@ export class ValueAnimation {
   #last: Scene | undefined;
   /** What was shown is copied for a drill: the pointer does not stop the change it plays. */
   #drill = false;
+  /**
+   * What custom marks drew of their tables in the last scene shown (not a
+   * frame between), which their next change moves from: tables write
+   * their new values before they say so.
+   */
+  #kept: ShownCustom | undefined;
+  /**
+   * What moves custom marks' values (value-custom.ts), loaded once the
+   * chart has custom marks: null while it loads, or if it fails to; until
+   * it loads, their changes show at once.
+   */
+  #custom: typeof import("./value-custom.ts") | null | undefined;
+  /** What it loads (what moves custom marks), which the chart's `loading` waits for. */
+  loading: Promise<void> | undefined;
+  /** The chart's transitions of views, whose easing values move along too: changes show at once until they load. */
+  readonly #views: (() => ViewAnimation | null | undefined) | undefined;
 
   /**
    * `drawn`: the chart's last scene, if it shows its current options and
-   * hidden keys, which a drill before the next frame moves from.
+   * hidden keys, which a drill before the next frame moves from. `views`:
+   * the chart's transitions of views, once loaded (a module of their own).
    */
   constructor(
     model: ChartModel,
     window: Window | null,
     drawn: Scene | undefined,
     builders: Builders,
+    views?: () => ViewAnimation | null | undefined,
   ) {
     this.#model = model;
     this.#builders = builders;
+    this.#views = views;
     this.#reducedMotion = window?.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
     if (drawn) {
       this.#drawn = drawnWith(model);
       this.#last = drawn;
     }
+    this.#keep(drawn);
     model.drilled = () => this.#drilled();
   }
 
   get playing(): boolean {
     return this.#tween !== undefined;
+  }
+
+  /** Bytes of what the chart keeps of its custom marks' tables, each table's once. */
+  get kept(): number {
+    return this.#kept?.bytes ?? 0;
+  }
+
+  /**
+   * Keeps what `scene`, shown as it is, drew of custom marks' tables (none
+   * past the budget), loading what moves them once the chart has some.
+   * Once that loads, the scene shown last, if no change has arrived since,
+   * is kept: tables it drew from that have changed since are not.
+   */
+  #keep(scene: Scene | undefined): void {
+    const custom = this.#custom;
+    if (custom === undefined && this.#model.config.marks.some((m) => m.spec.type === "custom")) {
+      this.#custom = null;
+      this.loading = import("./value-custom.ts").then(
+        (loaded) => {
+          this.#custom = loaded;
+          this.loading = undefined;
+          if (!this.#between && !this.#tween && !this.#shown) this.#keep(this.#last);
+        },
+        () => {
+          this.loading = undefined;
+        },
+      );
+    }
+    this.#kept =
+      custom && scene && movable(scene.panels)
+        ? custom.keepCustom(scene, this.#kept, MOVING_ITEMS)
+        : undefined;
   }
 
   /**
@@ -388,8 +461,12 @@ export class ValueAnimation {
     this.#shown = between
       ? snapshot(scene, panelsAt(tween, frame.elapsed, panels), now, placesAt(tween, frame.elapsed))
       : snapshot(scene, panels, now);
-    if (this.#shown) this.#shown.cost = performance.now() - now;
-    else this.#blocked = true;
+    // Custom marks move from their values in the frame, or as last kept.
+    const custom = between ? tween.custom?.shown() : this.#kept;
+    if (this.#shown) {
+      this.#shown.custom = custom;
+      this.#shown.cost = performance.now() - now;
+    } else this.#blocked = true;
   }
 
   /**
@@ -426,21 +503,30 @@ export class ValueAnimation {
     this.#blocked = false;
     this.#between = false;
     this.#drawn = drawnWith(this.#model);
-    // Copying what was shown counts toward this frame, as building the scene does.
-    if (!shown || frameTime + shown.cost > SLOW_FRAME) return scene;
     const { config } = this.#model;
-    const duration = durationOf(config.animation);
-    this.#tween = plan(
-      shown,
-      scene,
-      this.#model.panels(),
-      duration,
-      this.#builders,
-      sidesOf(config),
-      followedOf(config),
-      positionsOf(config),
-    );
-    if (this.#tween) this.#tween.drill = drill;
+    const views = this.#views?.();
+    // Copying what was shown counts toward this frame, as building the scene
+    // does; values move once the chart's easing has loaded, custom marks
+    // once what moves them has.
+    this.#tween =
+      shown && frameTime + shown.cost <= SLOW_FRAME && (views || !this.#views)
+        ? plan(
+            shown,
+            scene,
+            this.#model.panels(),
+            durationOf(config.animation),
+            this.#builders,
+            sidesOf(config),
+            followedOf(config),
+            positionsOf(config),
+          )
+        : undefined;
+    if (!this.#tween) {
+      this.#keep(scene);
+      return scene;
+    }
+    this.#tween.drill = drill;
+    this.#tween.ease = views?.easing();
     return this.step(frameTime) ?? scene;
   }
 
@@ -470,7 +556,9 @@ export class ValueAnimation {
     ) {
       this.#ended();
       this.#between = false;
-      return stale ? undefined : scene;
+      if (stale) return undefined;
+      this.#keep(scene);
+      return scene;
     }
     this.#between = true;
     const frame = frameAt(tween, elapsed);
@@ -520,7 +608,7 @@ export class ValueAnimation {
   /** Ends what plays and lets go of the scene drawn last, for a chart destroyed. */
   dispose(): void {
     this.settle();
-    this.#last = undefined;
+    this.#last = this.#kept = undefined;
     this.#model.drilled = undefined;
   }
 }
@@ -543,7 +631,7 @@ function durationOf(animation: boolean | AnimationSpec | undefined): number {
  * scale of the chart's own, or moved by pixels), which no scale moving
  * between scenes moves.
  */
-type Sides = (key: string) => "y" | "yRight" | undefined;
+export type Sides = (key: string) => "y" | "yRight" | undefined;
 
 /** The y scale of each mark's geometry, by its key (see `ownerOf`). */
 export function sidesOf(config: Pick<ChartConfig, "marks">): Sides {
@@ -714,10 +802,11 @@ function draws(mark: Geometry): mark is ArcGeometry {
 
 /**
  * Whether panels have something that can move (bars, slices, rules, points
- * that say which rows they show, lines and areas traced whole, lists, or
- * rasters), and not too much to draw every frame: all their bars, slices,
- * rules, rectangles, and labels, all their points, and all else they draw,
- * whether or not it moves. Clouds never move, and nothing moves beside them.
+ * that say which rows they show, lines and areas traced whole, lists,
+ * rasters, or custom marks), and not too much to draw every frame: all
+ * their bars, slices, rules, rectangles, labels, and custom marks' rows,
+ * all their points, and all else they draw, whether or not it moves.
+ * Clouds never move, and nothing moves beside them.
  */
 function movable(panels: readonly Panel[]): boolean {
   let items = 0;
@@ -743,6 +832,10 @@ function movable(panels: readonly Panel[]): boolean {
       any = true;
     } else if (draws(mark)) {
       items += mark.slices?.items.length ?? (mark.sectors ? countOf(mark.sectors) : 1);
+      any = true;
+    } else if (mark.kind === "shapes" && (mark as ShapesGeometry).redraw) {
+      // A custom mark draws again for each frame: its rows count as bars do.
+      items += (mark as ShapesGeometry).redraw!.rows;
       any = true;
     } else {
       vertices += mark.draw.size(mark);
@@ -816,16 +909,19 @@ export function plan(
       0,
     ),
   };
+  const custom = shown.custom?.plan(scene, panels, sides, MOVING_ITEMS);
   const tweens: PanelTween[] = [];
   let moves = false;
   for (const [i, drawn] of scene.panels.entries()) {
     const panel = panelOf(panels, drawn);
-    const planned = planPanel(shown.panels[i]!, drawn, panel, builders, roles, budget);
+    const planned = planPanel(shown.panels[i]!, drawn, panel, builders, roles, budget, custom);
     if (!planned) return undefined;
     tweens.push(planned.tween);
     moves ||= planned.moves;
   }
-  return moves ? { start: shown.time, duration, builders, scene, panels: tweens } : undefined;
+  return moves
+    ? { start: shown.time, duration, builders, scene, panels: tweens, custom }
+    : undefined;
 }
 
 /**
@@ -839,6 +935,7 @@ function planPanel(
   builders: Builders,
   { sides, followed, positions }: Roles,
   budget: { bars: number; points: number },
+  custom: CustomMotion | undefined,
 ): { tween: PanelTween; moves: boolean } | undefined {
   // A panel of another facet value, or drawn elsewhere or otherwise, is another picture.
   const same = drawn.key === shown.key;
@@ -888,6 +985,7 @@ function planPanel(
     rules: [],
     lists: [],
     rasters: [],
+    customs: [],
     pie: undefined,
     dial: undefined,
     sunburst: undefined,
@@ -944,6 +1042,19 @@ function planPanel(
     // Marks placed otherwise change at once, and what moves beside them with them.
     if (!side) return undefined;
     let moved: { moves: boolean } | undefined;
+    const redraw = mark.kind === "shapes" ? (mark as ShapesGeometry).redraw : undefined;
+    if (redraw) {
+      // A custom mark draws again on the frame's scales, which cannot follow
+      // categories changing order in pixels; one shown nothing of (what
+      // moves them had not loaded) shows its new values at once.
+      const frames = custom?.framesOf(mark);
+      if (reordered || !frames) return undefined;
+      budget.bars += redraw.rows;
+      if (budget.bars > MOVING_ITEMS) return undefined;
+      tween.customs.push({ index, side, frames });
+      moves ||= frames.moves;
+      continue;
+    }
     if (named(mark) && !followed(of)) {
       const pool = mark.named!.of ?? mark.key;
       labels.set(pool, [...(labels.get(pool) ?? []), { index, mark }]);
@@ -1266,7 +1377,15 @@ function movePie(shown: ShownPie, next: PieSlices): { pie: MovingPie; moves: boo
 
 /** Eased progress `elapsed` ms into a change. */
 function progress(tween: Tween, elapsed: number): number {
-  return ease(Math.min(1, Math.max(0, elapsed / tween.duration)));
+  return (tween.ease ?? cubicOut)(Math.min(1, Math.max(0, elapsed / tween.duration)));
+}
+
+/**
+ * How tweens move without the chart's easing (see `ViewAnimation.easing`):
+ * starting quickly, settling without overshooting.
+ */
+function cubicOut(t: number): number {
+  return 1 - (1 - t) ** 3;
 }
 
 /**
@@ -1353,6 +1472,9 @@ function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders)
   for (const list of tween.lists) marks[list.index] = listAt(list, blends.x, blends[list.side]);
   for (const raster of tween.rasters) marks[raster.index] = rasterAt(raster, t);
   const plans = tween.axes && plansAt(tween.axes, t);
+  // Custom marks draw again, on the frame's scales.
+  for (const custom of tween.customs)
+    marks[custom.index] = custom.frames.at(t, plans?.x?.scale, plans?.[custom.side]?.scale);
   let guides = plans && axesAt(panel, tween.axes!, plans);
   // Axes the guides list, laid out over the automatic axes between.
   if (plans && tween.listed) {
@@ -1385,11 +1507,6 @@ function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders)
     paint = [...paint, ...gone.map((_, i) => first + i)];
   }
   return { ...panel, ...guides, marks: [...marks, ...gone], items, ...(paint && { paint }) };
-}
-
-/** Starts quickly and settles without overshooting (cubic ease-out), as views move. */
-function ease(t: number): number {
-  return 1 - (1 - t) ** 3;
 }
 
 /** A pie's geometry at eased progress `t`, and the items it draws. */

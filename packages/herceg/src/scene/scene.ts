@@ -7,12 +7,14 @@
 // the view changes.
 
 import type { NumericArray } from "../data/column.ts";
+import type { ReadonlyTable, Table } from "../data/table.ts";
 import type { ArcPath, inSector, sectorInfo, traceSector } from "../draw/arc.ts";
 import type { SymbolName } from "../draw/symbols.ts";
 import type { Mapping } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
 import type { ItemInfo, LayoutItem } from "../marks/layout-mark.ts";
+import type { PositionScale } from "../scale/scale.ts";
 import type { LegendAction } from "../spec/guides.ts";
 import type { Clip } from "../spec/spec.ts";
 import type { PlotPaint, ResolvedHalo, StrokePaint, TextPaint } from "../style/style.ts";
@@ -541,6 +543,49 @@ export interface ShapesGeometry extends Geometry {
   fontSize: number;
   /** Text shapes are semibold (weight 600), which `font` must say too: SVG and PDF read this. */
   bold?: boolean | undefined;
+  /** A custom mark's, in scenes of charts animating values: how it draws a frame between. */
+  redraw?: CustomRedraw | undefined;
+}
+
+/**
+ * What a custom mark drew in a panel of a scene of a chart animating
+ * values (`Frame.keyed`), and how it draws the panel in a frame between two
+ * scenes (dom/value-custom.ts): its own `draw` again, over its table's
+ * values in the frame, on the frame's scales.
+ */
+export interface CustomRedraw {
+  /** The mark: its geometry in every panel moves alike. */
+  readonly mark: object;
+  /** Its `itemKey` (the field naming items), `series` field, and `encode` channels. */
+  readonly spec: {
+    readonly itemKey?: string | undefined;
+    readonly series?: string | undefined;
+    readonly encode?: object | undefined;
+  };
+  /** Its x and y fields. */
+  readonly x: readonly string[];
+  readonly y: readonly string[];
+  /** The table its rows index (a row view's source); undefined for a mark without one. */
+  readonly table: Table | undefined;
+  /** The table's version as drawn. */
+  readonly version: number;
+  /** The rows of each series drawn (undefined: every row), or the mark's rows when it has no series. */
+  readonly series: readonly {
+    readonly rows: ArrayLike<number> | undefined;
+    readonly length: number;
+  }[];
+  /** How many rows it draws, which count toward a chart's budget for value transitions as bars do. */
+  readonly rows: number;
+  /**
+   * The mark's geometry in the panel with `values` as its table's (none:
+   * the table's own), on scales `x` and `y` (none: the scene's); undefined
+   * when it draws nothing.
+   */
+  draw(
+    values: ReadonlyTable | undefined,
+    x: PositionScale | undefined,
+    y: PositionScale | undefined,
+  ): ShapesGeometry | undefined;
 }
 
 /**

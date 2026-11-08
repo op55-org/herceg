@@ -1,6 +1,6 @@
 import { type FieldKind, type NumericArray, UNTYPED } from "../data/column.ts";
 import type { RowView } from "../data/row-view.ts";
-import type { Schema, Table } from "../data/table.ts";
+import type { ReadonlyTable, Schema, Table } from "../data/table.ts";
 import type { ShownField } from "../fields/chart.ts";
 import type { Formatter } from "../format/format.ts";
 import { formatNumber, timeTickLabels } from "../format/format.ts";
@@ -247,6 +247,13 @@ export interface Frame {
    * sunbursts their sectors (SunburstSectors).
    */
   keyed?: boolean;
+  /**
+   * In a frame between two scenes of a value transition, what a custom mark
+   * draws there (scene.ts `CustomRedraw`): its table's values in the frame,
+   * none for a mark without a table. Such frames record no shapes for input,
+   * which reads the scene the transition goes to.
+   */
+  between?: { values: ReadonlyTable | undefined } | undefined;
   /**
    * With a selection highlighted, which of `table`'s rows it holds, 1 each:
    * drawn over the others (model/highlight.ts), so that of points equally

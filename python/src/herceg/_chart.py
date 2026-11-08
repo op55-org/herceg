@@ -243,6 +243,7 @@ HistogramNormalize = Literal["count", "frequency", "probability", "percent", "de
 HistogramElement = Literal["bars", "step", "poly"]
 #: How rows sharing a heatmap's cell combine into its value.
 CellReduce = Literal["last", "mean", "sum", "min", "max"]
+Easing = Literal["cubic-out", "linear", "cubic-in-out"]
 
 
 def _seams_spec(seams: Any) -> Any:
@@ -929,13 +930,18 @@ class Animation:
     order or ranks change, keyed bars come and go past the end of their
     position axis, and labels count through the numbers between. A change
     arriving meanwhile moves on from what is drawn. Charts with box plots,
-    boxen plots, violins, rugs, contours, dendrograms, custom marks,
-    treemaps, funnels, radars, Sankey diagrams, networks, maps, or 3D marks
-    refuse ``values`` as they draw. ``animation=True`` is ``Animation()``,
-    and a number is a duration."""
+    boxen plots, violins, rugs, contours, dendrograms, treemaps, funnels,
+    radars, Sankey diagrams, networks, maps, or 3D marks refuse ``values``
+    as they draw. ``easing`` is how changes of view and of values, and
+    drills, move over the duration, as d3's curves of these names:
+    ``"cubic-out"`` (the default) starts fast and settles, ``"linear"``
+    moves at an even pace (races, keyframes), and ``"cubic-in-out"`` speeds
+    up, then settles. ``animation=True`` is ``Animation()``, and a number is
+    a duration."""
 
     duration: float = 250
     values: bool = False
+    easing: Easing = "cubic-out"
 
     def _spec(self) -> dict[str, Any]:
         if not (_finite(self.duration) and self.duration >= 0):
@@ -946,6 +952,13 @@ class Animation:
         spec: dict[str, Any] = {"duration": self.duration}
         if _flag(self.values, "Animation values"):
             spec["values"] = True
+        if self.easing not in get_args(Easing):
+            raise ChartError(
+                f"Animation easing: expected {listed(get_args(Easing))}; "
+                f"received {shown(self.easing)}"
+            )
+        if self.easing != "cubic-out":
+            spec["easing"] = self.easing
         return spec
 
 

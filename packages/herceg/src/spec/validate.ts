@@ -4249,6 +4249,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
               fail(at, "milliseconds, at least 0", v);
           },
           values: boolean,
+          easing: oneOf("cubic-out", "linear", "cubic-in-out"),
         } satisfies ChecksOf<AnimationSpec>);
       },
       rowSelection: (v, path) => {

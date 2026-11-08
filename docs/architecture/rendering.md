@@ -247,10 +247,18 @@ double-click reset, a map's or network's plane) is shown gradually by
 - The model takes the new view at once and the `viewport` event reports it
   once. The transition plans its end by building, but never painting, the
   scene of the new view, so it includes nice rounding and glyph room.
-- Each frame sets the model's transition domains, eased (in log space on
-  log axes). Every frame is an ordinary scene, so tooltips and brushes read
-  what is on screen. Intermediate frames keep the new view's margins, so
-  passing tick labels never move the plot.
+- Each frame sets the model's transition domains, eased by the chart's
+  `easing` (d3's cubic-out, linear, and cubic-in-out curves, which value
+  transitions and drills move by too), in log space on log axes. Every
+  frame is an ordinary scene, so tooltips and brushes read what is on
+  screen. Intermediate frames keep the new view's margins, so passing tick
+  labels never move the plot.
+- The types, the spec's validator, and Python refuse other easings. Given
+  one from JavaScript, `ViewAnimation.easing` moves by cubic-out and tells
+  of it once per `animation` option, as it loads and as options change:
+  a `ChartError` (code `invalid-option`, path `animation.easing`, phase
+  `validate`) to `onError`, "error" listeners, or the console, which
+  neither keeps the chart from drawing nor fails `ready`.
 - Anything that must show at once ends the transition: table changes,
   resizes, option updates, legend toggles, wheel zoom and panning, presses,
   `render()`, and export. Charts with several panels, linked charts, and
@@ -268,8 +276,13 @@ With `animation: { values: true }`, `dom/value-transition.ts` (with
 `value-motion.ts` for scales, `value-bars.ts`, `value-labels.ts`,
 `value-sectors.ts`, `value-points.ts`, `value-traces.ts`, and
 `value-items.ts`) also moves marks to changed values, and their axes. It
-loads separately. The data is current at once; what moves is a picture of
-the change.
+loads separately. What moves custom marks (`value-custom.ts`) loads apart
+again, only for charts with custom marks: value transitions load it as
+they load, or once custom marks come, so it arrives a request after them.
+`chart.loading` waits for both. Until they load, and until view
+transitions (`dom/transition.ts`), whose easing values move by, have
+loaded, changes show at once. The data is current at once; what moves is
+a picture of the change.
 
 **Identity.** Scenes of such charts (`frame.keyed`) carry what names each
 item: bars (`BarItems`: each bar's name, its pixel root and tip, and for
@@ -279,8 +292,11 @@ field's values), labels (`LabelItems`: each label's name, the bar series
 it belongs to, and the number it writes, with how to write another), a
 sunburst's sectors (`SunburstSectors`: the nodes drawn, with the mark's
 own arrays of angles, depths, and paint, each node's label as drawn, and
-where the sunburst is drawn), pie slices (`PieSlices`), and gauge dials
-(`GaugeDial`). Marks record only what drawing knows (names, the numbers
+where the sunburst is drawn), pie slices (`PieSlices`), gauge dials
+(`GaugeDial`), and custom marks' shapes (`CustomRedraw`: the mark, its
+fields, table, and the table's version drawn, the rows its series hold
+and how many, and how it draws the panel again over other values on
+other scales). Marks record only what drawing knows (names, the numbers
 labels show, where their text starts, labels' places); the lazy module
 makes sectors of a sunburst's nodes and draws, lists, and picks its
 frames. A name is the `itemKey` value, else a bar's position value (a
@@ -288,10 +304,23 @@ category's name, not its band) or a text row's identity; a missing one
 is NAMELESS and the row's identity, which matches only within one table
 generation (`marks/item-names.ts`). Traced polylines say whether they are
 `whole` (every row traced). Panels keep their axis plans (`PanelPlans`).
-The lazy module imports no engine code; the chart hands it `planAxis`,
-`Polyline`, and `monotonePolyline`, and a sunburst's record the arc and
-label code its frames need (`SunburstKit`), since esbuild would otherwise
-split shared modules into chunks that compress worse.
+Custom marks' shapes are their `draw`'s and do not interpolate, so the
+chart keeps their data instead: after each scene it shows that is not a
+frame between, `keepCustom` copies the fields each custom mark declares
+(number and time `x`, `y`, and `encode` fields; the key and the series
+and category fields as codes and names), by row, once per source table,
+for tables of at most 2,000 rows drawn at their current version, and none
+past the frame budget. A copy is reused while its table keeps its version,
+its rows where they were, and no replaced value waiting in a transaction
+(whose writes leave the version as it was until it ends); a table grown
+past 2,000 rows since shows its change at once. Value transitions reach custom marks' motion at
+four points, importing only its types: keeping (`keepCustom`), planning
+(`ShownCustom.plan`), frames (`CustomFrames.at`), and moving on from a
+frame (`CustomMotion.shown`). The lazy module imports no engine code; the
+chart hands it `planAxis`, `Polyline`, and `monotonePolyline`, and a
+sunburst's record the arc and label code its frames need (`SunburstKit`),
+since esbuild would otherwise split shared modules into chunks that
+compress worse.
 
 **Snapshot and match.** When a table reports values changed in place or a
 reset, the chart copies, in pixels, what is on screen that can move, with
@@ -309,6 +338,7 @@ matches:
 | Lists | Geometry key, when both draw as many items at the same places along one axis |
 | Rasters | The same grid in the same place; colors move in RGB |
 | Rules, slices | Key (slices in one order merging both pies') |
+| Custom marks' rows | `itemKey`, else row identity within one generation, among the rows the mark drew; drawn in the same panel, of the same series and categories (the category fields of `x`, `y`, and `encode`), with every declared value finite at both ends |
 
 A name shared by items at either end matches nothing: those items show at
 once, placed on the frame's scales, and the rest of their series moves. So
@@ -329,6 +359,14 @@ places along the position axis, roots, and tips (a bar changing sign
 shrinks to the baseline and grows past it); slices move widths, so they
 always make a whole turn; points move centers, radii, opacities, and ramp
 positions; monotone curves are curved again each frame (stacks jointly).
+A custom mark's frames call its `draw` again (`CustomRedraw.draw`) over a
+`MovingTable`, a `ReadonlyTable` whose declared fields read their values
+between from buffers of the mark's own (evenly in log space for fields on
+log axes in every panel drawing the mark), on the frame's scales; channels
+through scales read those values (their readers kept apart for each frame
+table, so they go when the transition ends), others the new ones. Its rows
+that cannot move take their new values; frames record their shapes' items
+but not the shapes input reads, which stay the new scene's.
 A mark's areas, or a series' pieces, move together or not at all.
 
 **Coming and going.** Bars named by position grow from their root and
@@ -357,7 +395,9 @@ the radius and level as its sector takes or leaves the middle.
 
 **Retargeting.** Frames keep the records scenes do (names, roots and tips,
 point keys, label numbers, sectors) in buffers of their own, and each
-category's place along axes whose categories change order. A change
+category's place along axes whose categories change order; custom marks'
+frames keep their values, with the new scene's keys, categories, and
+rows drawn, copied as the transition starts. A change
 arriving while values move copies the frame on screen once, with its
 scales as it drew them (`panelsAt`), and the next scene moves from that
 copy: positions stay continuous, speeds do not. At most one transition and
@@ -385,19 +425,21 @@ move. Static SVG, PNG, and PDF draw the destination.
 **When a change shows at once.** Different panels or theme; series coming
 or going other than bars'; a scale that cannot move while geometry in its
 panel cannot follow; a band scale gaining or losing categories; lines,
-areas, lists, and rasters over categories that change order; appended
-or dropped rows; row view changes; changes until the data has been still
-for a change's duration after those (so streaming never animates
-forever); charts that are read by the pointer or keyboard, off screen,
-linked, with a navigator, or slow; frames over 2,000 bars, slices,
-sectors, and rules, 10,000 points (both counting items going), or 10,000
-points of lines and areas, or holding a point cloud. Marks keep no records for a
-series over those; a sunburst's record holds only arrays the mark keeps
-anyway, and no sectors are made of one over them.
+areas, lists, rasters, and custom marks over categories that change order;
+appended or dropped rows; a row view's own changes (a view telling of its
+table's write is left to the table's own report, which says what changed);
+changes until the data has been still for a change's duration after those
+(so streaming never animates forever); charts that are read by the pointer
+or keyboard, off screen, linked, with a navigator, or slow; frames over
+2,000 bars, slices, sectors, rules, and custom marks' rows, 10,000 points
+(both counting items going), or 10,000 points of lines and areas, or
+holding a point cloud. Marks keep no records for a series over those; a
+sunburst's record holds only arrays the mark keeps anyway, and no sectors
+are made of one over them.
 
 Marks that cannot move to changed values (box plots, boxen, violins, rugs,
-contours, dendrograms, custom marks, layout marks other than pies,
-sunbursts, and gauges) refuse `animation.values` as they draw
+contours, dendrograms, layout marks other than pies, sunbursts, and
+gauges) refuse `animation.values` as they draw
 (`marks/still.ts`, a `ChartError` with code `unsupported`, path
 `animation.values`): a check in the model would put code in every chart's
 first chunk.
@@ -416,3 +458,14 @@ come from these measurements. Copies hold about 25 bytes a bar and 16 a
 point; a transition's buffers and frame records about 67 a bar, 32 a
 point, and with value labels about 150 a bar, released when the change
 ends (a retarget holds one copy and one transition).
+
+Custom marks (A2's comets, Node) cost more a frame, since each frame runs
+their `draw`: keeping their fields after a scene takes about 0.008 ms for
+300 comets and 0.01 ms for 2,000 on two numeric axes; preparing a change
+0.15 and 0.3 ms; a frame 0.25 and 1.8 ms, a little less than an
+application's own frame takes that writes the values between and builds a
+scene (0.44 and 1.9 ms). Copies hold 8 bytes a row for
+each declared number field and 4 for the key and each category field (40
+bytes a row for A2's comets, 56 on two numeric axes); a transition adds 8
+a row for each moving field and 4 for the row matched, the key, and each
+category field (44 and 60), released when it ends.

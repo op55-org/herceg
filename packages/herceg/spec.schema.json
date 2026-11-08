@@ -44,8 +44,14 @@
         },
         "values": {
           "title": "Values",
-          "description": "Marks move from the values shown to new ones when a table's values change in place or are replaced (`replace`, `set`, `setColumn`, `reset`), and axes whose automatic domains change move with them, as well as the axes moving to views asked for: bars, pie slices, gauges, points (by row, so not across `reset`), lines and areas whose rows keep their positions, error bars, candlesticks, annotations, and heatmaps' cells. Appended and dropped rows, changed options, and changes that move a plot or the categories show at once. Box plots, boxen plots, violins, rugs, contours, dendrograms, custom marks, and layout marks other than pies and gauges refuse it.",
+          "description": "Marks move from the values shown to new ones when a table's values change in place or are replaced (`replace`, `set`, `setColumn`, `reset`), and axes whose automatic domains change move with them, as well as the axes moving to views asked for: bars, pie slices, gauges, points (by row, so not across `reset`), lines and areas whose rows keep their positions, error bars, candlesticks, annotations, heatmaps' cells, and custom marks' declared fields. Appended and dropped rows, changed options, and changes that move a plot or the categories show at once. Box plots, boxen plots, violins, rugs, contours, dendrograms, and layout marks other than pies and gauges refuse it.",
           "type": "boolean"
+        },
+        "easing": {
+          "title": "Easing",
+          "description": "How changes of view, of values, and drills move over their duration.",
+          "$ref": "#/$defs/Easing",
+          "default": "cubic-out"
         }
       },
       "additionalProperties": false
@@ -3036,6 +3042,11 @@
       "description": "A unit lengths of time are in. Weeks and longer have no fixed length.",
       "type": "string",
       "enum": ["nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day"]
+    },
+    "Easing": {
+      "description": "How a transition moves over its duration, as d3's curves of these names: \"cubic-out\" starts fast and settles (`1 - (1 - t)^3`); \"linear\" moves at an even pace; \"cubic-in-out\" speeds up, then settles (d3's default for transitions). Not CSS's timing functions, which are other curves.",
+      "type": "string",
+      "enum": ["cubic-out", "linear", "cubic-in-out"]
     },
     "EditBrushAction": {
       "description": "The brush moves with a drag that starts inside it, and resizes with one that starts on its edges or corners; the wheel over it resizes it about the pointer. Elsewhere, later bindings are tried.",

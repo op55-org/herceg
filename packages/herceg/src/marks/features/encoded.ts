@@ -7,7 +7,7 @@
 // scale, alone or ending a list).
 
 import type { MarkRows } from "../../data/row-view.ts";
-import type { Table } from "../../data/table.ts";
+import type { ReadonlyTable, Table } from "../../data/table.ts";
 import {
   type Channel,
   type Check,
@@ -39,10 +39,15 @@ interface Compiled {
   readonly whole: Channel<unknown>;
   readonly check: Check;
   readonly path: string;
-  /** Rows of `channel` (`read`) and of `whole` (`alone`) as last read, and what they were read at. */
+  /** Rows of `channel` (`read`) and of `whole` (`alone`) of the mark's table as last read, and what they were read at. */
   read?: Read;
   alone?: Read;
+  /** The same of frames' tables between two scenes, which go with their frames. */
+  readonly frames: WeakMap<ReadonlyTable, Reads>;
 }
+
+/** Rows a channel read, as `Compiled` keeps them. */
+type Reads = Pick<Compiled, "read" | "alone">;
 
 interface Read {
   readonly version: number;
@@ -61,7 +66,12 @@ export function encodedChannels(
   path: string,
 ): {
   use(theme: Theme, paint: PaintReader): void;
-  encoded(channel: Name, row: number, series?: CustomSeries): string | number | undefined;
+  encoded(
+    channel: Name,
+    row: number,
+    series?: CustomSeries,
+    frame?: ReadonlyTable,
+  ): string | number | undefined;
   seriesColor(name: string, label: string | undefined): string | undefined;
   keys(rows: MarkRows): GlyphKey[];
   /** Whether `keys` gives keys where rows are drawn: a color list reads a scale of categories. */
@@ -85,7 +95,7 @@ export function encodedChannels(
     const read = compileChannel(given as never, table, scales, name, check, at, name);
     // Only colors end in the series' (widths and opacities refuse its names; a field of the series' is read by row).
     const [channel, tail] = name === "color" ? seriesTail(read, series) : [read, undefined];
-    compiled.set(name, { channel, tail, whole: read, check, path: at });
+    compiled.set(name, { channel, tail, whole: read, check, path: at, frames: new WeakMap() });
   }
   let theme: Theme | undefined;
   let paint: PaintReader = (value) => value;
@@ -98,7 +108,7 @@ export function encodedChannels(
       theme = t;
       paint = p;
     },
-    encoded(name, row, series) {
+    encoded(name, row, series, frame) {
       const c = compiled.get(name);
       if (!c) return undefined;
       // A series' rows without another output take its color; rows read
@@ -109,7 +119,16 @@ export function encodedChannels(
       const channel = series ? c.channel! : c.whole;
       const scaled = channelRevision([channel]);
       const slot = series ? "read" : "alone";
-      let read = c[slot];
+      // In frames between two scenes, numbers through a scale (or as they
+      // are) read the frame's values; conditions, lists, categories, and
+      // display colors read the new values, and change at once.
+      const source =
+        frame && (channel.kind === "scaled" || (channel.kind === "identity" && channel.numbers))
+          ? frame
+          : table;
+      const reads =
+        source === table ? c : (c.frames.get(source) ?? c.frames.set(source, {}).get(source)!);
+      let read = reads[slot];
       if (read?.version !== table.version || read.scaled !== scaled || read.theme !== theme) {
         const colors = name === "color";
         read = {
@@ -118,7 +137,7 @@ export function encodedChannels(
           theme,
           rows: rowReader(
             channel,
-            table,
+            source,
             colors ? (theme?.palette ?? []) : [],
             (colors ? (theme?.muted ?? "#999999") : undefined) as unknown,
             c.check,
@@ -126,7 +145,7 @@ export function encodedChannels(
             false,
           ),
         };
-        c[slot] = read;
+        reads[slot] = read;
       }
       const out = read.rows.output(row) as string | number | undefined;
       return out === undefined && series && c.tail ? series.color : out;

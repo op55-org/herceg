@@ -345,7 +345,7 @@ const cartesian: MarkCase[] = [
         },
       }),
     kind: "shapes",
-    still: true,
+    animates: true,
   },
 ];
 
@@ -1895,7 +1895,7 @@ describe("capabilities: value animation preconditions", () => {
   );
 
   it.each(all.filter((c) => c.still))("$name refuses animation.values as it draws", (c) => {
-    const subject = c.name === "custom" ? "custom marks do" : `${typeOf(c)} does`;
+    const subject = `${typeOf(c)} does`;
     let error: unknown;
     try {
       build({ marks: [c.make()], animation: { values: true } });

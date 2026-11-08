@@ -1238,6 +1238,7 @@ export class MountedChart implements Chart, ExportsScene {
       this.#cloudsLoading,
       this.#animationLoading,
       this.#valuesLoading,
+      this.#values?.loading,
       this.#controllerLoading,
       ...(this.#controller?.loading ?? []),
       this.#model.items?.controlsLoading,
@@ -1671,12 +1672,17 @@ export class MountedChart implements Chart, ExportsScene {
     if (!reported) this.#report(failure);
   }
 
-  /** Tells of `failure`: rejects `ready` if no frame drew, then `onError`, "error" listeners, or the console. */
-  #report(failure: ChartError): void {
+  /**
+   * Tells of `failure`: rejects `ready` if no frame drew (unless the chart
+   * draws on, `drawing`), then `onError`, "error" listeners, or the console.
+   */
+  #report(failure: ChartError, drawing = false): void {
     // A chart destroyed (a component unmounted) tells no one of what it no longer draws.
     if (this.#destroyed) return;
-    this.#settleReady?.[1](failure);
-    this.#settleReady = undefined;
+    if (!drawing) {
+      this.#settleReady?.[1](failure);
+      this.#settleReady = undefined;
+    }
     const { onError } = this.#options;
     try {
       onError?.(failure);
@@ -2143,6 +2149,10 @@ export class MountedChart implements Chart, ExportsScene {
       this.#tables.set(
         table,
         table.subscribe((change?: TableChange) => {
+          // A view telling of its table's write leaves it to the table,
+          // which says what changed.
+          const own = this.#counts(table);
+          if (own === 0) return;
           // New data shows at once: a moving view would plan from stale
           // data. Changed values may move there from what is on screen,
           // unless something inspects or presses it or moves its view.
@@ -2155,7 +2165,7 @@ export class MountedChart implements Chart, ExportsScene {
           this.#animation?.settle();
           this.#cause = this.#panelsCause = "data";
           this.#content++;
-          this.#revision += this.#counts(table);
+          this.#revision += own;
           // A facet's panels are its data's, as a category axis' categories are.
           this.#invalidate(
             true,
@@ -2719,12 +2729,22 @@ export class MountedChart implements Chart, ExportsScene {
       });
   }
 
-  /** Loads the animation module the first time a chart asks for `animation`. */
+  /**
+   * Loads the animation module the first time a chart asks for `animation`,
+   * which checks each option's easing.
+   */
   #loadAnimation(): void {
+    this.#animation?.easing();
     if (this.#animation !== undefined || this.#animationLoading) return;
     this.#animationLoading = import("./transition.ts")
       .then(
-        ({ ViewAnimation }) => new ViewAnimation(this.#model, this.root.ownerDocument.defaultView),
+        ({ ViewAnimation }) =>
+          new ViewAnimation(
+            this.#model,
+            this.root.ownerDocument.defaultView,
+            (error) => this.#report(error, true),
+            ChartError,
+          ),
       )
       // Without it, views change at once.
       .catch(() => null)
@@ -2752,6 +2772,7 @@ export class MountedChart implements Chart, ExportsScene {
               monotonePolyline,
               measure: (text: string, font: string) => this.#measure()(text, font),
             },
+            () => this.#animation,
           ),
       )
       // Without it, values change at once.
@@ -2759,6 +2780,8 @@ export class MountedChart implements Chart, ExportsScene {
       .then((values) => {
         if (!this.#destroyed) this.#values = values;
         this.#valuesLoading = undefined;
+        // What it loads in turn (custom marks' motion) is part of it.
+        return values?.loading;
       });
   }
 

@@ -171,3 +171,23 @@ high-contrast themes outline them. Fixed: a dodged line or area whose
 category axis' positions have an `offset` drew from the second of two
 rows at a category the dodge brings into the plot, leaving out the
 first.
+
+`animation.easing` takes `"cubic-out"` (the default, as before),
+`"linear"`, or `"cubic-in-out"`, d3's curves of those names, for changes
+of view, of values, and drills alike (`hg.Animation(easing="linear")` in
+Python; specs, React, Vue, and Svelte through `animation`). An easing that
+is none, given from JavaScript, moves by `"cubic-out"` and is reported
+through `onError` and "error" listeners.
+
+Custom marks move to changed values: with `animation: { values: true }`
+their `draw` runs again each frame over a table of the fields they
+declare (`x`, `y`, and those `encode` reads) between their two values,
+matched by `itemKey` or row, its `encoded` widths, opacities, and ramp
+colors between too; `draw`'s `table` is a `ReadonlyTable` with or without
+animation. What moves custom marks loads only for charts that have them.
+
+Fixed: no value transition moved a mark over a row view (bars, points,
+lines, areas, error bars, candlesticks, heatmaps): the view's report of
+its table's write showed every change at once. They move as marks over
+tables do; a view's own query or restriction changing still shows at
+once.

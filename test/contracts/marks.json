@@ -2998,6 +2998,7 @@
         "selection.brush-y",
         "selection.brush-xy",
         "selection.lasso",
+        "lifecycle.value-animation",
         "lifecycle.view-animation",
         "lifecycle.cursor-sync",
         "lifecycle.viewport-sync",
@@ -3020,17 +3021,6 @@
           "alternative": {
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["custom.placement.nested", "custom.placement.facet"]
-          }
-        },
-        "lifecycle.value-animation": {
-          "error": {
-            "code": "unsupported",
-            "path": "animation.values",
-            "message": "animation.values: custom marks do not move to new values; leave values out, and new values show at once"
-          },
-          "alternative": {
-            "text": "Leave animation.values out: changed values show at once.",
-            "proofs": ["custom.lifecycle.value-animation.off"]
           }
         },
         "events.item-move": {

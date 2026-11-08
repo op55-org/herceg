@@ -71,6 +71,7 @@ export type {
   NumberField,
   NumericField,
   PositionField,
+  ReadonlyTable,
   Row,
   Schema,
   SchemaOf,

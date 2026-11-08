@@ -85,7 +85,6 @@
     "custom.items.legend": "herceg-unit",
     "custom.items.selection": "herceg-unit",
     "custom.items.tooltip": "herceg-unit",
-    "custom.lifecycle.value-animation.off": "herceg-browser",
     "dashboard.drawing.react": "react",
     "dashboard.early-input-cleanup.react": "react",
     "dashboard.early-input-loaded.react": "react",

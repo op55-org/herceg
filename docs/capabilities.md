@@ -14,7 +14,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 2130 cells: 1379 proved to work, 216 supported but not yet proved, 354 refused, and 181 not applicable.
+Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refused, and 181 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Events](#events) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -47,7 +47,7 @@ Of 2130 cells: 1379 proved to work, 216 supported but not yet proved, 354 refuse
 | regions of a table | 30 | 3 | 9 | 10 |
 | text (constant) | 29 | 3 | 2 | 18 |
 | text of a table | 30 | 3 | 9 | 10 |
-| custom | 44 | 0 | 3 | 5 |
+| custom | 45 | 0 | 2 | 5 |
 | pie | 30 | 3 | 17 | 2 |
 | treemap | 30 | 3 | 17 | 2 |
 | sunburst | 31 | 3 | 16 | 2 |
@@ -490,7 +490,7 @@ Of 2130 cells: 1379 proved to work, 216 supported but not yet proved, 354 refuse
 | regions of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | text (constant) | ✓ | ·82 | ✓ | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| custom | ✓ | ✗81 | ✓ | ✓ | ✓ | ✓ |
+| custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | pie | ·83 | ✓ | ✗84 | ✗84 | ✗84 | ✓ |
 | treemap | ·85 | ✗81 | ✗84 | ✗84 | ✗84 | ✓ |
 | sunburst | ·86 | ✓ | ✗84 | ✗84 | ✗84 | ✓ |

@@ -16,6 +16,16 @@ import { type RowQuery, type RowView, rowView } from "../src/data/row-view.ts";
 import { selectionStore, selectRows, selectWhere } from "../src/data/selection.ts";
 import { type Table, table } from "../src/data/table.ts";
 import { rowTotals } from "../src/data/totals.ts";
+import { keepCustom } from "../src/dom/value-custom.ts";
+import {
+  followedOf,
+  frameAt,
+  MOVING_ITEMS,
+  plan,
+  positionsOf,
+  sidesOf,
+  snapshot,
+} from "../src/dom/value-transition.ts";
 import { wholeTable } from "../src/encoding/channel-scales.ts";
 import { Rank } from "../src/encoding/ranks.ts";
 import { compileFields } from "../src/fields.ts";
@@ -37,6 +47,7 @@ import { boxplot } from "../src/marks/boxplot.ts";
 import { candlestick } from "../src/marks/candlestick.ts";
 import { contour } from "../src/marks/contour.ts";
 import { GridTracer } from "../src/marks/contour-trace.ts";
+import { monotonePolyline } from "../src/marks/curve.ts";
 import { custom } from "../src/marks/custom.ts";
 import { errorbar } from "../src/marks/errorbar.ts";
 import { geopoint } from "../src/marks/geopoint.ts";
@@ -62,10 +73,12 @@ import { text } from "../src/marks/text.ts";
 import { treemap } from "../src/marks/treemap.ts";
 import { UnionStack } from "../src/marks/union-stack.ts";
 import { violin } from "../src/marks/violin.ts";
+import { planAxis } from "../src/model/axis.ts";
+import { axisGuide } from "../src/model/axis-guide.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
 import { membership } from "../src/model/memberships.ts";
-import { ChartModel } from "../src/model/model.ts";
+import { type ChartConfig, ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
 import { panels } from "../src/model/panels.ts";
 import { Picker } from "../src/model/pick.ts";
@@ -2433,4 +2446,147 @@ for (const rows of [100_000, 1_000_000]) {
     { warmup: 5, samples: 30 },
   );
   pivot.dispose();
+}
+
+// Value transitions (`animation.values`): copying what a scene shows, planning
+// the change to the next scene, and a frame half way, for 2,000 bars, 10,000
+// keyed points, and A2's comets (custom marks, which keep their declared
+// fields and draw again each frame): 300 on a band y and 2,000 on two
+// number axes, a fifth of their ends moving.
+{
+  const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
+  const transition = (
+    name: string,
+    model: ChartModel,
+    edit: (forth: boolean) => void,
+    height = 640,
+  ) => {
+    model.setSize(960, height, 1);
+    const drawn = model.scene(estimateText);
+    const copy = () => {
+      const shown = snapshot(drawn, model.panels(), 0)!;
+      shown.custom = keepCustom(drawn, undefined, MOVING_ITEMS);
+      return shown;
+    };
+    measure(`value transition, ${name}: copy what is shown`, copy);
+    const shown = copy();
+    edit(true);
+    const next = model.scene(estimateText);
+    const { config } = model;
+    const planned = () =>
+      plan(
+        shown,
+        next,
+        model.panels(),
+        250,
+        builders,
+        sidesOf(config),
+        followedOf(config),
+        positionsOf(config),
+      );
+    measure(`value transition, ${name}: plan`, planned, { warmup: 10, samples: 40 });
+    const tween = planned()!;
+    // Each sample a frame at another time, as frames are: their values are written anew.
+    let frames = 0;
+    measure(
+      `value transition, ${name}: frame half way`,
+      () => frameAt(tween, 124 + (frames++ % 3)),
+      {
+        warmup: 10,
+        samples: 40,
+      },
+    );
+    edit(false);
+  };
+  const animating = (config: Omit<ChartConfig, "locale">) =>
+    new ChartModel(
+      { locale: "en-US", animation: { values: true }, ...config },
+      undefined,
+      staticCompilers(),
+    );
+  /** Writes `v` flipped, and back. */
+  const swapped = (data: Table, flip: (v: number) => number) => {
+    const back = Float64Array.from(data.numbers("v"));
+    const forth = back.map(flip);
+    return (on: boolean) => data.setColumn("v", on ? forth : back);
+  };
+  const bars = table({
+    x: Float64Array.from({ length: 2000 }, (_, i) => i),
+    v: Float64Array.from({ length: 2000 }, (_, i) => 10 + (i % 17)),
+  });
+  transition(
+    "2,000 bars",
+    animating({ marks: [bar(bars, { x: "x", y: "v" })], y: { domain: [0, 40] } }),
+    swapped(bars as unknown as Table, (v) => 40 - v),
+  );
+  const dots = table({
+    id: Float64Array.from({ length: 10_000 }, (_, i) => i),
+    x: Float64Array.from({ length: 10_000 }, (_, i) => (i * 7919) % 1000),
+    v: Float64Array.from({ length: 10_000 }, (_, i) => (i * 104729) % 1000),
+  });
+  transition(
+    "10,000 keyed points",
+    animating({
+      marks: [point(dots, { x: "x", y: "v", itemKey: "id" })],
+      x: { domain: [0, 1000] },
+      y: { domain: [0, 1000] },
+    }),
+    swapped(dots as unknown as Table, (v) => 1000 - v),
+  );
+  for (const length of [300, 2000]) {
+    const scatter = length > 300;
+    const rows = table({
+      id: Array.from({ length }, (_, i) => `F-${i}`),
+      x0: Float64Array.from({ length }, (_, i) => (i * 37) % 100),
+      y0: Float64Array.from({ length }, (_, i) => (i * 53) % 100),
+      x1: Float64Array.from({ length }, (_, i) => (i * 37 + 20) % 100),
+      y1: Float64Array.from({ length }, (_, i) => (i * 53 + 30) % 100),
+      confidence: Float64Array.from({ length }, (_, i) => (i % 10) / 10),
+      age: Float64Array.from({ length }, (_, i) => i % 30),
+      kind: category(Array.from({ length }, (_, i) => ["energy", "metals", "grains"][i % 3]!)),
+    });
+    const ends = Float64Array.from(rows.numbers("x1"));
+    const moved = ends.map((v, i) => (i % 5 === 0 ? (v + 40) % 100 : v));
+    const model = animating({
+      x: { domain: [0, 100] },
+      ...(scatter && { y: { domain: [0, 100] } }),
+      scales: {
+        widths: { type: "linear", domain: [0, 1], range: [2, 7] },
+        fade: { type: "linear", domain: [0, 30], range: [1, 0.35] },
+      },
+      marks: [
+        custom(rows, {
+          x: ["x0", "x1"],
+          y: scatter ? ["y0", "y1"] : "id",
+          series: "kind",
+          itemKey: "id",
+          encode: {
+            strokeWidth: { field: "confidence", scale: "widths" },
+            opacity: { field: "age", scale: "fade" },
+          },
+          draw({ table: t, series, x, y, item, path, circle, encoded }) {
+            const [bx, by] = [t.numbers("x1"), t.numbers("y1")];
+            for (const s of series)
+              for (let k = 0; k < s.length; k++) {
+                const row = s.rowAt(k);
+                const [sx, sy] = [x(s.x[row]!), y(s.y[row]!)];
+                const ey = scatter ? y(by[row]!) : sy;
+                const style = { fill: s.color, opacity: encoded("opacity", row) };
+                item(s, row, () => {
+                  path(cometPath(sx, sy, x(bx[row]!), ey, encoded("strokeWidth", row) ?? 2), style);
+                  circle(sx, sy, 3, style);
+                });
+              }
+          },
+        }),
+      ],
+    });
+    // 300 lanes on a band y, as A2 draws them, or a scatter.
+    transition(
+      `A2, ${length.toLocaleString("en-US")} comets`,
+      model,
+      (on) => rows.setColumn("x1", on ? moved : ends),
+      scatter ? 640 : 3100,
+    );
+  }
 }

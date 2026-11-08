@@ -1,6 +1,7 @@
 import "./interactive.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { table } from "../../src/data/table.ts";
+import { type RowView, rowView } from "../../src/data/row-view.ts";
+import { type Schema, type Table, table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import type { InputEvent, ItemTarget } from "../../src/dom/events.ts";
 import { SvgLayer } from "../../src/dom/svg-layer.ts";
@@ -8,7 +9,9 @@ import { sectorsOf } from "../../src/dom/value-sectors.ts";
 import { ValueAnimation } from "../../src/dom/value-transition.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { candlestick } from "../../src/marks/candlestick.ts";
 import { custom } from "../../src/marks/custom.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
 import { graph } from "../../src/marks/graph.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
@@ -16,12 +19,15 @@ import { tablesOf } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
+import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { text } from "../../src/marks/text.ts";
+import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
 import type { ArcGeometry, RectGeometry, Scene, TextGeometry } from "../../src/scene/scene.ts";
-import { MOUSE, modelOf } from "./helpers.ts";
+import type { ChartError } from "../../src/spec/errors.ts";
+import { collectGarbage, MOUSE, modelOf } from "./helpers.ts";
 
 const charts: Chart[] = [];
 
@@ -973,8 +979,8 @@ describe("value transitions", () => {
 
   it("are refused by marks that do not move, when the chart draws its options", async () => {
     const message =
-      "animation.values: custom marks do not move to new values; leave values out, and new values show at once";
-    const marks = () => [bar(sales(), { x: "region", y: "sales" }), custom({ draw() {} })];
+      "animation.values: rug does not move to new values; leave values out, and new values show at once";
+    const marks = () => [bar(sales(), { x: "region", y: "sales" }), rug(sales(), { y: "sales" })];
     const host = document.createElement("div");
     document.body.append(host);
     // Made to throw, the chart throws as it is made.
@@ -1410,5 +1416,613 @@ describe("keyed transitions", () => {
       chart.destroy();
       host.remove();
     }
+  });
+});
+
+/** Every scene each of `charts` draws from now on. */
+function scenesOf(...charts: Chart[]): Scene[][] {
+  const scenes = charts.map((): Scene[] => []);
+  const render = SvgLayer.prototype.render;
+  vi.spyOn(SvgLayer.prototype, "render").mockImplementation(function (this: SvgLayer, ...args) {
+    const i = charts.findIndex((chart) => chart.root.contains(this.svg));
+    if (i >= 0) scenes[i]!.push(args[0]);
+    return render.apply(this, args);
+  });
+  return scenes;
+}
+
+describe("easing", () => {
+  /** The bars' heights in a scene. */
+  const heights = (scene: Scene) => {
+    const mark = scene.panels[0]!.marks.find((m) => m.kind === "rect") as RectGeometry;
+    return Array.from({ length: mark.count }, (_, i) => mark.rects[i * 4 + 3]!);
+  };
+
+  it("move values evenly with linear easing, half way at half time, and by d3's cubic in-out", async () => {
+    // A frame every 16 ms from the change: 160 ms is half of 320.
+    const options = (easing?: "linear" | "cubic-in-out"): Partial<ChartOptions> => ({
+      animation: { values: true, duration: 320, ...(easing && { easing }) },
+      marks: [bar(table({ region: ["N", "S"], sales: [10, 30] }), { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+    });
+    const charts = [
+      await mount(options("linear")),
+      await mount(options("cubic-in-out")),
+      await mount(options()),
+    ];
+    await controlTime();
+    const scenes = scenesOf(...charts);
+    const [before] = charts.map((chart) => modelOf(chart).panels()[0]!.y.map(0));
+    const pixels = (value: number) => before! - modelOf(charts[0]!).panels()[0]!.y.map(value);
+    for (const chart of charts)
+      tablesOf(modelOf(chart).config.marks[0]!)[0]!.setColumn("sales", [30, 10]);
+    tick(80);
+    // A quarter of the way in time: linear a quarter, cubic in-out a sixteenth, cubic out more.
+    const quarter = scenes.map((list) => heights(list.at(-1)!)[0]!);
+    expect(quarter[0]).toBeCloseTo(pixels(15), 3);
+    expect(quarter[1]).toBeCloseTo(pixels(10 + 20 * 0.0625), 3);
+    expect(quarter[2]).toBeCloseTo(pixels(10 + 20 * (1 - 0.75 ** 3)), 3);
+    tick(80);
+    const half = scenes.map((list) => heights(list.at(-1)!));
+    expect(half[0]).toEqual([expect.closeTo(pixels(20), 3), expect.closeTo(pixels(20), 3)]);
+    expect(half[1]![0]).toBeCloseTo(pixels(20), 3);
+    expect(half[2]![0]).toBeCloseTo(pixels(10 + 20 * 0.875), 3);
+  });
+
+  it("move views with the chart's easing", async () => {
+    const chart = await mount({ animation: { duration: 320, easing: "linear" } });
+    await controlTime();
+    const [lo, hi] = x(chart) as [number, number];
+    chart.setViewport([20_000, 40_000]);
+    tick(160);
+    const [a, b] = x(chart) as [number, number];
+    expect(a).toBeCloseTo((lo + 20_000) / 2, 6);
+    expect(b).toBeCloseTo((hi + 40_000) / 2, 6);
+  });
+
+  it("tell of an easing that is none, drawing and moving as by default", async () => {
+    const heard: ChartError[] = [];
+    const logged = vi.spyOn(console, "error");
+    const animation = (easing: string) => ({
+      values: true,
+      duration: 320,
+      easing: easing as never,
+    });
+    const chart = await mount({
+      animation: animation("bounce"),
+      marks: [bar(table({ region: ["N", "S"], sales: [10, 30] }), { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+      onError: (error) => heard.push(error),
+    });
+    expect(heard.map(({ code, path, phase, message }) => ({ code, path, phase, message }))).toEqual(
+      [
+        {
+          code: "invalid-option",
+          path: "animation.easing",
+          phase: "validate",
+          message:
+            'animation.easing: expected "cubic-out", "linear", or "cubic-in-out"; received "bounce"',
+        },
+      ],
+    );
+    expect(chart.root.querySelector('[data-kind="rect"]')).not.toBeNull();
+    await controlTime();
+    const scenes = scenesOf(chart);
+    const before = modelOf(chart).panels()[0]!.y.map(0);
+    const pixels = (value: number) => before - modelOf(chart).panels()[0]!.y.map(value);
+    tablesOf(modelOf(chart).config.marks[0]!)[0]!.setColumn("sales", [30, 10]);
+    tick(160);
+    // Half way in time, cubic out has gone seven eighths of the way.
+    expect(heights(scenes[0]!.at(-1)!)[0]).toBeCloseTo(pixels(10 + 20 * 0.875), 3);
+    // Each option naming none is told of; one naming an easing is not.
+    chart.update({ animation: animation("toString") });
+    chart.update({ animation: animation("linear") });
+    expect(heard.map(({ message }) => message.split("received ")[1])).toEqual([
+      '"bounce"',
+      '"toString"',
+    ]);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it("draw a chart naming an easing that is none, keeping `ready` its first frame's", async () => {
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:300px";
+    document.body.append(host);
+    const heard: string[] = [];
+    // Its encoding loads a compiler first, so the easing is told of before the first frame.
+    const data = table({ id: ["a"], start: [0], end: [40], confidence: [1] });
+    const chart = createChart(host, {
+      animation: { values: true, easing: "bounce" as never },
+      marks: [
+        custom(data, {
+          x: ["start", "end"],
+          y: "id",
+          encode: { strokeWidth: { field: "confidence", scale: { type: "identity" } } },
+          draw: ({ series, x, y, path, encoded }) => {
+            for (const s of series)
+              path(`M${x(s.x[0]!)},${y(s.y[0]!)}`, { strokeWidth: encoded("strokeWidth", 0) });
+          },
+        }),
+      ],
+      onError: (error) => heard.push(error.message),
+    });
+    charts.push(chart);
+    await expect(chart.ready).resolves.toBeUndefined();
+    await chart.loading;
+    expect(heard).toHaveLength(1);
+  });
+});
+
+describe("custom marks changing values", () => {
+  // Linear, with a frame every 16 ms: 160 ms is half way.
+  const VALUES = { values: true, duration: 320, easing: "linear" } as const;
+  const SCALES = { widths: { type: "linear", domain: [0, 1], range: [2, 6] } } as const;
+  const forecasts = () =>
+    table({
+      id: ["a", "b", "c"],
+      start: [0, 10, 20],
+      end: [40, 50, 60],
+      confidence: [0, 0.5, 1],
+      lane: [1, 2, 3],
+      group: ["x", "x", "y"],
+    });
+  /** What one call of `draw` read: each comet's end and stroke width, by id. */
+  type Read = Map<string, { end: number; width: number | undefined }>;
+
+  /** A2's comets along numeric lanes, recording what each `draw` reads. */
+  function comets<S extends Schema>(
+    data: Table<S> | RowView<S>,
+    reads: Read[] = [],
+    options: object = {},
+  ) {
+    return custom(data as unknown as Table, {
+      x: ["start", "end"],
+      y: "lane",
+      itemKey: "id",
+      encode: { strokeWidth: { field: "confidence", scale: "widths" } },
+      draw({ table: rows, series, x, y, item, path, encoded }) {
+        const end = rows.numbers("end");
+        const read: Read = new Map();
+        reads.push(read);
+        for (const s of series)
+          for (let k = 0; k < s.length; k++) {
+            const row = s.rowAt(k);
+            const width = encoded("strokeWidth", row);
+            read.set(rows.value("id", row) as string, { end: end[row]!, width });
+            item(s, row, () =>
+              path(`M${x(s.x[row]!)} ${y(s.y[row]!)}H${x(end[row]!)}`, {
+                stroke: s.color,
+                strokeWidth: width,
+              }),
+            );
+          }
+      },
+      ...options,
+    });
+  }
+  const options = (
+    marks: ChartOptions["marks"],
+    animation: ChartOptions["animation"] = VALUES,
+  ): Partial<ChartOptions> => ({
+    animation,
+    scales: SCALES,
+    marks,
+    x: { domain: [0, 100] },
+    y: { domain: [0, 5] },
+  });
+  /** The comets as the chart's SVG draws them. */
+  const drawn = (chart: Chart) =>
+    [...chart.root.querySelectorAll(`[data-kind="shapes"]`)].map((g) => g.innerHTML).join();
+  const ends = (read: Read | undefined) =>
+    Object.fromEntries([...(read ?? [])].map(([id, { end }]) => [id, end]));
+  /** The value animations of charts made from now on. */
+  function animations(): ValueAnimation[] {
+    const made: ValueAnimation[] = [];
+    const start = ValueAnimation.prototype.start;
+    vi.spyOn(ValueAnimation.prototype, "start").mockImplementation(function (
+      this: ValueAnimation,
+      ...args
+    ) {
+      if (!made.includes(this)) made.push(this);
+      return start.apply(this, args);
+    });
+    return made;
+  }
+
+  it("draw frames between from their declared fields, encodings between, ending as drawn without animation", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const moving = await mount(options([comets(data, reads)]));
+    const still = await mount(options([comets(data)], false));
+    await controlTime();
+    data.replace(0, { end: [60, 70, 80], confidence: [1, 1, 0] });
+    tick(160);
+    expect(Object.fromEntries(reads.at(-1)!)).toEqual({
+      a: { end: 50, width: 4 },
+      b: { end: 60, width: 5 },
+      c: { end: 70, width: 4 },
+    });
+    expect(drawn(moving)).not.toBe(drawn(still));
+    tick(400);
+    expect(drawn(moving)).toBe(drawn(still));
+  });
+
+  it("move one mark in two charts from what each drew, retargeting after the other drew", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const mark = comets(data, reads);
+    const moving = await mount(options([mark]));
+    const still = await mount(options([mark], false));
+    await controlTime();
+    data.replace(0, { end: [60, 50, 60] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 50, b: 50, c: 60 });
+    // The other chart draws the mark at its new values meanwhile.
+    still.render();
+    expect(ends(reads.at(-1))).toEqual({ a: 60, b: 50, c: 60 });
+    data.replace(0, { end: [100] });
+    tick(16);
+    // On from 50, a twentieth of the way to 100, whatever the other chart drew since.
+    expect(reads.slice(-2).map(ends)).toEqual(
+      expect.arrayContaining([
+        { a: 52.5, b: 50, c: 60 },
+        { a: 100, b: 50, c: 60 },
+      ]),
+    );
+    tick(400);
+    expect(drawn(moving)).toBe(drawn(still));
+  });
+
+  it("draw their new values in a static export during a transition, and from then on", async () => {
+    const data = forecasts();
+    const moving = await mount(options([comets(data)]));
+    const still = await mount(options([comets(data)], false));
+    await controlTime();
+    data.replace(0, { end: [60, 70, 80] });
+    tick(160);
+    expect(drawn(moving)).not.toBe(drawn(still));
+    const exported = moving.toSVG().replace(/herceg-\d+/g, "");
+    expect(exported).toBe(still.toSVG().replace(/herceg-\d+/g, ""));
+    expect(drawn(moving)).toBe(drawn(still));
+    // What the export drew is kept: the next change moves from it.
+    data.replace(0, { end: [40] });
+    tick(160);
+    expect(drawn(moving)).not.toBe(drawn(still));
+  });
+
+  it("show changes at once past the chart's budget of moving items, keeping nothing", async () => {
+    const rows = (length: number) =>
+      table({
+        id: Array.from({ length }, (_, i) => `r${i}`),
+        start: new Float64Array(length),
+        end: Float64Array.from({ length }, (_, i) => i % 100),
+        confidence: new Float64Array(length),
+        lane: Float64Array.from({ length }, (_, i) => i % 5),
+      });
+    const made = animations();
+    // Three marks of 700 rows: 2,100 to draw in every frame, past 2,000.
+    const tables = [rows(700), rows(700), rows(700)];
+    const reads: Read[] = [];
+    await mount(options(tables.map((data, i) => comets(data, reads, { id: `m${i}` }))));
+    // One mark of 2,001 rows.
+    const long = rows(2001);
+    const longReads: Read[] = [];
+    await mount(options([comets(long, longReads)]));
+    await controlTime();
+    expect(made.map((animation) => animation.kept)).toEqual([0, 0]);
+    tables[0]!.replace(0, { end: [90] });
+    long.replace(0, { end: [90] });
+    tick(16);
+    expect(reads.slice(-3).map((read) => read.get("r0")?.end)).toContain(90);
+    expect(longReads.at(-1)!.get("r0")!.end).toBe(90);
+  });
+
+  it("move a faceted mark in every panel, and keep one copy of a table two views read", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const made = animations();
+    const faceted = await mount({ ...options([comets(data, reads)]), facet: facet("group") });
+    const views = [rowView(data, { filter: ["<", ["field", "lane"], 3] }), rowView(data)];
+    const viewReads: Read[] = [];
+    const viewed = await mount(
+      options(views.map((view, i) => comets(view, viewReads, { id: `view${i}` }))),
+    );
+    await controlTime();
+    // Start, end, confidence, and lane by row, and the ids: one copy for both views.
+    expect(made.map((animation) => animation.kept)).toEqual([3 * 32 + 12, 3 * 32 + 12]);
+    data.replace(0, { end: [60, 70, 80] });
+    tick(160);
+    // Each panel's comets, and each view's, between.
+    expect(reads.slice(-2).map(ends)).toEqual([{ a: 50, b: 60 }, { c: 70 }]);
+    expect(viewReads.slice(-2).map(ends)).toEqual([
+      { a: 50, b: 60 },
+      { a: 50, b: 60, c: 70 },
+    ]);
+    tick(400);
+    expect(drawn(faceted)).not.toBe("");
+    // A view's own change of rows shows at once.
+    views[0]!.setQuery({ filter: ["<", ["field", "lane"], 4] });
+    tick(16);
+    expect(ends(viewReads.at(-2))).toEqual({ a: 60, b: 70, c: 80 });
+    void viewed;
+  });
+
+  it("move from what was drawn through in-place changes and resets, showing appends at once", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const moving = await mount(options([comets(data, reads)]));
+    const still = await mount(options([comets(data)], false));
+    await controlTime();
+    // Two writes before a frame: from what was drawn to the last.
+    data.replace(0, { end: [100] });
+    data.setColumn("end", [60, 50, 60]);
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 50, b: 50, c: 60 });
+    tick(400);
+    // Settled, the next change moves from there.
+    data.setColumn("end", [80, 50, 60]);
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 70, b: 50, c: 60 });
+    // A change arriving now moves on from where they are.
+    data.replace(1, { end: [90] });
+    tick(16);
+    expect(ends(reads.at(-1))).toEqual({ a: 70.5, b: 52, c: 60 });
+    tick(400);
+    // Keyed items move across a reset; one that comes, and keys repeated, show at once.
+    data.reset({
+      id: ["c", "a", "d", "e", "e"],
+      start: [20, 0, 0, 0, 0],
+      end: [80, 100, 30, 10, 20],
+      confidence: [1, 0, 1, 1, 1],
+      lane: [3, 1, 4, 2, 2],
+      group: ["y", "x", "y", "x", "x"],
+    });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ c: 70, a: 90, d: 30, e: 20 });
+    tick(400);
+    expect(drawn(moving)).toBe(drawn(still));
+    // Appended rows show at once, with the changes soon after.
+    data.append({ id: ["f"], start: [0], end: [50], confidence: [0], lane: [0], group: ["x"] });
+    tick(16);
+    expect(drawn(moving)).toBe(drawn(still));
+    data.replace(0, { end: [40] });
+    tick(16);
+    expect(drawn(moving)).toBe(drawn(still));
+  });
+
+  it("match rows without a key by identity, so a reset shows at once", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    await mount(options([comets(data, reads, { itemKey: undefined })]));
+    await controlTime();
+    data.replace(0, { end: [60] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 50, b: 50, c: 60 });
+    tick(400);
+    data.reset({
+      id: ["a", "b", "c"],
+      start: [0, 10, 20],
+      end: [80, 50, 60],
+      confidence: [0, 0.5, 1],
+      lane: [1, 2, 3],
+      group: ["x", "x", "y"],
+    });
+    tick(16);
+    expect(ends(reads.at(-1))).toEqual({ a: 80, b: 50, c: 60 });
+  });
+
+  it("load what moves them when they come after the chart's first frame, then move", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const lines = line(table({ t: [0, 100], v: [1, 4] }), { x: "t", y: "v" });
+    const chart = await mount(options([lines]));
+    chart.update(options([lines, comets(data, reads)]));
+    // The frame that draws them loads it, which `loading` waits for.
+    chart.render();
+    await chart.loading;
+    await controlTime();
+    data.replace(0, { end: [60, 70, 80] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 50, b: 60, c: 70 });
+  });
+
+  it("let go of a transition's values once it ends", async () => {
+    const data = forecasts();
+    const frames: WeakRef<object>[] = [];
+    const mark = custom(data, {
+      x: ["start", "end"],
+      y: "lane",
+      itemKey: "id",
+      encode: { strokeWidth: { field: "confidence", scale: "widths" } },
+      draw({ table: rows, series, x, y, path, encoded }) {
+        if (rows !== (data as unknown)) frames.push(new WeakRef(rows));
+        const end = rows.numbers("end");
+        for (const s of series)
+          for (let k = 0; k < s.length; k++) {
+            const row = s.rowAt(k);
+            path(`M${x(s.x[row]!)} ${y(s.y[row]!)}H${x(end[row]!)}`, {
+              strokeWidth: encoded("strokeWidth", row),
+            });
+          }
+      },
+    });
+    await mount(options([mark]));
+    await controlTime();
+    data.replace(0, { end: [60, 70, 80], confidence: [1, 1, 0] });
+    tick(160);
+    expect(frames.length).toBeGreaterThan(0);
+    tick(400);
+    vi.useRealTimers();
+    for (let i = 0; i < 3; i++) {
+      await frame();
+      await collectGarbage();
+    }
+    expect(frames.filter((ref) => ref.deref() !== undefined)).toEqual([]);
+  });
+
+  it("show a change under a resting pointer at once, settle on a move, and pick the item drawn", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const chart = await mount(options([comets(data, reads)]));
+    await controlTime();
+    const { plot } = modelOf(chart).panels()[0]!;
+    const rect = chart.root.getBoundingClientRect();
+    const xOf = (value: number) => rect.left + modelOf(chart).panels()[0]!.x.map(value);
+    const yOf = (lane: number) => rect.top + modelOf(chart).panels()[0]!.y.map(lane);
+    const at = {
+      bubbles: true,
+      clientX: rect.left + plot.x + 2,
+      clientY: yOf(4),
+      pointerId: MOUSE,
+    };
+    chart.root.dispatchEvent(new PointerEvent("pointermove", at));
+    tick(16);
+    data.replace(0, { end: [60] });
+    tick(16);
+    expect(ends(reads.at(-1))).toEqual({ a: 60, b: 50, c: 60 });
+    chart.root.dispatchEvent(new PointerEvent("pointerleave", at));
+    tick(400);
+
+    const hovered: (number | undefined)[] = [];
+    chart.on("hover", ({ target }) =>
+      hovered.push(target?.kind === "item" ? target.row : undefined),
+    );
+    data.replace(0, { end: [90] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 75, b: 50, c: 60 });
+    // Past the frame's end, on the comet's new one: the new values show, and it is picked.
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", { ...at, clientX: xOf(85), clientY: yOf(1) }),
+    );
+    expect(ends(reads.at(-1))).toEqual({ a: 90, b: 50, c: 60 });
+    tick(16);
+    expect(hovered.at(-1)).toBe(0);
+    chart.root.dispatchEvent(new PointerEvent("pointerleave", at));
+    tick(400);
+    // So do keys.
+    data.replace(0, { end: [40] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 65, b: 50, c: 60 });
+    chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(ends(reads.at(-1))).toEqual({ a: 40, b: 50, c: 60 });
+  });
+
+  it("show changes at once where motion is reduced", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query.includes("reduce"), media: query }) as MediaQueryList,
+    );
+    const data = forecasts();
+    const reads: Read[] = [];
+    await mount(options([comets(data, reads)]));
+    await controlTime();
+    data.replace(0, { end: [60] });
+    tick(16);
+    expect(ends(reads.at(-1))).toEqual({ a: 60, b: 50, c: 60 });
+  });
+});
+
+// A row view tells of its table's writes as the table does; the chart hears
+// what changed from the table, and values move as they do over the table.
+describe("value transitions over row views", () => {
+  const VALUES = { duration: 300, values: true } as const;
+  const prices = () =>
+    table({
+      k: ["a", "b", "c", "d"],
+      g: ["p", "p", "q", "q"],
+      x: [0, 1, 2, 3],
+      y: [10, 20, 30, 40],
+      lo: [5, 15, 25, 35],
+      hi: [15, 25, 35, 45],
+    });
+  type Prices = RowView<ReturnType<typeof prices> extends Table<infer S> ? S : never>;
+  type Family = [(view: Prices) => ChartOptions["marks"][number], NonNullable<ChartOptions["y"]>];
+  /** Each family's mark over a view, and the y axis it is drawn on. */
+  const FAMILIES: Record<string, Family> = {
+    bars: [(view) => bar(view, { x: "k", y: "y" }), { domain: [0, 60] }],
+    points: [(view) => point(view, { x: "x", y: "y", itemKey: "k" }), { domain: [0, 60] }],
+    lines: [(view) => line(view, { x: "x", y: "y" }), { domain: [0, 60] }],
+    areas: [(view) => area(view, { x: "x", y: "y" }), { domain: [0, 60] }],
+    "error bars": [(view) => errorbar(view, { x: "x", y1: "lo", y2: "hi" }), { domain: [0, 60] }],
+    candlesticks: [
+      (view) => candlestick(view, { x: "x", open: "lo", high: "hi", low: "lo", close: "y" }),
+      { domain: [0, 60] },
+    ],
+    heatmaps: [(view) => heatmap(view, { x: "k", y: "g", color: "y" }), {}],
+  };
+  /** What the chart's SVG draws, its ids aside. */
+  const drawn = (chart: Chart) =>
+    chart.root.querySelector("svg")!.outerHTML.replace(/herceg-\d+/g, "");
+
+  for (const [family, [markOf, y]] of Object.entries(FAMILIES))
+    it(`move ${family} over a view as its table's values change in place`, async () => {
+      const data = prices();
+      const options = (
+        animation: NonNullable<ChartOptions["animation"]>,
+      ): Partial<ChartOptions> => ({
+        animation,
+        renderer: "svg",
+        marks: [markOf(rowView(data, { filter: [">=", ["field", "y"], 0] }))],
+        y,
+      });
+      const moving = await mount(options(VALUES));
+      const still = await mount(options(false));
+      await controlTime();
+      const before = drawn(moving);
+      data.replace(0, { y: [30, 10, 40, 20], lo: [25, 5, 35, 15], hi: [35, 15, 45, 25] });
+      tick(16);
+      tick(100);
+      expect(drawn(moving)).not.toBe(before);
+      expect(drawn(moving)).not.toBe(drawn(still));
+      tick(400);
+      expect(drawn(moving)).toBe(drawn(still));
+    });
+
+  it("show a change during a view transition at once, as over the table itself", async () => {
+    const data = prices();
+    const options = (view: boolean): Partial<ChartOptions> => ({
+      animation: VALUES,
+      renderer: "svg",
+      marks: [
+        point(view ? rowView(data, { filter: [">=", ["field", "y"], 0] }) : data, {
+          x: "x",
+          y: "y",
+          itemKey: "k",
+        }),
+      ],
+      y: { domain: [0, 60] },
+    });
+    const viewed = await mount(options(true));
+    const direct = await mount(options(false));
+    await controlTime();
+    for (const chart of [viewed, direct]) chart.setViewport([0.5, 2.5]);
+    tick(16);
+    data.replace(0, { y: [30, 10, 40, 20] });
+    tick(16);
+    expect(drawn(viewed)).toBe(drawn(direct));
+  });
+
+  it("move bars and points over sorted and filtered views, their own changes of rows at once", async () => {
+    const sales = table({ region: ["N", "S", "E", "W"], sales: [10, 20, 30, 40] });
+    const top = rowView(sales, { sort: [{ field: "sales", order: "descending" }] });
+    const some = rowView(sales, { filter: [">", ["field", "sales"], 15] });
+    const marks = () => [
+      bar(top, { x: "region", y: "sales", itemKey: "region" }),
+      point(some, { x: "region", y: "sales", itemKey: "region" }),
+    ];
+    const moving = await mount({ animation: VALUES, marks: marks(), y: { domain: [0, 50] } });
+    const still = await mount({ animation: false, marks: marks(), y: { domain: [0, 50] } });
+    await controlTime();
+    // The sorted view changes order, the filtered one its rows.
+    sales.setColumn("sales", [45, 20, 5, 40]);
+    tick(160);
+    const shapes = (chart: Chart) =>
+      ["rect", "point"].map((kind) => chart.root.querySelector(`[data-kind="${kind}"]`)?.outerHTML);
+    expect(shapes(moving)).not.toEqual(shapes(still));
+    tick(400);
+    expect(shapes(moving)).toEqual(shapes(still));
+    // A view's own change of rows shows at once.
+    some.setQuery({ filter: [">", ["field", "sales"], 30] });
+    tick(16);
+    expect(shapes(moving)).toEqual(shapes(still));
   });
 });

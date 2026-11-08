@@ -11,7 +11,14 @@ import type { Clip, Dash, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 // row (ranges) are inspected by their items' shapes, under the pointer.
 
 import type { RowView } from "../data/row-view.ts";
-import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
+import type {
+  CategoryField,
+  NumericField,
+  PositionField,
+  ReadonlyTable,
+  Schema,
+  Table,
+} from "../data/table.ts";
 import { n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import type { PathShape, PlotRect, Rect, ShapesGeometry, TextShape } from "../scene/scene.ts";
@@ -68,7 +75,6 @@ import {
   xExtent,
   yExtent,
 } from "./series.ts";
-import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
@@ -161,7 +167,12 @@ export type CustomChannel = "color" | "strokeWidth" | "opacity";
 
 /** The draw context of a custom mark over a table. */
 export interface DataDrawContext<S extends Schema> extends DrawContext {
-  table: Table<S>;
+  /**
+   * The rows `series` index, to read: the table, or in frames of a value
+   * transition, the frame's values of the fields the mark declares (x, y,
+   * and those `encode` reads), valid during this call only.
+   */
+  table: ReadonlyTable<S>;
   /**
    * The series to draw: those the legend has not hidden, each holding only
    * this panel's rows in charts with facets. Empty for marks without series.
@@ -737,8 +748,9 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame, key: MarkKey): ShapesGeometry[] {
-    refuseValues(frame.keyed, this.spec.type);
-    const { theme, paint } = frame;
+    const { theme, paint, between } = frame;
+    // In a frame between two scenes, the fields the mark declares read the frame's values.
+    const values = between?.values;
     const shapes: (PathShape | TextShape)[] = [];
     // Shapes' colors are read as the chart's other colors are: each distinct one once.
     const path = (d: string, style: ShapeStyle = {}) => {
@@ -765,7 +777,16 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     };
     // Hidden series are not drawn, as with other marks.
     const shown = series.filter((s) => !frame.hidden.has(s.key));
-    const views = shown.map((s) => customSeries(s, this.#placed));
+    const views = shown.map((s) => {
+      const view = customSeries(s, this.#placed);
+      return values
+        ? {
+            ...view,
+            x: this.#banded.x ? view.x : values.numbers(this.#x[0]!),
+            y: this.#banded.y || !s.field ? view.y : values.numbers(s.field),
+          }
+        : view;
+    });
     const seriesOf = new Map(views.map((view, i) => [view, shown[i]!]));
     // Items as `item` calls draw them, and which rows a selection holds.
     const table = this.table;
@@ -792,7 +813,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     };
     // Without a table, `table` is undefined; the table-free context's type has none.
     const context: DataDrawContext<Schema> = {
-      table: table!,
+      table: values ?? table!,
       series: views,
       x: (value) => frame.x.map(value),
       y: (value) => frame.y.map(value),
@@ -849,7 +870,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
         ends.push(shapes.length);
       },
       encoded: ((channel: CustomChannel, row: number, series?: CustomSeries) =>
-        features?.encoded?.(channel, row, series)) as DataDrawContext<Schema>["encoded"],
+        features?.encoded?.(channel, row, series, values)) as DataDrawContext<Schema>["encoded"],
       items: (mark) => {
         const drawn = frame.items?.(mark);
         if (!drawn)
@@ -875,12 +896,40 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
       font,
       fontSize: theme.fontSize,
     };
-    let byMark = byPlot.get(frame.plot);
-    if (!byMark) {
-      byMark = new Map();
-      byPlot.set(frame.plot, byMark);
+    // Input reads the scene a transition goes to, not its frames between.
+    if (!between) {
+      let byMark = byPlot.get(frame.plot);
+      if (!byMark) {
+        byMark = new Map();
+        byPlot.set(frame.plot, byMark);
+      }
+      byMark.set(this, geometry);
     }
-    byMark.set(this, geometry);
+    if (frame.keyed) {
+      const rows = table && this.rows();
+      // A mark without series draws its table's rows, or its view's.
+      const drawn = this.#split
+        ? shown
+        : rows
+          ? [{ rows: rows.positions, length: rowCount(rows) }]
+          : [];
+      geometry.redraw = {
+        mark: this,
+        spec: this.spec,
+        x: this.#x,
+        y: this.#y,
+        table,
+        version: table?.version ?? 0,
+        series: drawn,
+        rows: drawn.reduce((count, { length }) => count + length, 0),
+        draw: (values, x, y) =>
+          this.geometry(
+            series,
+            { ...frame, x: x ?? frame.x, y: y ?? frame.y, keyed: false, between: { values } },
+            key,
+          )[0],
+      };
+    }
     if (starts.length > 0)
       drawnItems.set(geometry, {
         series: itemSeries,

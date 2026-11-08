@@ -3615,6 +3615,7 @@
       },
       "emits": ["click", "hover", "pin", "rowSelection", "select", "viewport"],
       "consumes": [
+        "animation.values",
         "interaction.sync.cursor",
         "interaction.sync.selection",
         "interaction.sync.viewport",
@@ -3682,15 +3683,7 @@
         "rendering.canvas": { "state": "works" },
         "rendering.auto": { "state": "works" },
         "lifecycle.view-animation": { "state": "works" },
-        "lifecycle.value-animation": {
-          "state": "refused",
-          "error": {
-            "code": "unsupported",
-            "path": "animation.values",
-            "message": "animation.values: custom marks do not move to new values; leave values out, and new values show at once"
-          },
-          "alternative": "Leave animation.values out: changed values show at once."
-        },
+        "lifecycle.value-animation": { "state": "works" },
         "lifecycle.cursor-sync": { "state": "works" },
         "lifecycle.viewport-sync": { "state": "works" },
         "lifecycle.selection-sync": { "state": "works" },

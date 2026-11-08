@@ -6,7 +6,8 @@ import type { Breaks } from "../lod/m4.ts";
 import type { ItemViews } from "../model/item-views.ts";
 import type { ChartModel, DrawnPanel, ViewDomains } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { AnimationSpec } from "../spec/spec.ts";
+import type { ChartError } from "../spec/errors.ts";
+import type { AnimationSpec, Easing } from "../spec/spec.ts";
 import { frameCount, lastFrameTime } from "./scheduler.ts";
 
 /** How long `animation: true` takes, in milliseconds. */
@@ -42,6 +43,8 @@ export interface Transition {
   to: { domains: ViewDomains | undefined; planes: Planes | undefined } | undefined;
   start: number;
   duration: number;
+  /** The `easing` it moves with, from 0 to 1 over its duration. */
+  ease: (t: number) => number;
 }
 
 /**
@@ -78,11 +81,52 @@ function costOf(batch: Batch): number {
 export class ViewAnimation {
   readonly #model: ChartModel;
   readonly #reducedMotion: MediaQueryList | null;
+  readonly #report: (error: ChartError) => void;
+  readonly #ChartError: typeof ChartError;
+  /** The `animation` option whose `easing` was last told of. */
+  #told: unknown;
   #transition: Transition | undefined;
 
-  constructor(model: ChartModel, window: Window | null) {
+  /**
+   * `report`: how the chart tells of options it refuses that do not keep it
+   * from drawing, as `ChartError`s (the chart's class, which this module
+   * takes rather than imports: a module both imported would move into a
+   * chunk of its own).
+   */
+  constructor(
+    model: ChartModel,
+    window: Window | null,
+    report: (error: ChartError) => void,
+    errors: typeof ChartError,
+  ) {
     this.#model = model;
     this.#reducedMotion = window?.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
+    this.#report = report;
+    this.#ChartError = errors;
+    this.easing();
+  }
+
+  /**
+   * The curve the chart's views and values move along: its `easing`'s, by
+   * default cubic-out. A name that is none moves as by default, and is
+   * told of once per `animation` option: only JavaScript can give one
+   * (the types and specs refuse it). The chart asks as its options change.
+   */
+  easing(): (t: number) => number {
+    const { animation } = this.#model.config;
+    const name = typeof animation === "object" ? (animation.easing ?? "cubic-out") : "cubic-out";
+    if (Object.hasOwn(EASINGS, name)) return EASINGS[name];
+    if (animation !== this.#told) {
+      this.#told = animation;
+      this.#report(
+        new this.#ChartError({
+          code: "invalid-option",
+          path: "animation.easing",
+          message: `animation.easing: expected "cubic-out", "linear", or "cubic-in-out"; received ${JSON.stringify(name)}`,
+        }),
+      );
+    }
+    return EASINGS["cubic-out"];
   }
 
   get playing(): boolean {
@@ -111,6 +155,7 @@ export class ViewAnimation {
       to: undefined,
       start: performance.now(),
       duration,
+      ease: this.easing(),
     };
     return true;
   }
@@ -237,11 +282,11 @@ function rangeOf(
  * plane that came since moves from nowhere: it shows where it ends.
  */
 function planesAt(
-  transition: Pick<Transition, "planes" | "duration">,
+  transition: Pick<Transition, "planes" | "duration" | "ease">,
   to: Planes,
   elapsed: number,
 ): Planes {
-  const t = ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
+  const t = transition.ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
   const views = new Map<string, { x: readonly [number, number]; y: readonly [number, number] }>();
   for (const [state, end] of to) {
     const start = transition.planes?.get(state) ?? end;
@@ -255,7 +300,7 @@ function planesAt(
 
 /** The ranges of the axes `elapsed` milliseconds into a transition of them. */
 export function domainsAt(transition: Transition, to: ViewDomains, elapsed: number): ViewDomains {
-  const t = ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
+  const t = transition.ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
   const { domains: from, log, breaks } = transition.axes!;
   const ranges = (a: Omit<ViewDomains, "ticks">, b: Omit<ViewDomains, "ticks">) => ({
     x: between(a.x, b.x, t, log.x, breaks),
@@ -267,10 +312,16 @@ export function domainsAt(transition: Transition, to: ViewDomains, elapsed: numb
   return { ...ranges(from, to), ...(ticks && { ticks }) };
 }
 
-/** Starts quickly and settles without overshooting (cubic ease-out). */
-function ease(t: number): number {
-  return 1 - (1 - t) ** 3;
-}
+/**
+ * The curves of `animation.easing`, d3's of these names (easeCubicOut,
+ * easeLinear, easeCubicInOut): progress from 0 at the start to 1 at the
+ * end, without overshooting. Value transitions move with them too.
+ */
+const EASINGS: Readonly<Record<Easing, (t: number) => number>> = {
+  "cubic-out": (t) => 1 - (1 - t) ** 3,
+  linear: (t) => t,
+  "cubic-in-out": (t) => (t < 0.5 ? 4 * t ** 3 : 1 - (2 - 2 * t) ** 3 / 2),
+};
 
 function between(
   from: readonly [number, number] | null,

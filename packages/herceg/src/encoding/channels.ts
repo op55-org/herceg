@@ -13,7 +13,7 @@
 // (`ScaleOf.owner`): a chart, or a grid (grid/looks.ts).
 
 import { compileExpression, type Expression } from "../data/expression.ts";
-import type { Table } from "../data/table.ts";
+import type { ReadonlyTable, Table } from "../data/table.ts";
 import type { ChannelName } from "../spec/channels.ts";
 import type { ChannelSpec, ChannelsSpec, IdentityScaleSpec, RankSpec } from "../spec/encoding.ts";
 import type { CategoryScale, Defaults } from "./category-scales.ts";
@@ -476,7 +476,7 @@ const ONE = { count: 1, at: () => 0 };
  */
 export function rowReader<V>(
   channel: Channel<V> | undefined,
-  table: Table,
+  table: ReadonlyTable,
   defaults: Defaults<V>,
   fallback: V,
   check: Check,
