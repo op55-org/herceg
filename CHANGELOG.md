@@ -120,6 +120,19 @@ legend entries and toggles, and scales read in a list show their key.
 Custom marks read lists through `encoded(channel, row, series)`. Heatmaps
 take no `encode`.
 
+Picking takes the nearest stroke or point within reach, down to the first
+fill the pointer is inside, in every chart family: a click among lines a
+pixel apart takes the one under it, a line over a band is reached inside
+the band, an area's outline over its own fill, a box plot's whisker as a
+stroke, and draggable rules are grabbed first. A hollow candle's body is
+reached at its outline; its inside picks what is under it. Selected parts
+paint over the rest, a line's over every series' dimmed lines.
+`chart.referenceOf("series" | "item", key)` (Python `reference_of` on
+charts and widgets) reads a key from an event as a reference to a mark's
+`id`, and legend entries carry
+the series and items they stand for as `references` (`getLegend()`,
+`legendEntry` targets, `hg.LegendEntryTarget`).
+
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,

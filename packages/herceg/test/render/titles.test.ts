@@ -272,7 +272,8 @@ describe("titles in static SVG", () => {
 
   contractTest("svg.titles.lines.series", () => {
     // Two lines over each other, one observation of the first selected: the
-    // second's targets over the first's dimmed ones, under its selected one.
+    // second's targets over the first's dimmed ones, under its selected one,
+    // which is drawn over every series' others.
     const two = table({
       x: [0, 1, 0, 1],
       y: [5, 5, 5, 5],
@@ -300,8 +301,8 @@ describe("titles in static SVG", () => {
       (title) => title.match(/tag: (\w+)/)![1],
     );
     expect(order.indexOf("a0")).toBeLessThan(order.indexOf("b0"));
-    expect(order.indexOf("a1")).toBeLessThan(order.indexOf("b1"));
-    // A run and a lone row of the first selected: each under the second's.
+    expect(order.indexOf("a1")).toBeGreaterThan(order.indexOf("b1"));
+    // A run and a lone row of the first selected: each over the second's.
     const four = table({
       x: [0, 1, 2, 3, 0, 1, 2, 3],
       y: [5, 5, 5, 5, 5, 5, 5, 5],
@@ -328,7 +329,9 @@ describe("titles in static SVG", () => {
     const after = titles(renderSvg(drawn.scene, { idPrefix: "t", titles: drawn.titles })).map(
       (title) => title.match(/tag: (\w+)/)![1],
     );
-    for (const k of [0, 1, 3]) expect(after.indexOf(`a${k}`)).toBeLessThan(after.indexOf(`b${k}`));
+    for (const k of [0, 1, 3])
+      expect(after.indexOf(`a${k}`)).toBeGreaterThan(after.indexOf(`b${k}`));
+    expect(after.indexOf("a2")).toBeLessThan(after.indexOf("b2"));
   });
 
   contractTest("svg.titles.budget", () => {

@@ -94,6 +94,8 @@ const SEGMENTS = 9;
  * Raw summaries keep outliers; both inputs use the same packed geometry.
  */
 export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]> {
+  /** Its medians paint over its boxes: picked by what it draws (see `Mark.pickDrawn`). */
+  readonly pickDrawn = true;
   /** Room past the outermost whisker or outlier for an outlier's dot. */
   readonly inset: { readonly x: number; readonly y: number };
   protected readonly noun = ["box", "boxes"] as const;
@@ -434,6 +436,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
               upper,
               lower,
               baseline: 0,
+              along: horizontal ? "x" : "y",
               stroke: null,
               strokeWidth: 0,
             }

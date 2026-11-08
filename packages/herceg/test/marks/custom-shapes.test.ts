@@ -26,7 +26,17 @@ const indexOf = (
     bounds,
   );
 
+/** What a query finds: the stroke nearest it within reach, else the fill holding it (at 0), else the fill beside it. */
+const at = (found: ReturnType<ShapeIndex["find"]>) =>
+  found &&
+  (found.near ?? (found.fill === undefined ? found.beside : { group: found.fill, distance: 0 }));
+
 describe("the shapes index", () => {
+  it("finds a shape among more overlapping it than a call takes arguments", () => {
+    const index = indexOf(Array.from({ length: 150_000 }, () => square(0, 0)));
+    expect(at(index.find(5, 5, 4))?.group).toBe(149_999);
+  });
+
   it("finds items through its grid whatever the boxes' extent", () => {
     // Over 256 items, one drawn far off the plot, the rest near the origin.
     const shapes = [
@@ -36,8 +46,8 @@ describe("the shapes index", () => {
       ),
     ];
     const index = indexOf(shapes);
-    expect(index.find(105, 105, 0)?.group).toBe(1);
-    expect(index.find(-99_995, 5, 0)?.group).toBe(0);
+    expect(at(index.find(105, 105, 0))?.group).toBe(1);
+    expect(at(index.find(-99_995, 5, 0))?.group).toBe(0);
     expect(index.find(5_000, 5, 4)).toBeUndefined();
   });
 
@@ -50,7 +60,7 @@ describe("the shapes index", () => {
         Array.from({ length: count }, () => long),
         bounds,
       );
-      expect(index.find(80.2, 5, 0)?.group, `${count}`).toBe(count - 1);
+      expect(at(index.find(80.2, 5, 0))?.group, `${count}`).toBe(count - 1);
       expect(index.box(0)).toEqual({ x: -1e9, y: 0, width: 1e9 + 80.25, height: 10 });
     }
   });
@@ -65,7 +75,7 @@ describe("the shapes index", () => {
       strokeWidth: 10,
     };
     const index = indexOf([stroke]);
-    expect(index.find(200, 150, 4)?.distance).toBe(0);
+    expect(at(index.find(200, 150, 4))?.distance).toBe(0);
     expect(index.find(200, 162, 4)).toBeUndefined();
   });
 
@@ -85,7 +95,7 @@ describe("the shapes index", () => {
         strokeWidth: 1,
       };
       const index = indexOf([ellipse]);
-      expect(index.find(200, 150, 0.5)?.distance, `${rx} × ${ry}`).toBe(0);
+      expect(at(index.find(200, 150, 0.5))?.distance, `${rx} × ${ry}`).toBe(0);
     }
   });
 
@@ -99,18 +109,18 @@ describe("the shapes index", () => {
     });
     // A closed path of one point paints nothing: the square under it is found.
     const dot = indexOf([square(95, 95), stroked("M100 100Z", 10)]);
-    expect(dot.find(100, 100, 0)?.group).toBe(0);
+    expect(at(dot.find(100, 100, 0))?.group).toBe(0);
     // A line whose first point repeats ends butt there, as drawn.
     const line = indexOf([stroked("M0 50L0 50L10 50", 4)]);
     expect(line.find(-1, 50, 0)).toBeUndefined();
-    expect(line.find(1, 51, 0)?.distance).toBe(0);
+    expect(at(line.find(1, 51, 0))?.distance).toBe(0);
   });
 
   it("find shapes at the grid's edges, and leave those far past its bounds out of it", () => {
     const shapes = Array.from({ length: 257 }, () => square(0, 0, 32));
     const index = indexOf(shapes);
-    expect(index.find(32, 16, 0)?.group).toBe(256);
-    expect(index.find(16, 32, 0)?.group).toBe(256);
+    expect(at(index.find(32, 16, 0))?.group).toBe(256);
+    expect(at(index.find(16, 32, 0))?.group).toBe(256);
     // One drawn far away is not filed, and does not coarsen the grid.
     const bounded = indexOf([square(-1e9, -1e9), ...shapes], {
       x: -100,
@@ -118,7 +128,7 @@ describe("the shapes index", () => {
       width: 300,
       height: 300,
     });
-    expect(bounded.find(16, 16, 0)?.group).toBe(257);
+    expect(at(bounded.find(16, 16, 0))?.group).toBe(257);
     expect(bounded.find(-1e9 + 5, -1e9 + 5, 0)).toBeUndefined();
     expect(bounded.box(0)).toEqual({ x: -1e9, y: -1e9, width: 10, height: 10 });
   });
@@ -126,8 +136,8 @@ describe("the shapes index", () => {
   it("find the last painted of shapes as near, and fills by their shapes, not their boxes", () => {
     const triangle: PathShape = { ...square(0, 0), d: "M0 0L20 0L0 20Z" };
     const index = indexOf([square(0, 0, 30), triangle]);
-    expect(index.find(5, 5, 0)?.group).toBe(1);
+    expect(at(index.find(5, 5, 0))?.group).toBe(1);
     // Inside the triangle's box, outside the triangle: the square under it.
-    expect(index.find(15, 15, 0)?.group).toBe(0);
+    expect(at(index.find(15, 15, 0))?.group).toBe(0);
   });
 });

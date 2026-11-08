@@ -8,6 +8,8 @@ import { table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { boxplot } from "../../src/marks/boxplot.ts";
+import { candlestick } from "../../src/marks/candlestick.ts";
 import { custom } from "../../src/marks/custom.ts";
 import type { DrawnPart } from "../../src/marks/drawn.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
@@ -18,6 +20,7 @@ import { point } from "../../src/marks/point.ts";
 import { region } from "../../src/marks/region.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { text } from "../../src/marks/text.ts";
+import { violin } from "../../src/marks/violin.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { Picker } from "../../src/model/pick.ts";
@@ -30,6 +33,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { pickKit } from "../helpers/picker.ts";
 import { xScale, yScale } from "../helpers/scales.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -392,6 +396,409 @@ describe("order", () => {
     expect(pickAt(model, px, py)).toEqual({ mark: 1, row: 0 });
     expect(pickAt(model, px, py + 40)?.mark).toBe(0);
     expect(pickAt(model, pixel(model, 8, 5)[0], py + 40)).toBeUndefined();
+  });
+});
+
+describe("the rule", () => {
+  // The nearest stroke or point within reach, down to the first fill the
+  // point is inside, which covers what is painted under it; ties to the
+  // topmost.
+  /** A chart of x and y from 0 to 10, without a legend, so that charts of other marks place alike. */
+  const chart = (marks: ChartConfig["marks"]) =>
+    build({
+      marks,
+      legend: false,
+      x: { domain: [0, 10], nice: false },
+      y: { domain: [0, 10], nice: false },
+    });
+  /** A horizontal line at data value `y`. */
+  const flat = (y: number) => line(table({ x: [0, 10], y: [y, y] }), { x: "x", y: "y" });
+  // Charts of these marks share its plot: their axes are alike.
+  const probe = chart([flat(5)]);
+  /** The pixel of (4, 5), where the tests point. */
+  const [px, py] = pixel(probe, 4, 5);
+  /** The data value drawn `pixels` below the point (above it for a negative number). */
+  const below = (pixels: number) => yScale(probe)!.invert(py + pixels);
+  /** What is picked at (x, y): its mark, row, and series key. */
+  const at = (model: ChartModel, x: number, y: number) => {
+    const picked = picker.pick(model, { x, y, slop: 4 });
+    const { part } = picked?.item ?? {};
+    return (
+      picked && {
+        mark: picked.key,
+        row: part?.kind === "row" ? part.position : undefined,
+        series: picked.series?.key,
+      }
+    );
+  };
+
+  it("takes the line of a crowd the point is on, not one painted over it within reach", () => {
+    // Twelve lines of one mark, a pixel and a quarter apart.
+    const names = Array.from({ length: 12 }, (_, k) => `s${k}`);
+    const crowd = table({
+      x: [0, 10],
+      ...Object.fromEntries(names.map((name, k) => [name, [below(-1.25 * k), below(-1.25 * k)]])),
+    });
+    const model = chart([line(crowd, { x: "x", y: names as never })]);
+    for (const [k, name] of names.entries())
+      expect(at(model, px, py - 1.25 * k)?.series, name).toBe(JSON.stringify([0, name]));
+  });
+
+  it("takes the nearer of two lines of two marks, the later painted over the earlier", () => {
+    // On the first's pixels, the second 2 px away: the first.
+    expect(at(chart([flat(5), flat(below(2))]), px, py)?.mark).toBe(0);
+    // Between them, 1 px from one and 3 px from the other.
+    const two = chart([flat(5), flat(below(4))]);
+    expect(at(two, px, py + 1)?.mark).toBe(0);
+    expect(at(two, px, py + 3)?.mark).toBe(1);
+  });
+
+  it("ties to the topmost: lines drawn over each other, and glyphs the point is inside", () => {
+    const same = chart([flat(5), flat(5)]);
+    expect(at(same, px, py)?.mark).toBe(1);
+    expect(at(same, px, py + 2)?.mark).toBe(1);
+    const dots = chart([
+      point(table({ x: [4], y: [5] }), { x: "x", y: "y", radius: 6 }),
+      point(table({ x: [4], y: [below(2)] }), { x: "x", y: "y", radius: 6 }),
+    ]);
+    expect(at(dots, px, py + 1)?.mark).toBe(1);
+  });
+
+  it("takes the nearer of two marks' points, whichever is painted later", () => {
+    // Glyphs of radius 3, their edges 2 px and 3 px from the point.
+    const dots = chart([
+      point(table({ x: [4], y: [below(5)] }), { x: "x", y: "y", radius: 3 }),
+      point(table({ x: [4], y: [below(-6)] }), { x: "x", y: "y", radius: 3 }),
+    ]);
+    expect(at(dots, px, py)?.mark).toBe(0);
+  });
+
+  it("takes a line over a band within its reach, inside the band too", () => {
+    const model = chart([region({ x1: 2, x2: 6 }), flat(5)]);
+    expect(at(model, px, py)?.mark).toBe(1);
+    expect(at(model, px, py + 2)?.mark).toBe(1);
+    expect(at(model, px, py + 30)?.mark).toBe(0);
+  });
+
+  it("lets a fill painted over a stroke cover it, and a stroke over a fill reach into it", () => {
+    const bars = table({ c: ["a"], v: [6] });
+    const under = build({
+      marks: [bar(bars, { x: "c", y: "v" }), rule({ y: 4 })],
+      y: { domain: [0, 10] },
+    });
+    const [middle] = barAt(under, 0);
+    const over = build({
+      marks: [rule({ y: 4 }), bar(bars, { x: "c", y: "v" })],
+      y: { domain: [0, 10] },
+    });
+    const [, ruled] = pixel(over, 0, 4);
+    expect(at(over, middle, ruled + 2)?.mark).toBe(1);
+    expect(at(over, middle, ruled)?.mark).toBe(1);
+    expect(at(under, middle, ruled + 2)?.mark).toBe(1);
+    expect(at(under, middle, ruled + 20)?.mark).toBe(0);
+  });
+
+  it("reaches an area's outline over its own fill, and covers what is under the fill", () => {
+    const top = table({ x: [0, 10], y: [5, 5] });
+    // A line under the area, a pixel from the point inside its fill.
+    const covered = chart([flat(below(4)), area(top, { x: "x", y: "y" })]);
+    expect(at(covered, px, py + 3)?.mark).toBe(1);
+    // A line over it: the nearer of it and the outline.
+    const reached = chart([area(top, { x: "x", y: "y" }), flat(below(4))]);
+    expect(at(reached, px, py + 1)?.mark).toBe(0);
+    expect(at(reached, px, py + 3)?.mark).toBe(1);
+  });
+
+  it("takes a custom mark's stroke over its own fill, never another mark's line under it", () => {
+    // Each row an item: a filled square, then a stroke across it 2 px over the point.
+    const rows = table({ x: [4, 4], y: [5, 5] });
+    const model = chart([
+      flat(below(1)),
+      custom(rows, {
+        x: "x",
+        y: "y",
+        draw({ series, x, y, item, rect, line: stroke }) {
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              const [cx, cy] = [x(s.x[row]!), y(s.y[row]!)];
+              item(s, row, () =>
+                row === 0
+                  ? rect(cx - 20, cy - 20, 40, 40, { fill: "#cccccc" })
+                  : stroke(cx - 20, cy - 2, cx + 20, cy - 2, { stroke: "#000000" }),
+              );
+            }
+        },
+      }),
+    ]);
+    expect(at(model, px, py)).toMatchObject({ mark: 1, row: 1 });
+    // Away from the stroke, inside the square: the square, over the line still.
+    expect(at(model, px, py + 10)).toMatchObject({ mark: 1, row: 0 });
+    expect(at(chart([flat(below(1))]), px, py)?.mark).toBe(0);
+  });
+
+  it("takes a filled custom path on its thick outline's outer half, before a line under it", () => {
+    // A square whose top edge is 10 px under the point, its outline 8 px wide.
+    const outlined = (lineAt: number) =>
+      chart([
+        flat(below(lineAt)),
+        custom(table({ x: [4], y: [5] }), {
+          x: "x",
+          y: "y",
+          draw({ series, x, y, item, rect }) {
+            for (const s of series)
+              item(s, s.rowAt(0), () =>
+                rect(x(s.x[0]!) - 30, y(s.y[0]!) + 10, 60, 40, {
+                  fill: "#cccccc",
+                  stroke: "#000000",
+                  strokeWidth: 8,
+                }),
+              );
+          },
+        }),
+      ]);
+    // On the outline's outer half, a line a pixel off: the path.
+    expect(at(outlined(7), px, py + 8)?.mark).toBe(1);
+    // 3 px past the outline, the line a pixel off: the line.
+    expect(at(outlined(4), px, py + 3)?.mark).toBe(0);
+    // Inside its fill, the line a pixel off under it: the path.
+    expect(at(outlined(29), px, py + 30)?.mark).toBe(1);
+  });
+
+  it("measures a box plot by what it draws: its box covers, its whiskers are strokes", () => {
+    const samples = table({ g: ["a", "a", "a", "a", "a"], v: [1, 4, 5, 6, 9] });
+    const boxes = (over: number) =>
+      build({
+        marks: [boxplot(samples, { x: "g", y: "v" }), rule({ y: over })],
+        legend: false,
+        y: { domain: [0, 10], nice: false },
+      });
+    const model = boxes(8);
+    const [, ruled] = pixel(model, 0, 8);
+    const center = pixel(model, 0, 5)[0];
+    // On the whisker, the rule 3 px off: the box plot.
+    expect(at(model, center, ruled + 3)?.mark).toBe(0);
+    // Beside the whisker, inside the plot's box around it, 3 px from the rule: the rule.
+    expect(at(model, center + 8, ruled + 3)?.mark).toBe(1);
+    // Inside the box, the rule within reach over it: the rule; far from it, the box.
+    const low = boxes(5.5);
+    const [, inside] = pixel(low, 0, 5.5);
+    expect(at(low, center + 8, inside + 3)?.mark).toBe(1);
+    expect(at(low, center + 8, pixel(low, 0, 4.5)[1])?.mark).toBe(0);
+    // On the median, the rule 2 px over it: the median, a stroke over the box.
+    const [, median] = pixel(model, 0, 5);
+    expect(at(boxes(yScale(model)!.invert(median - 2)), center + 8, median)?.mark).toBe(0);
+    // Just past the box's side, where its whisker is far: nothing.
+    const box = model.drawnMarks()[0]!.geometry.find((g) => g.kind === "rect") as RectGeometry;
+    const side = box.rects[0]! + box.rects[2]!;
+    expect(at(model, side + 1, pixel(model, 0, 8)[1] + 10)).toBeUndefined();
+  });
+
+  it("takes the box plot group whose stroke is nearest, as drawn, in the query's series", () => {
+    // A hundred groups, a few pixels apart: beside group 0's box, at its whisker's height.
+    const groups = Array.from({ length: 100 }, (_, i) => `g${String(i).padStart(2, "0")}`);
+    const samples = table({
+      g: groups.flatMap((g) => [g, g, g, g, g]),
+      v: groups.flatMap((_, i) => (i === 1 ? [1, 7, 8, 9, 9] : [1, 3, 5, 7, 9])),
+    });
+    const model = build({
+      marks: [boxplot(samples, { x: "g", y: "v" })],
+      legend: false,
+      y: { domain: [0, 10], nice: false },
+    });
+    const { rects } = model.drawnMarks()[0]!.geometry[0] as RectGeometry;
+    const center = rects[0]! + rects[2]! / 2;
+    const [, y8] = pixel(model, 0, 8);
+    // Group 1's box edge, nearer than group 0's whisker (half its stroke off).
+    const edge = rects[4]!;
+    const picked = picker.pick(model, { x: center + 2.6, y: y8, slop: 4 });
+    expect(picked?.item.names).toEqual(["g01"]);
+    expect(picked?.item.distance).toBeCloseTo(edge - (center + 2.6) - 0.75, 2);
+    // Nearer group 0's whisker: group 0.
+    expect(picker.pick(model, { x: center + 1, y: y8, slop: 4 })?.item.names).toEqual(["g00"]);
+    // A query for a series of none of the mark's finds nothing of it.
+    expect(picker.pick(model, { x: center, y: y8, slop: 4, series: "none" })).toBeUndefined();
+  });
+
+  it("picks what a zoomed box plot shows of its box and whiskers", () => {
+    const samples = table({ g: ["a", "a", "a", "a", "a"], v: [1, 3, 5, 7, 9] });
+    const zoomed = (y: [number, number]) => {
+      const model = build({ marks: [boxplot(samples, { x: "g", y: "v" })], legend: false });
+      setViewport(model, { y });
+      model.scene(estimateText);
+      return model;
+    };
+    // The box's middle out of view: its visible inside, beside the center.
+    const inBox = zoomed([6, 8]);
+    const center = pixel(inBox, 0, 5)[0];
+    expect(at(inBox, center + 20, pixel(inBox, 0, 6.6)[1])?.mark).toBe(0);
+    // The whisker's middle out of view: its visible part.
+    const whisker = zoomed([8.2, 9.2]);
+    expect(at(whisker, center, pixel(whisker, 0, 8.5)[1])?.mark).toBe(0);
+  });
+
+  it("covers what a violin holds, its outline, whisker, and median dot strokes over it", () => {
+    const samples = table({ g: ["a", "a", "a", "a", "a"], v: [1, 3, 5, 7, 9] });
+    // A line at 4 under the violin, and a rule over it.
+    const violins = (over: number) =>
+      build({
+        marks: [
+          line(table({ g: ["a", "a"], y: [4, 4] }), { x: "g", y: "y" }),
+          violin(samples, { x: "g", y: "v" }),
+          rule({ y: over }),
+        ],
+        legend: false,
+        y: { domain: [0, 10], nice: false },
+      });
+    const model = violins(0.5);
+    const [center, median] = pixel(model, 0, 5);
+    const [, low] = pixel(model, 0, 4);
+    const above = (y: number, pixels: number) => yScale(model)!.invert(y - pixels);
+    // On the median's dot, the rule 2 px over it: the violin; on its inner
+    // box, which covers its whisker, the rule.
+    expect(at(violins(above(median, 2)), center, median)?.mark).toBe(1);
+    const [, inBox] = pixel(model, 0, 6);
+    expect(at(violins(above(inBox, 2)), center, inBox)?.mark).toBe(2);
+    // Inside its body, away from its inner box: the violin over the line;
+    // with the rule 2 px over, the rule.
+    expect(at(model, center + 30, low)?.mark).toBe(1);
+    expect(at(violins(above(low, 2)), center + 30, low)?.mark).toBe(2);
+  });
+
+  it("names a box plot's outlier for its own group beside a narrow neighbour", () => {
+    // 125 groups 4.45 px apart; g010's outlier at 30, the others' whiskers reaching 35.
+    const groups = Array.from({ length: 125 }, (_, i) => `g${String(i).padStart(3, "0")}`);
+    const samples = table({
+      g: groups.flatMap((g) => Array.from({ length: 10 }, () => g)),
+      v: groups.flatMap((_, i) =>
+        i === 10 ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 30] : [1, 4, 8, 12, 16, 20, 24, 28, 30, 35],
+      ),
+    });
+    const model = build({
+      marks: [boxplot(samples, { x: "g", y: "v" })],
+      legend: false,
+      y: { domain: [0, 40], nice: false },
+    });
+    const dots = model.drawnMarks()[0]!.geometry.find((g) => g.kind === "point") as PointGeometry;
+    const [dx, dy] = [dots.coords[0]!, dots.coords[1]!];
+    const picked = picker.pick(model, { x: dx + 2.4, y: dy, slop: 4 });
+    expect(picked?.item.names).toEqual(["g010"]);
+  });
+
+  it("covers a notched box's inside, upright or lying", () => {
+    const samples = table({
+      g: Array.from({ length: 40 }, () => "a"),
+      v: Array.from({ length: 40 }, (_, i) => i % 10),
+    });
+    for (const horizontal of [false, true]) {
+      const marks = [
+        rule(horizontal ? { x: 4 } : { y: 4 }),
+        boxplot(
+          samples,
+          horizontal ? { x: "v", y: "g", notch: true } : { x: "g", y: "v", notch: true },
+        ),
+      ];
+      const model = build({ marks, legend: false });
+      const [px, py] = horizontal ? pixel(model, 4, 0) : pixel(model, 0, 4);
+      // 20 px beside the box's center, a pixel past the rule under it: the box.
+      const [x, y] = horizontal ? [px + 1, py + 20] : [px + 20, py + 1];
+      expect(at(model, x, y)?.mark, horizontal ? "lying" : "upright").toBe(1);
+    }
+  });
+
+  it("covers what a falling candle's body hides: its wick is no stroke inside it", () => {
+    const prices = table({ t: [0, 1, 2], o: [7, 7, 7], h: [9, 9, 9], l: [1, 1, 1], c: [3, 3, 3] });
+    const candles = (over: number) =>
+      build({
+        marks: [
+          candlestick(prices, { x: "t", open: "o", high: "h", low: "l", close: "c" }),
+          rule({ y: over }),
+        ],
+        legend: false,
+        y: { domain: [0, 10], nice: false },
+      });
+    const model = candles(5);
+    const [cx, y5] = pixel(model, 1, 5);
+    // In the body, the rule 2 px off over it: the rule, not the wick under the body.
+    const near = candles(yScale(model)!.invert(y5 - 2));
+    expect(at(near, cx, y5)?.mark).toBe(1);
+    // Far from the rule, the candle.
+    expect(at(candles(9.5), cx, y5)?.mark).toBe(0);
+    // A rising candle painted over it: its wick, on the point, over the rule 2 px off.
+    const rising = table({ t: [1], o: [2], h: [9], l: [1], c: [4] });
+    const over = build({
+      marks: [
+        candlestick(prices, { x: "t", open: "o", high: "h", low: "l", close: "c" }),
+        candlestick(rising, { x: "t", open: "o", high: "h", low: "l", close: "c" }),
+        rule({ y: yScale(model)!.invert(y5 - 2) }),
+      ],
+      legend: false,
+      x: { domain: [0, 2], nice: false },
+      y: { domain: [0, 10], nice: false },
+    });
+    const [wick] = pixel(over, 1, 5);
+    expect(at(over, wick, y5)?.mark).toBe(1);
+  });
+
+  it("reaches a hollow candle's body at its outline, its inside picking what is under it", () => {
+    const rising = table({ t: [4], o: [2], h: [9], l: [1], c: [8] });
+    const model = chart([
+      flat(5),
+      candlestick(rising, { x: "t", open: "o", high: "h", low: "l", close: "c" }),
+    ]);
+    const [cx, y5] = pixel(model, 4, 5);
+    expect(at(model, cx, y5)?.mark).toBe(0);
+    expect(at(model, cx, pixel(model, 4, 8)[1])?.mark).toBe(1);
+  });
+
+  it("reaches a rectangle's outline on each of its sides", () => {
+    const bars = table({ c: ["a"], v: [6] });
+    const model = build({
+      marks: [bar(bars, { x: "c", y: "v", stroke: "#000000", strokeWidth: 6 })],
+      legend: false,
+      y: { domain: [-4, 10], nice: false },
+    });
+    const { rects } = model.drawnMarks()[0]!.geometry[0] as RectGeometry;
+    const [x0, y0, w, h] = [rects[0]!, rects[1]!, rects[2]!, rects[3]!];
+    const [cx, cy] = [x0 + w / 2, y0 + h / 2];
+    // 2 px past each side's edge, within the outline's outer half and the reach.
+    for (const [x, y] of [
+      [cx, y0 - 4],
+      [x0 + w + 4, cy],
+      [cx, y0 + h + 4],
+      [x0 - 4, cy],
+    ] as const)
+      expect(at(model, x, y)?.mark, `${x} ${y}`).toBe(0);
+  });
+
+  it("leaves fills with pick: false covering nothing", () => {
+    const model = chart([flat(5), region({ x1: 2, x2: 6, pick: false })]);
+    expect(at(model, px, py + 2)?.mark).toBe(0);
+    expect(at(model, px, py + 30)).toBeUndefined();
+  });
+
+  it("takes a custom shape the point is inside before one beside it, and one beside it where none holds it", () => {
+    // Two squares 20 px wide 3 px apart; the later one's edge 2 px from a point inside the earlier.
+    const squares = (gap: number) =>
+      custom(table({ x: [4, 4], y: [5, 5] }), {
+        x: "x",
+        y: "y",
+        draw({ series, x, y, item, rect }) {
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              const left = x(s.x[row]!) + (row === 0 ? -20 : gap);
+              item(s, row, () => rect(left, y(s.y[row]!) - 10, 20, 20));
+            }
+        },
+      });
+    const model = chart([squares(3)]);
+    expect(at(model, px - 1, py)).toMatchObject({ row: 0 });
+    // Between them: the nearer.
+    expect(at(model, px + 2.5, py)).toMatchObject({ row: 1 });
+    // Beside a square, a line farther off: the square; nearer, the line.
+    expect(at(chart([flat(below(3)), squares(3)]), px + 1, py)).toMatchObject({ mark: 1, row: 0 });
+    expect(at(chart([squares(3), flat(below(0.5))]), px + 1.5, py)?.mark).toBe(1);
   });
 });
 

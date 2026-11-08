@@ -20,6 +20,7 @@ import { histogram } from "../../src/marks/histogram.ts";
 import type { ChartMark } from "../../src/marks/mark.ts";
 import { DIM } from "../../src/marks/mark.ts";
 import { pie } from "../../src/marks/pie.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { sankey } from "../../src/marks/sankey.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { treemap } from "../../src/marks/treemap.ts";
@@ -38,6 +39,7 @@ import type {
   ShapesGeometry,
 } from "../../src/scene/scene.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>): Table => typed(columns) as unknown as Table;
@@ -407,6 +409,26 @@ describe("box plots, boxen marks, and violins with a selection", () => {
     const sorted = Float64Array.from([0.1, 0.2, 0.35, 0.4, 0.9], (v) => 1e9 + v);
     const whole = kde(sorted, 0.05)!;
     expect(Array.from(partDensity(whole, 5, sorted))).toEqual(Array.from(whole.values));
+  });
+
+  it("pick a selected violin's fill over the whole's whisker it covers", () => {
+    const values = table({ g: category(Array(9).fill("a")), v: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+    const violins = (over: number) => {
+      const { model, select } = highlighted(
+        values,
+        [violin(values, { x: "g", y: "v" }), rule({ y: over })],
+        { legend: false, y: { domain: [0, 10], nice: false } },
+      );
+      select([3, 4, 5]);
+      model.scene(estimateText);
+      return withPicker(model);
+    };
+    const plain = violins(0.5);
+    // At 2 on the center, the whole's whisker under the selected violin's
+    // fill, whose strokes are far: with a rule 2 px over, the rule.
+    const [x, y] = [xScale(plain)!.map(0), yScale(plain)!.map(2)];
+    expect(plain.picker!(x, y)?.key).toBe(0);
+    expect(violins(yScale(plain)!.invert(y - 2)).picker!(x, y)?.key).toBe(1);
   });
 
   it("summarize each facet panel's selected values in its own shapes", () => {

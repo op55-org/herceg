@@ -338,6 +338,11 @@ def _calls(tmp: Path) -> dict[str, Call]:
             function=getattr(hg.Chart, name),
             alone={"quality": {"format": "jpeg"}} if name == "to_image" else {},
         )
+    calls["Chart.reference_of"] = Call(
+        _method(_line, "reference_of"),
+        {"kind": "series", "key": '["lines","v"]'},
+        function=hg.Chart.reference_of,
+    )
     # Layouts of panels, and their cells.
     layouts: dict[str, tuple[Callable[[], Any], dict[str, Any]]] = {
         "Chart.grid": (lambda: hg.Chart(DATA), {"rows": 2, "columns": 2}),
@@ -466,6 +471,7 @@ def _calls(tmp: Path) -> dict[str, Call]:
         "on_pin": {"callback": print},
         "pin": {"value": 1.0},
         "update_rule": {"id": "limit", "y": 2.0},
+        "reference_of": {"kind": "series", "key": '["lines","v"]'},
         "on_hover": {"callback": print},
         "on_click": {"callback": print},
         "on_context_menu": {"callback": print},

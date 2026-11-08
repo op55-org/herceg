@@ -177,7 +177,21 @@ export interface PickQuery {
   readonly lookups: Lookups;
 }
 
-/** A mark's topmost item within reach. */
+/**
+ * What a mark has at a query (model/pick.ts), each within reach: its
+ * nearest stroke or point (`candidate`); the fill the query is inside
+ * (`fill`; null for one standing for no item), which covers what is
+ * painted under the mark; and for marks reaching fills from beside them
+ * (cells, custom shapes), the one nearest the query outside it (`beside`),
+ * which counts only where no fill holds the query.
+ */
+export interface PickResult {
+  readonly candidate?: PickedItem | undefined;
+  readonly beside?: PickedItem | undefined;
+  readonly fill?: PickedItem | null | undefined;
+}
+
+/** An item a pick found. */
 export interface PickedItem {
   /** The mark whose item it is, where it is not the record's: a layer of a map or 3D box drawn as one. */
   readonly mark?: MarkKey | undefined;
@@ -187,7 +201,7 @@ export interface PickedItem {
   readonly names: readonly KeyPart[] | undefined;
   /** Its drawn bounds; a line's observation, or a layout item, its point. */
   readonly box: Readonly<Rect>;
-  /** Pixels from the pointer to the drawn shape; 0 inside it. */
+  /** Pixels from the pointer to the drawn shape; 0 on or inside it. */
   readonly distance: number;
 }
 

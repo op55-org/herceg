@@ -1,6 +1,7 @@
 // Where a custom mark's items are, as their shapes are painted: for the
-// picker (within a pointer's reach) and for tooltips and `chart.inspect()`
-// (exactly on a shape). Each item is the shapes one `item` call drew.
+// picker (within a pointer's reach, a fill covering the shapes painted
+// before it) and for tooltips and `chart.inspect()` (exactly on a shape).
+// Each item is the shapes one `item` call drew.
 // Paths are read as browsers read SVG path data (draw/svg-path.ts),
 // curves and arcs flattened to within a quarter pixel near the query
 // (pieces far from it are their chords); fills by the nonzero rule,
@@ -242,6 +243,12 @@ function textBox(shape: TextShape, font: string, size: number, measure: MeasureT
   return { x, y: shape.y - height / 2, width, height };
 }
 
+/** A group found near a point, and how far it is. */
+interface Found {
+  readonly group: number;
+  readonly distance: number;
+}
+
 /** One item's shapes: shapes [start, end) of the geometry. */
 export interface ShapeGroup {
   readonly start: number;
@@ -317,76 +324,72 @@ export class ShapeIndex {
   }
 
   /**
-   * The group drawn nearest (x, y) within `reach` pixels of its shapes (0:
-   * on them), of those `accept` takes; of groups as near (the point inside
-   * several), the one painted last.
+   * What is drawn at (x, y), of the groups `accept` takes, as a picker
+   * walks it from the top down (model/pick.ts), each by its group and its
+   * distance within `reach` pixels (0 on it): the stroke nearest the point
+   * over the topmost fill holding it (`near`); that fill's group (`fill`),
+   * which covers every shape painted under it; and where no fill holds it,
+   * the fill or text nearest it from outside (`beside`). Ties go to the
+   * shape painted later.
    */
   find(
     x: number,
     y: number,
     reach: number,
     accept?: (group: number) => boolean,
-  ): { group: number; distance: number } | undefined {
-    let best: { group: number; distance: number } | undefined;
-    const test = (group: number) => {
-      if (accept && !accept(group)) return;
-      const box = this.box(group);
-      if (!box || toBox(box, x, y) > reach) return;
-      const distance = this.#distance(group, x, y, reach);
-      if (distance > reach) return;
-      if (
-        best &&
-        (distance > best.distance + TIE || (distance > best.distance - TIE && group < best.group))
-      )
-        return;
-      best = { group, distance };
-    };
+  ): { near?: Found; beside?: Found; fill?: number } | undefined {
+    // The groups that may reach the point, the last painted first.
+    let groups: number[] = [];
     const grid = this.#gridOf();
-    if (!grid) {
-      for (let g = 0; g < this.#groups.length; g++) test(g);
-      return best;
-    }
-    const seen = new Set<number>();
-    // The cells the query's reach covers, those at the grid's edges for a
-    // query past them (boxes there may reach it; the exact test decides).
-    const { cell: side, columns, rows } = grid;
-    const clamp = (v: number, last: number) => Math.min(last, Math.max(0, Math.floor(v / side)));
-    const c0 = clamp(x - reach - grid.x, columns - 1);
-    const c1 = clamp(x + reach - grid.x, columns - 1);
-    const r0 = clamp(y - reach - grid.y, rows - 1);
-    const r1 = clamp(y + reach - grid.y, rows - 1);
-    for (let r = r0; r <= r1; r++)
-      for (let c = c0; c <= c1; c++) {
-        const cell = r * grid.columns + c;
-        for (let k = grid.offsets[cell]!; k < grid.offsets[cell + 1]!; k++) {
-          const group = grid.groups[k]!;
-          if (seen.has(group)) continue;
-          seen.add(group);
-          test(group);
+    if (!grid) for (let g = this.#groups.length - 1; g >= 0; g--) groups.push(g);
+    else {
+      const seen = new Set<number>(grid.large);
+      // The cells the query's reach covers, those at the grid's edges for a
+      // query past them (boxes there may reach it; the exact test decides).
+      const { cell: side, columns, rows } = grid;
+      const clamp = (v: number, last: number) => Math.min(last, Math.max(0, Math.floor(v / side)));
+      const c0 = clamp(x - reach - grid.x, columns - 1);
+      const c1 = clamp(x + reach - grid.x, columns - 1);
+      const r0 = clamp(y - reach - grid.y, rows - 1);
+      const r1 = clamp(y + reach - grid.y, rows - 1);
+      for (let r = r0; r <= r1; r++)
+        for (let c = c0; c <= c1; c++) {
+          const cell = r * grid.columns + c;
+          for (let k = grid.offsets[cell]!; k < grid.offsets[cell + 1]!; k++)
+            seen.add(grid.groups[k]!);
         }
-      }
-    for (const group of grid.large) test(group);
-    return best;
-  }
-
-  /** Pixels from (x, y) to what group `group` paints, exactly where within `reach`. */
-  #distance(group: number, x: number, y: number, reach: number): number {
-    const { start, end } = this.#groups[group]!;
-    let best = Infinity;
-    for (let i = start; i < end && best > 0; i++) {
-      const shape = this.#shapes[i]!;
-      if ("text" in shape) {
-        best = Math.min(best, toBox(textBox(shape, this.#font, this.#size, this.#measure), x, y));
-        continue;
-      }
-      const width = shape.stroke !== undefined ? shape.strokeWidth : 0;
-      const flat = flatten(shape.d, x, y, reach + width / 2);
-      if (shape.fill !== "none" && filled(flat, x, y)) return 0;
-      if (shape.fill !== "none") best = Math.min(best, toStroke(flat, 0, x, y, true));
-      if (shape.stroke !== undefined && shape.strokeWidth > 0)
-        best = Math.min(best, toStroke(flat, shape.strokeWidth, x, y));
+      groups = [...seen].sort((a, b) => b - a);
     }
-    return best;
+    let near: Found | undefined;
+    let beside: Found | undefined;
+    const nearer = (found: Found | undefined, group: number, distance: number) =>
+      distance <= reach && !(found && distance >= found.distance - TIE)
+        ? { group, distance }
+        : found;
+    for (const group of groups) {
+      if (accept && !accept(group)) continue;
+      const box = this.box(group);
+      if (!box || toBox(box, x, y) > reach) continue;
+      const { start, end } = this.#groups[group]!;
+      // Its shapes from the last painted: a fill holding the point covers
+      // what is painted before it, its own stroke excepted.
+      for (let i = end - 1; i >= start; i--) {
+        const shape = this.#shapes[i]!;
+        if ("text" in shape) {
+          const distance = toBox(textBox(shape, this.#font, this.#size, this.#measure), x, y);
+          if (distance === 0) return { ...(near && { near }), fill: group };
+          beside = nearer(beside, group, distance);
+          continue;
+        }
+        const width = shape.stroke !== undefined ? shape.strokeWidth : 0;
+        const flat = flatten(shape.d, x, y, reach + width / 2);
+        if (width > 0) near = nearer(near, group, toStroke(flat, width, x, y));
+        if (shape.fill === "none") continue;
+        if (filled(flat, x, y)) return { ...(near && { near }), fill: group };
+        beside = nearer(beside, group, toStroke(flat, 0, x, y, true));
+      }
+    }
+    return near || beside ? { ...(near && { near }), ...(beside && { beside }) } : undefined;
   }
 
   #boxesOf(): Float64Array {

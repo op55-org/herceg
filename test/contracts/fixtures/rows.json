@@ -671,7 +671,7 @@
         }
       },
       "selection": {
-        "click": [3, 15],
+        "click": [3, 25],
         "rows": {
           "brush-x": [2, 3],
           "brush-y": [3, 5],

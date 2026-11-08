@@ -31,7 +31,7 @@ import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { BinSpec, Clip, Frozen, Histogram2DSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
@@ -845,7 +845,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
    * Its cells are found under the pointer where its image draws them, else
    * the nearest within reach; named and bounded by their bins (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.histogram2d(this, drawn, query);
   }
 

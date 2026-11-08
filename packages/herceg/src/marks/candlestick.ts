@@ -10,7 +10,7 @@ import type { Geometry, Rect, RectGeometry, SegmentGeometry } from "../scene/sce
 import type { CandlestickSpec, Clip, Frozen } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { refuseColor } from "./colored.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import type { ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -139,6 +139,8 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
   readonly view: RowView | undefined;
   readonly tooltip = "x";
+  /** Its bodies cover their wicks: picked by what it draws (see `Mark.pickDrawn`). */
+  readonly pickDrawn = true;
   /** Its one series, named by its label, though it stands for no field. */
   readonly legendScales = ["series"] as const;
   readonly categorical: boolean;
@@ -493,7 +495,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
    * Its candles are found as drawn, one by one or merged a pixel column at
    * a time (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.candlestick(this, drawn, query, PICKING);
   }
 

@@ -16,7 +16,7 @@ import type { BoxenSpec, BoxPlotSpec, Clip, ViolinSpec } from "../spec/spec.ts";
 import type { CandlePicking, CandlestickMark, Merged } from "./candlestick.ts";
 import type { ContourMark, ContourPicking } from "./contour.ts";
 import type { DistributionMark } from "./distribution.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import type { ErrorBarMark, ErrorBarPicking } from "./errorbar.ts";
 import type { HeatmapMark, HeatmapPicking, ResolvedAxis } from "./heatmap.ts";
 import type { AxisCells } from "./heatmap-cells.ts";
@@ -50,10 +50,19 @@ interface HitReading {
   lookup?:
     | ((series: readonly Series[], px: number, py: number, frame: Frame) => Hit | undefined)
     | undefined;
+  /**
+   * Whether the mark's shapes are fills (cells, bands): one holding the
+   * query covers what is painted under the mark, one beside it counts only
+   * where no fill holds the query. The picker finds other marks' bodies
+   * drawn as rectangles and areas itself (`Picker.#covered`).
+   */
+  fills?: boolean | undefined;
 }
 
 /** Each drawing's cover, read once: picking asks for it at every pointer move. */
 const covers = new WeakMap<DrawnMark, Rect[] | undefined>();
+/** Whether each of a drawing's candle series merges into pixel columns, read once. */
+const merging = new WeakMap<DrawnMark, Map<Series, boolean>>();
 
 /** The lookups of marks with their own, reading series with `kit`. */
 export function lookups(kit: LookupKit) {
@@ -62,14 +71,16 @@ export function lookups(kit: LookupKit) {
   /**
    * The item `mark` finds at `query` through its own lookup (`pick`): the
    * row of the point hit or, with `group`, the aggregate it is; its drawn
-   * bounds; its distance as the lookup gives it, within `query.slop`.
+   * bounds; its distance as the lookup gives it, within `query.slop`: a
+   * candidate, or of fills (`HitReading.fills`) the one holding the query
+   * or beside it.
    */
   function pickedHit(
     mark: Mark,
     drawn: DrawnMark,
     query: PickQuery,
     reading: HitReading,
-  ): PickedItem | undefined {
+  ): PickResult | undefined {
     const { frame } = drawn;
     if (!frame || !mark.pick) return undefined;
     // What tooltips look among: series shown, with rows (the query's only, if it names one).
@@ -84,26 +95,36 @@ export function lookups(kit: LookupKit) {
     // Lookups find the nearest, however far; a pick reaches `slop` past a shape.
     if (!(distance <= query.slop)) return undefined;
     const box = reading.bounds(series, position, frame);
-    if (!box) return undefined;
-    if (reading.group) {
-      const named = reading.group(series, position);
-      if (!named) return undefined;
-      const key = groupKey(drawn.mark, named.parts, named.names);
-      return {
-        part: { kind: "group", key, point: { series, position } },
-        names: named.names,
-        box,
-        distance,
-      };
-    }
-    const row = rowOf(series, position);
-    if (!mark.table) return undefined;
-    return {
-      part: { kind: "row", table: mark.table, position: row, series: { series, position } },
-      names: undefined,
-      box,
-      distance,
-    };
+    const named = box && reading.group?.(series, position);
+    const item =
+      box &&
+      (named
+        ? {
+            part: {
+              kind: "group" as const,
+              key: groupKey(drawn.mark, named.parts, named.names),
+              point: { series, position },
+            },
+            names: named.names,
+            box,
+            distance,
+          }
+        : !reading.group && mark.table
+          ? {
+              part: {
+                kind: "row" as const,
+                table: mark.table,
+                position: rowOf(series, position),
+                series: { series, position },
+              },
+              names: undefined,
+              box,
+              distance,
+            }
+          : undefined);
+    if (!reading.fills) return item && { candidate: item };
+    // A fill covers what is under it whether or not it stands for an item.
+    return distance === 0 ? { fill: item ?? null } : item && { beside: item };
   }
 
   return {
@@ -117,17 +138,18 @@ export function lookups(kit: LookupKit) {
       drawn: DrawnMark,
       query: PickQuery,
       candles: CandlePicking,
-    ): PickedItem | undefined {
-      // Read once a pick: counting the candles in view reads every one.
-      const merged = new Map<Series, boolean>();
+    ): PickResult | undefined {
+      // Read once a drawing: counting the candles in view reads every one.
+      const merged = merging.get(drawn) ?? new Map<Series, boolean>();
+      merging.set(drawn, merged);
       const merges = (s: Series, frame: Frame) => {
-        let merging = merged.get(s);
-        if (merging === undefined) {
+        let joins = merged.get(s);
+        if (joins === undefined) {
           const columns = Math.max(1, Math.ceil(frame.plot.width));
-          merging = mark.inView(s.whole ?? s, frame, columns) > columns;
-          merged.set(s, merging);
+          joins = mark.inView(s.whole ?? s, frame, columns) > columns;
+          merged.set(s, joins);
         }
-        return merging;
+        return joins;
       };
       return pickedHit(mark, drawn, query, {
         lookup: (series, px, py, frame) => {
@@ -198,7 +220,7 @@ export function lookups(kit: LookupKit) {
       drawn: DrawnMark,
       query: PickQuery,
       { along, ringShown, inside }: ContourPicking,
-    ): PickedItem | undefined {
+    ): PickResult | undefined {
       /**
        * The band region nearest a pixel within `reach` of what `clip` keeps
        * of it: the one holding the clip's point nearest the pixel, else the
@@ -269,6 +291,8 @@ export function lookups(kit: LookupKit) {
           return cut(ring, clipBox(mark.spec.clip, frame));
         },
         group: (s, position) => ({ parts: [], names: [s.values[rowOf(s, position)]!] }),
+        // Bands are fills; lines are strokes.
+        fills: mark.filled,
         // What clipping keeps, as far as the query reaches: band regions,
         // and lines' strokes measured from their edges.
         lookup: (series, px, py, frame) => {
@@ -287,8 +311,9 @@ export function lookups(kit: LookupKit) {
      * selection's over the whole's (`shapeDistance`); bounded by them, and
      * named by their category (and, with a series field, its group).
      */
-    distribution(mark: Distribution, drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-      return pickedHit(mark, drawn, query, {
+    distribution(mark: Distribution, drawn: DrawnMark, query: PickQuery): PickResult | undefined {
+      let shape: ReturnType<typeof nearestShape>;
+      const found = pickedHit(mark, drawn, query, {
         bounds: (s, position, frame) => {
           const row = rowOf(s, position);
           let bounds: Rect | undefined;
@@ -310,8 +335,27 @@ export function lookups(kit: LookupKit) {
           };
         },
         lookup: (series, px, py, frame) =>
-          nearestShape(mark, series, px, py, frame, query.slop, clipBox(mark.spec.clip, frame)),
+          (shape = nearestShape(
+            mark,
+            series,
+            px,
+            py,
+            frame,
+            query.slop,
+            clipBox(mark.spec.clip, frame),
+          )),
       });
+      // Violins are measured as drawn: one holding the query is its fill,
+      // and its strokes and glyphs painted over its fills candidates there.
+      // (Box plots and boxen plots are picked by what they draw; this names
+      // the item of a shape.)
+      const item = found?.candidate;
+      if (!mark.shapeDistance || item?.distance !== 0) return found;
+      const { stroke } = shape!;
+      return {
+        candidate: stroke <= query.slop ? { ...item, distance: stroke } : undefined,
+        fill: item,
+      };
     },
 
     /**
@@ -324,7 +368,7 @@ export function lookups(kit: LookupKit) {
       drawn: DrawnMark,
       query: PickQuery,
       { columns }: ErrorBarPicking,
-    ): PickedItem | undefined {
+    ): PickResult | undefined {
       const stroke = mark.spec.strokeWidth ?? 1.5;
       return pickedHit(mark, drawn, query, {
         lookup: (series, px, py, frame) => mark.find(series, px, py, frame, stroke, true),
@@ -360,7 +404,7 @@ export function lookups(kit: LookupKit) {
       drawn: DrawnMark,
       query: PickQuery,
       { bandOf }: HeatmapPicking,
-    ): PickedItem | undefined {
+    ): PickResult | undefined {
       const name = (s: Series, row: number, axis: "x" | "y", scale: PositionScale): KeyPart => {
         const { cells, ordinals } = mark.resolve(s, axis, scale);
         const at = ordinals[row]!;
@@ -442,6 +486,7 @@ export function lookups(kit: LookupKit) {
           return best;
         },
         bounds: (s, position, frame) => coverOf(cell(s, position, frame), cover),
+        fills: true,
         group: (s, position) => {
           const row = rowOf(s, position);
           const { frame } = drawn;
@@ -458,7 +503,7 @@ export function lookups(kit: LookupKit) {
      * draws them, else the nearest within reach; named and bounded by their
      * bins along x and y.
      */
-    histogram2d(mark: Histogram2DMark, drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    histogram2d(mark: Histogram2DMark, drawn: DrawnMark, query: PickQuery): PickResult | undefined {
       const bins = (s: Series, position: number) => {
         const cells = mark.cellsOf(s);
         if (!cells) return undefined;
@@ -516,6 +561,7 @@ export function lookups(kit: LookupKit) {
           const drawnCell = cell(s, position, frame);
           return drawnCell && coverOf(drawnCell, cover);
         },
+        fills: true,
         group: (s, position) => {
           const [x, y] = bins(s, position) ?? [];
           return x && y && { parts: [], names: [x, y] };
@@ -528,7 +574,7 @@ export function lookups(kit: LookupKit) {
      * strokes, the one painted last of those as near; each a line from the
      * plot's edge.
      */
-    rug(mark: RugMark, drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    rug(mark: RugMark, drawn: DrawnMark, query: PickQuery): PickResult | undefined {
       const stroke = mark.spec.strokeWidth ?? 1;
       return pickedHit(mark, drawn, query, {
         lookup: (series, px, py, frame) => mark.find(series, px, py, frame, stroke, true),
@@ -767,7 +813,8 @@ export function lookups(kit: LookupKit) {
   /**
    * The distribution shape nearest a pixel, within `reach` of what `clip`
    * keeps of it (`shapeDistance` measures a shape of its own); of shapes as
-   * near, the one painted last.
+   * near, the one painted last; with how far its strokes painted over its
+   * fills are (`stroke`).
    */
   function nearestShape(
     mark: Distribution,
@@ -777,8 +824,8 @@ export function lookups(kit: LookupKit) {
     frame: Frame,
     reach: number,
     clip: Readonly<Rect>,
-  ): Hit | undefined {
-    let best: Hit | undefined;
+  ): (Hit & { stroke: number }) | undefined {
+    let best: (Hit & { stroke: number }) | undefined;
     // Its paint order: a highlight's selected layer, series index, position.
     let bestAt: number[] = [];
     const measure = mark.shapeDistance?.bind(mark);
@@ -788,6 +835,7 @@ export function lookups(kit: LookupKit) {
       for (let k = 0; k < s.length; k++) {
         const row = rowOf(s, k);
         let distance = Number.POSITIVE_INFINITY;
+        let stroke = distance;
         let layer = 0;
         for (let l = 0; l < layers.length; l++) {
           const extent = mark.extent(layers[l]!, row, frame, placements[l]!);
@@ -796,16 +844,19 @@ export function lookups(kit: LookupKit) {
           const shown = distanceToCut(box, clip, px, py);
           // Dots reach a few pixels past.
           if (!(shown <= reach + 4)) continue;
-          const d = measure ? measure(layers[l]!, row, px, py, frame, clip) : shown;
-          // The selection's shape is painted over the whole's.
+          const [line, fill] = measure?.(layers[l]!, row, px, py, frame, clip) ?? [shown, shown];
+          const d = Math.min(line, fill);
+          // The selection's shape is painted over the whole's, its fill
+          // covering the whole's strokes.
           if (d < distance || (l > 0 && d === distance)) [distance, layer] = [d, l];
+          stroke = fill === 0 ? line : Math.min(stroke, line);
         }
         if (distance === Number.POSITIVE_INFINITY) continue;
         // ...and over every series' whole.
         const order = [layer, i, k];
         const nearest = best?.distance ?? Number.POSITIVE_INFINITY;
         if (distance < nearest || (distance === nearest && paintedLater(order, bestAt)))
-          [best, bestAt] = [{ series: s, position: k, distance }, order];
+          [best, bestAt] = [{ series: s, position: k, distance, stroke }, order];
       }
     });
     return best;

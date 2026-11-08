@@ -19,7 +19,7 @@ import type { BoxenSpec, BoxPlotSpec, Clip, Frozen, ViolinSpec } from "../spec/s
 import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import type { CssColor, SeriesName } from "./encoding.ts";
 import {
   type AxisFormat,
@@ -806,7 +806,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
    * their category (and, with a series field, their series' value)
    * (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.distribution(this, drawn, query);
   }
 
@@ -828,7 +828,9 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
 
   /**
    * How far a pixel is from what `clip` keeps of the shape drawn for
-   * `row`, for shapes their span overstates (violins).
+   * `row`, for shapes their span overstates (violins): from its strokes and
+   * glyphs painted over its fills (an outline, a whisker, a median's dot),
+   * and from its fills.
    */
   shapeDistance?(
     s: Series,
@@ -837,7 +839,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
     py: number,
     frame: Frame,
     clip: Readonly<Rect>,
-  ): number;
+  ): readonly [number, number];
 
   /**
    * Where `row`'s shape is drawn: its center and half its width along the

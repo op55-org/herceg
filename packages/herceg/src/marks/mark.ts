@@ -22,9 +22,10 @@ import type { Geometry, Rect } from "../scene/scene.ts";
 import type { NameSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
+import type { ItemReference, SeriesReference } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { AtThresholds } from "./annotation.ts";
-import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, DrawnPart, PartBuilders, PickQuery, PickResult } from "./drawn.ts";
 import type { ContentWriter } from "./features/content.ts";
 import type { DrawnItems } from "./layout-mark.ts";
 import type { RowBindings } from "./row-bindings.ts";
@@ -40,12 +41,11 @@ export const DIM = 0.25;
 
 /**
  * Whether a mark with a selection highlighted draws every series' selected
- * rows over every series' others, as marks of a glyph per row do; lines
- * and areas draw each series' over its own (model/highlight.ts).
+ * rows over every series' others, as marks of a glyph per row and lines
+ * do; areas draw each series' over its own (model/highlight.ts).
  */
 export function litOverSeries(mark: Mark): boolean {
-  const { type } = mark.spec;
-  return type !== "line" && type !== "area";
+  return mark.spec.type !== "area";
 }
 
 /**
@@ -73,6 +73,32 @@ export function keyOwner(key: string): MarkKey | undefined {
   }
   const owner = Array.isArray(parsed) ? parsed[0] : (parsed as { mark?: unknown } | null)?.mark;
   return typeof owner === "string" || typeof owner === "number" ? owner : undefined;
+}
+
+/**
+ * What a series' key (`kind` "series") or an item's names as references
+ * name it (spec/state.ts): `{ mark, series }` of a key `[mark, source]`,
+ * `{ mark, item }` of a key `[mark, ...parts]`; undefined for a key of no
+ * mark of `marks` with an `id` (keys name marks without one by index), and
+ * for any other string (groups' JSON objects).
+ */
+export function referenceOf(
+  kind: "series" | "item",
+  key: string,
+  marks: readonly { readonly spec: { readonly id?: string | undefined } }[],
+): SeriesReference | ItemReference | undefined {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parts) || !marks.some(({ spec }) => spec.id === parts[0])) return undefined;
+  const [mark, ...named] = parts as [string, ...ItemReference["item"]];
+  if (kind === "item") return named.length > 0 ? { mark, item: named } : undefined;
+  return named.length === 1 && typeof named[0] === "string"
+    ? { mark, series: named[0] }
+    : undefined;
 }
 
 /**
@@ -707,11 +733,19 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
     at?: { x: number; y: number },
   ): DrawnPart | undefined;
   /**
-   * The topmost item at `query`, for marks whose own lookup finds it better
-   * than geometry by kind (cells, boxes, candles; see `pickedHit`). A picker
-   * tests other marks' geometry and asks `partOf`.
+   * What the mark has at `query`, for marks whose own lookup finds it better
+   * than geometry by kind (cells, boxes, candles; see `pickedHit`): its
+   * nearest stroke or point within reach, and the fill the query is inside.
+   * A picker tests other marks' geometry and asks `partOf`.
    */
-  pickItem?(drawn: DrawnMark, query: PickQuery): PickedItem | undefined;
+  pickItem?(drawn: DrawnMark, query: PickQuery): PickResult | undefined;
+  /**
+   * Picked by what it draws, shape by shape as marks without lookups are,
+   * its lookup (`pickItem`) naming the item a shape stands for: marks whose
+   * items are shapes of several kinds painted over each other (a candle's
+   * body over its wick, a box plot's median over its box).
+   */
+  readonly pickDrawn?: boolean;
   /**
    * For marks that pair rows of their series (stacks of a series field):
    * the position of `s` to read beside the point of `anchor` at

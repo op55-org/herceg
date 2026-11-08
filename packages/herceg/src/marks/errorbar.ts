@@ -11,7 +11,7 @@ import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import type { CssColor, FieldCoordinate, ItemKeyed, SeriesName } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -415,7 +415,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
    * Its bars are found as `pick` finds them, measured to their painted
    * strokes; bounded by what its clip keeps of them (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.errorbar(this, drawn, query, PICKING);
   }
 

@@ -1276,7 +1276,7 @@ describe("style runs", () => {
         ).toBeLessThan(6);
   });
 
-  it("draw a series' dots where it is drawn, before later series, where none of its strokes reach the plot", () => {
+  it("draw a series' dots where it is drawn, before later series' selected parts, where none of its strokes reach the plot", () => {
     const rows = table({
       t: [-0.1, 0, 1],
       v: [5, 5, 5],
@@ -1304,8 +1304,11 @@ describe("style runs", () => {
       highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
     store.set("focus", selectRows(new RowSet(rows).addAll([0, 1, 2])));
     const marks = chart.scene(estimateText).panels[0]!.marks;
+    // Selected parts are drawn over every series' others: B's last.
     const dots = marks.findIndex((g) => g.kind === "point");
-    const b = marks.findIndex((g) => g.kind === "line" && (g.of ?? g.key).includes('"B"'));
+    const b = marks
+      .map((g) => g.kind === "line" && (g.of ?? g.key).includes('"B"'))
+      .lastIndexOf(true);
     expect(dots).toBeGreaterThanOrEqual(0);
     expect(b).toBeGreaterThan(dots);
   });

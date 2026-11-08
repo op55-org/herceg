@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal, TypeVar
@@ -377,13 +377,17 @@ class AxisLabelTarget:
 @dataclass(frozen=True)
 class LegendEntryTarget:
     """An entry of a legend: what it names (``key``, as ``hidden_keys`` name
-    it), its ``label``, and the subplot whose legend it is in (None for the
-    chart's)."""
+    it), its ``label``, the subplot whose legend it is in (None for the
+    chart's), and what it acts on (``references``): each series and layout
+    item it stands for, as ``hg.SeriesReference`` and ``hg.ItemReference``
+    (one series name drawn by a line and an area is two). Marks without an
+    ``id``, and groups of networks, maps, and 3D points, add none."""
 
     kind: ClassVar[Literal["legendEntry"]] = "legendEntry"
     key: str
     label: str
     panel: str | None
+    references: tuple[SeriesReference | ItemReference, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -518,7 +522,18 @@ def _target(payload: Any) -> Target | None:
             box=_box(payload.get("box")),
         )
     if kind == "legendEntry":
-        return LegendEntryTarget(key=text("key"), label=text("label"), panel=text("panel", True))
+        references = payload.get("references")
+        if not isinstance(references, list) or not all(
+            isinstance(entry, Mapping) and isinstance(entry.get("mark"), str)
+            for entry in references
+        ):
+            raise ValueError(f"legendEntry target references: expected a list, not {references!r}")
+        return LegendEntryTarget(
+            key=text("key"),
+            label=text("label"),
+            panel=text("panel", True),
+            references=tuple(_reference(entry) for entry in references),
+        )
     if kind == "plot":
         return PlotTarget(panel=text("panel"))
     raise ValueError(
@@ -1189,14 +1204,47 @@ def decode_selection(payload: Any) -> ChartSelection | None:
 
 
 def _reference(entry: Any) -> Any:
-    """A key as it is, and a reference set from Python, which the chart has
-    not reported by its key yet, as ``hg.ItemReference`` or
-    ``hg.SeriesReference``."""
+    """A key as it is, and a reference from the browser (set from Python and
+    not reported by its key yet, or a legend entry's), as
+    ``hg.ItemReference`` or ``hg.SeriesReference``."""
     if not isinstance(entry, Mapping):
         return entry
     if "series" in entry:
         return SeriesReference(entry["mark"], entry["series"])
-    return ItemReference(entry["mark"], tuple(entry["item"]))
+    return ItemReference(entry["mark"], tuple(_item_part(part) for part in entry["item"]))
+
+
+def _item_part(part: Any) -> Any:
+    """An item key's part as references hold it: a bin's interval as a tuple."""
+    return tuple(part) if isinstance(part, list) else part
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not JSON")
+
+
+def reference_of(
+    kind: Any, key: str, ids: Collection[str], owner: str
+) -> SeriesReference | ItemReference | None:
+    """What a key from an event names, as references name it (see
+    ``Chart.reference_of``), of a chart whose marks have the ids ``ids``;
+    ``owner`` names the caller in error messages."""
+    if kind not in ("series", "item"):
+        raise ChartError(
+            f'{owner} kind: expected "series" or "item"; received {shown(kind)}', path="kind"
+        )
+    try:
+        # As JSON reads it: NaN and Infinity are no JSON.
+        parts = json.loads(key, parse_constant=_no_constant)
+    except ValueError:
+        return None
+    if not (isinstance(parts, list) and parts and isinstance(parts[0], str) and parts[0] in ids):
+        return None
+    mark, *named = parts
+    if kind == "series":
+        series = named[0] if len(named) == 1 else None
+        return SeriesReference(mark, series) if isinstance(series, str) else None
+    return ItemReference(mark, tuple(_item_part(value) for value in named)) if named else None
 
 
 def encode_selection(value: Any) -> dict[str, Any] | None:

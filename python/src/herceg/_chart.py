@@ -25,6 +25,7 @@ from typing import (
     TypeVar,
     cast,
     get_args,
+    overload,
 )
 
 import numpy as np
@@ -115,9 +116,12 @@ from ._errors import (
 from ._events import (
     ChartSelection,
     DrillRoot,
+    ItemReference,
+    SeriesReference,
     Viewport,
     VisibilityState,
     drill_root_option,
+    reference_of,
     selection_option,
     viewport_option,
     visibility_option,
@@ -5616,6 +5620,26 @@ class Chart:
         )
 
     # Output ----------------------------------------------------------------
+
+    @overload
+    def reference_of(self, kind: Literal["series"], key: str) -> SeriesReference | None: ...
+    @overload
+    def reference_of(self, kind: Literal["item"], key: str) -> ItemReference | None: ...
+    @checks_hints("Chart.reference_of")
+    def reference_of(
+        self, kind: Literal["series", "item"], key: str
+    ) -> SeriesReference | ItemReference | None:
+        """What a key from an event names, as references name it: a series
+        key (a ``select`` event's series, a legend entry's) as
+        ``hg.SeriesReference``, an item key (a target's ``item``, a ``select``
+        event's items) as ``hg.ItemReference`` (a row without ``item_key``,
+        its identity's parts). ``kind`` says which the key is: the two can be
+        the same text. None for a key of no mark of the chart, of a mark
+        without an ``id`` (references name marks by id), and for groups' keys
+        (networks', maps', 3D points'). It decodes the key; it reads no
+        data."""
+        ids = {mark["id"] for mark, _ in self._marks if isinstance(mark.get("id"), str)}
+        return reference_of(kind, key, ids, "Chart.reference_of")
 
     def to_spec(self) -> tuple[dict[str, Any], list[bytes]]:
         """The portable chart spec and the binary buffers its columns reference."""

@@ -604,7 +604,9 @@ it; their paths are traced again for the exact test
 (nonzero fills, strokes with butt ends and round joins, curves and arcs
 flattened to a quarter pixel near the query and to chords elsewhere, text
 by its box) rather than kept. The picker reaches
-them through `pickItem` (the topmost item within slop; a mark of points
+them through `pickItem` (the nearest stroke within slop above the first
+filled shape holding the point, which a shape reached from beside counts
+as only where none holds it; a mark of points
 that drew no items, its series' nearest point within 3 px; ranges, only
 their items), and `partOf` names the item of a shape. Range marks are inspected as `"point"` tooltips with the
 mark's `place` (the item's box, inside the plot) and `pick` (the item

@@ -21,7 +21,7 @@ import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.t
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Expression } from "../spec/spec.ts";
-import type { Phase, PinTarget } from "../spec/state.ts";
+import type { ItemReference, Phase, PinTarget, SeriesReference } from "../spec/state.ts";
 
 type Ends = [number, number] | [string, string];
 type Range = readonly [number, number];
@@ -207,7 +207,14 @@ export type TargetPayload =
       text: string;
       box: Box;
     }
-  | { kind: "legendEntry"; key: string; label: string; panel: string | null }
+  | {
+      kind: "legendEntry";
+      key: string;
+      label: string;
+      panel: string | null;
+      /** What the entry acts on: references as the chart takes them. */
+      references: (SeriesReference | ItemReference)[];
+    }
   | { kind: "plot"; panel: string };
 
 /**
@@ -840,6 +847,9 @@ function targetPayload(target: Target, panels: readonly PanelAxes[]): TargetPayl
         key: target.key,
         label: target.label,
         panel: target.panel ?? null,
+        references: target.references.map((reference) =>
+          "series" in reference ? { ...reference } : { ...reference, item: [...reference.item] },
+        ),
       };
     case "plot":
       return { kind: "plot", panel: target.panel };

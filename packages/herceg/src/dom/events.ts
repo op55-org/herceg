@@ -11,8 +11,10 @@ import type { ChartError } from "../spec/errors.ts";
 import type {
   ChartSelection,
   DrillState,
+  ItemReference,
   Phase,
   PinTarget,
+  SeriesReference,
   ViewportState,
   VisibilityState,
 } from "../spec/state.ts";
@@ -137,6 +139,8 @@ export interface LegendEntryTarget {
   readonly label: string;
   /** The subplot whose legend it is in; undefined for the chart's. */
   readonly panel: string | undefined;
+  /** What it acts on, as references name it (see `LegendEntry.references`). */
+  readonly references: readonly (SeriesReference | ItemReference)[];
 }
 
 /** A plot where no item is. */
