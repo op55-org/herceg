@@ -1,24 +1,35 @@
-// Picking: the topmost item drawn under a point, tested against what the
-// frame on screen drew (marks/drawn.ts records), never against geometry
-// made again from current data. Marks are visited in paint order (their
-// `zIndex`, then as listed), each geometry in the order it paints, and the
-// first item within reach is picked: inside bars, bins, cells, and regions;
-// within a stroke's half width plus `slop` of lines, rules, and segments;
-// within a point's radius plus `slop`; inside areas and text. Nothing outside
-// a geometry's clip is picked. A line's or area's path is resolved to the
-// observation it draws nearest the point (level of detail, steps, and stacks
-// draw vertices that are no rows). Marks with lookups of their own pick their
-// items themselves (`Mark.pickItem`), layout marks through `itemAt`.
+// Picking: the item drawn under a point, tested against what the frame on
+// screen drew (marks/drawn.ts records), never against geometry made again
+// from current data. What is drawn is walked from the top down (marks by
+// `zIndex`, then as listed, each geometry last painted first): strokes and
+// points within reach are candidates (a stroke's half width plus `slop` of
+// lines, outlines, rules, and segments; a point's radius plus `slop`), and
+// the first fill the point is inside (bars, bins, cells, regions, areas,
+// text, layout items) ends the walk, covering what is painted under it. The
+// nearest candidate wins, ties to the topmost; with none, that fill. Nothing
+// outside a geometry's clip is picked. A line's or area's path is resolved
+// to the observation it draws nearest the point (level of detail, steps, and
+// stacks draw vertices that are no rows). Marks with lookups of their own
+// pick their items themselves (`Mark.pickItem`), layout marks through
+// `itemAt`.
 //
 // The interaction controller loads this module; what it reads series with is
 // the chart's code, handed in (`PickKit`), as the controller's is.
 
 import type { Table } from "../data/table.ts";
 import type { ruleDrawing } from "../draw/rule.ts";
-import type { DrawnMark, DrawnPart, PickedItem, PickQuery } from "../marks/drawn.ts";
+import type { DrawnMark, DrawnPart, PickedItem, PickQuery, PickResult } from "../marks/drawn.ts";
 import { type PartKit, type PartReader, partReader } from "../marks/drawn-parts.ts";
 import type { LayoutItem, LayoutMark } from "../marks/layout-mark.ts";
-import { boxOf, clipBox, inside, type LookupKit, type Lookups, lookups } from "../marks/lookups.ts";
+import {
+  boxOf,
+  clipBox,
+  cut,
+  inside,
+  type LookupKit,
+  type Lookups,
+  lookups,
+} from "../marks/lookups.ts";
 import type { Frame, Mark, MarkKey } from "../marks/mark.ts";
 import type { lowerPosition, placeAt, Series } from "../marks/series.ts";
 
@@ -78,8 +89,8 @@ interface Painted {
 }
 
 /**
- * Picks against a chart model's records: `pick` finds the topmost item at a
- * point of the chart, `textBox` measures placed text as picking does.
+ * Picks against a chart model's records: `pick` finds the item at a point
+ * of the chart (see the top), `textBox` measures placed text as picking does.
  */
 export class Picker {
   readonly #kit: PickKit;
@@ -93,10 +104,10 @@ export class Picker {
   }
 
   /**
-   * The topmost item `model`'s last frame drew within `slop` pixels past
-   * (x, y), in the topmost panel holding it (an inset over its parent), of
-   * the marks `accept` takes (by default, those without `pick: false`);
-   * undefined for none, or while a record is not current (its data
+   * The item `model`'s last frame drew at (x, y), within `slop` pixels of
+   * strokes and points, in the topmost panel holding it (an inset over its
+   * parent), of the marks `accept` takes (by default, those without `pick:
+   * false`); undefined for none, or while a record is not current (its data
    * changed since).
    */
   pick(
@@ -104,7 +115,6 @@ export class Picker {
     { x, y, slop, series }: Omit<PickQuery, "lookups">,
     accept?: (mark: Mark) => boolean,
   ): Picked | undefined {
-    const query: PickQuery = { x, y, slop, series, lookups: this.#lookups };
     const records = model.drawnMarks();
     const marks = model.config.marks as readonly Mark[];
     const markOf = (key: MarkKey) =>
@@ -112,7 +122,7 @@ export class Picker {
     const panels = model.allPanels();
     for (let p = panels.length - 1; p >= 0; p--) {
       const { key } = panels[p]!;
-      if (model.coveredAt(key, query.x, query.y)) continue;
+      if (model.coveredAt(key, x, y)) continue;
       const painted: Painted[] = [];
       for (const drawn of records) {
         if (drawn.panel !== key || !drawn.current()) continue;
@@ -125,46 +135,79 @@ export class Picker {
         // The marks `accept` takes, else those the pointer does not pass through.
         if (!mark || (accept ? !accept(mark) : mark.spec.pick === false)) continue;
         const z = mark.spec.zIndex ?? 0;
-        // Lookups, and points through their index, pick the mark's items at once.
-        if (mark.pickItem || (mark.nearby && mark.reach)) painted.push({ drawn, mark, g: -1, z });
+        // Lookups, and points through their index, pick the mark's items at
+        // once; marks picked by what they draw (`pickDrawn`) shape by shape.
+        if ((mark.pickItem && !mark.pickDrawn) || (mark.nearby && mark.reach))
+          painted.push({ drawn, mark, g: -1, z });
         else
           for (let g = 0; g < drawn.geometry.length; g++)
             painted.push({ drawn, mark, g, z: drawn.geometry[g]!.zIndex ?? z });
       }
       // By zIndex, ties as painted: the last is on top.
       painted.sort((a, b) => a.z - b.z);
-      for (let k = painted.length - 1; k >= 0; k--) {
+      // The nearest candidate, and the nearest fill beside the point.
+      let best: Picked | undefined;
+      let beside: Picked | undefined;
+      let fill: Picked | null | undefined;
+      for (let k = painted.length - 1; k >= 0 && fill === undefined; k--) {
+        // Under a candidate, only a nearer one counts: it is looked for that near.
+        const reach = best ? best.item.distance - TIE : slop;
+        if (reach < 0) break;
+        const query: PickQuery = { x, y, slop: reach, series, lookups: this.#lookups };
         const found = this.#pickPainted(painted[k]!, query, model.items);
-        if (found) return found;
+        if (nearer(found?.candidate, best)) best = found!.candidate;
+        if (nearer(found?.beside, beside)) beside = found!.beside;
+        fill = found?.fill;
       }
+      // A fill holding the point outranks those beside it; without one,
+      // a fill beside it nearer than any candidate.
+      if (fill !== undefined) return best ?? fill ?? undefined;
+      if (best || beside) return nearer(beside, best) ? beside : best;
     }
     return undefined;
   }
 
+  /**
+   * What one geometry of a panel (or a mark picking itself) has at the
+   * query, as picked (see `PickResult`).
+   */
   #pickPainted(
     { drawn, mark, g }: Painted,
     query: PickQuery,
     items: ItemViews | undefined,
-  ): Picked | undefined {
+  ):
+    | {
+        candidate?: Picked | undefined;
+        beside?: Picked | undefined;
+        fill?: Picked | null | undefined;
+      }
+    | undefined {
     // Nothing is picked outside the box a decoration's panel draws it within.
     if (drawn.keep && !inside(drawn.keep, query.x, query.y)) return undefined;
     if (!mark || g < 0) {
       // Nothing is picked outside the mark's clip, whatever its lookup finds within reach.
-      const clipped =
-        mark && !(drawn.frame && inside(clipBox(mark.spec.clip, drawn.frame), query.x, query.y));
-      const item = !mark
-        ? pickLayout(drawn, query, items)
-        : clipped
-          ? undefined
-          : mark.pickItem
-            ? mark.pickItem(drawn, query)
-            : this.#pickPoint(mark, drawn, query);
-      if (!item) return undefined;
-      return {
+      if (mark && !(drawn.frame && inside(clipBox(mark.spec.clip, drawn.frame), query.x, query.y)))
+        return undefined;
+      const found: PickResult | undefined = !mark
+        ? // Layout items are fills.
+          { fill: pickLayout(drawn, query, items) ?? null }
+        : mark.pickItem
+          ? mark.pickItem(drawn, query)
+          : { candidate: this.#pickPoint(mark, drawn, query) };
+      if (!found) return undefined;
+      const picked = (item: PickedItem): Picked => ({
         drawn,
         key: item.mark ?? drawn.mark,
         item,
         series: item.part.kind === "row" ? item.part.series?.series : item.part.point?.series,
+      });
+      const { candidate, beside, fill } = found;
+      // A layout mark finding no item there covers nothing.
+      if (!mark && !fill) return undefined;
+      return {
+        candidate: candidate && picked(candidate),
+        beside: beside && picked(beside),
+        fill: fill && picked(fill),
       };
     }
     const { frame } = drawn;
@@ -172,45 +215,106 @@ export class Picker {
     // Of a query for one series, that series' geometry only.
     if (query.series !== undefined && this.#parts.seriesOf(drawn, geometry)?.key !== query.series)
       return undefined;
-    // Nothing is picked outside the geometry's clip, though a stroke reached past it.
-    const clip = frame && clipBox(geometry.clip ?? geometry.draw.defaultClip ?? "plot", frame);
-    if (!clip || !inside(clip, query.x, query.y)) return undefined;
+    // Nothing is picked outside the geometry's clip, though a stroke reached
+    // past it, nor outside the spans a highlight's part is drawn within
+    // (`draw.clip`: x, y, width, and height of each).
+    const shown = frame && clipBox(geometry.clip ?? geometry.draw.defaultClip ?? "plot", frame);
+    if (!shown || !inside(shown, query.x, query.y)) return undefined;
+    // Strokes are measured to what the span holding the query shows of them.
+    const spans = geometry.draw.clip;
+    let clip = spans ? undefined : shown;
+    for (let i = 0; spans && i < spans.length; i += 4) {
+      const span = { x: spans[i]!, y: spans[i + 1]!, width: spans[i + 2]!, height: spans[i + 3]! };
+      if (inside(span, query.x, query.y)) clip = cut(shown, span);
+    }
+    if (!clip) return undefined;
     // A path's points run along its axis where its series is sorted there:
     // only its segments near the query are tested.
     const path = geometry.kind === "line" || geometry.kind === "area";
-    const trace = path ? this.#parts.partOf(mark, drawn, g, 0) : undefined;
+    const trace = path && !mark.pickDrawn ? this.#parts.partOf(mark, drawn, g, 0) : undefined;
     const along =
       trace?.kind === "trace" && (trace.order !== undefined || sortedAlong(trace, frame))
         ? trace.along
         : undefined;
-    // An area is filled across the axis it runs along, ordered or not: a
-    // trace's, or for outlines that are none (a histogram's), the mark's.
-    const orient = trace?.kind === "trace" ? trace.along : mark.tooltip === "y" ? "y" : undefined;
-    const hit = this.#hit(geometry, frame, clip, query, along, orient);
-    if (!hit) return undefined;
-    // Outlines that are no trace (a histogram's) say their item where it was picked.
-    const part =
-      trace?.kind === "trace" ? trace : this.#parts.partOf(mark, drawn, g, hit.index, query);
-    if (!part) return undefined;
-    const row =
-      part.kind === "trace" ? this.#traced(part, mark.table, frame, hit, query, along) : part;
-    if (!row) return undefined;
-    const series = row.kind === "row" ? row.series?.series : this.#parts.seriesOf(drawn, geometry);
-    const observed =
-      row.kind === "row" && row.series
-        ? pointBox(this.#kit, row.series.series, row.position, frame, mark)
-        : undefined;
-    // A path's observation is its point; one no scale places (a stack's zero
-    // drawn at a log axis' end) is the path's vertex nearest the query.
-    const box =
-      part.kind === "trace" ? (observed ?? nearerEnd(hit.segment!, query)) : (hit.box ?? observed);
-    if (!box) return undefined;
-    return {
-      drawn,
-      key: drawn.mark,
-      item: { part: row, names: undefined, box, distance: hit.distance },
-      series,
+    // An area is filled across the axis it runs along, ordered or not: its
+    // own (a notched box's), a trace's, or for outlines that are none (a
+    // histogram's), the mark's.
+    const orient =
+      (geometry as AreaGeometry).along ??
+      (trace?.kind === "trace" ? trace.along : mark.tooltip === "y" ? "y" : undefined);
+    const hits = this.#hit(geometry, frame, clip, query, along, orient);
+    if (!hits) return undefined;
+    /** The item a hit draws, as picked. */
+    const resolve = (hit: Hit): Picked | undefined => {
+      if (mark.pickDrawn) return this.#named(mark, drawn, geometry, hit, query, clip);
+      // Outlines that are no trace (a histogram's) say their item where it was picked.
+      const part =
+        trace?.kind === "trace" ? trace : this.#parts.partOf(mark, drawn, g, hit.index, query);
+      if (!part) return undefined;
+      const row =
+        part.kind === "trace" ? this.#traced(part, mark.table, frame, hit, query, along) : part;
+      if (!row) return undefined;
+      const series =
+        row.kind === "row" ? row.series?.series : this.#parts.seriesOf(drawn, geometry);
+      const observed =
+        row.kind === "row" && row.series
+          ? pointBox(this.#kit, row.series.series, row.position, frame, mark)
+          : undefined;
+      // A path's observation is its point; one no scale places (a stack's zero
+      // drawn at a log axis' end) is the path's vertex nearest the query.
+      const box =
+        part.kind === "trace"
+          ? (observed ?? nearerEnd(hit.segment!, query))
+          : (hit.box ?? observed);
+      if (!box) return undefined;
+      return {
+        drawn,
+        key: drawn.mark,
+        item: { part: row, names: undefined, box, distance: hit.distance },
+        series,
+      };
     };
+    return {
+      candidate: hits.near && resolve(hits.near),
+      // A fill covers what is under it whether or not it stands for an item.
+      fill: hits.inside && (resolve(hits.inside) ?? null),
+    };
+  }
+
+  /**
+   * The item a mark picked by what it draws (`pickDrawn`) draws a hit
+   * shape for, as its lookup names it at the shape's middle (held within
+   * the clip: a zoomed box's middle may be out of view), in the shape's
+   * series; at the hit's distance.
+   */
+  #named(
+    mark: Mark,
+    drawn: DrawnMark,
+    geometry: Geometry,
+    hit: Hit,
+    query: PickQuery,
+    clip: Readonly<Rect>,
+  ): Picked | undefined {
+    const [ax, ay, bx, by] = hit.segment ?? [];
+    const box = hit.box ?? boxOf(ax!, ay!, bx!, by!);
+    const held = (v: number, from: number, size: number) =>
+      Math.min(from + size, Math.max(from, v));
+    const found = mark.pickItem!(drawn, {
+      ...query,
+      x: held(box.x + box.width / 2, clip.x, clip.width),
+      y: held(box.y + box.height / 2, clip.y, clip.height),
+      slop: 1,
+      series: this.#parts.seriesOf(drawn, geometry)?.key,
+    });
+    const item = found?.candidate ?? found?.fill ?? undefined;
+    return (
+      item && {
+        drawn,
+        key: item.mark ?? drawn.mark,
+        item: { ...item, distance: hit.distance },
+        series: item.part.kind === "row" ? item.part.series?.series : item.part.point?.series,
+      }
+    );
   }
 
   /**
@@ -273,39 +377,67 @@ export class Picker {
   }
 
   /**
-   * The primitive of `geometry` under the query, by kind: its index, how
-   * far it is from the query (0 inside it), its drawn box where the
-   * primitive has one, and for paths the segment hit.
+   * The primitives of `geometry` at the query, by kind: the stroke or
+   * point nearest it within reach (`near`), and the fill it is inside
+   * (`inside`), each by its index, how far it is from the query (0 on or
+   * inside it), its drawn box where it has one, and for paths the segment
+   * hit.
    */
   #hit(
     geometry: Geometry,
     frame: Frame,
     clip: Readonly<Rect>,
-    { x, y, slop }: PickQuery,
-    along: "x" | "y" | undefined,
-    orient: "x" | "y" | undefined,
-  ): Hit | undefined {
+    { x, y, slop }: Pick<PickQuery, "x" | "y" | "slop">,
+    along?: "x" | "y",
+    orient?: "x" | "y",
+  ): Hits | undefined {
     switch (geometry.kind) {
       case "rect": {
-        const { rects, count } = geometry as RectGeometry;
-        // Rectangles painted later are on top. Kept to single precision,
-        // their edges are reached to within it (a bin's top, where its
-        // inspection reads it).
+        const { rects, count, edge } = geometry as RectGeometry;
+        const half = edge ? edge.width / 2 : 0;
+        const box = (i: number) => ({
+          x: rects[i * 4]!,
+          y: rects[i * 4 + 1]!,
+          width: rects[i * 4 + 2]!,
+          height: rects[i * 4 + 3]!,
+        });
+        // Rectangles painted later are on top, their outlines over every
+        // fill. Kept to single precision, their edges are reached to within
+        // it (a bin's top, where its inspection reads it).
+        let held: Hit | undefined;
+        let near: Hit | undefined;
         for (let i = count - 1; i >= 0; i--) {
-          const box = {
-            x: rects[i * 4]!,
-            y: rects[i * 4 + 1]!,
-            width: rects[i * 4 + 2]!,
-            height: rects[i * 4 + 3]!,
-          };
-          const [dx, dy] = [
-            Math.abs(x - box.x - box.width / 2),
-            Math.abs(y - box.y - box.height / 2),
-          ];
-          if (dx <= box.width / 2 + TIE && dy <= box.height / 2 + TIE)
-            return { index: i, distance: 0, box };
+          const w = rects[i * 4 + 2]! / 2;
+          const h = rects[i * 4 + 3]! / 2;
+          const dx = Math.abs(x - rects[i * 4]! - w);
+          const dy = Math.abs(y - rects[i * 4 + 1]! - h);
+          if (!held && dx <= w + TIE && dy <= h + TIE)
+            held = { index: i, distance: 0, box: box(i) };
+          if (!(half > 0)) {
+            if (held) break;
+            continue;
+          }
+          // Outlines beyond reach of the query are not measured.
+          if (dx > w + half + slop || dy > h + half + slop) continue;
+          const r = box(i);
+          const mask =
+            edge!.sides === undefined
+              ? 15
+              : typeof edge!.sides === "number"
+                ? edge!.sides
+                : edge!.sides[i]!;
+          // Side k runs from corner k to corner k + 1, clockwise from the top left (draw/rect.ts).
+          const cx = (k: number) => (k === 1 || k === 2 ? r.x + r.width : r.x);
+          const cy = (k: number) => (k & 2 ? r.y + r.height : r.y);
+          for (let k = 0; k < 4; k++) {
+            if (!(mask & (1 << k))) continue;
+            const d = shownDistance(x, y, cx(k), cy(k), cx(k + 1), cy(k + 1), clip, half);
+            const distance = Math.max(0, d - half);
+            if (distance <= slop && !(near && near.distance <= distance))
+              near = { index: i, distance, box: r };
+          }
         }
-        return undefined;
+        return held || near ? { near, inside: held } : undefined;
       }
       case "point": {
         const { coords, count, radius, radii } = geometry as PointGeometry;
@@ -322,14 +454,16 @@ export class Picker {
               box: { x: cx - r, y: cy - r, width: 2 * r, height: 2 * r },
             };
         }
-        return best;
+        return best && { near: best };
       }
       // Strokes are reached as the clip shows them, and not at all where
       // they have no width (renderers draw none).
       case "line": {
         const { path, strokeWidth } = geometry as LineGeometry;
         const half = strokeWidth / 2;
-        return half > 0 ? nearestSegment(path, half + slop, x, y, half, along, clip) : undefined;
+        const near =
+          half > 0 ? nearestSegment(path, half + slop, x, y, half, along, clip) : undefined;
+        return near && { near };
       }
       case "area":
         return areaHit(geometry as AreaGeometry, x, y, slop, along, orient, clip);
@@ -339,28 +473,32 @@ export class Picker {
         const half = strokeWidth / 2;
         const shown = half > 0 ? shownDistance(x, y, x1, y1, x2, y2, clip, half) : Infinity;
         const distance = Math.max(0, shown - half);
-        if (distance <= slop) return { index: 0, distance, box: boxOf(x1, y1, x2, y2) };
-        // Its label, drawn whatever the line's width.
+        const near =
+          distance <= slop ? { index: 0, distance, box: boxOf(x1, y1, x2, y2) } : undefined;
+        // Its label, drawn whatever the line's width: text, which covers.
         const box = (rule.draw as typeof ruleDrawing).labelBox?.(rule, frame.theme.fontSize);
-        return box && inside(box, x, y) ? { index: 0, distance: 0, box } : undefined;
+        const label = box && inside(box, x, y) ? { index: 0, distance: 0, box } : undefined;
+        return near || label ? { near, inside: label } : undefined;
       }
       case "segments": {
         const { coords, count, strokeWidth } = geometry as SegmentGeometry;
         const half = strokeWidth / 2;
         if (!(half > 0)) return undefined;
         let best: Hit | undefined;
+        const reach = half + slop;
         for (let i = 0; i < count; i++) {
-          const [x1, y1, x2, y2] = [
-            coords[i * 4]!,
-            coords[i * 4 + 1]!,
-            coords[i * 4 + 2]!,
-            coords[i * 4 + 3]!,
-          ];
+          const x1 = coords[i * 4]!;
+          const x2 = coords[i * 4 + 2]!;
+          // Segments beyond reach of the query along either axis are not measured.
+          if (x < Math.min(x1, x2) - reach || x > Math.max(x1, x2) + reach) continue;
+          const y1 = coords[i * 4 + 1]!;
+          const y2 = coords[i * 4 + 3]!;
+          if (y < Math.min(y1, y2) - reach || y > Math.max(y1, y2) + reach) continue;
           const distance = Math.max(0, shownDistance(x, y, x1, y1, x2, y2, clip, half) - half);
           if (distance <= slop && !(best && best.distance < distance))
             best = { index: i, distance, box: boxOf(x1, y1, x2, y2) };
         }
-        return best;
+        return best && { near: best };
       }
       case "text": {
         const { coords, labels, count, anchor } = geometry as TextGeometry;
@@ -380,7 +518,7 @@ export class Picker {
             frame,
             true,
           );
-          if (inside(box, x, y)) return { index: i, distance: 0, box };
+          if (inside(box, x, y)) return { inside: { index: i, distance: 0, box } };
         }
         return undefined;
       }
@@ -388,7 +526,7 @@ export class Picker {
         const { items } = geometry as LabelsGeometry;
         for (let i = items.length - 1; i >= 0; i--) {
           const box = textBox(items[i]!, frame);
-          if (inside(box, x, y)) return { index: i, distance: 0, box };
+          if (inside(box, x, y)) return { inside: { index: i, distance: 0, box } };
         }
         return undefined;
       }
@@ -514,13 +652,24 @@ export type TextLike = Pick<
   readonly box?: Rect | undefined;
 };
 
-/** What a geometry has under the query: a primitive, its distance, its box, and a path's segment. */
+/** A primitive of a geometry at the query: its index, its distance, its box, and a path's segment. */
 interface Hit {
   index: number;
   distance: number;
   box?: Rect | undefined;
   /** For paths: the segment hit, its ends' pixels (index to index + 1). */
   segment?: readonly [number, number, number, number];
+}
+
+/** What a geometry has at the query: its stroke or point within reach, and the fill holding it. */
+interface Hits {
+  near?: Hit | undefined;
+  inside?: Hit | undefined;
+}
+
+/** Whether `found` is nearer than `best` by more than `TIE` (or there is no `best`). */
+function nearer(found: Picked | undefined, best: Picked | undefined): boolean {
+  return !!found && !(best && found.item.distance >= best.item.distance - TIE);
 }
 
 /** Of positions `ks` (-1 for none), the one whose value `at` gives is nearest `target`; the earlier on ties. */
@@ -768,13 +917,13 @@ function distanceToCurve(
 }
 
 /**
- * Whether (x, y) is inside an area's fill, as `traceArea` (draw/area.ts)
- * outlines it and the renderers fill it: each run of its upper edge, then
- * back along its lower edge's run of the same index (or down to the
- * baseline), by the nonzero rule. Inside, what is hit is the upper edge's
- * segment nearest the query across the area. Outside, an outlined upper
- * edge is reached as a line is, and without one, the dots isolated points
- * are drawn as.
+ * What an area has at (x, y): its fill, where the point is inside it as
+ * `traceArea` (draw/area.ts) outlines it and the renderers fill it (each run
+ * of its upper edge, then back along its lower edge's run of the same index
+ * or down to the baseline, by the nonzero rule), hit at the upper edge's
+ * segment nearest the query across the area; and its outlined upper edge
+ * within reach, as a line is, or without an outline, the dots isolated
+ * points are drawn as.
  */
 function areaHit(
   area: AreaGeometry,
@@ -784,7 +933,7 @@ function areaHit(
   along: "x" | "y" | undefined,
   orient: "x" | "y" | undefined,
   clip: Readonly<Rect>,
-): Hit | undefined {
+): Hits | undefined {
   const { upper, lower, baseline, stroke, strokeWidth } = area;
   // Across the axis the area runs along (`orient`): a ray from the query
   // that way crosses its outline's edges, each counted by its direction
@@ -846,19 +995,24 @@ function areaHit(
       line(fx, baseline, fx, fy);
     }
   }
-  if ((winding !== 0 || onEdge) && top) {
+  // An area of no fill (a highlight's outline drawn apart) is its outline.
+  let held: Hit | undefined;
+  if ((winding !== 0 || onEdge) && top && area.fillOpacity > 0) {
     const { w, index: i } = top;
-    return {
+    held = {
       index: i,
       distance: 0,
       segment: [u[i * 2]!, u[i * 2 + 1]!, u[i * 2 + 2]!, u[i * 2 + 3]!],
       box: a ? boxOf(w, p, w, p) : boxOf(p, w, p, w),
     };
   }
+  // Its outline is painted over its fill.
   const half = strokeWidth / 2;
-  return strokeWidth > 0
-    ? nearestSegment(upper, half + slop, x, y, half, along, clip, !stroke)
-    : undefined;
+  const near =
+    strokeWidth > 0
+      ? nearestSegment(upper, half + slop, x, y, half, along, clip, !stroke)
+      : undefined;
+  return held || near ? { near, inside: held } : undefined;
 }
 
 /** The end of a segment nearer (x, y), as a box of no size. */

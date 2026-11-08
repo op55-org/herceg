@@ -313,5 +313,7 @@ createChart(element, {
 - `zIndex: 1` lifts a mark over those declared after it.
 - The order is the panel's own (insets paint over their parents), and
   separate from the order the keyboard, descriptions, and tooltips read.
-- Hovering and clicking find what is on top: the mark painted last.
+- Hovering and clicking take the nearest stroke or point within reach,
+  down to the first fill under the pointer; of equally near ones, the mark
+  painted last ([Interaction](interaction.md#events)).
 - 3D marks refuse `zIndex`; a 3D box draws by depth.

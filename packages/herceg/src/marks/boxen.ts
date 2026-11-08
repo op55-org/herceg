@@ -50,6 +50,8 @@ type LetterStats = BoxStats & { letters: Letters };
  * the values beyond the outermost boxes.
  */
 export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
+  /** Its medians paint over its boxes: picked by what it draws (see `Mark.pickDrawn`). */
+  readonly pickDrawn = true;
   readonly inset: { readonly x: number; readonly y: number };
   protected readonly noun = ["box", "boxes"] as const;
   protected readonly width = WIDTH;

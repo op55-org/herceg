@@ -343,6 +343,10 @@ class LiveChart:
         order = np.argsort(values, kind="stable")
         return order[start:]
 
+    def mark_ids(self) -> set[str]:
+        """The ids of the marks the chart draws now."""
+        return {mark["id"] for mark in self._marks if isinstance(mark.get("id"), str)}
+
     def numbering(self) -> dict[str, tuple[int, np.ndarray | None]]:
         """How each table's rows are numbered now, for `follow`: the rows
         dropped from its front since it was replaced, and an ordered table's

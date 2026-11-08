@@ -135,6 +135,28 @@ export class HiddenKeys extends Keys {
   }
 }
 
+/**
+ * What a legend entry's keys (its own, or its targets) stand for: of the
+ * series keyed `series`, those named by their own keys, by what they stand
+ * for (`hidden.groups`), or by their marks whole; and the layout items
+ * standing for them (a pie's slices).
+ */
+export function legendMembers(
+  hidden: Pick<HiddenKeys, "groups">,
+  keys: readonly string[],
+  series: readonly string[],
+): { series: string[]; items: string[] } {
+  const named = new Set(keys);
+  const { groups } = hidden;
+  const listed = new Set(series);
+  return {
+    series: series.filter(
+      (key) => named.has(key) || named.has(groups.get(key)!) || named.has(wholeOf(key)!),
+    ),
+    items: [...groups.keys()].filter((key) => named.has(groups.get(key)!) && !listed.has(key)),
+  };
+}
+
 /** How legend text is measured and set: entries' labels, parts' titles, and the values they write. */
 export interface LegendText {
   measure: MeasureText;

@@ -14,7 +14,8 @@
 //   the highlighted part is the same curve and stack. A line's selected rows
 //   with no selected neighbor are dots. Lines whose x does not ascend, and
 //   runs of rows at one x, draw whole and dimmed with their selected rows'
-//   values over them instead.
+//   values over them instead. Lines draw every series' selected parts over
+//   every series' others; areas keep their order (a stack's layers).
 // - Marks summarizing rows (histograms, box plots, heatmaps) draw their
 //   selected rows against the whole themselves (`Mark.selectedGeometry`),
 //   through the parts and dimming lent here.
@@ -253,7 +254,7 @@ export class Highlighter {
       const s = byKey.get(g.of ?? g.key);
       if (s && !seriesEnds(s) && !frame.hidden.has(s.key)) others.add(s);
     }
-    const lit = new Map<string, Geometry[]>();
+    const shown = new Map<string, Geometry[]>();
     // Geometry of a series with a key of its own (markers, style runs'
     // pieces) by its series and layer: an area's outlines apart from its fills.
     const litKey = (g: Geometry, on = "") =>
@@ -265,10 +266,10 @@ export class Highlighter {
         const name = g.of ?? g.key;
         const traced = maskedSeries.find((m) => name === m.key || name.startsWith(`${m.key}|`));
         if (traced) tracing(g, traced);
-        const parts = lit.get(litKey(g)) ?? lit.set(litKey(g), []).get(litKey(g))!;
+        const parts = shown.get(litKey(g)) ?? shown.set(litKey(g), []).get(litKey(g))!;
         // A look replaces paint once; without, a translucent copy shows the mark's own over it dimmed.
-        const shown = paint.looked ? [paint.lit(g)] : over(kit, g);
-        parts.push(...shown.map((copy) => (copy === g ? g : copiedFrom(copy, g))));
+        const copies = paint.looked ? [paint.lit(g)] : over(kit, g);
+        parts.push(...copies.map((copy) => (copy === g ? g : copiedFrom(copy, g))));
       }
     }
     // A series drawn in pieces (sharing `of`: markers, style runs'): each
@@ -277,8 +278,11 @@ export class Highlighter {
     for (const g of drawn) if (g.of !== undefined) lastPiece.set(litKey(g, ON), g);
     // In the mark's order, each part as it paints it: an area's fill, then
     // its outline; a series' selected rows over its own dimmed ones, so that
-    // translucent colors selected whole show as they are.
+    // translucent colors selected whole show as they are. Lines, whose order
+    // means nothing, paint every series' selected parts over every series'
+    // others (`litOverSeries`); a stack's layers keep theirs.
     const out: Geometry[] = [];
+    const lit = type === "line" ? ([] as Geometry[]) : out;
     const shift = (s: Series) => shiftOf(mark, s, frame);
     for (const g of drawn) {
       const s = byKey.get(g.of ?? g.key);
@@ -288,7 +292,8 @@ export class Highlighter {
       const rows = ends && g.kind === "point" && s.features?.markerRows?.(g);
       if (rows) {
         const [inside, outside] = pointsIn(g as PointGeometry, rows, selectedOf(s));
-        out.push(...paint.dim(outside), paint.lit(inside));
+        out.push(...paint.dim(outside));
+        lit.push(paint.lit(inside));
         continue;
       }
       if (ends) {
@@ -313,27 +318,30 @@ export class Highlighter {
           lo <= hi ? [reaching(off, lo, hi), reaching(spans, lo, hi)] : [off, spans];
         if (outside.length > 0)
           for (const dimmed of paint.dim(g)) out.push(clipped(dimmed, outside, frame, along, OFF));
-        if (inside.length > 0) out.push(clipped(paint.lit(g), inside, frame, along, ON));
+        if (inside.length > 0) lit.push(clipped(paint.lit(g), inside, frame, along, ON));
         continue;
       }
-      // Dimmed, then its selected rows' values over it, part by part.
-      const [under, values] = [paint.dim(g), lit.get(litKey(g, ON)) ?? []];
+      // Dimmed, then its selected rows' values over it, part by part. A
+      // translucent copy shows as it is only straight over its own dimmed
+      // part, so a series with selected values goes with them whole.
+      const [under, values] = [paint.dim(g), shown.get(litKey(g, ON)) ?? []];
+      const dimmed = values.some(drawsSome) ? lit : out;
       const last = lastPiece.get(litKey(g, ON));
       if (last) {
-        out.push(...under);
-        if (last === g) out.push(...values);
+        dimmed.push(...under);
+        if (last === g) lit.push(...values);
         continue;
       }
       for (let i = 0; i < Math.max(under.length, values.length); i++) {
-        if (under[i]) out.push(under[i]!);
-        if (values[i]) out.push(values[i]!);
+        if (under[i]) dimmed.push(under[i]!);
+        if (values[i]) lit.push(values[i]!);
       }
     }
     // Dots at selected rows no span shows, for series without markers, in
     // the look each observation is drawn in: a line's color, opacity, and
     // width, an area's outline's (or its dots'), or as its style runs give
-    // it. Over the series' own runs, under later series, as its selected
-    // parts are (picking reads them so: `litOverSeries`).
+    // it. With the series' selected parts: over its own runs, under later
+    // series' (picking reads them so: `litOverSeries`).
     const whole = new Map<string, DotLook>();
     for (const g of drawn)
       if (g.kind === "line") {
@@ -369,18 +377,19 @@ export class Highlighter {
       const owner = d.key.slice(0, d.key.indexOf(ON));
       (dotsOf.get(owner) ?? dotsOf.set(owner, []).get(owner)!).push(d);
     }
-    if (dotsOf.size === 0) return out;
+    const under = lit === out ? [] : out;
+    if (dotsOf.size === 0) return lit === out ? out : [...out, ...lit];
     const ownerOf = (g: Geometry) => (g.of ?? g.key).split("\u0001")[0]!;
     const last = new Map<string, Geometry>();
-    for (const g of out) last.set(ownerOf(g), g);
+    for (const g of lit) last.set(ownerOf(g), g);
     // Dots of a series none of whose pieces reach the plot go where it
     // would be drawn: before the first part of a later series.
     const order = new Map(series.map((s, i) => [s.key, i]));
     const rank = (owner: string) => order.get(owner) ?? -1;
     const waiting = [...dotsOf.keys()].filter((owner) => !last.has(owner));
     waiting.sort((a, b) => rank(a) - rank(b));
-    const placed: Geometry[] = [];
-    for (const g of out) {
+    const placed: Geometry[] = [...under];
+    for (const g of lit) {
       const owner = ownerOf(g);
       while (waiting.length > 0 && rank(waiting[0]!) < rank(owner))
         placed.push(...dotsOf.get(waiting.shift()!)!);
@@ -1199,6 +1208,12 @@ function faded(draw: Drawing<Geometry>, fraction: number): Drawing<Geometry> {
  * drawn apart, an area of no fill (`outlineOf`), so each is drawn at its
  * own alpha.
  */
+/** Whether a line's or markers' copy draws anything: a series' with selected rows does. */
+function drawsSome(geometry: Geometry): boolean {
+  if (geometry.kind === "line") return (geometry as LineGeometry).path.count > 0;
+  return geometry.kind !== "point" || (geometry as PointGeometry).count > 0;
+}
+
 function over(kit: HighlightKit, geometry: Geometry): Geometry[] {
   const DIM = kit.dim;
   const at = (a: number) => (a >= 1 ? 1 : ((1 - DIM) * a) / (1 - DIM * a));

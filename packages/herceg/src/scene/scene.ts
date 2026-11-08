@@ -199,6 +199,11 @@ export interface AreaGeometry extends Geometry {
   /** Bottom edge, left to right; when null the area closes at `baseline`. */
   lower: Polyline | null;
   baseline: number;
+  /**
+   * The axis its edges run along where no trace says it: a notched box's
+   * sides run along its values. Its inside is across it.
+   */
+  along?: "x" | "y" | undefined;
   /** Outline color for the top edge, or null for none. */
   stroke: string | null;
   strokeWidth: number;

@@ -16,6 +16,7 @@ import type { ChartMark } from "../../src/marks/mark.ts";
 import { DIM } from "../../src/marks/mark.ts";
 import { point } from "../../src/marks/point.ts";
 import { rug } from "../../src/marks/rug.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { membership } from "../../src/model/memberships.ts";
@@ -199,9 +200,9 @@ describe("highlighting", () => {
   });
 
   contractTest("highlight.lines.order", () => {
-    // Each line's selected rows over its own dimmed ones, series by series:
-    // a later series' dimmed markers over an earlier one's selected markers,
-    // where picking finds them.
+    // Every line's selected parts over every series' dimmed ones, as marks
+    // of a glyph per row draw theirs: an earlier series' selected markers
+    // over a later one's dimmed markers, where picking finds them.
     const two = table({ x: [0, 1, 0, 1], y: [5, 5, 5, 5], s: ["a", "a", "b", "b"] });
     const { store, highlighter, model } = highlighted(two, [
       line(two, { x: "x", y: "y", series: "s", markers: true }),
@@ -211,19 +212,82 @@ describe("highlighting", () => {
     const keys = model.scene(estimateText).panels[0]!.marks.map(({ key }) => key);
     const litA = keys.findIndex((key) => key.includes('"a"') && key.includes("\u0001on"));
     const ofB = keys.map((key) => key.includes('"b"'));
-    expect(litA).toBeGreaterThan(-1);
-    expect(litA).toBeLessThan(ofB.lastIndexOf(true));
+    expect(litA).toBeGreaterThan(ofB.lastIndexOf(true));
     const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(5)];
-    expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(3);
-    // A lone selected row's dot too: over its own line, under later series.
+    expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
+    // A lone selected row's dot too: over every series' dimmed lines.
     const plain = highlighted(two, [line(two, { x: "x", y: "y", series: "s" })]);
     plain.model.layoutHighlight = (source) => plain.highlighter.selected(source);
     plain.store.set("focus", selectRows(new RowSet(two).add(1)));
     const drawn = plain.model.scene(estimateText).panels[0]!.marks.map(({ key }) => key);
     const dot = drawn.findIndex((key) => key.includes('"a"') && key.endsWith("-dots"));
-    expect(dot).toBeGreaterThan(-1);
-    expect(dot).toBeLessThan(drawn.map((key) => key.includes('"b"')).lastIndexOf(true));
-    expect(plain.model.inspect(px, py, "nearest")!.points[0]!.row).toBe(3);
+    expect(dot).toBeGreaterThan(drawn.map((key) => key.includes('"b"')).lastIndexOf(true));
+    expect(plain.model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
+    // A line whose x does not ascend, drawn whole and dimmed with its
+    // selected rows' values over it: the two go over the other series' together.
+    const back = table({
+      x: [0, 2, 1, 0, 2, 1],
+      y: [5, 5, 5, 5, 5, 5],
+      s: ["a", "a", "a", "b", "b", "b"],
+    });
+    const whole = highlighted(back, [line(back, { x: "x", y: "y", series: "s" })]);
+    whole.model.layoutHighlight = (source) => whole.highlighter.selected(source);
+    whole.store.set("focus", selectRows(new RowSet(back).addAll([0, 1, 2])));
+    const order = whole.model.scene(estimateText).panels[0]!.marks.map(({ key }) => key);
+    const dimmedA = order.indexOf('[0,"a"]');
+    expect(dimmedA).toBeGreaterThan(order.indexOf('[0,"b"]'));
+    expect(order[dimmedA + 1]).toBe('[0,"a"]\u0001on');
+  });
+
+  it("picks a selected candle's wick painted over another's body", () => {
+    // At one time, a falling candle and, selected and so painted over it, a rising one.
+    const prices = table({ t: [1, 1], o: [7, 2], h: [9, 9], l: [1, 1], c: [3, 4] });
+    const candles = (over?: number) => {
+      const marks = [candlestick(prices, { x: "t", open: "o", high: "h", low: "l", close: "c" })];
+      const made = highlighted(prices, over === undefined ? marks : [...marks, rule({ y: over })]);
+      made.store.set("focus", selectRows(new RowSet(prices).add(1)));
+      made.model.scene(estimateText);
+      return made.model;
+    };
+    const plain = candles();
+    const [x, y] = [xScale(plain)!.map(1), yScale(plain)!.map(5)];
+    // On the wick, inside the falling body, a rule 2 px off over both: the
+    // candles, the wick a stroke painted over the body. (Which of two candles
+    // at one time it names is its lookup's.)
+    const model = candles(yScale(plain)!.invert(y - 2));
+    expect(withPicker(model).picker!(x, y)?.key).toBe(0);
+  });
+
+  it("picks a line's selected part only within the spans it is drawn in", () => {
+    // Two lines over each other; a's rows at x 0 and 1 selected, drawn over b there only.
+    const two = table({
+      x: [0, 1, 2, 3, 0, 1, 2, 3],
+      y: [5, 5, 5, 5, 5, 5, 5, 5],
+      s: ["a", "a", "a", "a", "b", "b", "b", "b"],
+    });
+    const { store, model } = highlighted(two, [line(two, { x: "x", y: "y", series: "s" })]);
+    store.set("focus", selectRows(new RowSet(two).addAll([0, 1])));
+    model.scene(estimateText);
+    const picked = (x: number) =>
+      withPicker(model).picker!(xScale(model)!.map(x), yScale(model)!.map(5))?.series?.key;
+    expect(picked(0.5)).toContain('"a"');
+    expect(picked(2.5)).toContain('"b"');
+  });
+
+  it("measures a line's selected part to what its span shows of it", () => {
+    // Two lines over each other rising steeply past x 1; a's rows at x 0 and
+    // 1 selected, its rise not drawn selected past its span.
+    const two = table({
+      x: [0, 1, 1.01, 2, 0, 1, 1.01, 2],
+      y: [1, 1, 9, 9, 1, 1, 9, 9],
+      s: ["a", "a", "a", "a", "b", "b", "b", "b"],
+    });
+    const { store, model } = highlighted(two, [line(two, { x: "x", y: "y", series: "s" })]);
+    store.set("focus", selectRows(new RowSet(two).addAll([0, 1])));
+    model.scene(estimateText);
+    // A pixel left of the rise, inside a's span: b's rise, drawn there.
+    const [x, y] = [xScale(model)!.map(1) - 1, yScale(model)!.map(5)];
+    expect(withPicker(model).picker!(x, y)?.series?.key).toContain('"b"');
   });
 
   contractTest("highlight.clouds.order", () => {

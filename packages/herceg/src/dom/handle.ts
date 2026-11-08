@@ -17,7 +17,7 @@ import type { SvgSizing } from "../render/svg.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect } from "../scene/scene.ts";
 import type { CameraSpec, CursorShowSpec } from "../spec/spec.ts";
-import type { ChartSelection, PinTarget } from "../spec/state.ts";
+import type { ChartSelection, ItemReference, PinTarget, SeriesReference } from "../spec/state.ts";
 import type { Camera } from "../three/camera.ts";
 import type { ChartUpdate } from "./chart.ts";
 import type {
@@ -103,6 +103,19 @@ export interface LegendEntry {
   readonly key: string;
   readonly label: string;
   readonly color: string;
+  /**
+   * What it acts on, as references name it: each series and layout item
+   * of what it stands for (one series name drawn by a line and an area is
+   * two). Marks without an `id`, and groups of networks, maps, and 3D
+   * points, add none.
+   */
+  readonly references: readonly (SeriesReference | ItemReference)[];
+}
+
+/** What `Chart.referenceOf` gives for each kind of key. */
+export interface ReferenceOf {
+  series: SeriesReference;
+  item: ItemReference;
 }
 
 /** Network nodes moved by the chart's user, by item key: where each is, in the network's layout units. */
@@ -313,6 +326,16 @@ export interface Chart {
    * shows no legend: series, or a layout mark's items.
    */
   getLegend(): readonly LegendEntry[];
+  /**
+   * What a key from an event, a selection, a legend entry, or a pin names,
+   * as references name it: a series key's `{ mark, series }`, an item key's
+   * `{ mark, item }` (a row without `itemKey`, its identity's parts). The
+   * caller says which kind of key it holds, as the event does: the two can
+   * be the same text. Undefined for a key of no mark of the chart, of a mark
+   * without an `id` (references name marks by id), and for groups' keys
+   * (networks', maps', 3D points'). It decodes the key; it reads no data.
+   */
+  referenceOf<K extends keyof ReferenceOf>(kind: K, key: string): ReferenceOf[K] | undefined;
   /**
    * The keys of the series and items hidden, as the legend hides them; with
    * `panel`, those hidden in that subplot, as its own legend may hide them.

@@ -10,9 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from herceg import ItemReference, SeriesReference
 from herceg._events import (
     _EPOCH,
     IntervalGroup,
+    LegendEntryTarget,
     Provenance,
     ScaleView,
     ValueGroup,
@@ -164,3 +166,36 @@ def test_hover_targets_carry_no_provenance():
     assert decode_input_event(payload).target.provenance is None
     with pytest.raises(ValueError):
         decode_input_event(_clicked({"groups": [{"field": 1}], "condition": None, "source": None}))
+
+
+def _legend_click(references: object) -> dict:
+    """A click on a legend entry, as the browser writes it."""
+    target = {"kind": "legendEntry", "key": '["lines","v"]', "label": "v", "panel": None}
+    return {
+        "pointer": None,
+        "target": {**target, "references": references},
+        "inspection": None,
+        "cause": "pointer",
+        "revision": 1,
+    }
+
+
+def test_legend_entry_targets_name_what_they_stand_for():
+    # The payload the front ends' tests read from a line and an area of one series
+    # (python/js/test/surfaces.test.ts), and a pie's slice.
+    written = [
+        {"mark": "bands", "series": "v"},
+        {"mark": "lines", "series": "v"},
+        {"mark": "shares", "item": ["slice", [0, 5]]},
+    ]
+    target = decode_input_event(_legend_click(written)).target
+    assert isinstance(target, LegendEntryTarget)
+    assert target.references == (
+        SeriesReference("bands", "v"),
+        SeriesReference("lines", "v"),
+        ItemReference("shares", ("slice", (0, 5))),
+    )
+    assert decode_input_event(_legend_click([])).target.references == ()
+    for broken in (None, [{"series": "v"}], ["lines"]):
+        with pytest.raises(ValueError, match="legendEntry target references"):
+            decode_input_event(_legend_click(broken))

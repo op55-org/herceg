@@ -17,7 +17,7 @@ import type { MeasureText } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import { monotonePolyline } from "../marks/curve.ts";
 import { tablesOf, viewOf } from "../marks/layout-mark.ts";
-import { keepsKey } from "../marks/mark.ts";
+import { keepsKey, referenceOf } from "../marks/mark.ts";
 import { lowerPosition, placeAt, rowOf, samePositions, xAt } from "../marks/series.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import { planAxis } from "../model/axis.ts";
@@ -25,6 +25,7 @@ import { axisGuide } from "../model/axis-guide.ts";
 import { chartDescription, describeChart } from "../model/describe.ts";
 import { LOADED as compilers, GUIDE_KIT } from "../model/guides.ts";
 import type { PlaneViewChange } from "../model/item-views.ts";
+import { legendMembers } from "../model/legend.ts";
 import {
   type ChartConfig,
   ChartModel,
@@ -58,8 +59,10 @@ import type { CameraSpec } from "../spec/spec.ts";
 import {
   type BrushSelection,
   type ChartSelection,
+  type ItemReference,
   type Phase,
   type PinTarget,
+  type SeriesReference,
   STATE_OPTIONS,
   type StateSpec,
   type VisibilityState,
@@ -94,6 +97,7 @@ import {
   type LegendEntry,
   type PanelInfo,
   panelInfo,
+  type ReferenceOf,
 } from "./handle.ts";
 import type { Interaction, InteractionHost, InteractionKit, ShownCursor } from "./interaction.ts";
 import { Legend } from "./legend.ts";
@@ -1364,7 +1368,39 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   getLegend(): readonly LegendEntry[] {
-    return this.#model.legendEntries().map(({ key, label, color }) => ({ key, label, color }));
+    return this.#model
+      .legendEntries()
+      .map(({ key, label, color }) => ({ key, label, color, references: this.#references([key]) }));
+  }
+
+  referenceOf<K extends keyof ReferenceOf>(kind: K, key: string): ReferenceOf[K] | undefined {
+    if (kind !== "series" && kind !== "item")
+      throw new ChartError({
+        code: "invalid-option",
+        path: "kind",
+        message: `chart.referenceOf kind: expected "series" or "item"; received ${JSON.stringify(kind)}`,
+      });
+    return referenceOf(kind, key, this.#options.marks) as ReferenceOf[K] | undefined;
+  }
+
+  /** What a legend entry of `keys` (its own, or its targets) stands for (see `legendMembers`). */
+  #members(keys: readonly string[]): { series: string[]; items: string[] } {
+    const model = this.#model;
+    return legendMembers(
+      model.hidden,
+      keys,
+      model.series().map(({ key }) => key),
+    );
+  }
+
+  /** What a legend entry of `keys` acts on, as references name it. */
+  #references(keys: readonly string[]): (SeriesReference | ItemReference)[] {
+    const { marks } = this.#options;
+    const { series, items } = this.#members(keys);
+    return [
+      ...series.map((key) => referenceOf("series", key, marks)),
+      ...items.map((key) => referenceOf("item", key, marks)),
+    ].filter((reference) => reference !== undefined);
   }
 
   getHiddenKeys({ panel }: { panel?: string | undefined } = {}): readonly string[] {
@@ -2606,6 +2642,8 @@ export class MountedChart implements Chart, ExportsScene {
       live: this.#live,
       legend: this.#legend.element,
       legendClicks: this.#legend.clicked,
+      members: (keys) => this.#members(keys),
+      references: (keys) => this.#references(keys),
       events: this.#events,
       id: this.#id,
       options: () => this.#options,

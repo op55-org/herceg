@@ -5,7 +5,7 @@
 // tests/test_surfaces.py checks that each sends the spec as it is.
 
 import { encodePayload, mount as mountFragment, unmount as unmountFragment } from "herceg/web";
-import { afterEach, describe, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
 import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
 import {
@@ -114,4 +114,82 @@ describe("front ends draw the spec as sent", () => {
       name,
     );
   }
+});
+
+describe("a legend entry's click, as each front end reports it", () => {
+  // One series name drawn by an area and a line: the entry stands for both.
+  const spec = sent({
+    marks: [
+      { type: "area", id: "bands", x: "t", y: ["v", "w"] },
+      { type: "line", id: "lines", x: "t", y: ["v", "w"] },
+    ],
+  } as DrawnCase["spec"]);
+  const target = {
+    kind: "legendEntry",
+    label: "v",
+    references: [
+      { mark: "bands", series: "v" },
+      { mark: "lines", series: "v" },
+    ],
+  };
+
+  /** Presses the entry "v" of the chart's legend in `page`, once the chart has loaded. */
+  async function pressEntry(chart: MountedChart, page: HTMLElement) {
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    chart.render();
+    const button = [...page.querySelectorAll("button")].find((b) => b.textContent === "v")!;
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  }
+
+  it("names the series it stands for, in a notebook widget", async () => {
+    const model = new MockModel({
+      _chart: {
+        revision: 0,
+        spec: fullSpec(spec),
+        buffers: [],
+        selection: null,
+        viewport: null,
+        drill_root: null,
+        item_positions: {},
+      },
+      _listening: ["click"],
+    });
+    const widget = widgetModule();
+    const page = host();
+    const chart = made(() => {
+      cleanups.push(widget.initialize({ model }));
+      cleanups.push(widget.render({ model, el: page }));
+    });
+    await pressEntry(chart, page);
+    expect(model.messages("click")).toMatchObject([{ type: "click", event: { target } }]);
+  });
+
+  it("names the series it stands for, in a Streamlit app", async () => {
+    const page = host();
+    const payload = encodePayload(fullSpec(spec), [], { events: ["click"] });
+    let triggers: [string, unknown][] = [];
+    const chart = made(() => {
+      const ran = run(page, payload);
+      cleanups.push(ran.cleanup);
+      triggers = ran.triggers;
+    });
+    await pressEntry(chart, page);
+    expect(triggers).toMatchObject([["click", { target }]]);
+  });
+
+  it("names the series it stands for, in a web page", async () => {
+    const page = host();
+    const inline = { protocol: 1, kind: "chart", spec: fullSpec(spec), buffers: [] };
+    const template = document.createElement("template");
+    template.setAttribute("data-herceg-payload", "");
+    template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    page.dataset.herceg = "";
+    page.append(template);
+    const clicks: unknown[] = [];
+    page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
+    const chart = await mountFragment(page);
+    cleanups.push(() => unmountFragment(page));
+    await pressEntry(chart as unknown as MountedChart, page);
+    expect(clicks).toMatchObject([{ target }]);
+  });
 });

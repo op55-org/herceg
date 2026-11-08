@@ -6,7 +6,7 @@ import type { SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, Frozen, RugSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import type { CssColor, ItemKeyed, SeriesName } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -249,7 +249,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
    * Its ticks are found as `pick` finds them, measured to their painted
    * strokes (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.rug(this, drawn, query);
   }
 

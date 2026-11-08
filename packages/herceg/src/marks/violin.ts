@@ -73,8 +73,9 @@ interface Shape {
 export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
   /**
    * How far a pixel is from what `clip` keeps of the violin of `row` as
-   * painted: its fill, its outline's stroke, and the inner marks
-   * `geometry` draws.
+   * painted: from its outline's stroke and the inner marks `geometry`
+   * draws over its fill (its inner box covering what is under it), and
+   * from its fills.
    */
   override shapeDistance(
     s: Series,
@@ -83,7 +84,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
     py: number,
     frame: Frame,
     clip: Readonly<Rect>,
-  ): number {
+  ): readonly [number, number] {
     const horizontal = this.horizontal;
     const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
@@ -114,6 +115,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
     const { stats, groups } = this.summaryOf(s);
     const shape = groups[row]!;
     let distance = Number.POSITIVE_INFINITY;
+    let fill = Number.POSITIVE_INFINITY;
     if (shape.density) {
       // The fill as kept: whether it holds the clip's point nearest the pixel.
       const qx = Math.min(Math.max(px, clip.x), clip.x + clip.width);
@@ -141,22 +143,22 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
         }
         [c0, w0] = [c, w];
       });
-      if (inside) return Math.hypot(px - qx, py - qy);
+      if (inside) fill = Math.hypot(px - qx, py - qy);
       if (!Number.isNaN(first)) {
         edge(0, c0, w0, c0);
         // A split violin's flat side runs along its center.
         if (split) edge(0, first, 0, c0);
       }
     } else if (shape.min === shape.max) {
-      return across0(across.map(shape.min), half);
+      return [across0(across.map(shape.min), half), fill];
     }
-    if (inner === "none") return distance;
+    if (inner === "none") return [distance, fill];
     if (inner === "quartiles") {
       for (const value of this.#statistics(stats, row)) {
         const c = across.map(value);
         distance = Math.min(distance, across0(c, widthAt(shape, half, across, value, c)));
       }
-      return distance;
+      return [distance, fill];
     }
     const box = this.#box(share, half);
     // As drawn: a split violin's inner marks in the middle of its side.
@@ -175,7 +177,8 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
     const dot = Number.isFinite(median)
       ? distanceToDisc(mx, my, medianRadius(box), clip, px, py)
       : Number.POSITIVE_INFINITY;
-    return Math.min(distance, boxed, whisker, dot);
+    // Inside its inner box, only the median's dot is painted over it.
+    return boxed > 0 ? [Math.min(distance, whisker, dot), Math.min(fill, boxed)] : [dot, 0];
   }
 
   /**

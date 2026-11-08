@@ -178,3 +178,56 @@ def test_widgets_give_references_back_as_references():
     series = hg.SeriesSelection((hg.SeriesReference("dots", "v"),))
     widget.selection = series
     assert widget.selection == series
+
+
+def test_keys_from_events_read_as_references():
+    chart = (
+        hg.Chart(DATA)
+        .line(x="t", y="v", series="s", id="lines")
+        .bar(x="t", y="v", id="bars")
+        .point(x="t", y="v")
+    )
+    assert chart.reference_of("series", '["lines","a"]') == hg.SeriesReference("lines", "a")
+    assert chart.reference_of("item", '["bars","row",1]') == hg.ItemReference("bars", ("row", 1))
+    # A bin's interval is a tuple, as references hold it.
+    assert chart.reference_of("item", '["bars",[0,5]]') == hg.ItemReference("bars", ((0, 5),))
+    # The kind says what the key is: a series key and an item key can be one text.
+    assert chart.reference_of("item", '["lines","a"]') == hg.ItemReference("lines", ("a",))
+    # Of no mark of the chart, of a mark without an id, or no key at all: None.
+    for key in (
+        '["other","a"]',
+        '[2,"v"]',
+        '["lines"]',
+        '["lines","a","b"]',
+        "not json",
+        "{}",
+        '[[],"a"]',
+        '[{},"a"]',
+    ):
+        assert chart.reference_of("series", key) is None, key
+    assert chart.reference_of("item", '["bars"]') is None
+    # What JSON.parse refuses, as TypeScript's chart.referenceOf does.
+    assert chart.reference_of("item", '["bars",NaN]') is None
+    with pytest.raises(
+        hg.ChartError, match='Chart.reference_of kind: expected "series" or "item"; received "row"'
+    ):
+        chart.reference_of("row", '["lines","a"]')  # type: ignore[call-overload]
+    with pytest.raises(
+        hg.ChartError, match="Chart.reference_of key: expected a string; received 3"
+    ):
+        chart.reference_of("series", 3)  # type: ignore[call-overload]
+
+
+def test_widgets_read_keys_as_references_of_the_chart_they_show():
+    widget = hg.Chart(DATA, select="series").line(x="t", y="v", series="s", id="lines").widget()
+    assert widget.reference_of("series", '["lines","b"]') == hg.SeriesReference("lines", "b")
+    assert widget.reference_of("item", '["lines","row",0]') == hg.ItemReference("lines", ("row", 0))
+    assert widget.reference_of("series", '["bars","b"]') is None
+    with pytest.raises(
+        hg.ChartError, match='widget.reference_of kind: expected "series" or "item"'
+    ):
+        widget.reference_of("rows", '["lines","b"]')  # type: ignore[call-overload]
+    with pytest.raises(
+        hg.ChartError, match="widget.reference_of key: expected a string; received 3"
+    ):
+        widget.reference_of("series", 3)  # type: ignore[call-overload]

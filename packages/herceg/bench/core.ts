@@ -32,12 +32,15 @@ import { Polyline } from "../src/lod/polyline.ts";
 import { area } from "../src/marks/area.ts";
 import { type BarMark, bar } from "../src/marks/bar.ts";
 import { boxplot } from "../src/marks/boxplot.ts";
+import { candlestick } from "../src/marks/candlestick.ts";
 import { contour } from "../src/marks/contour.ts";
 import { GridTracer } from "../src/marks/contour-trace.ts";
 import { custom } from "../src/marks/custom.ts";
+import { errorbar } from "../src/marks/errorbar.ts";
 import { geopoint } from "../src/marks/geopoint.ts";
 import { geoshape } from "../src/marks/geoshape.ts";
 import { graph } from "../src/marks/graph.ts";
+import { heatmap } from "../src/marks/heatmap.ts";
 import { histogram } from "../src/marks/histogram.ts";
 import { labelPaint } from "../src/marks/labels.ts";
 import { line } from "../src/marks/line.ts";
@@ -46,6 +49,7 @@ import { pie } from "../src/marks/pie.ts";
 import { point } from "../src/marks/point.ts";
 import { PositionStack } from "../src/marks/position-stack.ts";
 import { region } from "../src/marks/region.ts";
+import { rug } from "../src/marks/rug.ts";
 import { rule } from "../src/marks/rule.ts";
 import { lowerPosition, placeAt, rowOf } from "../src/marks/series.ts";
 import { SplitRows } from "../src/marks/split.ts";
@@ -55,6 +59,7 @@ import { packSwarm } from "../src/marks/swarm.ts";
 import { text } from "../src/marks/text.ts";
 import { treemap } from "../src/marks/treemap.ts";
 import { UnionStack } from "../src/marks/union-stack.ts";
+import { violin } from "../src/marks/violin.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
 import { membership } from "../src/model/memberships.ts";
@@ -1417,6 +1422,228 @@ measure("custom: 2,000 comets, pick under 100 places", () => {
 measure("custom: 2,000 comets, inspect under 100 places", () => {
   for (const [px, py] of cometPlaces) pickedComets.inspect(px, py);
 });
+
+// Picking (model/pick.ts): the nearest stroke or point within reach, down
+// to the first fill the point is inside, so every geometry within reach
+// above that fill is tested, not only the first. Each case picks under 100
+// places of the plot, a click's or a hover's worth of queries.
+const pickPlaces = (plot: { x: number; y: number; width: number; height: number }) =>
+  Array.from(
+    { length: 100 },
+    (_, i) =>
+      [
+        plot.x + ((i * 97) % 1000) * (plot.width / 1000),
+        plot.y + ((i * 61) % 1000) * (plot.height / 1000),
+      ] as const,
+  );
+const picking = (
+  marks: ConstructorParameters<typeof ChartModel>[0]["marks"],
+  y?: [number, number],
+) => {
+  const chart = new ChartModel(
+    {
+      locale: "en-US",
+      timeZone: "UTC",
+      legend: false,
+      ...(y && { y: { domain: y, nice: false } }),
+      marks,
+    },
+    undefined,
+    staticCompilers(),
+  );
+  chart.setSize(960, 400, 1);
+  const picker = new Picker({ rowOf, placeAt, lowerPosition });
+  chart.picker = (px, py, accept) => picker.pick(chart, { x: px, y: py, slop: 4 }, accept);
+  chart.scene(estimateText);
+  return chart;
+};
+const pickUnder = (chart: ChartModel) => {
+  const places = pickPlaces(chart.scene(estimateText).panels[0]!.plot);
+  return () => {
+    for (const [px, py] of places) chart.picker!(px, py);
+  };
+};
+// A1's crowd: 12 lines of 2,160 minutes, 6 ms apart around 200 ms.
+const PICK_CROWD = 2160;
+const pickNames = Array.from({ length: 12 }, (_, k) => `s${k}`);
+const pickCrowdColumns = (order: (i: number) => number) =>
+  table({
+    t: Float64Array.from({ length: PICK_CROWD }, (_, i) => order(i) * 60_000),
+    ...Object.fromEntries(
+      pickNames.map((name, k) => [
+        name,
+        Float64Array.from(
+          { length: PICK_CROWD },
+          (_, i) => 200 + 6 * k + 10 * Math.sin(order(i) / 90 + k),
+        ),
+      ]),
+    ),
+  });
+const pickCrowd = pickCrowdColumns((i) => i);
+const pickCrowdChart = () => picking([line(pickCrowd, { x: "t", y: pickNames as never })]);
+measure("pick: 12 lines × 2,160, under 100 places", pickUnder(pickCrowdChart()));
+// The same lines unordered along x (a shuffled table), traced as listed.
+const pickShuffled = pickCrowdColumns((i) => (i * 1201) % PICK_CROWD);
+measure(
+  "pick: 12 unordered lines × 2,160, under 100 places",
+  pickUnder(picking([line(pickShuffled, { x: "t", y: pickNames as never })])),
+);
+// Overlapping fills: 50 translucent regions over each other under the crowd,
+// and 50 bars over it, which cover what is under them.
+const pickSpans = table({
+  from: Float64Array.from({ length: 50 }, (_, i) => (i * 1500 * 60_000) / 50),
+  to: Float64Array.from({ length: 50 }, (_, i) => ((i * 1500 + 40_000) * 60_000) / 50),
+});
+measure(
+  "pick: 50 regions under 12 lines, under 100 places",
+  pickUnder(
+    picking([
+      region(pickSpans, { x1: "from", x2: "to" }),
+      line(pickCrowd, { x: "t", y: pickNames as never }),
+    ]),
+  ),
+);
+const pickBars = table({
+  c: Array.from({ length: 50 }, (_, i) => `c${i}`),
+  v: Float64Array.from({ length: 50 }, (_, i) => 100 + ((i * 37) % 50)),
+});
+const pickLines = table({
+  c: Array.from({ length: 50 }, (_, i) => `c${i}`),
+  ...Object.fromEntries(
+    pickNames.map((name, k) => [
+      name,
+      Float64Array.from({ length: 50 }, (_, i) => 50 + 6 * k + (i % 7)),
+    ]),
+  ),
+});
+measure(
+  "pick: 50 bars over 12 lines, under 100 places",
+  pickUnder(
+    picking(
+      [line(pickLines, { x: "c", y: pickNames as never }), bar(pickBars, { x: "c", y: "v" })],
+      [0, 200],
+    ),
+  ),
+);
+// Dense custom shapes: 20,000 filled squares, a few pixels each, as items.
+const PICK_DENSE = 20_000;
+const pickDenseRows = table({
+  x: Float64Array.from({ length: PICK_DENSE }, (_, i) => (i * 7919) % 1000),
+  y: Float64Array.from({ length: PICK_DENSE }, (_, i) => (i * 104_729) % 1000),
+});
+type PickDense = typeof pickDenseRows extends Table<infer S> ? S : never;
+const pickDenseShapes = custom<PickDense>(pickDenseRows, {
+  x: "x",
+  y: "y",
+  draw({ series, x, y, item, rect }) {
+    for (const s of series)
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rowAt(k);
+        item(s, row, () => rect(x(s.x[row]!) - 2, y(s.y[row]!) - 2, 4, 4));
+      }
+  },
+});
+measure("pick: 20,000 custom squares, under 100 places", pickUnder(picking([pickDenseShapes])));
+// One case for each other family a hover listener picks in: points of
+// four marks, a stack's layers, a heatmap's cells, candles over a line,
+// box plots, and a pie's slices.
+const PICK_POINTS = 2500;
+const pickClouds = Array.from({ length: 4 }, (_, k) =>
+  point(
+    table({
+      x: Float64Array.from({ length: PICK_POINTS }, (_, i) => ((i * 7919 + k * 13) % 1000) / 10),
+      y: Float64Array.from({ length: PICK_POINTS }, (_, i) => ((i * 104_729 + k * 31) % 1000) / 10),
+    }),
+    { x: "x", y: "y" },
+  ),
+);
+measure("pick: 4 marks of 2,500 points, under 100 places", pickUnder(picking(pickClouds)));
+measure(
+  "pick: a stack of 12 areas × 2,160, under 100 places",
+  pickUnder(picking([area(pickCrowd, { x: "t", y: pickNames as never, stack: true })])),
+);
+const pickCells = table({
+  x: Float64Array.from({ length: 200 * 50 }, (_, i) => i % 200),
+  y: Float64Array.from({ length: 200 * 50 }, (_, i) => Math.floor(i / 200)),
+  v: Float64Array.from({ length: 200 * 50 }, (_, i) => (i * 37) % 101),
+});
+measure(
+  "pick: a heatmap of 200 × 50 cells, under 100 places",
+  pickUnder(picking([heatmap(pickCells, { x: "x", y: "y", color: "v" })])),
+);
+const PICK_CANDLES = 500;
+const pickPrices = table({
+  t: Float64Array.from({ length: PICK_CANDLES }, (_, i) => i * 60_000),
+  o: Float64Array.from({ length: PICK_CANDLES }, (_, i) => 100 + 10 * Math.sin(i / 20)),
+  c: Float64Array.from({ length: PICK_CANDLES }, (_, i) => 100 + 10 * Math.sin((i + 3) / 20)),
+  h: Float64Array.from({ length: PICK_CANDLES }, (_, i) => 112 + 10 * Math.sin(i / 20)),
+  l: Float64Array.from({ length: PICK_CANDLES }, (_, i) => 88 + 10 * Math.sin(i / 20)),
+});
+measure(
+  "pick: 500 candles over a line, under 100 places",
+  pickUnder(
+    picking([
+      line(pickPrices, { x: "t", y: "c" }),
+      candlestick(pickPrices, { x: "t", open: "o", high: "h", low: "l", close: "c" }),
+    ]),
+  ),
+);
+const pickSamples = table({
+  g: Array.from({ length: 20 * 500 }, (_, i) => `g${i % 20}`),
+  v: Float64Array.from({ length: 20 * 500 }, (_, i) => ((i * 7919) % 1000) / 10),
+});
+measure(
+  "pick: box plots of 20 groups × 500, under 100 places",
+  pickUnder(picking([boxplot(pickSamples, { x: "g", y: "v" })])),
+);
+const pickShares = table({
+  k: Array.from({ length: 12 }, (_, i) => `k${i}`),
+  v: Float64Array.from({ length: 12 }, (_, i) => 1 + i),
+});
+measure(
+  "pick: a pie of 12 slices, under 100 places",
+  pickUnder(picking([pie(pickShares, { category: "k", value: "v" })])),
+);
+// Lookup marks with many shapes: 100,000 rug ticks and error bars, whose
+// lookups measure what they draw, and 500 violins, mostly missed.
+const PICK_MANY = 100_000;
+const pickMany = table({
+  x: Float64Array.from({ length: PICK_MANY }, (_, i) => (i * 7919) % 100_000),
+  low: Float64Array.from({ length: PICK_MANY }, (_, i) => (i * 13) % 50),
+  high: Float64Array.from({ length: PICK_MANY }, (_, i) => 50 + ((i * 17) % 50)),
+});
+measure(
+  "pick: a rug of 100,000 ticks, under 100 places",
+  pickUnder(picking([rug(pickMany, { x: "x" })])),
+);
+measure(
+  "pick: 100,000 error bars, under 100 places",
+  pickUnder(picking([errorbar(pickMany, { x: "x", y1: "low", y2: "high" })])),
+);
+const pickViolins = table({
+  g: Array.from({ length: 500 * 20 }, (_, i) => `g${i % 500}`),
+  v: Float64Array.from({ length: 500 * 20 }, (_, i) => ((i * 7919) % 1000) / 100),
+});
+measure(
+  "pick: 500 violins, under 100 places",
+  pickUnder(picking([violin(pickViolins, { x: "g", y: "v" })], [0, 40])),
+);
+// The first query after a draw, which reads what the frame drew afresh
+// (a custom mark's grid of boxes, an unordered trace's positions): a
+// scene drawn ahead for each sample.
+const firstQuery = (name: string, chart: () => ChartModel) => {
+  const charts = Array.from({ length: 70 }, chart);
+  const at = pickPlaces(charts[0]!.panels()[0]!.plot)[17]!;
+  let next = 0;
+  measure(name, () => charts[next++ % charts.length]!.picker!(at[0], at[1]), {
+    warmup: 20,
+    samples: 50,
+  });
+};
+firstQuery("pick: first query after a draw, 12 lines × 2,160", pickCrowdChart);
+firstQuery("pick: first query after a draw, 20,000 custom squares", () =>
+  picking([pickDenseShapes]),
+);
 
 // Custom items over a view sorted against its table's order: each item
 // call finds its row's position in its series, over a table by halving

@@ -27,7 +27,7 @@ import type { Clip, ContourSpec, Frozen } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import { contourFormError } from "./contour-input.ts";
 import { bandRings, GridTracer, type ScalarGrid, type Traced } from "./contour-trace.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
+import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import { distinct } from "./heatmap-cells.ts";
 import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -678,7 +678,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * Its bands and lines are found as drawn, named by their level's value,
    * and bounded by their region's outer ring or their line (marks/lookups.ts).
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     return query.lookups.contour(this, drawn, query, PICKING);
   }
 

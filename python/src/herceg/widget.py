@@ -13,7 +13,7 @@ import inspect
 import math
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 try:
     import anywidget
@@ -50,10 +50,12 @@ from ._events import (
     Inspection,
     ItemMove,
     ItemPositions,
+    ItemReference,
     PanelVisibility,
     PinTarget,
     Range,
     SelectEvent,
+    SeriesReference,
     Value,
     ViewEdge,
     Viewport,
@@ -79,6 +81,7 @@ from ._events import (
     encode_pin,
     encode_selection,
     encode_view_change,
+    reference_of,
     same_pin,
     same_values,
     same_views,
@@ -940,6 +943,18 @@ class ChartWidget(anywidget.AnyWidget):
         """Calls ``callback(pinned)`` (an ``hg.PinTarget``, None when let go)
         when the tooltip is pinned or let go, including Python's ``pin``."""
         self._listen(("pin", ""), callback, remove)
+
+    @overload
+    def reference_of(self, kind: Literal["series"], key: str) -> SeriesReference | None: ...
+    @overload
+    def reference_of(self, kind: Literal["item"], key: str) -> ItemReference | None: ...
+    def reference_of(
+        self, kind: Literal["series", "item"], key: str
+    ) -> SeriesReference | ItemReference | None:
+        """What a key from an event names, as ``Chart.reference_of`` says, of
+        the marks the widget shows now: ``hg.SeriesReference`` of a series
+        key, ``hg.ItemReference`` of an item key, or None."""
+        return reference_of(kind, key, self._live.mark_ids(), "widget.reference_of")
 
     def update_rule(self, id: str, *, x: Value | None = None, y: Value | None = None) -> None:
         """Moves the rule ``id`` (``chart.rule(..., id=...)`` at a number or

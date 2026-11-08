@@ -548,13 +548,14 @@ chart.on("select", ({ revision }) => {
   through breaks; a fractional band index on category axes, whose
   `categories` name the band). Undefined for the keyboard and for cursors
   other charts share.
-- `target`: the topmost thing drawn there that input addresses, by `kind`:
+- `target`: what input addresses there, picked as described below, by
+  `kind`:
 
   | `kind` | Fields |
   | --- | --- |
   | `"item"` | `mark` (its index), `markId`, `item` (a key that stays the item's from frame to frame), `series`, `row`, `panel`, `box` |
   | `"axisLabel"` | `panel`, `scale`, `layer` (`"major"` or a tick layer's id), `value`, `category`, `text`, `box` |
-  | `"legendEntry"` | `key`, `label`, `panel` (a subplot's legend) |
+  | `"legendEntry"` | `key`, `label`, `panel` (a subplot's legend), `references` (the series and layout items it stands for) |
   | `"plot"` | `panel`: a plot where no item is |
 
 - `inspection`: what [`inspection`](#inspection) reads there; undefined
@@ -629,11 +630,21 @@ items, series, and brushes the same way, each with its `source` where its
 table is derived. `herceg/web` pages and Python receive the same
 expressions (`event.target.provenance`); `rows()` stays in the browser.
 
-Items are picked as the frame on screen drew them, in paint order
-(`zIndex`, then as listed), the topmost within reach: inside bars, bins,
-boxes, cells, candles, regions, areas, and text; within a point's radius
-plus 4 px (8 px for touch); within half a line's stroke plus 4 px of a
-segment drawn; within 4 px of a rule. Nothing outside a mark's clip is
+Items are picked as the frame on screen drew them, by one rule: the
+nearest stroke or point within reach, down to the first fill the pointer
+is inside. Marks are searched from the top of the paint order (`zIndex`,
+then as listed, the last painted first). Lines, rules, outlines, error
+bars, and points within reach are candidates: within a point's radius
+plus 4 px (8 px for touch), within half a line's stroke plus 4 px of a
+segment drawn, within 4 px of a rule. The first fill holding the pointer
+(a bar, bin, box, cell, filled candle body, region, area, slice, or
+text; a hollow candle body is reached at its outline) ends the search
+and is picked unless a candidate above it was found; a fill's edge near
+the pointer counts as a candidate only where no fill holds it.
+Of candidates, the nearest wins, ties going to the topmost. So a click
+among lines a pixel apart takes the one under the pointer, a line over a
+band is reached from inside the band, and an area's outline is reached
+over its own fill. A draggable rule within reach is taken before anything else. Nothing outside a mark's clip is
 picked, and strokes are reached only where the clip shows them; lines
 and rules of no width draw nothing and are not reached, though a rule's
 label is. A line's item is the observation it draws nearest the pointer
@@ -717,6 +728,11 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   `{ mark: "delays", item: [[0, 10]] }` (a histogram's bin from 0 to 10),
   `{ mark: "cars", series: "Europe" }`. The chart keeps and reports keys,
   in one order; an empty list is no selection.
+  `chart.referenceOf("series", key)` and `chart.referenceOf("item", key)`
+  read a key from an event as such a reference: undefined for a mark
+  without an `id` and for groups of networks, maps, and 3D points. Legend
+  entries list theirs (`references` on `getLegend()`'s entries and on
+  `legendEntry` targets): a series name an area and a line draw is two.
 - **Looks.** A mark's `selected` and `unselected` looks (`fill`,
   `stroke`, `strokeWidth`, `dash`, `opacity`, `fillOpacity`,
   `strokeOpacity`, and a point's `radius`) are laid over its paint where
@@ -733,7 +749,11 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   dendrograms take none, layout marks (pies, trees, maps, networks) draw
   a selected item's share and dim the rest, and custom marks read
   `ctx.selection(series, row)`. Heatmaps and 2D histograms draw their
-  selected cells in the `selected` look over the others.
+  selected cells in the `selected` look over the others. What is selected
+  paints over what is not, as clicks find it: a line's selected parts
+  over every series' dimmed lines, points' selected glyphs over every
+  series' others; areas keep their stack's order, each layer's selected
+  part over its own.
 
 **Phases.** A gesture reports the changes it makes as it goes: a brush
 being drawn, moved, or resized reports `select` with `phase: "preview"`
@@ -1084,7 +1104,7 @@ sectors as drawn).
 Legend entries hide and show what they name; the chart's methods do too.
 
 ```ts
-const [first] = chart.getLegend(); // { key, label, color } per entry
+const [first] = chart.getLegend(); // { key, label, color, references } per entry
 chart.setVisibility(first!.key, false); // or a list of keys
 chart.setVisibility(first!.key, true, { panel: "latency" }); // shown there only
 const hidden = chart.getHiddenKeys();

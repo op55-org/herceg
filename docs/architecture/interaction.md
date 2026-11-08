@@ -67,15 +67,36 @@ cursor's target) is found by one picker, `model/pick.ts`, which tests what
 the frame on screen drew (the `DrawnMark` records of `marks/drawn.ts`),
 never geometry made again from current data.
 
-- **Order and reach.** Panels from the topmost (insets over their parent),
-  marks by `zIndex` then as listed, each geometry as painted, the last
-  painted first; the first within reach wins: containment for rectangles,
-  areas, and text (an area's fill as drawn: its closed outline by nonzero
-  winding across the axis it runs along, curves on the curve, the outline
-  itself inside); a point's edge, a stroke's half
-  width (an outlined area's upper edge too), or a rule's line plus the
-  query's `slop` (4 px, 8 px for touch; a press resolved later reaches as
-  its own pointer did). Points are found through their mark's index; of
+- **The rule.** The nearest stroke or point within reach, down to the
+  first fill the point is inside. The walk visits panels from the topmost
+  (insets over their parent), then marks by `zIndex` then as listed, each
+  geometry as painted, the last painted first, and sorts what each
+  reports (`PickResult` in `marks/drawn.ts`) three ways: a `candidate`, a
+  stroke or point within reach (a point's edge, a stroke's half width, an
+  outlined area's upper edge or a bar's outline, a rule's line, each plus
+  the query's `slop`: 4 px, 8 px for touch; a press resolved later reaches
+  as its own pointer did); a `fill` holding the point (rectangles, areas,
+  and text: an area's fill as drawn, its closed outline by nonzero winding
+  across the axis it runs along, curves on the curve, the outline itself
+  inside), which ends the walk and is picked unless a candidate was found
+  above it (a fill naming no item ends it with nothing); and a fill reached from `beside` it within reach (a cell, a
+  custom shape), which counts only where no fill holds the point. Of
+  candidates the nearest wins; within a thousandth of a pixel
+  (`TIE`), the topmost. Once one is found, marks below are asked only
+  within its distance.
+  Lookup marks' items report fills through `HitReading.fills` (cells,
+  bins, contour bands); a violin holding the point is a fill, the
+  strokes and glyphs painted over its fills (outline, whisker, median dot;
+  not those its inner box or a selection's violin covers) candidates over
+  it, measured in one pass (`shapeDistance`). Marks
+  whose items are shapes of several kinds painted over each other
+  (candlesticks, box plots, boxen: `Mark.pickDrawn`) are walked shape by
+  shape as marks without lookups are, a body over its wick and a median
+  over its box, and their lookup only names the item a hit shape stands
+  for (`Picker.#named`): a whisker is a stroke, and a hollow candle's
+  body is reached at its outline. Draggable rules are
+  asked first, alone (`#ruleAt`), so a rule among lines is still grabbed.
+  Points are found through their mark's index; of
   points as near, the highlighted, then the later. Nothing outside a
   geometry's or lookup mark's clip is picked, and a stroke is measured to
   what the clip shows of it (its segments cut to the clip widened by half
@@ -93,13 +114,15 @@ never geometry made again from current data.
   left out, steps add their corners) when first asked.
 - **Lookups.** Marks whose geometry says too little (candlesticks,
   distributions, heatmaps, 2D histograms, contours, error bars, rugs) pick
-  their own items (`Mark.pickItem`), through the lookups the picker hands
+  or name their own items (`Mark.pickItem`), through the lookups the picker hands
   them in the query (`marks/lookups.ts`), so their picking code loads with
   the picker rather than with every chart. Layout marks pick through
   `LayoutResult.itemAt`. Custom marks pick the items their `item` calls
   drew by their shapes (`Mark.pickItem`, through a grid of the items'
-  boxes), or, drawing none, their series' nearest point within 3 px plus
-  the slop; ranges drawing none are not picked.
+  boxes: groups last painted first, a shape's stroke before its own fill,
+  a filled shape holding the point ending the search), or, drawing none,
+  their series' nearest point within 3 px plus the slop; ranges drawing
+  none are not picked.
 - **Loading.** The picker is a chunk of its own, loaded by the controller
   once a `hover`, `click`, or `contextMenu` listener is added or a row
   selection taking clicks needs it; until it loads, input that needs it

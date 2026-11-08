@@ -119,6 +119,7 @@ export type {
   ItemPositions,
   LegendEntry,
   PanelInfo,
+  ReferenceOf,
   ScaleInstance,
   SelectionOwner,
 } from "./dom/handle.ts";

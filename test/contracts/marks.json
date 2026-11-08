@@ -6233,7 +6233,8 @@
       "Chart.to_snapshot": "the chart's output: its spec, files, pages, and live views",
       "Chart.to_spec": "the chart's output: its spec, files, pages, and live views",
       "Chart.to_svg": "the chart's output: its spec, files, pages, and live views",
-      "Chart.widget": "the chart's output: its spec, files, pages, and live views"
+      "Chart.widget": "the chart's output: its spec, files, pages, and live views",
+      "Chart.reference_of": "reads a key from an event as a reference to a mark's id"
     },
     "helper": {
       "save": "exports several charts to one file",

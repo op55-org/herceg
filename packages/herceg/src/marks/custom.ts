@@ -20,7 +20,14 @@ import { ChartError } from "../spec/errors.ts";
 import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import { ShapeIndex } from "./custom-shapes.ts";
-import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
+import type {
+  DrawnMark,
+  DrawnPart,
+  PartBuilders,
+  PickedItem,
+  PickQuery,
+  PickResult,
+} from "./drawn.ts";
 import type { ColorChannels, ItemKeyed, RowChannels } from "./encoding.ts";
 import { copiesOf, type ItemInfo } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
@@ -895,12 +902,13 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   }
 
   /**
-   * The topmost item within `query.slop` of its shapes, of the series
-   * shown (the query's only, if it names one), with its drawn box; for a
-   * mark of points that drew no items, its series' nearest point within a
-   * few pixels. Ranges are picked by their items only, as they are read.
+   * The items of the series shown (the query's only, if it names one)
+   * that its shapes put at the query (see `ShapeIndex.find`), with their
+   * drawn boxes; for a mark of
+   * points that drew no items, its series' nearest point within a few
+   * pixels. Ranges are picked by their items only, as they are read.
    */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+  pickItem(drawn: DrawnMark, query: PickQuery): PickResult | undefined {
     const { frame } = drawn;
     const table = this.table;
     if (!frame || !table) return undefined;
@@ -908,22 +916,39 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     const items = geometry && drawnItems.get(geometry);
     const wanted = (s: Series) =>
       !frame.hidden.has(s.key) && (query.series === undefined || query.series === s.key);
-    if (!items)
-      return this.#layout === "ranges" ? undefined : this.#pickPoint(drawn, query, wanted);
+    if (!items) {
+      const point = this.#layout === "ranges" ? undefined : this.#pickPoint(drawn, query, wanted);
+      return point && { candidate: point };
+    }
     const found = items.shapes.find(query.x, query.y, query.slop, (group) =>
       wanted(items.series[group]!),
     );
-    if (!found) return undefined;
-    const series = items.series[found.group]!;
-    const position = items.positions[found.group]!;
-    const box = this.#boxOf(items, series, position);
-    if (!box) return undefined;
-    return {
-      part: { kind: "row", table, position: rowOf(series, position), series: { series, position } },
-      names: undefined,
-      box,
-      distance: found.distance,
+    const itemOf = (group: number, distance: number): PickedItem | undefined => {
+      const series = items.series[group]!;
+      const position = items.positions[group]!;
+      const box = this.#boxOf(items, series, position);
+      return (
+        box && {
+          part: {
+            kind: "row",
+            table,
+            position: rowOf(series, position),
+            series: { series, position },
+          },
+          names: undefined,
+          box,
+          distance,
+        }
+      );
     };
+    const { near, beside, fill } = found ?? {};
+    return (
+      found && {
+        candidate: near && itemOf(near.group, near.distance),
+        beside: beside && itemOf(beside.group, beside.distance),
+        fill: fill === undefined ? undefined : (itemOf(fill, 0) ?? null),
+      }
+    );
   }
 
   /** What shape `index` of the shapes geometry draws: its item's row, or nothing outside items. */
@@ -977,11 +1002,12 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     if (!items) return undefined;
     const among = new Set(series);
     const found = items.shapes.find(px, py, 0, (group) => among.has(items.series[group]!));
-    if (!found) return undefined;
+    const group = found?.near?.group ?? found?.fill;
+    if (group === undefined) return undefined;
     // Its tooltip stands where the pointer found it.
     return {
-      series: items.series[found.group]!,
-      position: items.positions[found.group]!,
+      series: items.series[group]!,
+      position: items.positions[group]!,
       distance: 0,
       at: [px, py],
     };

@@ -37,7 +37,13 @@ import type {
   tickLabelGap,
 } from "../scene/scene.ts";
 import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
-import type { ChartSelection, Phase, PinTarget } from "../spec/state.ts";
+import type {
+  ChartSelection,
+  ItemReference,
+  Phase,
+  PinTarget,
+  SeriesReference,
+} from "../spec/state.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
@@ -122,6 +128,10 @@ export interface InteractionHost {
   readonly legend: HTMLElement;
   /** The entry each click on the legend was on, as drawn then (see `Legend.clicked`). */
   readonly legendClicks: WeakMap<Event, LegendClick>;
+  /** What a legend entry of `keys` (its own, or its targets) stands for (see `legendMembers`). */
+  members(keys: readonly string[]): { series: string[]; items: string[] };
+  /** What a legend entry of `keys` acts on, as references name it. */
+  references(keys: readonly string[]): (SeriesReference | ItemReference)[];
   readonly events: Emitter;
   /** Unique in the page: prefixes the ids the controller's drawings need. */
   readonly id: string;
@@ -1534,14 +1544,15 @@ export class Interaction {
     click?: Event,
   ): LegendEntryTarget | null | undefined {
     const found = this.#legendItem(element, click);
-    return (
-      found && {
-        kind: "legendEntry",
-        key: found.item.key,
-        label: found.item.label,
-        panel: found.guide.panel,
-      }
-    );
+    if (!found) return found;
+    const { key, label, selects, targets } = found.item;
+    return {
+      kind: "legendEntry",
+      key,
+      label,
+      panel: found.guide.panel,
+      references: this.#host.references(selects ?? (targets?.length ? targets : [key])),
+    };
   }
 
   /**
@@ -1613,26 +1624,13 @@ export class Interaction {
   }
 
   /**
-   * What a legend entry's targets name: series by their own keys, what
-   * they stand for (`HiddenKeys.groups`), or their marks whole; where they
-   * name none, the layout marks' items that stand for them (a pie's slices).
+   * What a legend entry's targets name (`legendMembers`): the series they
+   * stand for, or where they name none, the layout marks' items that stand
+   * for them (a pie's slices).
    */
   #legendNames(targets: string | readonly string[]): ["series" | "items", string[]] {
-    const { model } = this.#host;
-    const named = new Set([targets].flat());
-    const { groups } = model.hidden;
-    const all = model.series().map(({ key }) => key);
-    const series = all.filter((key) => {
-      const mark = /^\[(-?\d+|"(?:[^"\\]|\\.)*")[,\]]/.exec(key)?.[1];
-      return (
-        named.has(key) || named.has(groups.get(key)!) || (!!mark && named.has(`{"mark":${mark}}`))
-      );
-    });
-    if (series.length > 0) return ["series", series];
-    const items = [...groups]
-      .filter(([key, identity]) => named.has(identity) && !all.includes(key))
-      .map(([key]) => key);
-    return ["items", items];
+    const { series, items } = this.#host.members([targets].flat());
+    return series.length > 0 ? ["series", series] : ["items", items];
   }
 
   /**

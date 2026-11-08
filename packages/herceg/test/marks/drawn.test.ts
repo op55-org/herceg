@@ -51,7 +51,7 @@ import type {
   SegmentGeometry,
 } from "../../src/scene/scene.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
-import { LOOKUPS as lookups } from "../helpers/picker.ts";
+import { lookedUp, LOOKUPS as lookups } from "../helpers/picker.ts";
 
 /** A panel of a chart drawn here, with its scales. */
 type Panel = ReturnType<ChartModel["panels"]>[number];
@@ -405,7 +405,7 @@ describe("drawn-mark records", () => {
     const [panel] = model.panels();
     const mark = model.config.marks[0] as Mark;
     const at = { x: panel!.x.map(1), y: panel!.y.map(0), slop: 4, lookups };
-    expect(mark.pickItem!(records[0]!, at)).toMatchObject({
+    expect(lookedUp(mark, records[0]!, at)).toMatchObject({
       part: { kind: "group", key: '["cells","b","p"]' },
       names: ["b", "p"],
       distance: 0,
@@ -417,14 +417,14 @@ describe("drawn-mark records", () => {
     const q0 = sums.model.panels()[0]!;
     const sum = sums.model.config.marks[0] as Mark;
     expect(
-      sum.pickItem!(sums.records[0]!, { x: q0.x.map(1), y: q0.y.map(5), slop: 4, lookups })?.part,
+      lookedUp(sum, sums.records[0]!, { x: q0.x.map(1), y: q0.y.map(5), slop: 4, lookups })?.part,
     ).toMatchObject({ kind: "group", key: '["sums",1,5]' });
     const samples = table({ g: ["a", "a", "b", "b"], v: [1, 3, 2, 4] });
     const boxes = drawn({ marks: [boxplot(samples, { x: "g", y: "v", id: "box" })] });
     const box = boxes.model.config.marks[0] as Mark;
     const p = boxes.model.panels()[0]!;
     expect(
-      box.pickItem!(boxes.records[0]!, { x: p.x.map(1), y: p.y.map(3), slop: 4, lookups }),
+      lookedUp(box, boxes.records[0]!, { x: p.x.map(1), y: p.y.map(3), slop: 4, lookups }),
     ).toMatchObject({
       part: { kind: "group", key: '["box","b"]' },
       names: ["b"],
@@ -436,7 +436,7 @@ describe("drawn-mark records", () => {
     const candle = candles.model.config.marks[0] as Mark;
     const q = candles.model.panels()[0]!;
     expect(
-      candle.pickItem!(candles.records[0]!, { x: q.x.map(2), y: q.y.map(2.5), slop: 4, lookups })
+      lookedUp(candle, candles.records[0]!, { x: q.x.map(2), y: q.y.map(2.5), slop: 4, lookups })
         ?.part,
     ).toMatchObject({ kind: "row", position: 1 });
     // Nothing past the reach of a shape, though a tooltip's lookup finds the nearest.
@@ -444,9 +444,9 @@ describe("drawn-mark records", () => {
     expect(
       candle.pick!(candles.records[0]!.series, above.x, above.y, candles.records[0]!.frame!),
     ).toBeDefined();
-    expect(candle.pickItem!(candles.records[0]!, above)).toBeUndefined();
+    expect(lookedUp(candle, candles.records[0]!, above)).toBeUndefined();
     expect(
-      candle.pickItem!(candles.records[0]!, { ...above, slop: 24, lookups })?.distance,
+      lookedUp(candle, candles.records[0]!, { ...above, slop: 24, lookups })?.distance,
     ).toBeCloseTo(20);
   });
 
@@ -458,7 +458,7 @@ describe("drawn-mark records", () => {
       const s = record!.series[0]!;
       return Array.from({ length: s.length }, (_, k) => {
         const [x, y] = mark.pointAnchor!(s, k, record!.frame!)!;
-        const picked = mark.pickItem!(record!, { x, y, slop: 4, lookups })?.part;
+        const picked = lookedUp(mark, record!, { x, y, slop: 4, lookups })?.part;
         return picked?.kind === "group" ? picked.key : undefined;
       });
     };
@@ -491,7 +491,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       const mark = model.config.marks[0] as Mark;
       const at = { x: p.x.map(x) + dx, y: p.y.map(y) + dy, slop: 4, lookups };
-      const picked = mark.pickItem!(records[0]!, at);
+      const picked = lookedUp(mark, records[0]!, at);
       expect(picked?.box, JSON.stringify(picked)).toBeDefined();
       const { box } = picked!;
       // What was picked is drawn where the pointer is.
@@ -574,7 +574,7 @@ describe("drawn-mark records", () => {
         const at = horizontal
           ? { x: p.x.map(1), y: p.y.map(0) + 3, slop: 4, lookups }
           : { x: p.x.map(0) + 3, y: p.y.map(1), slop: 4, lookups };
-        const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+        const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
         const name = `${horizontal ? "across" : "up"} ${domain[0] > domain[1] ? "reversed" : ""}`;
         expect(found?.distance, name).toBe(0);
         const { box } = found!;
@@ -620,7 +620,7 @@ describe("drawn-mark records", () => {
             ? { x: p.x.map(1), y: p.y.map(0), slop: 4, lookups }
             : { x: p.x.map(0), y: p.y.map(1), slop: 4, lookups };
           expect(
-            (model.config.marks[0] as Mark).pickItem!(records[0]!, at),
+            lookedUp(model.config.marks[0] as Mark, records[0]!, at),
             mark.spec.type,
           ).toBeUndefined();
         }
@@ -651,7 +651,7 @@ describe("drawn-mark records", () => {
       const plot = records[0]!.frame!.plot;
       // In its body, far enough left of the plot that no candle in view is centered near.
       const at = { x: plot.x - 45, y: p.y.map(5), slop: 0, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       expect(found?.part.kind === "row" && found.part.position, String(clip)).toBe(0);
     }
   });
@@ -663,7 +663,7 @@ describe("drawn-mark records", () => {
       marks: [candlestick(prices, { x: "t", open: "o", high: "h", low: "l", close: "c" })],
     });
     const p = model.panels()[0]!;
-    const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, {
+    const found = lookedUp(model.config.marks[0] as Mark, records[0]!, {
       x: p.x.map(1),
       y: p.y.map(8),
       slop: 0,
@@ -684,7 +684,7 @@ describe("drawn-mark records", () => {
       y: { domain: [0, 10], nice: false },
     });
     const q = thinModel.panels()[0]!;
-    const wick = (thinModel.config.marks[0] as Mark).pickItem!(thinRecords[0]!, {
+    const wick = lookedUp(thinModel.config.marks[0] as Mark, thinRecords[0]!, {
       x: q.x.map(0.001) + 0.45,
       y: q.y.map(8),
       slop: 0,
@@ -711,7 +711,7 @@ describe("drawn-mark records", () => {
       const at = horizontal
         ? { x: plot.x + plot.width - 0.1, y: p.y.map(0), slop: 0, lookups }
         : { x: p.x.map(0), y: plot.y + 0.1, slop: 0, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       const name = horizontal ? "across" : "up";
       expect(found?.distance, name).toBe(0);
       const { box } = found!;
@@ -751,7 +751,7 @@ describe("drawn-mark records", () => {
         lookups,
       };
       // 2 px from the outline's middle: 1.25 from its 1.5 px stroke.
-      expect(mark.pickItem!(record, at)?.distance).toBeCloseTo(1.25, 1);
+      expect(lookedUp(mark, record, at)?.distance).toBeCloseTo(1.25, 1);
       found = true;
     }
     expect(found).toBe(true);
@@ -776,7 +776,7 @@ describe("drawn-mark records", () => {
         slop: 4,
         lookups,
       };
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, at)?.part;
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, at)?.part;
     };
     // Selected row 0 paints over row 1, of another series or its own.
     const twice = table({ v: [2, 2], lo: [1, 1], hi: [3, 3], g: ["a", "b"], t: [1, 1] });
@@ -820,7 +820,7 @@ describe("drawn-mark records", () => {
     const p = model.panels()[0]!;
     const mark = model.config.marks[0] as Mark;
     const at = (t: number) =>
-      mark.pickItem!(records[0]!, { x: p.x.map(t), y: p.y.map(2.5), slop: 4, lookups });
+      lookedUp(mark, records[0]!, { x: p.x.map(t), y: p.y.map(2.5), slop: 4, lookups });
     const lit = at(499)!;
     expect(lit.part.kind === "row" && lit.part.position).toBe(499);
     expect(lit.box.y).toBeCloseTo(p.y.map(4));
@@ -839,7 +839,7 @@ describe("drawn-mark records", () => {
     const panel = broken.model.panels()[0]!;
     const seam = { x: panel.x.map(2.5), y: panel.y.map(5.5), slop: 4, lookups };
     const mark = broken.model.config.marks[0] as Mark;
-    expect(mark.pickItem!(broken.records[0]!, seam)).toBeUndefined();
+    expect(lookedUp(mark, broken.records[0]!, seam)).toBeUndefined();
     // Without caps, a stem ends square at its ends.
     const ranges = table({ t: [1, 2], lo: [1, 2], hi: [3, 4] });
     const bare = drawn({
@@ -850,8 +850,8 @@ describe("drawn-mark records", () => {
     const p = bare.model.panels()[0]!;
     const bars = bare.model.config.marks[0] as Mark;
     const above = (by: number) => ({ x: p.x.map(1), y: p.y.map(3) - by, slop: 4, lookups });
-    expect(bars.pickItem!(bare.records[0]!, above(8))).toBeUndefined();
-    const near = bars.pickItem!(bare.records[0]!, above(3))!;
+    expect(lookedUp(bars, bare.records[0]!, above(8))).toBeUndefined();
+    const near = lookedUp(bars, bare.records[0]!, above(3))!;
     expect(near.distance).toBeCloseTo(3);
     expect(near.box.y).toBeCloseTo(p.y.map(3));
     expect(near.box.width).toBe(20);
@@ -877,7 +877,7 @@ describe("drawn-mark records", () => {
         { x: p.x.map(1), y: p.y.map(10.2) },
         { x: p.x.map(1) + 2, y: p.y.map(10.25) },
       ]) {
-        const found = mark.pickItem!(records[0]!, { ...at, slop: 4, lookups });
+        const found = lookedUp(mark, records[0]!, { ...at, slop: 4, lookups });
         if (clip === undefined) expect(found).toBeUndefined();
         else expect(found?.distance).toBe(0);
       }
@@ -898,7 +898,7 @@ describe("drawn-mark records", () => {
       const plot = records[0]!.frame!.plot;
       const mark = model.config.marks[0] as Mark;
       const at = { x: plot.x + 1, y: p.y.map(5), slop: 4, lookups };
-      const found = mark.pickItem!(records[0]!, at);
+      const found = lookedUp(mark, records[0]!, at);
       expect(found?.distance).toBe(0);
       expect(found?.part.kind === "row" && found.part.position).toBe(t.indexOf(-0.01));
       expect(mark.pick!(records[0]!.series, at.x, at.y, records[0]!.frame!)?.distance).toBe(0);
@@ -921,7 +921,7 @@ describe("drawn-mark records", () => {
         const p = model.panels()[0]!;
         const picker = model.config.marks[0] as Mark;
         const at = { x: p.x.map(1.49), y: p.y.map(1), slop: 4, lookups };
-        expect(records[0] && picker.pickItem!(records[0], at)).toBeUndefined();
+        expect(records[0] && lookedUp(picker, records[0], at)).toBeUndefined();
       }
     // Row 0 is a neighbor's neighbor left of the view, which geometry draws none of.
     const prices = table({
@@ -942,7 +942,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       const picker = model.config.marks[0] as Mark;
       const at = { x: plot.x + 0.5, y: p.y.map(2), slop: 4, lookups };
-      expect(picker.pickItem!(records[0]!, at)).toBeUndefined();
+      expect(lookedUp(picker, records[0]!, at)).toBeUndefined();
     }
   });
 
@@ -972,11 +972,11 @@ describe("drawn-mark records", () => {
       const picker = model.config.marks[0] as Mark;
       const name = mark.spec.type;
       expect(
-        picker.pickItem!(records[0]!, { x: p.x.map(0.4), y: p.y.map(1), slop: 0, lookups }),
+        lookedUp(picker, records[0]!, { x: p.x.map(0.4), y: p.y.map(1), slop: 0, lookups }),
         name,
       ).toBeUndefined();
       // The selected cell itself is picked where it is drawn, inside the chart.
-      const lit = picker.pickItem!(records[0]!, {
+      const lit = lookedUp(picker, records[0]!, {
         x: p.x.map(0.45),
         y: p.y.map(0),
         slop: 0,
@@ -1012,7 +1012,7 @@ describe("drawn-mark records", () => {
             along === "x"
               ? { x: p.x.map(0.5), y: p.y.map(0), slop: 4, lookups }
               : { x: p.x.map(0), y: p.y.map(0.5), slop: 4, lookups };
-          const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+          const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
           const name = `${mark.spec.type} ${along} ${domain[0]}`;
           expect(found?.distance, name).toBe(0);
           expect(found?.box.width, name).toBeGreaterThan(0);
@@ -1041,7 +1041,7 @@ describe("drawn-mark records", () => {
     const picker = model.config.marks[0] as Mark;
     // Above the band's top edge, at 1.5: the outline reaches a quarter pixel past it.
     const above = (dy: number, slop: number) =>
-      picker.pickItem!(records[0]!, { x: p.x.map(1), y: p.y.map(1.5) - dy, slop, lookups });
+      lookedUp(picker, records[0]!, { x: p.x.map(1), y: p.y.map(1.5) - dy, slop, lookups });
     expect(above(0.1, 0)?.distance).toBe(0);
     expect(above(4.1, 4)?.distance).toBeCloseTo(3.85);
     expect(above(4.3, 4)).toBeUndefined();
@@ -1060,7 +1060,7 @@ describe("drawn-mark records", () => {
       y: { domain: [0, 2], nice: false },
     });
     const q = two.panels()[0]!;
-    const covered = (two.config.marks[0] as Mark).pickItem!(drawnTwo[0]!, {
+    const covered = lookedUp(two.config.marks[0] as Mark, drawnTwo[0]!, {
       x: q.x.map(1),
       y: q.y.map(1.5) + 0.1,
       slop: 0,
@@ -1080,7 +1080,7 @@ describe("drawn-mark records", () => {
         y: { domain: [0, 4], nice: false },
       });
       const p = model.panels()[0]!;
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, {
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, {
         x: p.x.map(1),
         y: p.y.map(2),
         slop: 4,
@@ -1108,7 +1108,7 @@ describe("drawn-mark records", () => {
           const at = horizontal
             ? { x: p.x.map(v!), y: p.y.map(g!), slop: 4, lookups }
             : { x: p.x.map(g!), y: p.y.map(v!), slop: 4, lookups };
-          const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+          const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
           const name = `${mark.spec.type} ${horizontal ? "across" : "up"} at ${g}`;
           expect(found?.distance, name).toBe(0);
           expect(found!.box.width * found!.box.height, name).toBeGreaterThan(0);
@@ -1131,7 +1131,7 @@ describe("drawn-mark records", () => {
         });
         const p = model.panels()[0]!;
         const at = { x: p.x.map(x), y: p.y.map(y), slop: 4, lookups };
-        const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+        const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
         expect(found?.distance, `${level} ${z === xs ? "up" : "across"}`).toBeCloseTo(0);
         expect(found!.box.width * found!.box.height).toBeGreaterThan(0);
       }
@@ -1142,7 +1142,7 @@ describe("drawn-mark records", () => {
       const { model, records } = drawn(config);
       const p = model.panels()[0]!;
       const where = point(p, records[0]!.frame!.plot);
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, { ...where, slop: 4, lookups });
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, { ...where, slop: 4, lookups });
     };
     const xs = [0, 1, 2, 0, 1, 2, 0, 1, 2];
     const ys = [0, 0, 0, 1, 1, 1, 2, 2, 2];
@@ -1196,7 +1196,7 @@ describe("drawn-mark records", () => {
       const point = horizontal
         ? { x: p.x.map(5), y: p.y.map(1) }
         : { x: p.x.map(1), y: p.y.map(5) };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, {
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, {
         ...point,
         slop: 4,
         lookups,
@@ -1219,7 +1219,7 @@ describe("drawn-mark records", () => {
     ) => {
       const { model, records } = drawn(config);
       const where = point(model.panels()[0]!, records[0]!.frame!.plot);
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, { ...where, slop: 4, lookups });
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, { ...where, slop: 4, lookups });
     };
     // A thick contour line's round end at the grid's left edge, drawn past the plot.
     const xs = [0, 1, 2, 0, 1, 2, 0, 1, 2];
@@ -1280,7 +1280,7 @@ describe("drawn-mark records", () => {
     ) => {
       const { model, records } = drawn(config);
       const where = point(model.panels()[0]!, records[0]!.frame!.plot);
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, { ...where, slop: 4, lookups });
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, { ...where, slop: 4, lookups });
     };
     // Falling candles just above the plot: bodies a pixel tall down from their tops, and a
     // wide OHLC bar's ticks 2 px wide, reach a fifth of a pixel into it; merged OHLC bars'
@@ -1378,7 +1378,7 @@ describe("drawn-mark records", () => {
           expect(reach, name).toBe(true);
           // On the wick, between the high and the body (at 8).
           const at = { x: p.x.map(1), y: p.y.map(8), slop: 4, lookups };
-          const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+          const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
           expect(found?.distance, name).toBe(0);
         }
   });
@@ -1392,7 +1392,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       // On the diagonal from (0.8, 0) to (0, 0.8).
       const at = { x: p.x.map(0.4), y: p.y.map(0.4), slop: 4, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       if (strokeWidth === 0) expect(found).toBeUndefined();
       else expect(found?.distance).toBeCloseTo(0);
     }
@@ -1409,7 +1409,7 @@ describe("drawn-mark records", () => {
       });
       const p = model.panels()[0]!;
       const at = { x: p.x.map(1), y: p.y.map(8), slop: 4, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       expect(found?.part, variant).toMatchObject({ kind: "row", position: 0 });
     }
   });
@@ -1448,7 +1448,7 @@ describe("drawn-mark records", () => {
       expect(dots).toHaveLength(1);
       const [dot] = dots;
       const at = { x: dot!.coords[0]! + 6, y: dot!.coords[1]!, slop: 4, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       const name = JSON.stringify(options);
       expect(found?.distance, name).toBeCloseTo(6 - dot!.radius);
       expect(found?.part.kind, name).toBe("group");
@@ -1482,7 +1482,7 @@ describe("drawn-mark records", () => {
       const at = horizontal
         ? { x: p.x.map(1), y: p.y.map(0), slop: 4, lookups }
         : { x: p.x.map(0), y: p.y.map(1), slop: 4, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       expect(found?.distance).toBe(0);
       expect((found!.part as { key: string }).key, horizontal ? "across" : "up").toContain('"a"');
     }
@@ -1504,7 +1504,7 @@ describe("drawn-mark records", () => {
     const { model, records } = drawn(lines([0.5 - 10 / unit, 0.5 + 13 / unit]));
     const p = model.panels()[0]!;
     const at = { x: p.x.map(1), y: plot.y + plot.height - 1, slop: 4, lookups };
-    const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+    const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
     expect(found?.distance).toBeCloseTo(2);
   });
 
@@ -1525,7 +1525,7 @@ describe("drawn-mark records", () => {
         ...axes,
       });
       const at = { ...point(records[0]!.frame!.plot), slop: 4, lookups };
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, at);
     };
     const window = { domain: [0.5, 1.5] as [number, number], nice: false };
     // A triangle below x + y = 1, meeting the plot at its bottom-left corner.
@@ -1567,7 +1567,7 @@ describe("drawn-mark records", () => {
       const plot = records[0]!.frame!.plot;
       const mark = model.config.marks[0] as Mark;
       const pick = (y: number) =>
-        mark.pickItem!(records[0]!, { x: p.x.map(1), y, slop: 4, lookups });
+        lookedUp(mark, records[0]!, { x: p.x.map(1), y, slop: 4, lookups });
       expect(records[0]!.geometry.length).toBe(thresholds.length - 1);
       expect(pick(plot.y + plot.height - 1), `${thresholds}`).toBeUndefined();
       if (thresholds.length > 1) expect(pick(p.y.map(60))?.distance).toBe(0);
@@ -1584,7 +1584,7 @@ describe("drawn-mark records", () => {
     const plot = records[0]!.frame!.plot;
     const mark = model.config.marks[0] as Mark;
     const below = (by: number) =>
-      mark.pickItem!(records[0]!, {
+      lookedUp(mark, records[0]!, {
         x: p.x.map(1),
         y: plot.y + plot.height + by,
         slop: 4,
@@ -1611,7 +1611,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       expect(records[0]!.geometry).toHaveLength(0);
       const at = { x: p.x.map(1), y: p.y.map(45.5), slop: 4, lookups };
-      expect((model.config.marks[0] as Mark).pickItem!(records[0]!, at), `${clip}`).toBeUndefined();
+      expect(lookedUp(model.config.marks[0] as Mark, records[0]!, at), `${clip}`).toBeUndefined();
     }
   });
 
@@ -1648,7 +1648,7 @@ describe("drawn-mark records", () => {
       );
       const edge = Math.max(...xs.filter((x) => x < p.x.map(0.5))) + 0.5;
       const pick = (dx: number) =>
-        mark.pickItem!(records[0]!, { x: edge + dx, y: p.y.map(5), slop: 4, lookups });
+        lookedUp(mark, records[0]!, { x: edge + dx, y: p.y.map(5), slop: 4, lookups });
       expect(pick(3.9)?.distance).toBeCloseTo(3.9);
       expect(pick(4.1)).toBeUndefined();
     }
@@ -1662,7 +1662,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       const mark = model.config.marks[0] as Mark;
       const pick = (dx: number, slop: number) =>
-        mark.pickItem!(records[0]!, { x: p.x.map(0.001) + dx, y: p.y.map(8), slop, lookups });
+        lookedUp(mark, records[0]!, { x: p.x.map(0.001) + dx, y: p.y.map(8), slop, lookups });
       const inside = pick(0.45, 0);
       expect(inside?.distance, variant).toBe(0);
       // Bounded on the right by the wick's painted edge (on the left, by the plot).
@@ -1700,7 +1700,7 @@ describe("drawn-mark records", () => {
         const at = horizontal
           ? { x: p.x.map(10), y: p.y.map(0), slop: 4, lookups }
           : { x: p.x.map(0), y: p.y.map(10), slop: 4, lookups };
-        const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+        const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
         const name = `${mark.spec.type} ${horizontal ? "across" : "up"}`;
         expect(found?.distance, name).toBe(0);
         const { box } = found!;
@@ -1722,10 +1722,7 @@ describe("drawn-mark records", () => {
         const beside = horizontal
           ? { x: p.x.map(10), y: reach + 10, slop: 4, lookups }
           : { x: reach + 10, y: p.y.map(10), slop: 4, lookups };
-        expect(
-          (model.config.marks[0] as Mark).pickItem!(records[0]!, beside),
-          name,
-        ).toBeUndefined();
+        expect(lookedUp(model.config.marks[0] as Mark, records[0]!, beside), name).toBeUndefined();
       }
   });
 
@@ -1763,7 +1760,8 @@ describe("drawn-mark records", () => {
           const { records } = sceneOf(model);
           const p = model.panels()[0]!;
           const pick = (beside: number, slop: number) =>
-            (model.config.marks[0] as Mark).pickItem!(
+            lookedUp(
+              model.config.marks[0] as Mark,
               records[0]!,
               horizontal
                 ? { x: p.x.map(10), y: p.y.map(500) + beside, slop, lookups }
@@ -1794,7 +1792,7 @@ describe("drawn-mark records", () => {
       const at = horizontal
         ? { x: p.x.map(0.75), y: p.y.map(500) + 1.4, slop: 0, lookups }
         : { x: p.x.map(500) + 1.4, y: p.y.map(0.75), slop: 0, lookups };
-      const found = (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      const found = lookedUp(model.config.marks[0] as Mark, records[0]!, at);
       const name = horizontal ? "across" : "up";
       expect(found?.distance, name).toBe(0);
       const { box } = found!;
@@ -1820,7 +1818,7 @@ describe("drawn-mark records", () => {
     const { model, records } = drawn({ marks: [contour(cone, ring)] });
     const p = model.panels()[0]!;
     const mark = model.config.marks[0] as Mark;
-    const pick = (x: number) => mark.pickItem!(records[0]!, { x, y: p.y.map(0), slop: 4, lookups });
+    const pick = (x: number) => lookedUp(mark, records[0]!, { x, y: p.y.map(0), slop: 4, lookups });
     const edge = p.x.map(0.25);
     expect(pick(p.x.map(0))).toBeUndefined();
     // Two pixels inside the hole (a little less to the ring's traced corners), the ring outside it.
@@ -1839,7 +1837,7 @@ describe("drawn-mark records", () => {
       const at = horizontal
         ? { x: plot.x + 1, y: p.y.map(0), slop: 4, lookups }
         : { x: p.x.map(0), y: plot.y + plot.height - 1, slop: 4, lookups };
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, at);
     };
     const n = 1000;
     const below = (value: number) => Array.from({ length: n }, () => value);
@@ -1892,12 +1890,12 @@ describe("drawn-mark records", () => {
         // The cell at (0, 0) ends left of the plot, where its image does too
         // whatever the clip; the one at (1, 1) is drawn.
         expect(
-          picker.pickItem!(records[0]!, { x: plot.x + 1, y: p.y.map(0), slop: 4, lookups }),
+          lookedUp(picker, records[0]!, { x: plot.x + 1, y: p.y.map(0), slop: 4, lookups }),
         ).toBeUndefined();
         expect(
-          picker.pickItem!(records[0]!, { x: p.x.map(0.49), y: p.y.map(0), slop: 4, lookups }),
+          lookedUp(picker, records[0]!, { x: p.x.map(0.49), y: p.y.map(0), slop: 4, lookups }),
         ).toBeUndefined();
-        const drawnCell = picker.pickItem!(records[0]!, {
+        const drawnCell = lookedUp(picker, records[0]!, {
           x: p.x.map(1),
           y: p.y.map(1),
           slop: 4,
@@ -1919,7 +1917,7 @@ describe("drawn-mark records", () => {
     const cells = drawn({ marks: [heatmap(one, { x: "x", y: "y", color: "v" })], ...axes });
     const p = cells.model.panels()[0]!;
     const mark = cells.model.config.marks[0] as Mark;
-    const box = mark.pickItem!(cells.records[0]!, {
+    const box = lookedUp(mark, cells.records[0]!, {
       x: p.x.map(1),
       y: p.y.map(1),
       slop: 4,
@@ -1927,7 +1925,7 @@ describe("drawn-mark records", () => {
     })!.box;
     const right = box.x + box.width;
     const at = (x: number, y: number, slop = 4) =>
-      mark.pickItem!(cells.records[0]!, { x, y, slop, lookups })?.distance;
+      lookedUp(mark, cells.records[0]!, { x, y, slop, lookups })?.distance;
     expect(at(right + 2, p.y.map(1))).toBeCloseTo(2);
     expect(at(right + 2, box.y - 2)).toBeCloseTo(Math.hypot(2, 2));
     expect(at(right + 2, p.y.map(1), 1)).toBeUndefined();
@@ -1943,7 +1941,7 @@ describe("drawn-mark records", () => {
     });
     const r = reversed.model.panels()[0]!;
     const flipped = reversed.model.config.marks[0] as Mark;
-    const cell = flipped.pickItem!(reversed.records[0]!, {
+    const cell = lookedUp(flipped, reversed.records[0]!, {
       x: r.x.map(1),
       y: r.y.map(1),
       slop: 4,
@@ -1951,7 +1949,7 @@ describe("drawn-mark records", () => {
     })!.box;
     for (const x of [cell.x - 4, cell.x + cell.width + 4])
       expect(
-        flipped.pickItem!(reversed.records[0]!, { x, y: r.y.map(1), slop: 4, lookups })?.distance,
+        lookedUp(flipped, reversed.records[0]!, { x, y: r.y.map(1), slop: 4, lookups })?.distance,
       ).toBeCloseTo(4);
     // Two bins with a gap between: the nearer.
     const points = table({ x: [0.1, 0.2, 2.8, 2.9], y: [0.1, 0.2, 2.8, 2.9] });
@@ -1961,7 +1959,7 @@ describe("drawn-mark records", () => {
     });
     const q = bins.model.panels()[0]!;
     const binned = bins.model.config.marks[0] as Mark;
-    const found = binned.pickItem!(bins.records[0]!, {
+    const found = lookedUp(binned, bins.records[0]!, {
       x: q.x.map(1) + 2,
       y: q.y.map(0.5),
       slop: 4,
@@ -1973,7 +1971,7 @@ describe("drawn-mark records", () => {
       [0, 1],
     ]);
     expect(
-      binned.pickItem!(bins.records[0]!, { x: q.x.map(1.5), y: q.y.map(0.5), slop: 4, lookups }),
+      lookedUp(binned, bins.records[0]!, { x: q.x.map(1.5), y: q.y.map(0.5), slop: 4, lookups }),
     ).toBeUndefined();
   });
 
@@ -1993,7 +1991,7 @@ describe("drawn-mark records", () => {
     const mark = model.config.marks[0] as Mark;
     // Between the two at 0: A narrows to nothing there, B is widest.
     const at = { x: (p.x.map(0) + p.x.map(1)) / 2, y: p.y.map(0), slop: 4, lookups };
-    const found = mark.pickItem!(records[0]!, at)!;
+    const found = lookedUp(mark, records[0]!, at)!;
     expect(found.names).toEqual(["B"]);
     expect(found.distance).toBeLessThan(4);
   });
@@ -2006,7 +2004,7 @@ describe("drawn-mark records", () => {
     });
     const p = model.panels()[0]!;
     const mark = model.config.marks[0] as Mark;
-    const found = mark.pickItem!(records[0]!, { x: p.x.map(6), y: p.y.map(0), slop: 4, lookups })!;
+    const found = lookedUp(mark, records[0]!, { x: p.x.map(6), y: p.y.map(0), slop: 4, lookups })!;
     // The cell at 6 spans 5 to 7, halfway to its neighbors.
     expect(found.box.x).toBeCloseTo(p.x.map(5));
     expect(found.box.x + found.box.width).toBeCloseTo(p.x.map(7));
@@ -2025,7 +2023,7 @@ describe("drawn-mark records", () => {
         return g.kind === "point" ? (g as PointGeometry).coords : (g as LineGeometry).path.coords;
       };
       const pick = (x: number, y: number) =>
-        (model.config.marks[0] as Mark).pickItem!(record, { x, y, slop: 4, lookups });
+        lookedUp(model.config.marks[0] as Mark, record, { x, y, slop: 4, lookups });
       return { at, pick };
     };
     // The median dot, which no box or whisker around it is drawable to reach.
@@ -2063,7 +2061,7 @@ describe("drawn-mark records", () => {
         for (let k = 0; k < count; k++) {
           const [x, y, w, h] = boxes.subarray(k * 4, k * 4 + 4);
           const at = { x: x! + w! / 2, y: y! + h! / 2, slop: 4, lookups };
-          expect(mark.pickItem!(record, at)?.distance, `${horizontal} ${k}`).toBe(0);
+          expect(lookedUp(mark, record, at)?.distance, `${horizontal} ${k}`).toBe(0);
         }
     }
   });
@@ -2073,7 +2071,7 @@ describe("drawn-mark records", () => {
       const { model, records } = drawn({ marks: [mark] });
       const p = model.panels()[0]!;
       const at = { x: p.x.map(x) + dx, y: p.y.map(y), slop, lookups };
-      return (model.config.marks[0] as Mark).pickItem!(records[0]!, at);
+      return lookedUp(model.config.marks[0] as Mark, records[0]!, at);
     };
     // 8 px from the middles of 20 px strokes, inside the plot: on them.
     const ranges = table({ t: [1, 2], lo: [1, 2], hi: [3, 4] });
@@ -2089,9 +2087,7 @@ describe("drawn-mark records", () => {
       slop: 4,
       lookups,
     };
-    expect((rugs.model.config.marks[0] as Mark).pickItem!(rugs.records[0]!, tick)?.distance).toBe(
-      0,
-    );
+    expect(lookedUp(rugs.model.config.marks[0] as Mark, rugs.records[0]!, tick)?.distance).toBe(0);
     // A contour line 7 px away, within a touch's reach.
     const z: number[] = [];
     const xs: number[] = [];
@@ -2131,7 +2127,7 @@ describe("drawn-mark records", () => {
     const plot = records[0]!.frame!.plot;
     // The middle of a merged candle: between the two ranges, inside what is drawn.
     const at = { x: plot.x + 100.5, y: p.y.map(5.5), slop: 4, lookups };
-    const picked = mark.pickItem!(records[0]!, at);
+    const picked = lookedUp(mark, records[0]!, at);
     expect(picked?.part.kind).toBe("row");
     expect(picked?.distance).toBe(0);
     expect(picked!.box.y).toBeCloseTo(p.y.map(9));
@@ -2159,7 +2155,7 @@ describe("drawn-mark records", () => {
     });
     const p = model.panels()[0]!;
     const plot = records[0]!.frame!.plot;
-    const picked = (model.config.marks[0] as Mark).pickItem!(records[0]!, {
+    const picked = lookedUp(model.config.marks[0] as Mark, records[0]!, {
       x: plot.x + 51.2,
       y: p.y.map(2.5),
       slop: 0,
@@ -2181,7 +2177,7 @@ describe("drawn-mark records", () => {
         slop: 4,
         lookups,
       };
-      const part = (model.config.marks[0] as Mark).pickItem!(records[0]!, at)?.part;
+      const part = lookedUp(model.config.marks[0] as Mark, records[0]!, at)?.part;
       return part?.kind === "row" ? [part.series?.series.key, part.position] : undefined;
     };
     // Coincident rows of two series, then of one: the later ones paint on top.
@@ -2200,12 +2196,12 @@ describe("drawn-mark records", () => {
     const x = model.panels()[0]!.x.map(2);
     const inner = plot.y + plot.height - 8;
     const mark = model.config.marks[0] as Mark;
-    expect(mark.pickItem!(records[0]!, { x, y: inner - 8, slop: 4, lookups })).toBeUndefined();
+    expect(lookedUp(mark, records[0]!, { x, y: inner - 8, slop: 4, lookups })).toBeUndefined();
     expect(
-      mark.pickItem!(records[0]!, { x, y: inner - 3, slop: 4, lookups })?.distance,
+      lookedUp(mark, records[0]!, { x, y: inner - 3, slop: 4, lookups })?.distance,
     ).toBeCloseTo(3);
     expect(
-      mark.pickItem!(records[0]!, { x: x + 12, y: inner - 3, slop: 4, lookups })?.distance,
+      lookedUp(mark, records[0]!, { x: x + 12, y: inner - 3, slop: 4, lookups })?.distance,
     ).toBeCloseTo(Math.hypot(2, 3));
   });
 
@@ -2223,7 +2219,7 @@ describe("drawn-mark records", () => {
       const p = model.panels()[0]!;
       const record = model.drawnMarks()[0]!;
       const at = { x: p.x.map(2), y: p.y.map(3), slop: 4, lookups };
-      expect((mark as unknown as Mark).pickItem!(record, at)).toBeUndefined();
+      expect(lookedUp(mark as unknown as Mark, record, at)).toBeUndefined();
     }
   });
 
@@ -2237,14 +2233,14 @@ describe("drawn-mark records", () => {
     const mark = model.config.marks[0] as Mark;
     const p = model.panels()[0]!;
     const center = p.x.map(0);
-    const base = mark.pickItem!(records[0]!, { x: center + 5, y: p.y.map(0.1), slop: 4, lookups });
+    const base = lookedUp(mark, records[0]!, { x: center + 5, y: p.y.map(0.1), slop: 4, lookups });
     expect(base?.part).toMatchObject({ kind: "group", key: '["v","a"]' });
     // Beside the tail, inside the span of its values and the violin's width.
     const beside = { x: center + 40, y: p.y.map(6), slop: 4, lookups };
     expect(mark.pick!(records[0]!.series, beside.x, beside.y, records[0]!.frame!)?.distance).toBe(
       0,
     );
-    expect(mark.pickItem!(records[0]!, beside)).toBeUndefined();
+    expect(lookedUp(mark, records[0]!, beside)).toBeUndefined();
     // Beside a sloping stretch of the outline, measured square to it.
     const outline = records[0]!.geometry.find(
       (g): g is LineGeometry => g.kind === "line" && (g as LineGeometry).path.count > 3,
@@ -2267,9 +2263,12 @@ describe("drawn-mark records", () => {
       lookups,
     });
     // Measured from the outline's 1.5 px stroke.
-    expect(mark.pickItem!(records[0]!, near(3))?.distance).toBeCloseTo(2.25, 1);
-    expect(mark.pickItem!(records[0]!, near(6))).toBeUndefined();
-    expect(mark.pickItem!(records[0]!, near(-1))?.distance).toBe(0);
+    expect(lookedUp(mark, records[0]!, near(3))?.distance).toBeCloseTo(2.25, 1);
+    expect(lookedUp(mark, records[0]!, near(6))).toBeUndefined();
+    // A pixel inside: its fill, and its outline's stroke a quarter pixel off.
+    const inside = mark.pickItem!(records[0]!, near(-1));
+    expect(inside?.fill?.distance).toBe(0);
+    expect(inside?.candidate?.distance).toBeCloseTo(0.25, 1);
   });
 
   it("pick layout marks' items through itemAt, named by their keys", () => {
