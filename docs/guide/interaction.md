@@ -396,9 +396,10 @@ widget.pin(value=datetime(2025, 4, 1), axis="x")
 - **What it is pinned to.** With the inspection's mode `"nearest"`, or
   on a layout item (a slice, a node), the item itself: it follows the item
   by its key as data changes and goes when the item does. With
-  `"nearest-x"` or `"nearest-y"`, the item's value on that axis
-  (`{ value, axis, panel }`): every series is read there again as data
-  changes. Either hides while out of view, zoomed or panned away, and
+  `"nearest-x"` or `"nearest-y"`, the value on that axis the tooltip read
+  where it was clicked (`{ value, axis, panel }`; Enter's, at the keyboard
+  cursor), even where the line clicked is nearer another of its points:
+  every series is read there again as data changes. Either hides while out of view, zoomed or panned away, and
   shows again with it; meanwhile no other tooltip shows. A change of the
   inspection's mode lets it go.
 - **What pins.** An item the inspection reads: a series' point, a layout
@@ -1006,7 +1007,8 @@ gradually to a view asked for: `setViewport`, zooming to a brush,
 double-click reset, a map's or network's plane. With `values: true`, marks
 also move to new values when a table changes in place or is reset (`set`,
 `replace`, `setColumn`, `reset`), and axes whose automatic domains change
-move with them.
+move with them, those the guides list too (on other sides, with tick
+layers or labels of their own), laid out for the domains between.
 
 ```ts
 const chart = createChart(element, {

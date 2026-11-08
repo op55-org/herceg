@@ -595,6 +595,8 @@ describe("a navigator's sliders", () => {
     expect(Math.abs(pressed - at(600))).toBeLessThan(1);
     expect(chart.getViewport().x![0]).toBeCloseTo((pressed - strip.x) / perUnit(chart), 0);
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Shown range");
+    // The focus a press gives draws no ring.
+    expect(getComputedStyle(document.activeElement!).outlineStyle).toBe("none");
     document.activeElement!.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );

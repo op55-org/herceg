@@ -1084,8 +1084,71 @@ def test_points_color_by_category_as_series_or_with_a_key():
     assert geo["marks"][0]["color"] == "kind"
     three = {**values, "z": np.array([0.0, 1.0, 2.0])}
     assert hg.scatter_3d(three, "x", "y", "z", color="kind").to_spec()[0]["marks"][0]["color"]
-    with pytest.raises(ValueError, match="geopoint colors: 'kind' is a category column"):
+    with pytest.raises(ValueError, match="geopoint color_midpoint: 'kind' is a category column"):
         hg.Chart(values).geopoint("x", "y", color="kind", color_midpoint=0)
+
+
+def test_points_take_a_css_color_as_lines_do():
+    values = {"x": np.array([1.0, 2.0]), "y": np.array([1.0, 2.0]), "kind": ["a", "b"]}
+    # Static SVG writes names as hex colors, as it does a line's.
+    for color, drawn in (("#ff00ff", "#ff00ff"), ("tomato", "#ff6347")):
+        chart = hg.scatter(values, "x", "y", color=color, width=300, height=200)
+        assert chart.to_spec()[0]["marks"][0]["color"] == color
+        assert f'fill="{drawn}"' in chart.to_svg()
+    with pytest.raises(ValueError, match="point color: 'knid' is neither a column nor a color"):
+        hg.scatter(values, "x", "y", color="knid")
+    red = {**values, "red": ["a", "b"]}
+    with pytest.raises(ValueError, match="point color: 'red' names both a column and a color"):
+        hg.scatter(red, "x", "y", color="red")
+    with pytest.raises(ValueError, match="point colors: a ramp colors a number column"):
+        hg.scatter(values, "x", "y", color="#ff00ff", colors="viridis")
+    # Map and 3D points too, where a fill wins over it.
+    geo = hg.Chart(values, width=300, height=200).geopoint("x", "y", color="tomato")
+    assert geo.to_spec()[0]["marks"][0]["color"] == "tomato"
+    assert 'fill="#ff6347"' in geo.to_svg()
+    three = {**values, "z": np.array([0.0, 1.0])}
+    assert hg.scatter_3d(three, "x", "y", "z", color="#ff00ff").to_spec()[0]["marks"][0]["color"]
+    with pytest.raises(ValueError, match="geopoint color: 'knid' is neither a column nor a color"):
+        hg.Chart(values).geopoint("x", "y", color="knid")
+    with pytest.raises(
+        ValueError,
+        match="point_3d color: 'red' names both a column and a color; give fill='red' for "
+        "the color, or rename the column",
+    ):
+        hg.scatter_3d({**three, "red": [1.0, 2.0]}, "x", "y", "z", color="red")
+    with pytest.raises(ValueError, match="geopoint color_midpoint: a ramp colors a number column"):
+        hg.Chart(values).geopoint("x", "y", color="tomato", color_midpoint=0)
+    # A fill wins over the color, ramp and all, as in the engine; the color is still checked.
+    filled = {"fill": "#123456", "colors": "viridis", "color_midpoint": 0.5}
+    assert hg.scatter(values, "x", "y", color="tomato", **filled).to_svg()
+    assert hg.Chart(values).geopoint("x", "y", color="tomato", **filled).to_svg()
+    assert hg.scatter_3d(three, "x", "y", "z", color="tomato", **filled).to_svg()
+    with pytest.raises(ValueError, match="geopoint color: 'knid' is neither a column nor a color"):
+        hg.Chart(values).geopoint("x", "y", color="knid", fill="#123456")
+
+
+def test_ramp_refusals_name_and_locate_the_option_given():
+    values = {
+        "x": np.array([1.0, 2.0]),
+        "y": np.array([1.0, 2.0]),
+        "z": np.array([0.0, 1.0]),
+        "kind": ["a", "b"],
+    }
+    marks = {
+        "point": lambda **options: hg.Chart(values).point("x", "y", **options),
+        "geopoint": lambda **options: hg.Chart(values).geopoint("x", "y", **options),
+        "point_3d": lambda **options: hg.Chart(values).point_3d("x", "y", "z", **options),
+    }
+    ramp = (("colors", "colors", "viridis"), ("color_domain", "colorDomain", (0.0, 1.0)))
+    ramp += (("color_midpoint", "colorMidpoint", 0.5),)
+    reasons = (("tomato", "a ramp colors a number column"), ("kind", "'kind' is a category column"))
+    for mark, add in marks.items():
+        for name, option, value in ramp:
+            for color, why in reasons:
+                with pytest.raises(hg.ChartError) as refused:
+                    add(color=color, **{name: value})
+                assert str(refused.value).startswith(f"{mark} {name}: {why}"), refused.value
+                assert refused.value.path == f"marks[0].{option}"
 
 
 def test_scatter_helper_takes_every_encoding():

@@ -304,6 +304,41 @@ describe("tracks for labels placed as they are drawn", () => {
     expect(edge(model)).toBe(edge(plain));
   });
 
+  it("lay out a chart updated with the same labels once, and afresh where they take other room", () => {
+    const rows = table({ t: [0, 10], v: [0, 10] });
+    let text = "a much longer label";
+    let drawn = 0;
+    const follower = new Following(() => {
+      drawn++;
+      return text;
+    });
+    const config = () => ({
+      locale: "en-US",
+      legend: false,
+      marks: [line(rows, { x: "t", y: "v" }), follower as never],
+    });
+    const edge = (model: ChartModel) => {
+      const { plot } = model.scene(estimateText).panels[0]!;
+      return plot.x + plot.width;
+    };
+    const model = new ChartModel(config());
+    model.setSize(400, 300, 1);
+    const wide = edge(model);
+    // An update starts from the room its labels took: drawn once, where they were.
+    drawn = 0;
+    model.update(config());
+    expect(edge(model)).toBe(wide);
+    expect(drawn).toBe(1);
+    // Labels taking less room after an update give it back, as a chart made with them has.
+    text = "short";
+    model.update(config());
+    const narrow = edge(model);
+    const made = new ChartModel(config());
+    made.setSize(400, 300, 1);
+    expect(narrow).toBeGreaterThan(wide);
+    expect(narrow).toBe(edge(made));
+  });
+
   contractTest("label.attached.room.interior", () => {
     // Labels outside the plots of panels beside others keep room between them.
     const rows = table({ t: [0, 10, 0, 10], v: [0, 10, 0, 10], g: ["a", "a", "b", "b"] });
@@ -563,6 +598,32 @@ describe("series labels keeping apart", () => {
       expect(Math.abs(segments.coords[k * 4 + 1]! - 100)).toBeLessThanOrEqual(2);
       expect(segments.coords[k * 4 + 2]!).toBeCloseTo(350, 6);
     }
+  });
+
+  it("draw a leader from labels displaced more than 6 pixels from their points, either way", () => {
+    // Two labels whose points are `apart` pixels closer than a block's
+    // height move apart evenly, one up and one down, half of that each. The
+    // threshold is on that displacement, not on the space the text paints.
+    const look = { stroke: undefined, path: "line labels.leader.stroke", strokeWidth: 1 };
+    const [single] = place([series(100, "a", "move", owner())], frame, GUIDE_KIT).boxes;
+    const block = single!.height;
+    const leaders = (moved: number) => {
+      const own = owner("labels", look);
+      const lower = 100 + block - 2 * moved;
+      const { geometry, boxes } = place(
+        [series(100, "up", "move", own), series(lower, "down", "move", own)],
+        frame,
+        GUIDE_KIT,
+      );
+      const [up, down] = [...boxes].sort((a, b) => a.y - b.y);
+      expect(single!.y - up!.y).toBeCloseTo(moved, 6);
+      expect(down!.y - (single!.y + lower - 100)).toBeCloseTo(moved, 6);
+      const segments = geometry.get(own)!.find((g) => g.kind === "segments");
+      return (segments as SegmentGeometry | undefined)?.count ?? 0;
+    };
+    expect(leaders(5.9)).toBe(0);
+    expect(leaders(6)).toBe(0);
+    expect(leaders(6.1)).toBe(2);
   });
 
   it("move least where blocks meet only some of the others", () => {

@@ -87,7 +87,10 @@ edge. `model.#furniture` makes the title's and legends' requests
 - Marks labelling outside their plots ask for room (`Mark.room`), the
   widest per side a track of its own, innermost (`Frame.outside`). Marks
   that measure as they place (`Mark.roomPlaced`) report after drawing; if a
-  panel needs more than kept, the scene is laid out once more.
+  panel needs more than kept, the scene is laid out once more. A new
+  layout (a resize, an update) starts from the rooms last drawn, so an
+  update that leaves labels as they were lays out once; where they take
+  other rooms, it is laid out once more from theirs.
 - Text measurement is injected: the browser measures with a canvas context;
   static rendering uses built-in Helvetica metrics (0.6 em per glyph for
   monospace fonts) padded by 10%, or supplied fonts (see

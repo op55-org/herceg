@@ -17,6 +17,7 @@ import {
   fraction,
   isOpaqueColor,
   rampOf,
+  refuseRamp,
   SequentialScale,
 } from "../scale/color.ts";
 import { linearTicks } from "../scale/ticks.ts";
@@ -39,6 +40,7 @@ import type {
   Channel,
   Channels,
   ColorChannel,
+  CssColor,
   Encodings,
   FieldCoordinate,
   ItemKeyed,
@@ -191,10 +193,15 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
    * A number or time field colored on a continuous scale, with a color
    * legend; or a category field whose values take the theme's palette in
    * order of appearance, with a key of them (the `series` field, named here,
-   * keeps its series' colors); or a channel, such as `{ field, scale: {
-   * type: "identity" } }` for a field of colors.
+   * keeps its series' colors); a color for every point; or a channel, such
+   * as `{ field, scale: { type: "identity" } }` for a field of colors.
    */
-  color?: PositionField<S> | Channel<string, S> | MappedField<S> | readonly ColorChannel<S>[];
+  color?:
+    | PositionField<S>
+    | CssColor
+    | Channel<string, S>
+    | MappedField<S>
+    | readonly ColorChannel<S>[];
   /**
    * Colors for a number or time `color`, low to high, such as an imported
    * scheme (`viridis`, `rdbu`, ...). Defaults to the theme's sequential
@@ -316,6 +323,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   readonly #opacity: number;
   /** Outline color and width in pixels; 0 for none. */
   readonly #stroke: string | undefined;
+  /** The fill of every point: `fill`, or a color `color` gives that it draws itself. */
+  readonly #fill: string | undefined;
   readonly #ringWidth: number;
   /** How far each of SYMBOLS reaches per unit of radius. */
   readonly #reaches = SYMBOLS.map(symbolReach);
@@ -381,17 +390,16 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     const channels = pointChannels(spec, table);
     const { color, size, opacity, symbol } = channels;
     this.#toneField = color.own;
+    this.#fill = spec.fill ?? color.paint;
     this.#sizeField = size.own;
     this.#opacityField = opacity.own;
-    if (
-      color.given !== undefined &&
-      color.own === undefined &&
-      (spec.colors !== undefined ||
-        spec.colorDomain !== undefined ||
-        spec.colorMidpoint !== undefined)
-    )
-      throw new Error(
-        `point colors: ${typeof color.given === "string" ? `"${color.given}" is a category field, colored by the theme's palette` : "a ramp colors a number field"}; drop colors, colorDomain, and colorMidpoint`,
+    if (color.given !== undefined && color.own === undefined)
+      refuseRamp(
+        spec,
+        "point",
+        typeof color.given === "string" && table.has(color.given)
+          ? `"${color.given}" is a category field, colored by the theme's palette`
+          : "a ramp colors a number field",
       );
     if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "point");
@@ -485,7 +493,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     bands: Bands,
     context: BandContext,
   ) {
-    const { spec, table } = this;
+    const { table } = this;
     const fields = this.#fields;
     // A category position is each row's band index on the chart's axis.
     const banded = (axis: "x" | "y") =>
@@ -496,7 +504,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
       this.#banded.x ? banded("x") : table.numbers(fields.x as never),
       key,
       palette,
-      spec.fill,
+      this.#fill,
       this.#banded.y ? banded("y") : undefined,
     );
     // Rows the legend hides by value go, as hidden series do.
@@ -1232,6 +1240,8 @@ interface PointChannelOf<V> {
   readonly given: unknown;
   readonly own?: string | undefined;
   readonly compiled?: PointChannel<V> | undefined;
+  /** A color in CSS syntax the mark draws itself, as a line's `color`. */
+  readonly paint?: string | undefined;
 }
 
 /** Refuses a channel set as option `flat` and in `encode` as `name`. */
@@ -1270,12 +1280,21 @@ function pointChannels(spec: Frozen<PointSpec>, table: Table) {
           );
         return { given };
       }
+      // A color, not a field: hex, rgb(), hsl(), and var() drawn as they are; names (and
+      // what is neither, which it refuses) the feature compiler reads, as on lines.
+      if (name === "color" && !table.has(given))
+        return /^(#|rgb|hsl|var\()/.test(given)
+          ? { given, paint: given }
+          : { given, compiled: { spec: { value: given }, path } };
       if (name === "symbol" && !table.has(given))
         throw new RangeError(
           `point symbol: no shape or field "${given}"; name a category field or one of ${SYMBOLS.map((s) => `"${s}"`).join(", ")}`,
         );
       requireField(table, given, numbers ? NUMERIC : POSITION, `point ${path}`);
-      return table.kind(given) === "category"
+      // A field named as a color the feature compiler refuses, as on lines,
+      // whether or not a chart on the page loaded it.
+      return table.kind(given) === "category" ||
+        (name === "color" && !!globalThis.CSS?.supports("color", given))
         ? { given, compiled: { spec: { field: given }, path } }
         : { given, own: given };
     }

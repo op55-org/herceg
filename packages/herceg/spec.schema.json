@@ -3527,7 +3527,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number field colored on a continuous scale.",
+          "description": "A number field colored on a continuous scale, with a color legend; a category field (the series it names); or a color for every point.",
           "type": "string"
         },
         "colors": {
@@ -6331,7 +6331,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number field colored on a continuous scale, with a color legend.",
+          "description": "A number field colored on a continuous scale, with a color legend; a category field (the series it names); or a color for every point.",
           "type": "string"
         },
         "colors": {
@@ -6413,7 +6413,7 @@
         },
         "color": {
           "title": "Color",
-          "description": "A number or time field colored on a continuous scale (see `colors`), a category field (its values' colors, and the series it names), or a channel: `{ field, scale }` through one of the chart's scales, or `{ field, scale: { type: \"identity\" } }` for colors the data holds.",
+          "description": "A number or time field colored on a continuous scale (see `colors`), a category field (its values' colors, and the series it names), a color for every point, or a channel: `{ field, scale }` through one of the chart's scales, or `{ field, scale: { type: \"identity\" } }` for colors the data holds.",
           "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" }]
         },
         "colors": {
@@ -7772,7 +7772,7 @@
       "additionalProperties": false
     },
     "SeriesLabelsSpec": {
-      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label moved more than 6 pixels back to its point.",
+      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label displaced more than 6 pixels from its place at its point back to that point.",
       "type": "object",
       "properties": {
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },

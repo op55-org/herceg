@@ -775,6 +775,25 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       }
       return out;
     },
+    moving(axes, state, index, plot, own) {
+      return {
+        defaults: axes,
+        at: (defaults, plans) =>
+          this.panel(
+            defaults,
+            {
+              ...state,
+              plan: (scale, k, pixels, start) =>
+                k === index && (scale === "y" || scale === "yRight")
+                  ? plans[scale]
+                  : state.plan(scale, k, pixels, start),
+            },
+            index,
+            plot,
+            { ...plans, own },
+          ),
+      };
+    },
   };
 }
 

@@ -2520,7 +2520,8 @@ export class MountedChart implements Chart, ExportsScene {
             (panning || brush);
         if (drags && !(pointer.target as Element).closest?.("button")) {
           event.preventDefault();
-          this.root.focus({ preventScroll: true });
+          // No ring for it until a key is pressed (see press-focus.ts).
+          this.root.focus({ preventScroll: true, focusVisible: false });
           this.root.setPointerCapture?.(pointer.pointerId);
         }
       } else if (

@@ -112,3 +112,12 @@ Lists split no series; one ending in the series' colors keeps their
 legend entries and toggles, and scales read in a list show their key.
 Custom marks read lists through `encoded(channel, row, series)`. Heatmaps
 take no `encode`.
+
+Points, map points, and 3D points take a CSS color in `color` as lines
+do (`color="tomato"` in Python); a column name there still colors by its
+values. Value animation moves every axis `guides` lists with its scale,
+its layers and titles laid out between. A press that focuses a chart (a
+click, a drag, a brush) draws no focus ring until a key is pressed;
+keyboard focus draws one, also under a page's `:focus` reset. A clicked
+tooltip pins the value its inspection read, and bar labels of several
+lines align each line as `style.align` says.

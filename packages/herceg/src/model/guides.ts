@@ -311,12 +311,33 @@ export interface CompiledAxes {
     plans: PanelPlans,
   ): AxisGuide[];
   /**
+   * Panel `index`'s axes as `panel` lays them out from `axes`, its default
+   * ones, for plans other than the scene's: value transitions' frames.
+   */
+  moving(
+    axes: readonly AxisGuide[],
+    state: AxesState,
+    index: number,
+    plot: Rect,
+    own: OwnScales | undefined,
+  ): MovingAxes;
+  /**
    * Whether the room `across` kept fits the x axes as panel `i`'s x plan,
    * `planOf(i)`, labels them, and the reach it gave fits the y labels as
    * planned; if not, `across` keeps more for scenes of this size, and the
    * model lays the scene out again.
    */
   fits(state: AxesState, planOf: (i: number) => AxisPlan): boolean;
+}
+
+/**
+ * A panel's axes the guides list, laid out again for other plans: its
+ * default axes (`defaults`, also laid out for those plans), and the
+ * guides' axes from them, y titles beside the labels of those plans.
+ */
+export interface MovingAxes {
+  readonly defaults: readonly AxisGuide[];
+  at(defaults: readonly AxisGuide[], plans: PanelPlans): AxisGuide[];
 }
 
 /**

@@ -1198,7 +1198,8 @@ class SeriesLabels:
     leaves out the lowest ``priority`` (then the last series) where the plot
     is too short for all; ``"hide"`` leaves out those that would cover
     another; ``"show"`` draws them at their points. ``leader=True`` (or an
-    ``hg.StrokeStyle``) joins labels moved away to their points."""
+    ``hg.StrokeStyle``) joins labels displaced more than 6 pixels from their
+    places at their points back to them."""
 
     at: LabelAt
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None

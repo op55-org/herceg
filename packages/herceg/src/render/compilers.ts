@@ -4,6 +4,7 @@
 
 import * as displayCode from "../fields/compile.ts";
 import { guideCompiler } from "../guides/compile.ts";
+import { staticColors } from "../marks/colored.ts";
 import { featureCompiler } from "../marks/features/compile.ts";
 import type { FeatureCompiler } from "../model/features.ts";
 import { GUIDE_KIT, type GuideCompiler, LOADED } from "../model/guides.ts";
@@ -19,7 +20,9 @@ let made: [GuideCompiler, FeatureCompiler] | undefined;
 const isColor = (value: string) =>
   cssColor(value) !== undefined ||
   /^[a-z-]+\(.*\)$/i.test(value.trim()) ||
-  value === "currentColor";
+  value.trim().toLowerCase() === "currentcolor";
+// Marks made without a browser tell colors from fields so too.
+staticColors.isColor = isColor;
 
 /** The guide compiler and the feature compiler, made on first use, with the display code they use. */
 export function staticCompilers(): [GuideCompiler, FeatureCompiler] {

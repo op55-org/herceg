@@ -171,19 +171,38 @@ export function plannable(motion: AxesMotion): boolean {
 }
 
 /**
- * The axes and grid lines of `panel`, the scene moved to, at eased progress
- * `t`: those of moving scales with ticks planned for the domains between,
- * as the scene plans its own (the same tick count, chosen within the
- * domain before room was added for glyphs, and labeled together).
+ * A panel's plans at eased progress `t`: those of moving scales planned for
+ * the domains between, the others the scene's, and grid lines following the
+ * axis they follow in the scene.
  */
-export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel, "axes" | "grids"> {
+export function plansAt(motion: AxesMotion, t: number): PanelPlans {
   const { motions, after } = motion;
-  const plans: Partial<Record<Axis, AxisPlan>> = {};
-  const planOf = (axis: Axis): AxisPlan | undefined => {
-    if (!motions[axis].moves) return undefined;
-    plans[axis] ??= planAt(motion, axis, t);
-    return plans[axis];
-  };
+  const plans = { ...after };
+  for (const axis of ["x", "y", "yRight"] as const) {
+    const plan = after[axis];
+    if (!motions[axis].moves || !plan) continue;
+    const between = planAt(motion, axis, t);
+    plans[axis] = between;
+    if (after.grid === plan) plans.grid = between;
+  }
+  return plans;
+}
+
+/**
+ * The axes and grid lines of `panel`, the scene moved to, as a frame's
+ * `plans` place them (see `plansAt`): those of moving scales with ticks
+ * planned for the domains between, as the scene plans its own (the same
+ * tick count, chosen within the domain before room was added for glyphs,
+ * and labeled together).
+ */
+export function axesAt(
+  panel: { readonly axes: readonly AxisGuide[]; readonly grids: Panel["grids"] },
+  motion: AxesMotion,
+  plans: PanelPlans,
+): Pick<Panel, "axes" | "grids"> {
+  const { motions, after } = motion;
+  const planOf = (axis: Axis): AxisPlan | undefined =>
+    motions[axis]?.moves ? plans[axis] : undefined;
   const axes = panel.axes.map((guide): AxisGuide => {
     const plan = planOf(guide.scale as Axis);
     // Axes without labels (with nothing to label) stay without.

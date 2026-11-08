@@ -2624,7 +2624,8 @@ class Chart:
         hg.OrdinalScale(map={...})}`` fixes them), with a key in the legend;
         a category ``color`` names the series too (as ``series`` does),
         unless ``series`` names another column or is ``False``, which colors
-        each point by its row. ``symbol`` is a shape
+        each point by its row; or a CSS color for every point, as a line's
+        ``color`` is (``fill`` wins over it). ``symbol`` is a shape
         (``"circle"``, ``"square"``, ``"triangle"``, ...) or a category column
         with a shape per value: its name, or ``{"field": name}``, which a
         column named like a shape needs. ``sampling="pixel"`` draws opaque
@@ -2735,8 +2736,9 @@ class Chart:
                 f"point stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
         if isinstance(color, str):
-            self._require(table, color, (*_NUMERIC, "category"), "point color")
-            self._check_category_color(table, color, colors, color_domain, color_midpoint, "point")
+            self._check_point_color(
+                table, color, fill, colors, color_domain, color_midpoint, "point", _NUMERIC
+            )
         symbol_spec = channels.get("symbol") or self._symbol(
             table, cast("str | Mapping[str, str] | None", symbol)
         )
@@ -4390,7 +4392,8 @@ class Chart:
         ``series`` gives a color and legend entry per category, ``color`` colors
         points by a numeric column (or a category column, which names the
         series too unless ``series`` is given or ``False``, as
-        ``Chart.point``'s). Points are drawn largest first, each ringed in the
+        ``Chart.point``'s), or is a CSS color for every point (``fill`` wins
+        over it). Points are drawn largest first, each ringed in the
         background color (``stroke``, ``stroke_width``). For a
         GeoDataFrame of points, add the columns first:
         ``gdf.assign(lon=gdf.geometry.x, lat=gdf.geometry.y)``. Layers share a
@@ -4420,8 +4423,17 @@ class Chart:
             )
         _check_size(radius, size, "geopoint")
         self._require(table, size, ("number",), "geopoint size")
-        self._require(table, color, ("number", "category"), "geopoint color")
-        self._check_category_color(table, color, colors, color_domain, color_midpoint, "geopoint")
+        self._check_point_color(
+            table,
+            color,
+            fill,
+            colors,
+            color_domain,
+            color_midpoint,
+            "geopoint",
+            ("number",),
+            f"give fill={color!r} for the color, or rename the column",
+        )
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
             raise ChartError(
                 "geopoint fill_opacity: expected a number from 0 to 1; "
@@ -4495,7 +4507,8 @@ class Chart:
         ``series`` gives a color and legend entry per category, ``color``
         colors points by a numeric column (or a category column, which names
         the series too unless ``series`` is given or ``False``, as
-        ``Chart.point``'s), and ``label_field`` names a
+        ``Chart.point``'s) or is a CSS color for every point (``fill`` wins
+        over it), and ``label_field`` names a
         category column labeling each point in tooltips. ``radius`` is the
         radius in pixels (3.5 by default). 3D marks share their chart or subplot, its
         box, and its ``camera``.
@@ -4522,8 +4535,17 @@ class Chart:
                 path=self._path("point_3d", "color"),
             )
         self._require(table, label_field, ("category",), "point_3d label_field")
-        self._require(table, color, ("number", "category"), "point_3d color")
-        self._check_category_color(table, color, colors, color_domain, color_midpoint, "point_3d")
+        self._check_point_color(
+            table,
+            color,
+            fill,
+            colors,
+            color_domain,
+            color_midpoint,
+            "point_3d",
+            ("number",),
+            f"give fill={color!r} for the color, or rename the column",
+        )
         _check_size(radius, None, "point_3d")
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
             raise ChartError(
@@ -6947,19 +6969,29 @@ class Chart:
                     )
 
     def _check_colors(
-        self, table: int, color: str | None, channels: dict[str, Any] | None, mark: str
+        self,
+        table: int,
+        color: str | None,
+        channels: dict[str, Any] | None,
+        mark: str,
+        kinds: tuple[str, ...] = ("category",),
+        both: str | None = None,
     ) -> None:
         """Refuses a ``color`` that is neither a column nor a color, or names
-        both, and channels reading columns the data does not have or that hold
-        no categories, as the engine would as it draws."""
+        both (``both`` says how to tell them apart), or a column not of
+        ``kinds``, and channels reading columns the data does not have or that
+        hold no categories, as the engine would as it draws."""
         names = self._tables[table][1].names
         if color is not None and isinstance(color, str):
             column, css = color in names, is_color(color)
             if column and css:
                 raise ChartError(
-                    f"{mark} color: {color!r} names both a column and a color; give "
-                    f"encode=hg.Encodings(color=hg.Channel(field={color!r})) or "
-                    f"hg.Channel(value={color!r})",
+                    f"{mark} color: {color!r} names both a column and a color; "
+                    + (
+                        both
+                        or f"give encode=hg.Encodings(color=hg.Channel(field={color!r})) or "
+                        f"hg.Channel(value={color!r})"
+                    ),
                     path=self._path(mark, "color"),
                 )
             if not column and not css:
@@ -6969,9 +7001,9 @@ class Chart:
                     "hsl(), var(), or CSS names",
                     path=self._path(mark, "color"),
                 )
-            # Lines, areas, and bars color by categories, through a scale.
+            # Lines, areas, and bars color by categories, through a scale; points by numbers too.
             if column:
-                self._require(table, color, ("category",), f"{mark} color")
+                self._require(table, color, kinds, f"{mark} color")
         for name, given in (channels or {}).items():
             for at, channel in _entries(f"encode.{name}", given):
                 self._check_channel_field(table, channel, mark, at)
@@ -7231,10 +7263,35 @@ class Chart:
                 and color.get("scale") is None
                 and self._kind(table, field) in _NUMERIC
             ):
-                raise ChartError(
-                    "point colors: a ramp colors a number column; drop colors, "
-                    "color_domain, and color_midpoint"
-                )
+                self._refuse_ramp("point", "a ramp colors a number column", *ramp)
+
+    def _check_point_color(
+        self,
+        table: int,
+        color: str | None,
+        fill: str | None,
+        colors: Any,
+        color_domain: Any,
+        color_midpoint: Any,
+        mark: str,
+        numbers: tuple[str, ...],
+        both: str | None = None,
+    ) -> None:
+        """Refuses a points' ``color`` as the engine would: a column holding
+        neither ``numbers`` nor categories, a name that is neither a column
+        nor a color, or both, and a ramp's options for anything but a number
+        column, unless ``fill``, which wins over the color, is given."""
+        if color is None:
+            return
+        self._check_colors(table, color, None, mark, (*numbers, "category"), both)
+        if fill is not None:
+            return
+        if color in self._tables[table][1].names:
+            self._check_category_color(table, color, colors, color_domain, color_midpoint, mark)
+        else:
+            self._refuse_ramp(
+                mark, "a ramp colors a number column", colors, color_domain, color_midpoint
+            )
 
     def _check_category_color(
         self,
@@ -7249,11 +7306,30 @@ class Chart:
         palette colors value by value."""
         if color is None or self._kind(table, color) != "category":
             return
-        if colors is not None or color_domain is not None or color_midpoint is not None:
-            raise ChartError(
-                f"{mark} colors: {color!r} is a category column, colored by the theme's "
-                "palette; drop colors, color_domain, and color_midpoint"
-            )
+        self._refuse_ramp(
+            mark,
+            f"{color!r} is a category column, colored by the theme's palette",
+            colors,
+            color_domain,
+            color_midpoint,
+        )
+
+    def _refuse_ramp(
+        self, mark: str, why: str, colors: Any, color_domain: Any, color_midpoint: Any
+    ) -> None:
+        """Refuses a ramp's options on a mark whose ``color`` reads no ramp,
+        saying ``why``, at the first one given, as the engine's ``refuseRamp``
+        does."""
+        for name, option, value in (
+            ("colors", "colors", colors),
+            ("color_domain", "colorDomain", color_domain),
+            ("color_midpoint", "colorMidpoint", color_midpoint),
+        ):
+            if value is not None:
+                raise ChartError(
+                    f"{mark} {name}: {why}; drop colors, color_domain, and color_midpoint",
+                    path=self._path(mark, option),
+                )
 
     def _source_table(self, mark: str) -> int | None:
         """The table of the mark of id ``mark`` declared so far, if it has one."""

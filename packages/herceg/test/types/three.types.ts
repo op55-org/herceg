@@ -1,5 +1,6 @@
 // Fields of 3D marks: positions are numbers or times (and categories for a
-// surface's floor), heights and colors numbers. Compiled by `npm run typecheck`.
+// surface's floor), heights and colors numbers (or a point's CSS color).
+// Compiled by `npm run typecheck`.
 import { category, time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { line3d } from "../../src/marks/line3d.ts";
@@ -23,6 +24,11 @@ point3d(data, { x: "a", y: "b", z: "c", series: "a" });
 point3d(data, { x: "a", y: "b", z: "c", color: "when" });
 // @ts-expect-error not a field of the table
 point3d(data, { x: "a", y: "b", z: "nope" });
+// A color for every point, as a point's along axes.
+point3d(data, { x: "a", y: "b", z: "c", color: "tomato" });
+point3d(data, { x: "a", y: "b", z: "c", color: "#ff00ff" });
+// @ts-expect-error neither a field of the table nor a color
+point3d(data, { x: "a", y: "b", z: "c", color: "nope" });
 
 surface(data, { x: "kind", y: "when", z: "c", color: "a" });
 // @ts-expect-error heights are numbers

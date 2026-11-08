@@ -14,7 +14,24 @@ shape it, and how it is tested.
 A chart is a focusable figure named by its `title` and described by a
 summary of what it shows, with your `description` first. The summary is
 read once, as the figure's description, and refreshes at most once a
-second.
+second. Focus reached with the keyboard draws the browser's focus ring;
+focus a click or drag gives the chart draws none until a key other than
+a modifier is pressed there. The chart marks that focus with
+`data-herceg-focus="pointer"` (`"keyboard"` once a key is pressed), which
+a page's own focus styles can test. Herceg's rules for it weigh as an
+attribute and `:focus` do, (0,2,0): they win over resets such as
+`:focus { outline: none }`, and a more specific selector of the page's,
+or `!important`, wins over them:
+
+```css
+/* The chart in #latency draws this outline whenever it has the focus, presses too. */
+#latency > [role="figure"]:focus { outline: 2px solid royalblue; }
+```
+
+Controls of the page's inside a chart keep their own rings. A chart
+loads its interaction code after it first draws; in Chrome and Firefox, a
+key pressed after a press that came before that code loaded draws no
+ring, and the next key does.
 
 ```ts
 createChart(element, {

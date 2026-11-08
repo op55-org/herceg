@@ -417,8 +417,8 @@ export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
  * in the order of their points, and leaves out those of lowest `priority`
  * (then the last in series order) where the plot is too short for all;
  * "show" draws each at its point; "hide" leaves out those that would cover
- * one of higher priority. `leader` draws a line from each label moved more
- * than 6 pixels back to its point.
+ * one of higher priority. `leader` draws a line from each label displaced
+ * more than 6 pixels from its place at its point back to that point.
  */
 export interface SeriesLabelsSpec extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;

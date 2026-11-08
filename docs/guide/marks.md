@@ -299,7 +299,7 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
 | `field` | Another field's value instead. |
 | `content` | Text and parts (`{ value: true }`, `{ field }`, `{ series: true }`), each with a `format` and a [`style`](#parts-with-a-look-of-their-own). |
 | `format` | Intl options, or `{ number: ",.0f" }` / `{ time }` patterns. |
-| `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. |
+| `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. `align` lines up the lines of a label of several lines (`"\n"` in `content`) at their start, center, or end; the block stays where `place` puts it. |
 | `minLength` | Bars shorter than this many pixels get no label. |
 | `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. |
 | `overlap` | `"show"` (default) or `"hide"`: a label that would cover an earlier one goes inside its bar, or is left out where it does not fit there. |
@@ -328,7 +328,7 @@ hg.scatter(tips, x="day", y="tip", swarm=True)
 | --- | --- |
 | `radius` | Every point's radius in pixels (2.5 by default). |
 | `size` | A number field sizing points by area, from zero (or the least value) at `radiusRange[0]` to the largest at `radiusRange[1]` (default `[2, 12]`), with a size key. Takes the place of `radius`. |
-| `color` | A number or time field on a continuous scale with a color legend, or a category field through the color scale. |
+| `color` | A number or time field on a continuous scale with a color legend, a category field through the color scale, or a CSS color for every point. |
 | `fillOpacity` | A constant, or a field mapped from 0.15 to opaque. |
 | `symbol` | A shape (`"circle"`, `"square"`, `"triangle"`, `"diamond"`, `"cross"`, `"star"`, `"wye"`, `"triangle-down"`, `"x"`) or a category field through the `"symbol"` scale (the first eight by default). Every shape has the area of the circle of the same radius. A name that is both a shape and a field is refused; write `{ field }`. |
 | `stroke`, `strokeWidth` | Outlines: `stroke` alone is 1 pixel; `strokeWidth` alone uses the chart's background, keeping overlapping points apart. |
@@ -853,18 +853,21 @@ Each kind takes only the fields it can honour and refuses the others:
   inside the plot, keeping off labels that "show" and labels that "hide"
   of higher priority than any that move. Where the plot is too short for
   all of them, "move" leaves out the lowest priority, then the last
-  series, until the rest fit. Labels moved more than 6 pixels from their
-  point draw a leader when asked. They are placed first in a panel;
+  series, until the rest fit. A label displaced more than 6 pixels from
+  where it would sit at its point draws a leader when asked: the threshold
+  is on how far layout moved it from that place, not on where its glyphs
+  fall. They are placed first in a panel;
   annotation labels keep off them.
 - **Annotation labels** are placed by priority, then mark order, then row
   order. A rule's label that moves tries the mirror place across its rule,
   then slides along the rule; text tries places around its point; a
   region's label slides along its side. Places near the label are tried for
   every label before farther ones.
-- **As painted.** Labels keep apart, and "hide" leaves out, by what they
-  paint: box outlines and halos count, on series, annotation, and bar
-  labels alike. A label that writes nothing (empty, or only line breaks)
-  takes no place and hides no other.
+- **As painted.** Labels keep apart, and "hide" leaves out, by the blocks
+  they paint: their lines at their line height, with box padding,
+  outlines, and halos, on series, annotation, and bar labels alike. A
+  label that writes nothing (empty, or only line breaks) takes no place
+  and hides no other.
 - **Cost.** Series labels take O(n log n) for n labels at one column, and
   for up to 48 labels whose columns differ, about O(n·m) for m pairs that
   meet (O(n²(n + m)) at worst); labels that "show" add the sorting of
