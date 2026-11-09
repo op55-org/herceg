@@ -17,8 +17,8 @@ Modifier = Literal["shift", "ctrl", "alt", "meta"]
 Axes = Literal["x", "y", "xy"]
 
 _MODIFIERS = ("shift", "ctrl", "alt", "meta")
-#: Keys the keyboard cursor and selections answer to, which bindings cannot take
-#: without Ctrl, Alt, or Meta held.
+#: Keys the keyboard cursor and selections answer to (``i`` reads every series
+#: at the cursor), which bindings cannot take without Ctrl, Alt, or Meta held.
 _CURSOR_KEYS = (
     "ArrowLeft",
     "ArrowRight",
@@ -30,6 +30,7 @@ _CURSOR_KEYS = (
     "PageDown",
     "Escape",
     "Enter",
+    "i",
 )
 
 
@@ -230,7 +231,7 @@ class KeyGesture:
         modifiers = _modifiers(self.modifiers, role.field("modifiers"))
         if self.key in _CURSOR_KEYS and not set(modifiers or ()) - {"shift"}:
             raise role.field("key").error(
-                f"{shown(self.key)} moves the keyboard cursor; "
+                f"{shown(self.key)} is a key the keyboard cursor takes; "
                 "bind another key, or hold ctrl, alt, or meta"
             )
         return _clean({"type": "key", "key": self.key, "modifiers": modifiers})

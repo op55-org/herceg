@@ -50,8 +50,10 @@ def test_bindings_refuse_what_charts_refuse():
     again = hg.Binding(hg.WheelGesture(modifiers=["alt", "ctrl"]), hg.PanAction())
     with pytest.raises(ValueError, match=r"Chart bindings\[1\]: duplicates binding 0"):
         hg.Chart(DATA, bindings=[twice, again])
-    with pytest.raises(ValueError, match="moves the keyboard cursor"):
+    with pytest.raises(ValueError, match="is a key the keyboard cursor takes"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.KeyGesture("Home"), hg.ResetAction())])
+    with pytest.raises(ValueError, match="is a key the keyboard cursor takes"):
+        hg.Chart(DATA, bindings=[hg.Binding(hg.KeyGesture("i"), hg.ResetAction())])
     with pytest.raises(hg.ChartError, match=r"Chart bindings\[0\] action: a WheelGesture performs"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.WheelGesture(), hg.BrushAction())])
     # No keys held, said either way, is one gesture, as the browser reads it.

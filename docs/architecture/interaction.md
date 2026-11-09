@@ -56,9 +56,13 @@ the model's `inspect()`.
   violins) give no row; layout items give one where an item is one row.
   This costs three fields and one map lookup per point.
 - Keyboard navigation keeps a position within a series, so repeated x
-  values are each reachable. Other series are read at the first point each
-  draws at the cursor's x, except where a mark pairs rows of its series
-  (`Mark.alongside`, as stacked areas do).
+  values are each reachable, and reads what the pointer would read at its
+  point (`inspectPosition`, `model/keyboard.ts`). Along the series' axis
+  with `snap: "shared"`, other series are read at the first point each
+  draws at the cursor's value (those sharing its positions at its row),
+  except where a mark pairs rows of its series (`Mark.alongside`, as
+  stacked areas do); otherwise as the pointer reads at its pixel, the
+  cursor's own point standing for its series.
 
 ## Picking
 
@@ -669,11 +673,49 @@ must test columns the chart sends (a binding's `fields` adds others).
   element so it is read once. A range navigator adds its overview and
   range to the summary; its sliders announce through their own polite live
   region.
-- Keyboard values are announced whole through a polite, atomic live
-  region. The tooltip and drawings are hidden from assistive technology.
-- Keyboard stops come from `ChartModel.keyboardStops` per panel: series
-  sharing their positions share a stop, as one inspection reports them all.
+- Keyboard moves are announced through a polite, atomic live region: the
+  cursor's series where it changes, with its place in the order Up and
+  Down follow, then its point, and its series and place again where Up or
+  Down goes nowhere; `i` announces every point the inspection reads. Text
+  equal to the last announcement ends in a no-break space, so it is read
+  again. The tooltip and drawings are hidden from assistive technology.
+- Keyboard stops are every series a panel's inspector shows
+  (`keyboardStops`), so marks with `inspect: false` have none. Up and
+  Down follow a run: `orderAt` orders the panel's series at the cursor's
+  place by where the last frame drew them across it (line paths and area
+  edges as drawn, steps and curves included; a path crossing more than
+  once at the crossing nearest the cursor), else by their drawn point
+  nearest the place. The controller keeps the order while Up and Down
+  follow, so lines that cross neither skip nor repeat a series. The
+  cursor keeps what it is on as the picker's input does (`keyedItem`: a
+  row by its identity, with its order value in an ordered table; an
+  aggregate or cell by its place) and finds it again as each scene is
+  drawn, before the ring and tooltip are placed (`itemAt`, from the
+  controller's `draw`). It follows only what direct lookups find, and no
+  lookup reads every row: a row where it was in its series, by its
+  identity there; else by halves its position in its table, whose rows
+  ascend by identity (an ordered table's by order value, then by identity
+  among rows of one value, which keep the order they arrived in), then by
+  halves of the series' rows, which are in the order of the mark's view
+  (`RowView.indexOf`) or its table; a layout mark's item by its key in
+  what its layout drew; a heatmap's cell through the mark's index of cells
+  (`AxisCells.find` along numbers, its category's band along categories,
+  then `CellIndex.find`), kept only where the cell found is at its place;
+  an aggregate among its series' few. A miss is a target gone: there is
+  no cursor and nothing looks for it (`#gone`) until the next key hands
+  it to its neighbour in screen order from where it last stood
+  (`#handOff`), even where its target came back meanwhile, in a
+  series alone in its panel to its point nearest there, or to a layout
+  mark that took its panel, or whose item it was on; finding nothing, it
+  leaves no cursor. Enter and clicks act on a row in the series the
+  inspection reads where the cursor or the pick found it drawn
+  (`#drawnAt`), else where `itemAt` finds it (a rug's series read leaves
+  out ticks off a log axis).
+  `orderAt` searches sorted paths by halves and scans unsorted ones.
   Heatmaps step through `Mark.stepCell`.
+- The keyboard's tooltip stands at the cursor's own point (`keyedPoint`),
+  which a ring marks, its row in bold; at the plot's middle where that
+  point is out of view, as for cursors other charts share.
 - Legend entries are buttons with `aria-pressed` in a group named "Legend".
 - Static SVG has `role="img"`, `<title>`, and `<desc>`; PDF alternative
   text is the same summary.

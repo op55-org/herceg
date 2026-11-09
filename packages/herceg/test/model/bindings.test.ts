@@ -144,7 +144,15 @@ describe("bindings", () => {
         new Bindings({
           bindings: [{ gesture: { type: "key", key: "ArrowLeft" }, action: { type: "reset" } }],
         }),
-    ).toThrow('interaction.bindings[0].gesture.key: "ArrowLeft" moves the keyboard cursor');
+    ).toThrow(
+      'interaction.bindings[0].gesture.key: "ArrowLeft" is a key the keyboard cursor takes',
+    );
+    expect(
+      () =>
+        new Bindings({
+          bindings: [{ gesture: { type: "key", key: "i" }, action: { type: "reset" } }],
+        }),
+    ).toThrow('"i" is a key the keyboard cursor takes');
     expect(
       () =>
         new Bindings({

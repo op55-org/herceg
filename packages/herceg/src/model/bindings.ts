@@ -52,7 +52,7 @@ interface Input {
   focused: boolean;
 }
 
-/** Keys the keyboard cursor and selections answer to. */
+/** Keys the keyboard cursor and selections answer to (`i` reads every series at the cursor). */
 export const NAVIGATION_KEYS = [
   "ArrowLeft",
   "ArrowRight",
@@ -64,6 +64,7 @@ export const NAVIGATION_KEYS = [
   "PageDown",
   "Escape",
   "Enter",
+  "i",
 ];
 
 const MODIFIERS: readonly Modifier[] = ["shift", "ctrl", "alt", "meta"];
@@ -172,7 +173,7 @@ function compile(interaction: InteractionSpec, brushesRows: boolean, path: strin
       throw new Error(`${at}: duplicates binding ${twin}; remove one or change its gesture`);
     if (gesture.type === "key" && NAVIGATION_KEYS.includes(gesture.key) && !(mods & ~SHIFT))
       throw new Error(
-        `${at}.gesture.key: "${gesture.key}" moves the keyboard cursor; bind another key, or hold Ctrl, Alt, or Meta`,
+        `${at}.gesture.key: "${gesture.key}" is a key the keyboard cursor takes; bind another key, or hold Ctrl, Alt, or Meta`,
       );
     if (action.type === "brush" && action.zoom && brushesRows)
       throw new Error(

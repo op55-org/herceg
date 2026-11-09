@@ -105,7 +105,7 @@ hg.Chart(df, zoom="x", bindings=[
 
 Every gesture but a pinch takes `modifiers`, matched exactly (`["shift"]`,
 `["ctrl"]`, `["alt"]`, `["meta"]`). A gesture may be bound once. Keys the
-keyboard cursor uses (arrows, Home, End, Page Up and Down, Escape, Enter)
+keyboard cursor uses (arrows, Home, End, Page Up and Down, Escape, Enter, `i`)
 can be bound only with Ctrl, Alt, or Meta.
 
 | Action (Python) | Options | Does |
@@ -288,6 +288,14 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 - **Unsorted series** are read by a scan; `"previous"` and `"next"` leave
   them out. Heatmap cells and layout items are read under the pointer
   whatever `snap` says.
+- **The keyboard** reads what the pointer would read at the cursor's
+  point, under the same `mode`, `snap`, and `within`, and nothing where
+  the pointer would read nothing (the point is still announced): along x
+  with `"shared"`, every series at its value, those sharing its positions
+  at its row, so repeated values are each reached; with `"nearest"`, its
+  point alone. Every series is a stop, Up and Down go in screen order at
+  the cursor's place, and `i` reads every series listed
+  ([Keyboard](accessibility.md#keyboard)).
 - **`inspection: false`** has the pointer read nothing: no tooltip, no
   crosshair, and hover and click events without an `inspection` (their
   `pointer` and `target` remain). The keyboard still reads and announces
@@ -307,7 +315,10 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 The tooltip shows what is at the pointer or keyboard cursor: the position
 (the x value, or y, or an item's name), then a row per series or item,
 written as the axis' `format` writes it, or as the series' value field's
-[display](fields.md#charts) does.
+[display](fields.md#charts) does. It stands beside the pointer, or beside
+the keyboard cursor's point, ringed, with the cursor's series in bold;
+where that point is out of view, and in charts following a cursor through
+[sync](#sync), at the plot's middle.
 
 | Option | Does |
 | --- | --- |

@@ -13,10 +13,14 @@ import { columns, panel } from "../../src/layout.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
+import { rug } from "../../src/marks/rug.ts";
+import { placeAt, rowOf } from "../../src/marks/series.ts";
 import { treemap } from "../../src/marks/treemap.ts";
+import { itemAt, keyedItem } from "../../src/model/keyboard.ts";
 import { panels } from "../../src/model/panels.ts";
 import { pinPayload } from "../../src/web/events.ts";
-import { MOUSE } from "./helpers.ts";
+import { positionOf } from "../helpers/keyboard.ts";
+import { MOUSE, modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
 const charts: Chart[] = [];
@@ -160,6 +164,40 @@ describe("a click on what the tooltip shows", () => {
     chart.pin(null);
     chart.pin({ item: target.item });
     expect(chart.pinned).toEqual({ value: 2, axis: "x", panel: "" });
+  });
+
+  it("pins a rug's tick, whatever order the rug keeps its rows in", async () => {
+    // A rug draws its ticks in value order: 3, its first row, is its last tick.
+    const chart = await mount({ marks: [rug(table({ v: [3, 1, 2] }), { x: "v" })] });
+    const pins = heard(chart, "pin");
+    const model = modelOf(chart);
+    const tick = positionOf(model, model.series()[0]!.key, 2)!.points[0]!;
+    expect(tick.value).toBe(3);
+    const rect = chart.root.getBoundingClientRect();
+    clickAt(chart, [rect.left + tick.px, rect.top + tick.py]);
+    chart.render();
+    expect(pins.map(({ at }) => at)).toEqual([{ value: 3, axis: "x", panel: "" }]);
+  });
+
+  it("pins a rug's tick on a log axis, which reads no tick at -1, its view's filter or not", async () => {
+    // The rug draws -1 (off the axis) but reads only 1 and 2: 2 is drawn
+    // third and read second. The view leaves 5 out.
+    const values = table({ v: [-1, 5, 1, 2] });
+    for (const data of [
+      table({ v: [-1, 1, 2] }),
+      rowView(values, { filter: ["<", ["field", "v"], 5] }),
+    ]) {
+      const chart = await mount({ marks: [rug(data, { x: "v" })], x: { type: "log" } });
+      const pins = heard(chart, "pin");
+      const model = modelOf(chart);
+      const tick = positionOf(model, model.series()[0]!.key, 1)!.points[0]!;
+      expect(tick.value).toBe(2);
+      const rect = chart.root.getBoundingClientRect();
+      clickAt(chart, [rect.left + tick.px, rect.top + tick.py]);
+      chart.render();
+      expect(pins.map(({ at }) => at)).toEqual([{ value: 2, axis: "x", panel: "" }]);
+      chart.destroy();
+    }
   });
 
   it("lets it go on a second click there, a click off the data, or one outside the chart", async () => {
@@ -518,6 +556,34 @@ describe("a pin's place", () => {
     expect(pins.at(-1)).toMatchObject({ at: null, cause: "data" });
   });
 
+  it("is a heatmap's cell, at its place as the keyboard's cursor is, though new rows fill it", async () => {
+    const cells = table({ x: [0, 1], y: [0, 0], v: [1, 2] });
+    const chart = await mount({
+      inspection: { mode: "nearest" },
+      marks: [heatmap(cells, { id: "cells", x: "x", y: "y", color: "v" })],
+    });
+    const pins = heard(chart, "pin");
+    const model = modelOf(chart);
+    const { key } = model.series()[0]!;
+    const cell = positionOf(model, key, 1)!.points[0]!;
+    const rect = chart.root.getBoundingClientRect();
+    clickAt(chart, [rect.left + cell.px, rect.top + cell.py]);
+    chart.render();
+    expect(pins).toHaveLength(1);
+    // The keyboard's cursor on the same cell is kept by its place.
+    const cursor = keyedItem(model, "", key, 1, { placeAt, rowOf });
+    expect(pins[0]!.inspection?.points.map(({ value }) => value)).toEqual([2]);
+    // A refresh: new rows at the same places.
+    cells.dropFirst(2);
+    cells.append({ x: [0, 1], y: [0, 0], v: [3, 4] });
+    chart.render();
+    expect(itemAt(model, "", key, 1, cursor!, { placeAt, rowOf })).toBe(1);
+    expect(pins).toHaveLength(1);
+    expect(chart.pinned).toEqual(pins[0]!.at);
+    expect(tooltipOf(chart).style.display).toBe("block");
+    expect(tooltipOf(chart).textContent).toContain("4");
+  });
+
   it("is its item still once a selection listener sorts its view, and goes once it filters it out", async () => {
     const rows = table({ t: [0, 1, 2, 3, 4], v: [10, 30, 20, 50, 40] });
     for (const query of [
@@ -656,6 +722,18 @@ describe("the keyboard", () => {
     key(document.activeElement!, "Escape");
     expect(pins.at(-1)).toMatchObject({ at: null, cause: "keyboard" });
     expect(document.activeElement).toBe(chart.root);
+  });
+
+  it("pins with Enter the rug tick its cursor is on, whatever order the rug keeps its rows in", async () => {
+    const chart = await mount({ marks: [rug(table({ v: [3, 1, 2] }), { x: "v" })] });
+    const pins = heard(chart, "pin");
+    chart.root.focus();
+    key(chart.root, "ArrowRight");
+    key(chart.root, "End");
+    chart.render();
+    key(chart.root, "Enter");
+    chart.render();
+    expect(pins.map(({ at }) => at)).toEqual([{ value: 3, axis: "x", panel: "" }]);
   });
 });
 

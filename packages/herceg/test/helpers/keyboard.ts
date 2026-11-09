@@ -1,7 +1,7 @@
 // The keyboard cursor's stops and steps as the chart's interaction
 // controller finds them (model/keyboard.ts), for tests of what charts draw.
 
-import { placeAt, rowOf, samePositions } from "../../src/marks/series.ts";
+import { placeAt, rowOf } from "../../src/marks/series.ts";
 import {
   cursorAxis,
   inspectPosition,
@@ -13,7 +13,7 @@ import type { ChartModel } from "../../src/model/model.ts";
 
 /** The series of panel `panel` the keyboard stops at. */
 export function stopsOf(model: ChartModel, panel: string) {
-  return keyboardStops(model.inspectorOf(panel), samePositions);
+  return keyboardStops(model.inspectorOf(panel));
 }
 
 /** The cell the keyboard steps to from `position` in panel `panel`'s series keyed `key`. */

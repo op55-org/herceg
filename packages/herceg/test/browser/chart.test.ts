@@ -219,7 +219,11 @@ describe("interaction", () => {
     expect(tooltip.style.display).toBe("block");
     expect(tooltip.textContent).toContain("a3");
     expect(tooltip.textContent).toContain("b7");
-    expect(chart.root.querySelectorAll("svg circle")).toHaveLength(2);
+    // Each point read is marked; the keyboard's ring stays hidden.
+    const shown = [...chart.root.querySelectorAll("svg circle")].filter(
+      (circle) => circle.getAttribute("visibility") !== "hidden",
+    );
+    expect(shown).toHaveLength(2);
     pointer(chart.root, "pointerleave", 0, 0);
     await frame();
     expect(tooltip.style.display).toBe("none");
@@ -402,11 +406,12 @@ describe("interaction", () => {
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
     key("ArrowRight");
     const live = chart.root.querySelector("[aria-live]")!;
-    expect(live.textContent).toContain("v: 10");
+    // The series is named where the cursor arrives at it, then its points alone.
+    expect(live.textContent).toBe("v: 10 at 0");
     key("ArrowRight");
-    expect(live.textContent).toContain("v: 20");
+    expect(live.textContent).toBe("20 at 1");
     key("End");
-    expect(live.textContent).toContain("v: 30");
+    expect(live.textContent).toBe("30 at 2");
     chart.destroy();
   });
 

@@ -75,7 +75,7 @@ describe("the tooltip", () => {
     expect(swatch(field!)).toBe("none");
     key(chart, "ArrowRight");
     expect(chart.root.querySelector("[aria-live]")!.textContent).toBe(
-      "0. p99: 210 ms, Requests: 9,800",
+      "p99: 210 ms at 0, Requests: 9,800",
     );
   });
 
@@ -115,10 +115,10 @@ describe("the tooltip", () => {
     expect(seen).toHaveLength(1);
     hover(chart, 2);
     expect(seen.map((inspection) => inspection.value)).toEqual([1, 2]);
-    // The crosshair stays, and the keyboard reads the inspection.
+    // The crosshair stays, and the keyboard reads its point.
     expect(chart.root.querySelector("svg line")!.getAttribute("visibility")).toBe("visible");
     key(chart, "ArrowRight");
-    expect(chart.root.querySelector("[aria-live]")!.textContent).toBe("0. p99: 210");
+    expect(chart.root.querySelector("[aria-live]")!.textContent).toBe("p99: 210 at 0");
 
     const node = document.createElement("strong");
     node.textContent = "own";

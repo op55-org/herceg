@@ -143,8 +143,9 @@ describe("pies in facet panels", () => {
     expect(said(chart)).toBe("North: revenue. a: 5 (100%)");
     chart.root.querySelectorAll("button")[0]!.click();
     chart.render();
+    // Its slice gone, the cursor enters the panel's items again, named as it arrives.
     key(chart, "ArrowRight");
-    expect(said(chart)).toBe("Pie of revenue by product, with nothing to show.");
+    expect(said(chart)).toBe("North: Pie of revenue by product, with nothing to show.");
     key(chart, "ArrowDown");
     expect(said(chart)).toBe("South: revenue. b: 2 (100%)");
     chart.destroy();
@@ -266,8 +267,9 @@ describe("a pie beside a line in subplots", () => {
       ],
     });
     chart.render();
+    // Its series gone, the cursor is handed to the pie in its panel, named as it arrives.
     key(chart, "ArrowRight");
-    expect(said(chart)).toBe("Pie of revenue by product, with nothing to show.");
+    expect(said(chart)).toBe("Trend: Pie of revenue by product, with nothing to show.");
     chart.destroy();
   });
 

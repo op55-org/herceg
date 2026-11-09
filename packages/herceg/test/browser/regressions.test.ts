@@ -225,11 +225,11 @@ describe("runtime regressions", () => {
     const press = (key: string) =>
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
     press("ArrowRight");
-    expect(live.textContent).toContain("y: 5");
+    expect(live.textContent).toBe("y: 5 at 0");
     press("ArrowRight");
-    expect(live.textContent).toContain("y: 6");
+    expect(live.textContent).toBe("6 at 0");
     press("ArrowRight");
-    expect(live.textContent).toContain("y: 7");
+    expect(live.textContent).toBe("7 at 1");
     chart.destroy();
   });
 

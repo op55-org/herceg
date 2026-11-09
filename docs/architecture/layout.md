@@ -266,8 +266,10 @@ subplots' cells (`model/cells.ts`); a chart of one panel places itself.
   owned by the instances its brush ran along, cleared once they are not
   drawn.
 - **Keyboard.** Left and Right step through a stop's points along its axis
-  (`stepPoint`, `model/keyboard.ts`); Up and Down carry the cursor's value
-  between panels sharing the scale, or its place across the plot.
+  (`stepPoint`, `model/keyboard.ts`); Up and Down go through a panel's
+  series in screen order at the cursor's place (`orderAt`), then on into
+  the next panel at the cursor's value where the panels share the scale,
+  or at its place across the plot.
 - **Python** live widgets take the same view changes
   (`viewportEventPayload`) and restore them per panel
   (`restoreViewportState`).

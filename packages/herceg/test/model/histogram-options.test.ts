@@ -158,7 +158,8 @@ describe("histogram options", () => {
     expect(yScale(model)!.domain).toEqual([0, 4]);
     expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     expect(axisOf(model)).toBe("y");
-    expect(stopsOf(model, "")).toHaveLength(1);
+    // Each series is a stop, though they share their bins.
+    expect(stopsOf(model, "")).toHaveLength(2);
     const hit = model.inspect(xScale(model)!.map(1), yScale(model)!.map(1))!;
     expect(hit.axis).toBe("y");
     expect(hit.points.map((p) => p.text)).toEqual(["0 – 2: 2", "0 – 2: 0"]);

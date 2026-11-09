@@ -9,17 +9,27 @@
 
 import type { Table } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
+import type { DrawnRow } from "../marks/drawn.ts";
 import type { AxisFormat, Mark, MarkKey } from "../marks/mark.ts";
-import type { Series, samePositions, xAt } from "../marks/series.ts";
+import type { Series, xAt } from "../marks/series.ts";
 import type { AxisPlan } from "../model/axis.ts";
 import { type Binding, Bindings, shapeOf } from "../model/bindings.ts";
+import type { AxisInspection } from "../model/inspect.ts";
 import type { ItemResolver } from "../model/items.ts";
 import {
   cursorAxis,
   inspectPosition,
+  itemAt,
+  type KeyedItem,
   keyboardStops,
+  keyedItem,
+  keyedPoint,
+  orderAt,
+  rowItem,
+  standing,
   stepCell,
   stepPoint,
+  type Visit,
 } from "../model/keyboard.ts";
 import type { ChartModel, DrawnPanel, Inspection, Viewport } from "../model/model.ts";
 import type { Picked, Picker, PickKit } from "../model/pick.ts";
@@ -64,7 +74,7 @@ import type { LegendClick } from "./legend.ts";
 import { pressed, pressFocus } from "./press-focus.ts";
 import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
-import { describeInspection, Tooltip } from "./tooltip.ts";
+import { describeInspection, fieldsSpoken, Tooltip } from "./tooltip.ts";
 
 // Layout controls compile their bindings with this module's class
 // (layout-controls.ts), which keeps it in this module's chunk: in a chunk
@@ -107,7 +117,6 @@ const FRAME = Symbol.for("herceg.inputFrame");
 export interface InteractionKit extends PickKit {
   svgElement: typeof svgElement;
   xAt: typeof xAt;
-  samePositions: typeof samePositions;
   surface: typeof surface;
   tickLabelGap: typeof tickLabelGap;
   /** Keys the keyboard cursor and selections answer to. */
@@ -220,18 +229,24 @@ export interface KeyboardCursor {
   panel: string;
   key: string;
   position: number;
-  /** What it last announced: where the cursor was, should its series go (hidden) before the next key. */
-  last?: Inspection;
+  /** Where it stood when it moved there (see `standing`), which a series that goes is handed on from. */
+  stood?: { axis: "x" | "y"; place: number; height: number } | undefined;
+  /** What it is on (see `KeyedItem`), which each scene drawn finds again (see `itemAt`). */
+  item?: KeyedItem | undefined;
 }
 
 /**
- * What the keyboard's cursor is on, kept so that data changes do not move
- * it: a table row by identity (see `Table.identity`), or where an
- * aggregate or a cell is (see `Interaction.#placeOf`).
+ * A run of Up and Down: the series of a panel in the order they visit
+ * them, taken once where the cursor stood (see `orderAt`), and the one the
+ * cursor is at; the scene it was taken in, a change of which ends it.
  */
-type KeyedItem =
-  | { table: Table; identity: number; generation: number }
-  | { place: readonly (number | string | undefined)[] };
+interface Run {
+  panel: string;
+  axis: "x" | "y";
+  place: number;
+  order: Visit[];
+  at: number;
+}
 
 /**
  * The pinned tooltip: where (`at`, as `pinned` reports it), and for an
@@ -392,6 +407,8 @@ export class Interaction {
   readonly #dots: SVGGElement;
   /** Outlines the item inspected in charts of a layout mark (a pie slice). */
   readonly #outline: SVGPathElement;
+  /** Rings the keyboard cursor's own point: the series it is on, whatever the inspection reads. */
+  readonly #ring: SVGCircleElement;
   /** Labels on the axes at the crosshair, once loaded for `tooltip.axisLabels`; null if it failed to load. */
   #crosshair: CrosshairLabels | null | undefined;
   #crosshairLoading: Promise<void> | undefined;
@@ -443,6 +460,14 @@ export class Interaction {
   #reading: { x: number; y: number; scene: Scene; inspection: Inspection | undefined } | null =
     null;
   #keyboard: KeyboardCursor | null = null;
+  /**
+   * The keyboard cursor whose target went (its series hidden, its row
+   * dropped): there is no cursor, and the next key hands it on from where
+   * it stood (see `#handOff`), though its target came back meanwhile;
+   * nothing looks for its target.
+   */
+  #gone: KeyboardCursor | null = null;
+  #run: Run | null = null;
   #press: Press | null = null;
   /** The frame count when a brush's move last reported its preview at once (see `frameCount`). */
   #previewedIn = -1;
@@ -491,6 +516,8 @@ export class Interaction {
   #outsideOn: readonly EventTarget[] = [];
   /** The series point a picked aggregate (a bin, a box, a cell) stands for, which pins read it at. */
   readonly #points = new WeakMap<ItemTarget, { series: Series; position: number }>();
+  /** Where in its series a picked row, or the keyboard cursor's, is drawn, which pins find it at. */
+  readonly #drawnAt = new WeakMap<ItemTarget, DrawnRow | undefined>();
   /** Whether the chart has marks with `drag`, which presses pick first and the pointer's cursor shows. */
   #draggable = false;
   /** Handlers by event type, which play held input too. */
@@ -518,7 +545,13 @@ export class Interaction {
       "stroke-linejoin": "round",
       visibility: "hidden",
     });
-    host.overlay.append(...this.#crosshairs, this.#dots, this.#outline);
+    this.#ring = svgElement(document, "circle", {
+      r: "6.5",
+      fill: "none",
+      "stroke-width": "2",
+      visibility: "hidden",
+    });
+    host.overlay.append(...this.#crosshairs, this.#dots, this.#outline, this.#ring);
     // What presses focus draws no ring until a key (see press-focus.ts); a
     // focus the chart has without one now is a press's, held while this loaded.
     this.#cleanup.push(pressFocus(host.root));
@@ -753,13 +786,12 @@ export class Interaction {
     const marks = model.config.marks as readonly Mark[];
     const mark = marks.find((m, i) => (m.spec.id ?? i) === named);
     if (!mark) return undefined;
-    const series = this.#inspected(panel).filter((s) => model.markOf(s) === mark);
-    const names = (cursor: KeyboardCursor) =>
-      this.#keyboardTarget(this.#keyed(cursor), cursor)?.item === key;
+    const series = this.#stops(panel).filter((s) => model.markOf(s) === mark);
+    const names = (cursor: KeyboardCursor) => this.#keyboardTarget(cursor)?.item === key;
     const { table } = mark;
     if (table && !mark.summarizes && mark.tooltip !== "cell") {
       for (const row of this.#items().rowsOf(key, table)) {
-        const item = { table, identity: table.identity(row), generation: table.generation };
+        const item = rowItem(table, row);
         for (const s of series) {
           const cursor = this.#itemNow({ panel, key: s.key, position: 0 }, item);
           if (cursor && names(cursor)) return this.#anchored(cursor, item, key);
@@ -800,7 +832,7 @@ export class Interaction {
     const axis = this.#pinAxis(panel, inspection.axis);
     // Cells, points placed off that axis, and the right axis' points beside a left axis (whose
     // values a pin along y reads, even with its series hidden) are read where they are.
-    const series = this.#inspected(panel).find(({ key }) => key === cursor.key);
+    const series = this.#stops(panel).find(({ key }) => key === cursor.key);
     const mark = series && model.markOf(series);
     const drawn = model.panels().find(({ key }) => key === panel);
     if (
@@ -838,31 +870,29 @@ export class Interaction {
   /**
    * The keyboard's kind of cursor on an item target, and what it is on: a
    * layout mark's item by its key, an aggregate at the point it stands
-   * for, a row in its series; undefined for items of no series (annotations).
+   * for, a row in the series the inspection reads, where the pick or the
+   * keyboard cursor found it drawn, else as `itemAt` finds it (the series
+   * read may leave out rows drawn: a rug's off a log axis); undefined for
+   * items of no series (annotations).
    */
   #cursorOf(target: ItemTarget): [KeyboardCursor, KeyedItem | undefined] | undefined {
-    const { model } = this.#host;
-    const { panel, series, item } = target;
+    const { panel, item } = target;
+    const drawn = this.#drawnAt.get(target);
+    const table = (this.#host.model.config.marks[target.mark] as Mark | undefined)?.table;
+    if (drawn && table) {
+      const { series, position } = drawn;
+      const keyed = rowItem(table, this.#kit.rowOf(series, position));
+      const cursor = this.#itemNow({ panel, key: series.key, position }, keyed);
+      return cursor ? [cursor, keyed] : undefined;
+    }
     const point = this.#points.get(target);
     if (point) {
       const cursor = { panel, key: point.series.key, position: point.position };
       return [cursor, this.#keyedItem(cursor)];
     }
-    if (series === undefined)
-      return model.inspectItem(item, panel)
-        ? [{ panel, key: item, position: 0 }, undefined]
-        : undefined;
-    const table = (model.config.marks[target.mark] as Mark | undefined)?.table;
-    const { row } = target;
-    if (!table || row === undefined) return undefined;
-    const keyed = { table, identity: table.identity(row), generation: table.generation };
-    const cursor = this.#itemNow({ panel, key: series, position: 0 }, keyed);
-    return cursor ? [cursor, keyed] : undefined;
-  }
-
-  /** Every series the inspection reads in `panel`: the keyboard's stops, and those sharing their positions. */
-  #inspected(panel: string): Series[] {
-    return (this.#host.model.inspectorOf(panel)?.marks ?? []).flatMap(({ visible }) => visible);
+    return target.series === undefined && this.#host.model.inspectItem(item, panel)
+      ? [{ panel, key: item, position: 0 }, undefined]
+      : undefined;
   }
 
   /**
@@ -1493,12 +1523,13 @@ export class Interaction {
 
   /**
    * An item target: of mark `mark` (its index), keyed `item`, of the table
-   * row `row` names (its identity taken now, its position read when asked).
+   * row `row` names (its identity taken now, its position read when asked),
+   * drawn where `row.series` says in its series.
    */
   #target(
     mark: number,
     item: string,
-    row: { table: Table; position: number } | undefined,
+    row: { table: Table; position: number; series?: DrawnRow | undefined } | undefined,
     series: string | undefined,
     panel: string,
     box: ItemTarget["box"],
@@ -1507,7 +1538,7 @@ export class Interaction {
     const table = row?.table;
     const identity = row && table!.identity(row.position);
     const generation = table?.generation;
-    return {
+    const target: ItemTarget = {
       kind: "item",
       mark,
       markId,
@@ -1520,6 +1551,8 @@ export class Interaction {
       panel,
       box,
     };
+    this.#drawnAt.set(target, row?.series);
+    return target;
   }
 
   /** Item keys of the chart's marks (model/items.ts), for its configuration. */
@@ -1715,17 +1748,14 @@ export class Interaction {
   /**
    * The keyboard cursor's item: a layout mark's item it is on, a row of its
    * series, or an aggregate (a bin, a box) or a cell, the item drawn at its
-   * point in `inspection`.
+   * point.
    */
-  #keyboardTarget(
-    inspection: Inspection | undefined,
-    keyboard = this.#keyboard,
-  ): ItemTarget | undefined {
+  #keyboardTarget(keyboard = this.#keyboard): ItemTarget | undefined {
     const { model } = this.#host;
     if (!keyboard || !this.#picking) return undefined;
     const marks = model.config.marks;
     // Pins name series that share the keyboard's stops' positions too.
-    const series = this.#inspected(keyboard.panel).find(({ key }) => key === keyboard.key);
+    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
     const mark = series && model.markOf(series);
     if (!series || !mark) {
       // A layout mark's item: the one keyed, as its panel's record drew it.
@@ -1739,8 +1769,7 @@ export class Interaction {
       );
     }
     const index = marks.indexOf(mark);
-    // Its series' point: grouped aggregates read several of one mark at a place.
-    const point = inspection?.points.find((p) => p.key === series.key);
+    const point = this.#keyedPoint(keyboard)?.points[0];
     if (!mark.table || mark.summarizes || mark.tooltip === "cell") {
       // Picked at its point, moved into the plot: a bin or a box the view
       // cuts off is picked where it shows.
@@ -1766,7 +1795,7 @@ export class Interaction {
         position: row,
         series,
       }),
-      { table: mark.table, position: row },
+      { table: mark.table, position: row, series: { series, position: keyboard.position } },
       series.key,
       keyboard.panel,
       { x: point?.px ?? 0, y: point?.py ?? 0, width: 0, height: 0 },
@@ -1799,6 +1828,18 @@ export class Interaction {
     const changed = () =>
       host.stale() || host.revision() !== revision || host.scene() !== inspected;
     if (frame) {
+      // A new scene ends a run of Up and Down: its order is of the last one.
+      this.#run = null;
+      // The keyboard cursor stays on what it is on, wherever data changes
+      // moved it, and stands there; where that went, there is none until
+      // the next key hands it on (see `#gone`).
+      const keyboard = this.#keyboard;
+      if (keyboard) {
+        const now = this.#itemNow(keyboard, keyboard.item);
+        if (now) now.stood = standing(host.model, now.panel, now.key, now.position, this.#kit);
+        else this.#gone = keyboard;
+        this.#keyboard = now;
+      }
       this.#framed.clear();
       for (const panel of host.model.panels()) this.#framed.set(panel.key, this.#view(panel));
       // What touches do depends on the panels drawn, which the first scene brings.
@@ -1902,7 +1943,7 @@ export class Interaction {
     );
     // What the pointer or keyboard is on and reads (a cursor shown here is reported once drawn).
     // Once what it is on can be read (`needPicking`).
-    const mine = !!(this.#pointer || this.#keyboard);
+    const mine = !!(this.#pointer || this.#keyboard || this.#gone);
     if (hovering && mine && !resolved && (this.#picking || !this.#pickingLoad)) {
       this.#hover(this.#inputEvent(active));
       if (changed()) return;
@@ -1921,6 +1962,7 @@ export class Interaction {
     const dots: [number, number, string, string | undefined][] = [];
     let tipped = 0;
     this.#outline.setAttribute("visibility", "hidden");
+    this.#ring.setAttribute("visibility", "hidden");
     const bounds = { width: scene.width, height: scene.height };
     for (const [i, line] of lines.entries()) {
       const inspection = drawn[i];
@@ -1974,17 +2016,35 @@ export class Interaction {
         );
       for (const point of inspection.points.filter(inside))
         dots.push([point.px, point.py, point.color, cut || undefined]);
-      // The pointer's tooltip is at the pointer; others' at the crosshair.
+      // The keyboard cursor's own point is ringed where it is in view.
+      const own =
+        inspection === active && !this.#pointer ? this.#keyedPoint()?.points[0] : undefined;
+      const ringed = own && inside(own) ? own : undefined;
+      if (ringed) {
+        this.#ring.setAttribute("cx", String(ringed.px));
+        this.#ring.setAttribute("cy", String(ringed.py));
+        this.#ring.setAttribute("stroke", theme.text);
+        if (cut) this.#ring.setAttribute("clip-path", cut);
+        else this.#ring.removeAttribute("clip-path");
+        this.#ring.setAttribute("visibility", "visible");
+      }
+      // The pointer's tooltip is at the pointer, the keyboard's at its own
+      // point while in view; others' at the crosshair.
       if (tips.has(inspection)) {
         // A pin of an item points at it.
-        const point = inspection === pinned && this.#pin?.cursor && inspection.points[0];
+        const point =
+          (inspection === pinned && this.#pin?.cursor && inspection.points[0]) || ringed;
         const anchor =
           (inspection === active && this.#pointer) ||
           (point && { x: point.px, y: point.py }) ||
           (vertical
             ? { x: inspection.position, y: plot.y + plot.height / 2 }
             : { x: plot.x + plot.width / 2, y: inspection.position });
-        this.#tip(tipped++).show(inspection, theme, anchor, bounds);
+        // The keyboard's own row is marked among those the tooltip lists.
+        const row = inspection.points.findIndex(
+          (p) => !!own && p.key === own.key && p.px === own.px && p.py === own.py,
+        );
+        this.#tip(tipped++).show(inspection, theme, anchor, bounds, row);
       }
     }
     // Markers are kept from one move to the next, their attributes rewritten.
@@ -2040,9 +2100,7 @@ export class Interaction {
     const pointer = this.#pointer;
     return this.#stamped({
       pointer: pointer ? this.#pointerAt(pointer.x, pointer.y) : undefined,
-      target: pointer
-        ? this.#targetAt(pointer.x, pointer.y, this.#over)
-        : this.#keyboardTarget(inspection),
+      target: pointer ? this.#targetAt(pointer.x, pointer.y, this.#over) : this.#keyboardTarget(),
       inspection,
       cause: pointer ? "pointer" : "keyboard",
       revision: this.#host.drawnRevision(),
@@ -2223,6 +2281,13 @@ export class Interaction {
     return this.#keyboard ? this.#keyed(this.#keyboard) : undefined;
   }
 
+  /** The keyboard cursor's own point, read alone (see `keyedPoint`); none for a layout mark's item. */
+  #keyedPoint(keyboard = this.#keyboard): AxisInspection | undefined {
+    return keyboard
+      ? keyedPoint(this.#host.model, keyboard.key, keyboard.position, keyboard.panel, this.#kit)
+      : undefined;
+  }
+
   /** What the keyboard's cursor at `keyboard` reads: an item, or the points at its position. */
   #keyed({ key, panel, position }: KeyboardCursor): Inspection | undefined {
     const { model } = this.#host;
@@ -2400,9 +2465,9 @@ export class Interaction {
     return scale.categories ? (scale.categories[Math.round(value)] ?? null) : value;
   }
 
-  /** The series of panel `panel` the keyboard stops at (see `keyboardStops`). */
+  /** The series of panel `panel` the keyboard stops at: every one its inspection shows (see `keyboardStops`). */
   #stops(panel: string): Series[] {
-    return keyboardStops(this.#host.model.inspectorOf(panel), this.#kit.samePositions);
+    return keyboardStops(this.#host.model.inspectorOf(panel));
   }
 
   /** For heatmaps: the cell the keyboard steps to (see `stepCell`). */
@@ -2472,7 +2537,7 @@ export class Interaction {
       this.#pointer = local(event);
       this.#touch = event.pointerType === "touch";
       this.#over = event.target;
-      this.#keyboard = null;
+      this.#keyboard = this.#gone = null;
       this.#brushAnchor = null;
       // Another pointer than a rule's being dragged moves nothing.
       const press = this.#besideRule(event) ? null : this.#press;
@@ -2818,8 +2883,10 @@ export class Interaction {
     });
 
     on("keydown", (event) => this.#key(event));
-    on("blur", () => {
-      this.#keyboard = null;
+    // Focus moving to the chart's own controls (its legend) keeps the cursor.
+    on("focusout", (event) => {
+      if (host.root.contains(event.relatedTarget as Node | null)) return;
+      this.#keyboard = this.#gone = null;
       this.#brushAnchor = null;
       host.schedule();
     });
@@ -3308,65 +3375,21 @@ export class Interaction {
   }
 
   /** What the keyboard's cursor is on (see `KeyedItem`); undefined for layout marks', which keys name. */
-  #keyedItem(keyboard: KeyboardCursor): KeyedItem | undefined {
-    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
-    const mark = series && this.#host.model.markOf(series);
-    if (!series || !mark) return undefined;
-    const table = mark.table;
-    if (!table || mark.summarizes || mark.tooltip === "cell")
-      return { place: this.#placeOf(mark, series, keyboard.position, keyboard.panel) };
-    const row = this.#kit.rowOf(series, keyboard.position);
-    return { table, identity: table.identity(row), generation: table.generation };
-  }
-
-  /**
-   * Where the aggregate or cell at `position` of `series` is: its values
-   * along the axes that place it (the axis the mark reads along, or both),
-   * by name on category axes, whose indices data changes move.
-   */
-  #placeOf(
-    mark: Mark,
-    series: Series,
-    position: number,
-    panel: string,
-  ): (number | string | undefined)[] {
-    const drawn = this.#host.model.panels().find(({ key }) => key === panel);
-    const row = this.#kit.rowOf(series, position);
-    const along = mark.tooltip === "x" || mark.tooltip === "y" ? mark.tooltip : undefined;
-    return (["x", "y"] as const).map((axis) => {
-      if (along && along !== axis) return undefined;
-      // Its place on the panel's axis, whose categories may be the panel's own.
-      const value = this.#kit.placeAt(series, axis, row);
-      const scale = axis === "x" ? drawn?.x : mark.spec.axis === "right" ? drawn?.yRight : drawn?.y;
-      return scale?.categories?.[value] ?? value;
-    });
+  #keyedItem({ panel, key, position }: KeyboardCursor): KeyedItem | undefined {
+    return keyedItem(this.#host.model, panel, key, position, this.#kit);
   }
 
   /**
    * `keyboard` on what it was on (`item`), wherever data changes since
-   * have moved it in its series; null once it is gone, or its mark reads
-   * another table.
+   * have moved it in its series (see `itemAt`); on a layout mark's item
+   * (no `item`), where its layout drew one of its key; null once it is gone.
    */
   #itemNow(keyboard: KeyboardCursor, item: KeyedItem | undefined): KeyboardCursor | null {
-    if (!item) return keyboard;
-    const series = this.#inspected(keyboard.panel).find(({ key }) => key === keyboard.key);
-    const mark = series && this.#host.model.markOf(series);
-    if (!series || !mark) return null;
-    const row =
-      "table" in item && mark.table === item.table
-        ? item.table.positionOf(item.identity, item.generation)
-        : -1;
-    if ("table" in item && row < 0) return null;
-    for (let position = 0; position < series.length; position++) {
-      const found =
-        "table" in item
-          ? this.#kit.rowOf(series, position) === row
-          : this.#placeOf(mark, series, position, keyboard.panel).every(
-              (value, i) => value === item.place[i],
-            );
-      if (found) return { ...keyboard, position };
-    }
-    return null;
+    const { panel, key } = keyboard;
+    const { model } = this.#host;
+    if (!item) return model.inspectItem(key, panel) ? keyboard : null;
+    const position = itemAt(model, panel, key, keyboard.position, item, this.#kit);
+    return position < 0 ? null : { ...keyboard, position };
   }
 
   /**
@@ -3376,12 +3399,12 @@ export class Interaction {
   #enter(revision = this.#host.drawnRevision(), keyboard = this.#keyboard): () => void {
     const host = this.#host;
     if (!keyboard) return () => {};
-    const inspection = this.#keyed(keyboard) ?? keyboard.last;
+    const inspection = this.#keyed(keyboard);
     const payload = this.#stamped({
       pointer: undefined,
       target: host.events.has("click")
-        ? this.#provenanced(this.#keyboardTarget(inspection, keyboard))
-        : this.#keyboardTarget(inspection, keyboard),
+        ? this.#provenanced(this.#keyboardTarget(keyboard))
+        : this.#keyboardTarget(keyboard),
       inspection,
       cause: "keyboard",
       revision,
@@ -3392,11 +3415,41 @@ export class Interaction {
     const pinning = drills ? undefined : this.#clickPin(payload.target, () => inspection);
     return () => {
       if (drills) this.#drill(payload.target!, Number.NaN, Number.NaN, "keyboard");
-      if (chosen !== undefined) host.select(chosen, undefined, "keyboard");
+      if (chosen !== undefined) {
+        host.select(chosen, undefined, "keyboard");
+        this.#saySelected(payload.target as ItemTarget, keyboard, inspection);
+      }
       const pin = pinning?.();
       if (pin !== undefined) this.#setPin(pin, "keyboard");
       if (!this.#disposed && host.events.has("click")) host.events.emit("click", payload);
     };
+  }
+
+  /**
+   * Announces what Enter on the keyboard cursor (`keyboard`, reading
+   * `inspection`) made of the selection, once listeners of it have run: its
+   * item or series selected or deselected, or the selection cleared.
+   */
+  #saySelected(
+    target: ItemTarget | undefined,
+    keyboard: KeyboardCursor,
+    inspection: Inspection | undefined,
+  ): void {
+    const host = this.#host;
+    if (this.#disposed || target?.kind !== "item") return;
+    const selection = host.selection();
+    const series = host.options().interaction?.select === "series";
+    const held = (selection as { series?: string[]; items?: string[] } | null)?.[
+      series ? "series" : "items"
+    ];
+    // A series by its name, a point by its name and place, a layout item by its name.
+    const own = this.#keyedPoint(keyboard);
+    const [point] = (own ?? inspection)?.points ?? [];
+    if (!point) return;
+    const name = series || !own ? point.label : `${point.label} at ${own.label}`;
+    host.live.textContent = !selection
+      ? "Selection cleared"
+      : `${name} ${held?.includes((series ? target.series : target.item)!) ? "selected" : "deselected"}`;
   }
 
   /**
@@ -3441,12 +3494,15 @@ export class Interaction {
   }
 
   /**
-   * Arrow keys step through the points of the first visible series. The
-   * cursor keeps its position in the series, so repeated x values are each
-   * reachable. In charts with facets, the cursor is in one panel; the Up and
-   * Down arrows move it to the previous or next panel, near the same x. With
-   * brushing on, Shift extends a selection from where the cursor started,
-   * Enter zooms to it when zoom is on, and Escape clears it.
+   * Arrow keys move the keyboard cursor. Left and Right (Home, End, Page Up
+   * and Down) step through the points of the series it is on, keeping its
+   * position in the series, so repeated x values are each reachable; Up and
+   * Down move to the series drawn next above or below at its place, in
+   * screen order (see `#upDown`), and past the last to the next panel. Each
+   * move announces the series the cursor is on where it changed, and its
+   * point; `i` announces every series it reads (`#readAll`). With brushing
+   * on, Shift extends a selection from where the cursor started, Enter
+   * zooms to it when zoom is on, and Escape clears it.
    */
   #key(event: KeyboardEvent) {
     const host = this.#host;
@@ -3468,8 +3524,12 @@ export class Interaction {
       return;
     }
     // Controls inside the chart (legend buttons) keep their own keys.
-    if (event.target !== host.root || this.#boundKey(event) || !this.#kit.keys.includes(event.key))
+    if (event.target !== host.root || this.#boundKey(event)) return;
+    if (event.key === "i" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      this.#readAll(event);
       return;
+    }
+    if (!this.#kit.keys.includes(event.key)) return;
     // Escape ends a drag, a pan going back to where it started.
     if (event.key === "Escape" && this.#press) {
       event.preventDefault();
@@ -3484,8 +3544,22 @@ export class Interaction {
     host.current();
     const panels = model.panels();
     const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+    // A cursor whose series went is handed on (see `#handOff`): Up, Down,
+    // and Enter land where it was handed, which is announced; the other
+    // keys step from there, or in a layout mark's items from their ends.
+    const handed = this.#keyboard ?? this.#gone;
+    const lands = vertical || event.key === "Enter";
+    // Escape clears what it clears wherever the cursor is.
+    const off = event.key !== "Escape" && this.#handOff(event.key === "ArrowUp");
+    if (typeof off === "string") return this.#itemKey(event, off, lands);
+    if (off && lands) {
+      event.preventDefault();
+      this.#arrive(handed, true);
+      return;
+    }
     // Enter and Escape act on the selection, whichever panel the cursor is in.
     if (event.key === "Enter") {
+      this.#run = null;
       const selection = host.selection();
       const owner = host.owner();
       const at = owner?.plane ? undefined : panels.find(({ key }) => owner?.panels.includes(key));
@@ -3520,7 +3594,7 @@ export class Interaction {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      this.#keyboard = null;
+      this.#keyboard = this.#gone = null;
       this.#brushAnchor = null;
       live.textContent = "";
       if (host.selection()) host.select(null, undefined, "keyboard");
@@ -3529,7 +3603,7 @@ export class Interaction {
     }
     // Where the cursor stops, panel by panel: Left and Right move through a
     // stop's points, or a layout mark's items (a stop of their own), Up and
-    // Down to the stop before or after.
+    // Down between a panel's series and on to the next panel.
     const stops = model
       .allPanels()
       .flatMap(({ key, items }): { panel: string; series?: Series }[] =>
@@ -3539,7 +3613,7 @@ export class Interaction {
     let at = stops.findIndex(
       ({ panel, series }) => panel === keyboard?.panel && (!series || series.key === keyboard.key),
     );
-    // The cursor's stop may be gone (its series hidden): then it starts afresh in its panel.
+    // The cursor's stop may be gone with nowhere to hand it: then it starts afresh in its panel.
     const found = at >= 0;
     const current = found ? keyboard!.position : -1;
     if (!found)
@@ -3556,106 +3630,83 @@ export class Interaction {
     }
     // Heatmaps step cell by cell, in rows and columns as drawn; Up and Down
     // leave the grid at its edges. Contours' regions and lines are read as points are.
-    const cells = ({ series }: { series?: Series }) =>
+    const cells = (series: Series | undefined) =>
       series !== undefined && model.markOf(series)?.stepCell !== undefined;
     let cell: number | undefined;
-    if (cells(start) && current >= 0) {
+    if (cells(start.series) && current >= 0) {
       const [columns, rows] = CELL_STEPS[event.key] ?? [0, 0];
       cell =
         this.#stepCell(start.panel, start.series!.key, current, columns, rows) ??
         (vertical ? undefined : current);
     }
-    let across = keyboard !== null && !found;
-    if (vertical && cell === undefined) {
-      const next = keyboard && found ? at + (event.key === "ArrowUp" ? -1 : 1) : at;
-      if (next < 0 || next >= stops.length) return;
-      across ||= next !== at;
-      at = next;
-    }
-    const { panel } = stops[at]!;
-    let { series } = stops[at]!;
-    if (!series) {
-      this.#itemKey(event, panel, true);
-      return;
-    }
-    // Entering a grid, the cursor starts at its top left cell.
-    if (cell === undefined && cells(stops[at]!) && (across || current < 0))
-      cell = this.#stepCell(panel, series.key, -1, 0, 0);
-    const from = panels.find(({ key }) => key === start.panel);
-    const to = panels.find(({ key }) => key === panel);
-    event.preventDefault();
-    const before = keyboard ? (this.#inspection() ?? keyboard.last) : undefined;
-    // Up and Down carry the cursor's place along the axis it follows (x, or
-    // y for marks along y) to the next stop: its value on a shared scale,
-    // else its place across the plot.
-    const along = before?.axis === "y" ? "y" : "x";
+    let panel = start.panel;
+    let series = start.series;
     let position = Math.max(0, current);
+    if (vertical && cell === undefined && keyboard && found) {
+      const to = this.#upDown(event.key === "ArrowUp", keyboard);
+      if (!to) {
+        // Nowhere to go: the cursor says where it is again, so the key is
+        // heard: its series and place in the run, or its cell.
+        event.preventDefault();
+        const own = this.#keyedPoint(keyboard);
+        const [point] = own?.points ?? [];
+        if (point)
+          this.#say(
+            cells(start.series)
+              ? describeInspection(this.#inspection() ?? own!)
+              : point.label + this.#rank(),
+          );
+        return;
+      }
+      if (typeof to === "string") return this.#itemKey(event, to, true);
+      ({ panel } = this.#run!);
+      ({ position } = to);
+      series = this.#stops(panel).find(({ key }) => key === to.key);
+      if (!series) return;
+      // Entering a grid, the cursor starts at its top left cell.
+      if (cells(series)) cell = this.#stepCell(panel, series.key, -1, 0, 0);
+    } else if (!series) return this.#itemKey(event, panel, true);
+    else if (cell === undefined && cells(series) && current < 0)
+      cell = this.#stepCell(panel, series.key, -1, 0, 0);
     if (cell !== undefined) position = cell;
-    else if (across)
-      position = nearestTo(
-        this.#kit,
-        series,
-        before?.axis !== along
-          ? undefined
-          : !from || !to || from[`${along}Group`] === to[`${along}Group`]
-            ? before.value
-            : to[along].invert(to.plot[along] + before.position - from.plot[along]),
-        to![along],
-        along,
-      );
-    else
+    else if (!vertical || !keyboard || !found)
       ({ series, position } = stepPoint(
         model.inspectorOf(panel)!,
-        series,
+        series!,
         current,
         event.key,
         this.#kit,
       ));
+    const to = panels.find(({ key }) => key === panel);
     // Reading series already exclude hidden points; other series step over
     // axis breaks in the direction of travel.
-    const breaks = model.markOf(series)?.readSeries ? undefined : to?.x.breaks;
-    if (breaks && !across) {
+    const breaks = model.markOf(series!)?.readSeries ? undefined : to?.x.breaks;
+    if (breaks && !vertical) {
       const back = event.key === "ArrowLeft" || event.key === "PageUp" || event.key === "End";
-      const { x, rows, length, sorted } = series;
+      const { x, rows, length, sorted } = series!;
       const shown = breaks.nearestShown(x, position, length, back, sorted, rows);
       if (shown >= 0) position = shown;
     }
-    this.#keyboard = { panel, key: series.key, position };
-    this.#pointer = null;
-    // The cursor moves on the frame drawn: what listeners changed while it
-    // drew waits for the next.
-    host.finishFrame();
-    const inspection = this.#inspection();
-    if (!inspection) return;
-    this.#keyboard.last = inspection;
-    let text = describeInspection(inspection);
-    // Arriving in a panel, the cursor names it and the annotations it alone draws.
-    if (
-      inspection.panel !== undefined &&
-      (before?.panel !== inspection.panel || panel !== start.panel)
-    )
-      text = [
-        `${panels.find(({ key }) => key === inspection.panel)?.label ?? inspection.panel}:`,
-        ...model.annotationSummaries(inspection.panel),
-        text,
-      ].join(" ");
+    event.preventDefault();
+    // Where the cursor stood, as Shift's selection starts from it.
+    const before = this.#keyedPoint(keyboard);
+    this.#keyboard = { panel, key: series!.key, position };
+    // Named from where it was: a cursor handed on names the series it is handed to.
+    const own = this.#arrive(handed, vertical && !!keyboard && found, cells(series));
+    if (!own) return;
     // Shift selects a range along the axis the cursor steps along: for
     // brushes along that axis, and for rectangles and lassos, which the
     // keyboard cannot draw. A range does not go on into a panel with
-    // another scale along that axis.
-    const axis = inspection.axis;
+    // another scale along that axis, nor along another axis.
+    const { axis } = own;
     const brush = shapeOf(model.interactionOf(panel)?.brush);
-    // Nor does it go on along another axis.
-    const crossed = axis !== "item" && from?.[`${axis}Group`] !== to?.[`${axis}Group`];
+    const from = panels.find(({ key }) => key === start.panel);
+    const crossed = from?.[`${axis}Group`] !== to?.[`${axis}Group`];
     if (crossed || (this.#brushAnchor && this.#brushAnchor.axis !== axis)) this.#brushAnchor = null;
-    if (
-      event.shiftKey &&
-      axis !== "item" &&
-      (brush === axis || brush === "xy" || brush === "lasso")
-    ) {
-      const start = before?.axis === axis && !crossed ? before : inspection;
-      this.#brushAnchor ??= { value: start.value, label: start.label, axis };
-      const range = [this.#brushAnchor.value, inspection.value] as const;
+    if (event.shiftKey && (brush === axis || brush === "xy" || brush === "lasso")) {
+      const begin = before?.axis === axis && !crossed ? before : own;
+      this.#brushAnchor ??= { value: begin.value, label: begin.label, axis };
+      const range = [this.#brushAnchor.value, own.value] as const;
       // In the panel as drawn: what listeners changed since waits for the next frame.
       host.select(
         {
@@ -3670,11 +3721,237 @@ export class Interaction {
       const selection = host.selection();
       const zooms = selection?.kind === "brush" && this.#zooms(selection, to!);
       const hint = zooms ? " Press Enter to zoom to it." : "";
-      text = `Selected ${this.#brushAnchor.label} to ${inspection.label}.${hint} ${text}`;
+      live.textContent = `Selected ${this.#brushAnchor.label} to ${own.label}.${hint} ${live.textContent}`;
     } else {
       this.#brushAnchor = null;
     }
-    live.textContent = text;
+  }
+
+  /**
+   * Announces the keyboard cursor where it arrived from `from` (null for
+   * none): the panel where it entered one; where the series changed, the
+   * series, with its place in the run of Up and Down that moved it there
+   * (`ranked`); then its point, and where; for a `cell`, what the tooltip
+   * reads. Returns its own point, read alone (see `keyedPoint`), or
+   * undefined where it reads nothing.
+   */
+  #arrive(from: KeyboardCursor | null, ranked: boolean, cell = false): AxisInspection | undefined {
+    const host = this.#host;
+    const { model } = host;
+    const keyboard = this.#keyboard!;
+    const { panel, key, position } = keyboard;
+    this.#pointer = null;
+    if (!ranked) this.#run = null;
+    // The cursor moves on the frame drawn: what listeners changed while it
+    // drew waits for the next.
+    host.finishFrame();
+    const inspection = this.#inspection();
+    const own = this.#keyedPoint();
+    keyboard.stood = standing(model, panel, key, position, this.#kit);
+    keyboard.item = this.#keyedItem(keyboard);
+    if (!inspection && !own) return undefined;
+    let text = describeInspection((inspection ?? own)!);
+    const [point] = own?.points ?? [];
+    if (point && !cell) {
+      const rank = ranked ? this.#rank() : "";
+      // A series of one place (a box plot's category) is not named twice.
+      const where = own!.label === point.label ? "" : ` at ${own!.label}`;
+      const named = from?.panel !== panel || from.key !== key;
+      text = `${named ? `${point.label}${rank}: ` : ""}${point.text}${where}${fieldsSpoken(point)}`;
+    }
+    // Arriving in a panel, the cursor names it and the annotations it alone draws.
+    if (model.namesPanels && from?.panel !== panel)
+      text = [
+        `${model.panels().find((drawn) => drawn.key === panel)?.label ?? panel}:`,
+        ...model.annotationSummaries(panel),
+        text,
+      ].join(" ");
+    host.live.textContent = text;
+    return own;
+  }
+
+  /**
+   * Where Up (or Down) takes the keyboard cursor: the series before (or
+   * after) it in its panel's run, in screen order at its place (taken once,
+   * at the run's first press, and kept while Up and Down follow: see
+   * `orderAt`); past the run's ends, as `#beyond` says. A press going
+   * nowhere leaves the run as it was.
+   */
+  #upDown(up: boolean, keyboard: KeyboardCursor): Visit | string | undefined {
+    const { model } = this.#host;
+    const { panel, key, position } = keyboard;
+    let run = this.#run;
+    const visit = run?.order[run.at];
+    // A run ends with any other move (see `#arrive`), a new scene (see
+    // `draw`), or another panel; a layout mark's items have none.
+    if (!run || run.panel !== panel || visit?.key !== key || visit.position !== position) {
+      const stood = standing(model, panel, key, position, this.#kit);
+      run = this.#run = this.#runAt(
+        panel,
+        stood ?? { axis: "x", place: Number.NaN, height: 0 },
+        (order) => {
+          const at = order.findIndex((v) => v.key === key);
+          // The cursor stays on its own observation, wherever the order found its series'.
+          if (at >= 0) order[at] = { ...order[at]!, position };
+          return at < 0 ? (up ? order.length : -1) : at;
+        },
+      );
+      if (!stood) run.order = [];
+    }
+    const next = run.order[run.at + (up ? -1 : 1)];
+    if (!next) return this.#beyond(up, panel, run.axis, run.place);
+    run.at += up ? -1 : 1;
+    return next;
+  }
+
+  /**
+   * Where Up (or Down) goes past the ends of panel `panel`'s run at `place`
+   * along `axis`: into the next panel that way with series, at its last (or
+   * first) series there, starting a run in it, or at a layout mark's items
+   * there (that panel's key); undefined past the first (or last) panel.
+   */
+  #beyond(up: boolean, panel: string, axis: "x" | "y", place: number): Visit | string | undefined {
+    const { model } = this.#host;
+    // At the same value on a scale both share, else at the same pixel across
+    // the plot; from a layout mark's items, at the plot's start.
+    const all = model.allPanels();
+    const from = model.panels().find((drawn) => drawn.key === panel);
+    const across = axis === "x" ? "y" : "x";
+    const step = up ? -1 : 1;
+    for (
+      let p = all.findIndex((at) => at.key === panel) + step;
+      p >= 0 && p < all.length;
+      p += step
+    ) {
+      const { key, items } = all[p]!;
+      if (items) return key;
+      const to = model.panels().find((drawn) => drawn.key === key);
+      if (!to) continue;
+      const there =
+        !from || Number.isNaN(place)
+          ? to.plot[axis]
+          : from[`${axis}Group`] === to[`${axis}Group`]
+            ? to[axis].map(from[axis].invert(place))
+            : to.plot[axis] + place - from.plot[axis];
+      // From the edge it enters by: its first series from above, its last from below.
+      const edge = to.plot[across] + (up ? (axis === "x" ? to.plot.height : to.plot.width) : 0);
+      const entered = this.#runAt(key, { axis, place: there, height: edge }, (order) =>
+        up ? order.length - 1 : 0,
+      );
+      if (entered.order.length) {
+        this.#run = entered;
+        return entered.order[entered.at];
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * A run of Up and Down in panel `panel` where the keyboard cursor `stood`
+   * (see `standing`): its series in their order there, and the one the
+   * cursor is at, which `at` finds.
+   */
+  #runAt(
+    panel: string,
+    stood: { axis: "x" | "y"; place: number; height: number },
+    at: (order: Visit[]) => number,
+  ): Run {
+    const order = orderAt(
+      this.#host.model,
+      panel,
+      stood.axis,
+      stood.place,
+      stood.height,
+      this.#kit,
+    );
+    return { panel, ...stood, order, at: at(order) };
+  }
+
+  /**
+   * Hands the keyboard cursor on where its series or row went (hidden by
+   * the legend, dropped by a stream), whether or not that came back since:
+   * to the series next below where it stood among the others (above,
+   * `up`), else the nearest the other way, by screen order at its place,
+   * as a run starting there; in its own series where that is the panel's
+   * only one; to the layout mark's items where one took its panel or its
+   * item went; with nothing left in its panel, on to the next panel that
+   * way (see `#beyond`). Returns whether it did, or a layout mark's panel
+   * to enter; finding nothing, it leaves no cursor.
+   */
+  #handOff(up: boolean): boolean | string {
+    const keyboard = this.#gone;
+    this.#gone = null;
+    if (!keyboard) return false;
+    const { panel, key, position } = keyboard;
+    const items = this.#host.model.allPanels().find((at) => at.key === panel)?.items;
+    // Where it last stood: a layer hidden from a stack is drawn nowhere, and
+    // a series' row a stream dropped stands for nothing; a layout mark's
+    // item gone, its panel's items are entered again.
+    const stood = keyboard.stood ?? standing(this.#host.model, panel, key, position, this.#kit);
+    if (!stood) return !!items && panel;
+    // Series in series order, which places it among series drawn at its height.
+    const keys =
+      this.#host.model
+        .inspectorOf(panel)
+        ?.marks.flatMap(({ series }) => series.map((s) => s.key)) ?? [];
+    const run = this.#runAt(panel, stood, (order) => {
+      // Of the others (a series whose row went stays in the order), the
+      // first below where it stood, or the one above it; a series alone
+      // keeps it, at its observation nearest there.
+      const others = order.filter((v) => v.key !== key || order.length < 2);
+      const below = others.findIndex(
+        (v) =>
+          v.height > stood.height ||
+          (v.height === stood.height && keys.indexOf(v.key) > keys.indexOf(key)),
+      );
+      return order.indexOf(
+        others[below < 0 ? others.length - 1 : up ? Math.max(0, below - 1) : below]!,
+      );
+    });
+    const visit =
+      run.order[run.at] ?? (items ? panel : this.#beyond(up, panel, stood.axis, stood.place));
+    if (typeof visit !== "object") return visit ?? false;
+    if (run.order[run.at]) this.#run = run;
+    this.#keyboard = { panel: this.#run!.panel, key: visit.key, position: visit.position };
+    return true;
+  }
+
+  /**
+   * `i`: announces every point the keyboard cursor reads, as the tooltip
+   * lists them, again when pressed again.
+   */
+  #readAll(event: KeyboardEvent) {
+    if (!(this.#keyboard ?? this.#gone)) return;
+    event.preventDefault();
+    this.#host.current();
+    // A cursor whose series went reads where it is handed (see `#handOff`),
+    // arriving there first.
+    const handed = this.#gone;
+    const off = this.#handOff(false);
+    if (typeof off === "string") return this.#itemKey(event, off, true);
+    if (off) this.#arrive(handed, false);
+    this.#run = null;
+    const inspection = this.#inspection();
+    if (!inspection) return;
+    const text =
+      inspection.axis === "item"
+        ? describeInspection(inspection)
+        : `${inspection.points.length} series at ${inspection.label}: ${inspection.points
+            .map((point) => `${point.label} ${point.text}${fieldsSpoken(point)}`)
+            .join("; ")}`;
+    this.#say(text);
+  }
+
+  /** The keyboard cursor's place in its run of Up and Down (", 2 of 12"); none in a run of one. */
+  #rank(): string {
+    const { at = 0, order = [] } = this.#run ?? {};
+    return order.length > 1 ? `, ${at + 1} of ${order.length}` : "";
+  }
+
+  /** Announces `text`, again where it was the last announcement: told apart by a space. */
+  #say(text: string): void {
+    const { live } = this.#host;
+    live.textContent = live.textContent === text ? `${text}\u00a0` : text;
   }
 
   /**
@@ -3793,34 +4070,6 @@ const CELL_STEPS: Record<string, readonly [number, number]> = {
   PageUp: [0, Number.POSITIVE_INFINITY],
   PageDown: [0, Number.NEGATIVE_INFINITY],
 };
-
-/**
- * Position of the point of `series` placed nearest `value` along `axis` on
- * screen (on `scale`), never one an axis break hides; the first without a
- * `value`.
- */
-function nearestTo(
-  { placeAt, rowOf }: InteractionKit,
-  series: Series,
-  value: number | undefined,
-  scale: PositionScale,
-  axis: "x" | "y",
-): number {
-  if (value === undefined) return 0;
-  let best = 0;
-  let distance = Infinity;
-  const at = scale.map(value);
-  for (let k = 0; k < series.length; k++) {
-    const place = placeAt(series, axis, rowOf(series, k));
-    if (scale.breaks?.hides(place)) continue;
-    const d = Math.abs(scale.map(place) - at);
-    if (d < distance) {
-      best = k;
-      distance = d;
-    }
-  }
-  return best;
-}
 
 /** A sentence announcing a selection, with values as the axes label them. */
 function describeSelection(selection: BrushSelection, format: AxisFormat): string {
