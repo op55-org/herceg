@@ -416,6 +416,7 @@ export class TreemapMark implements LayoutMark {
       return {
         key: data.keyOf(frame.id, view, node),
         label: pathText(node),
+        names: [...view.prefix, ...pathOf(tree, node)],
         color: fills[node] ?? colorOf(node) ?? theme.muted,
         value: shown[node]!,
         text: `${amount(shown[node]!)} (${percent(shown[node]! / total)}${where(written)})${data.selectedText(counts, node, locale, fieldText)}`,
@@ -485,6 +486,7 @@ export class TreemapMark implements LayoutMark {
       indexOf: navigation.indexOf,
       summary: () => this.#summary(written, shown, percent, amount, fieldText),
       rowsOf: (key, of) => (of === this.table ? data.rowsOf(frame.id, view, key) : undefined),
+      holdsRows: (key, of) => of === this.table && data.nodeOf(frame.id, view, key) >= 0,
       soleRow: (key, of) => (of === this.table ? data.soleRow(frame.id, view, key) : undefined),
       drill: data.drill(frame, root, view, path?.crumbs ?? []),
     };

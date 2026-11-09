@@ -386,6 +386,8 @@ const HIDDEN_ENTRY = 0.4;
 
 /** What the controller acts on along axes; layout marks' controls take the rest. */
 const OWN = ({ type }: Binding["action"]) => type !== "orbit" && type !== "moveItem";
+/** A gesture made with no key held. */
+const UNMODIFIED = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
 
 export class Interaction {
   readonly #host: InteractionHost;
@@ -534,6 +536,19 @@ export class Interaction {
   readonly #drawnAt = new WeakMap<ItemTarget, DrawnRow | undefined>();
   /** Whether the chart has marks with `drag`, which presses pick first and the pointer's cursor shows. */
   #draggable = false;
+  /** The resize cursor over a rule the pointer can drag, or none. */
+  #ruleCursor = "";
+  /** Whether a click where the pointer is acts (see `#acts`), which the pointer cursor shows. */
+  #pointing = false;
+  /** The cursor the chart last set on its root, which it changes only when its own choice does. */
+  #cursor = "";
+  /**
+   * What the pointer was last read to be on (by a hover, or the cursor):
+   * of the scene and the drill's frame drawn, and the pointer (which each
+   * move replaces, with the element it is over); and once the cursor asks,
+   * whether a click there acts. One pick serves both.
+   */
+  #on: [Scene | undefined, unknown, object, Target | undefined, boolean?] | null = null;
   /** Handlers by event type, which play held input too. */
   readonly #handlers = new Map<string, (event: never) => void>();
   readonly #cleanup: (() => void)[] = [];
@@ -583,15 +598,135 @@ export class Interaction {
   /**
    * Whether the pointer reading what is under it or the keyboard is on the
    * chart, or a press is in progress. A pointer that reads nothing
-   * (`inspection: false`, no hover listener) lets changed values move.
+   * (`inspection: false`, no hover listener, and no click of the chart's
+   * own to show) lets changed values move.
    */
   get busy(): boolean {
     return !!((this.#pointer && this.#reads()) || this.#keyboard || this.#press || this.#tap);
   }
 
-  /** Whether the pointer reads what is under it: by inspection, or picking for hover listeners. */
+  /**
+   * Whether the pointer reads what is under it: by inspection, picking for
+   * hover listeners, or for the cursor, where the chart's clicks act.
+   */
   #reads(): boolean {
-    return this.#host.options().inspection !== false || this.#host.events.has("hover");
+    return (
+      this.#host.options().inspection !== false ||
+      this.#host.events.has("hover") ||
+      this.#clicksAct()
+    );
+  }
+
+  /**
+   * Whether the chart's own clicks act on what they are on: select it
+   * (`interaction.select`), pin it (`tooltip.pin`), select its rows
+   * (a row selection's clicks), or drill a tree.
+   */
+  #clicksAct(): boolean {
+    const host = this.#host;
+    return (
+      !!host.options().interaction?.select ||
+      this.#pinsByClick() ||
+      !!host.rows()?.takesClicks ||
+      !!host.model.drills
+    );
+  }
+
+  /**
+   * Shows the pointer cursor where a click acts (see `#acts`), decided once
+   * for each move, scene, and drill frame; not for touches or a drag. A
+   * rule the pointer can drag keeps its resize cursor. With the pointer
+   * gone to the keyboard, the cursor stays as it was until it moves.
+   */
+  #aim(shown: Inspection | undefined): void {
+    const pointer = this.#pointer;
+    const host = this.#host;
+    const acts =
+      !!pointer && !this.#touch && !this.#press?.moved && !this.#tap?.moved && this.#clicksAct();
+    // What it is on is read once picking is here (a load draws again).
+    if (acts) this.needPicking();
+    if (!acts || !this.#picking) {
+      // Holds no scene it no longer reads.
+      this.#on = null;
+      if (pointer) this.#pointing = false;
+    } else {
+      let on = this.#on;
+      if (
+        !on ||
+        on[0] !== host.scene() ||
+        on[1] !== host.model.items?.transitionItems ||
+        on[2] !== pointer
+      )
+        this.#pointed(pointer!);
+      on = this.#on!;
+      this.#pointing = on[4] ??= this.#acts(on[3], pointer!.x, pointer!.y, shown);
+    }
+    this.#setCursor();
+  }
+
+  /** After a drag, which shows no pointer cursor: a frame shows it where the pointer rests. */
+  #aimAgain(): void {
+    if (this.#clicksAct()) this.#host.schedule();
+  }
+
+  /**
+   * Which of `panel`'s drag bindings a press at (x, y) takes: the chart's
+   * own; one that edits the brush only on it, which moves or resizes it.
+   */
+  #takes(panel: DrawnPanel, x: number, y: number): (action: Binding["action"]) => boolean {
+    return (a) => OWN(a) && (a.type !== "editBrush" || !!this.#brushAt(panel, x, y));
+  }
+
+  /** What the pointer is on (`#targetAt`), noted for the cursor (see `#on`). */
+  #pointed(pointer: { x: number; y: number }): Target | undefined {
+    const target = this.#targetAt(pointer.x, pointer.y, this.#over);
+    const host = this.#host;
+    if (this.#picking)
+      this.#on = [host.scene(), host.model.items?.transitionItems, pointer, target];
+    return target;
+  }
+
+  /** Sets the root's cursor where the chart's choice changed: a rule's, the pointer, or none. */
+  #setCursor(): void {
+    const cursor = this.#ruleCursor || (this.#pointing ? "pointer" : "");
+    if (cursor === this.#cursor) return;
+    this.#cursor = cursor;
+    this.#host.root.style.cursor = cursor;
+  }
+
+  /**
+   * Whether a click at (x, y) on `target` acts, as `#clicked` decides: it
+   * selects rows where a row selection takes clicks, else drills or
+   * selects the item or its series; and where it does not drill, pins the
+   * item, with what `shown` reads (the pointer's inspection). Clicks off
+   * the data, which clear, do not count; off the panels, a press clicks
+   * only on an axis label, and in one, none whose drag moves the
+   * crosshair cursor (see the pointerdown handler).
+   */
+  #acts(target: Target | undefined, x: number, y: number, shown: Inspection | undefined): boolean {
+    const host = this.#host;
+    if (!host.model.layout && !this.#onItems(x, y)) {
+      const panel = this.#panelAt(x, y);
+      // As a press with the mouse and no key held.
+      const press = { ...UNMODIFIED, button: 0, pointerType: "mouse" };
+      if (
+        panel
+          ? this.#bindingsIn(panel).match("drag", press, this.#takes(panel, x, y))?.action.type ===
+            "cursor"
+          : !this.#axisLabel(x, y)
+      )
+        return false;
+    }
+    const select = host.options().interaction?.select;
+    const rows = select ? undefined : host.rows()?.clicks(x, y);
+    if (rows === undefined && this.#drills(target, x, y)) return true;
+    if (target?.kind !== "item") return !!rows;
+    return (
+      !!rows ||
+      select === "items" ||
+      (select === "series" && target.series !== undefined) ||
+      (this.#pinsByClick() && !!this.#pinOf(target, () => shown))
+    );
   }
 
   get keyboard(): KeyboardCursor | null {
@@ -924,8 +1059,7 @@ export class Interaction {
   ): () => Pin | null | undefined {
     if (!this.#pinsByClick() || (target?.kind !== "item" && target?.kind !== "plot"))
       return () => undefined;
-    const at = target.kind === "item" ? this.#cursorOf(target) : undefined;
-    const pin = (at && this.#anchored(...at, (target as ItemTarget).item, shown())) ?? null;
+    const pin = target.kind === "item" ? this.#pinOf(target, shown) : null;
     const mode = this.#pinMode;
     return () =>
       !this.#pinsByClick() || this.#pinMode !== mode
@@ -933,6 +1067,16 @@ export class Interaction {
         : pin && JSON.stringify(pin.at) === JSON.stringify(this.#pin?.at)
           ? null
           : pin;
+  }
+
+  /**
+   * The pin a click on `target` makes, at the item where the inspection
+   * `shown` gives (what the click reads) reads it; null for an item it
+   * does not pin.
+   */
+  #pinOf(target: ItemTarget, shown: () => Inspection | undefined): Pin | null {
+    const at = this.#cursorOf(target);
+    return (at && this.#anchored(...at, target.item, shown())) ?? null;
   }
 
   /**
@@ -1258,6 +1402,7 @@ export class Interaction {
     if (pinch && !bound(pinch.panel, pinch.action)) this.#pinch = null;
     host.root.style.touchAction = this.#touchPolicy();
     this.#draggable = options.marks.some((mark) => (mark.spec as { drag?: boolean }).drag);
+    if (!this.#draggable) this.#ruleCursor = "";
     // A rule being dragged that the options no longer have goes back; one
     // they made again (an equal mark) goes on being dragged.
     const now = press?.rule && this.#ruleNow(press.rule);
@@ -1369,7 +1514,7 @@ export class Interaction {
     this.#pending = [];
     this.#waiting = null;
     this.#due = [];
-    this.#captured = this.#heard = null;
+    this.#captured = this.#heard = this.#on = null;
     for (const stop of this.#cleanup) stop();
   }
 
@@ -1404,7 +1549,7 @@ export class Interaction {
             scene,
             event: this.#stamped({
               pointer: this.#pointerAt(pointer.x, pointer.y),
-              target: this.#targetAt(pointer.x, pointer.y, this.#over),
+              target: this.#pointed(pointer),
               inspection: this.#inspection(),
               cause: "pointer",
               revision,
@@ -2009,6 +2154,7 @@ export class Interaction {
       this.#hover(this.#inputEvent(active));
       if (changed()) return;
     }
+    this.#aim(active);
     const { svgElement, tickLabelGap, surface } = this.#kit;
     const document = host.root.ownerDocument;
     const lines = this.#crosshairs;
@@ -2161,7 +2307,7 @@ export class Interaction {
     const pointer = this.#pointer;
     return this.#stamped({
       pointer: pointer ? this.#pointerAt(pointer.x, pointer.y) : undefined,
-      target: pointer ? this.#targetAt(pointer.x, pointer.y, this.#over) : this.#keyboardTarget(),
+      target: pointer ? this.#pointed(pointer) : this.#keyboardTarget(),
       inspection,
       cause: pointer ? "pointer" : "keyboard",
       revision: this.#host.drawnRevision(),
@@ -2219,19 +2365,21 @@ export class Interaction {
   #touchPolicy(): string {
     const kinds = new Set(this.#host.model.items?.asked().map(({ kind }) => kind));
     const plane = kinds.has("map") || kinds.has("drag");
-    const touch = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
     // Pans and brushes take axes or a map's or network's plane; orbits a 3D
     // chart. Subplots with bindings of their own take what any panel takes.
     const axes = this.#host.model.panels().length > 0;
     let along = "";
     let pinch: string | undefined;
     for (const bindings of [this.#bindings, ...this.#own.values()]) {
-      const action = bindings.match("drag", { ...touch, button: 0, pointerType: "touch" }, (a) =>
-        a.type === "orbit"
-          ? kinds.has("orbit")
-          : a.type === "moveItem"
-            ? kinds.has("drag")
-            : a.type === "pageScroll" || axes || plane,
+      const action = bindings.match(
+        "drag",
+        { ...UNMODIFIED, button: 0, pointerType: "touch" },
+        (a) =>
+          a.type === "orbit"
+            ? kinds.has("orbit")
+            : a.type === "moveItem"
+              ? kinds.has("drag")
+              : a.type === "pageScroll" || axes || plane,
       )?.action;
       along +=
         action?.type === "pan"
@@ -2247,7 +2395,7 @@ export class Interaction {
                 : "";
       // Pinches zoom along axes. Charts that drag both ways (maps, networks)
       // take them too, doing nothing, unless a binding leaves them to the page.
-      const type = bindings.match("pinch", touch)?.action.type;
+      const type = bindings.match("pinch", UNMODIFIED)?.action.type;
       if (pinch !== "zoom") pinch = type ?? pinch;
     }
     // Rules dragged move along their axis: a horizontal rule along y.
@@ -2580,7 +2728,10 @@ export class Interaction {
 
     // Over a pinned tooltip or an anchor, the pointer is on its content, not on the chart.
     const leave = () => {
-      this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
+      this.#pointer = this.#reading = this.#pointerShared = this.#over = this.#on = null;
+      this.#ruleCursor = "";
+      this.#pointing = false;
+      this.#setCursor();
       host.shareCursor(null);
     };
     on("pointermove", (event) => {
@@ -2659,7 +2810,8 @@ export class Interaction {
       // Over a rule it can drag, the pointer says which way it moves.
       if (this.#draggable && !press) {
         const rule = this.#ruleAt(x, y, event);
-        root.style.cursor = rule ? (rule.axis === "x" ? "ew-resize" : "ns-resize") : "";
+        this.#ruleCursor = rule ? (rule.axis === "x" ? "ew-resize" : "ns-resize") : "";
+        this.#setCursor();
       }
       host.schedule();
       this.#sharePointer(x, y);
@@ -2785,10 +2937,7 @@ export class Interaction {
         if (event.pointerType !== "touch") root.setPointerCapture?.(event.pointerId);
         return;
       }
-      // A drag that starts on the brush moves or resizes it, where a binding says so.
-      const on = (a: Binding["action"]) =>
-        OWN(a) && (a.type !== "editBrush" || !!this.#brushAt(panel, x, y));
-      const action = this.#bindingsIn(panel).match("drag", event, on)?.action;
+      const action = this.#bindingsIn(panel).match("drag", event, this.#takes(panel, x, y))?.action;
       const type = action?.type;
       const mode =
         type === "pan" || type === "brush" || type === "cursor"
@@ -2822,12 +2971,14 @@ export class Interaction {
         if (tap.pointer !== event.pointerId) return;
         this.#tap = null;
         if (!tap.moved && !off) this.#click(local(event), event, tap.label);
+        else if (tap.moved) this.#aimAgain();
         return;
       }
       if (this.#besideRule(event)) return;
       const press = this.#press;
       this.#press = null;
       if (!press) return;
+      if (press.moved) this.#aimAgain();
       if (!press.moved) {
         if (event.button === 0 && press.mode !== "cursor" && !off) this.#click(local(event), event);
         return;

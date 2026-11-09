@@ -51,6 +51,7 @@ import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts
 import type { PositionScale } from "../scale/scale.ts";
 import type { ItemViews } from "./item-views.ts";
 import type { ChartModel, DrawnPanel, ScaleInstance } from "./model.ts";
+import type { Picked } from "./pick.ts";
 import { pointRows } from "./point-rows.ts";
 
 /**
@@ -733,24 +734,22 @@ function itemRows(
 }
 
 /**
- * The rows of the item drawn under a pixel, among marks over `tables`, as
- * the chart picks it (model/pick.ts): the topmost, inside a bar, bin, box,
- * violin, or cell, or within reach of a point or a line's observation.
- * Undefined over none; null over a layout mark's item that stands for none
- * of their rows.
+ * What a click at a pixel is on among marks over `tables`, as the chart
+ * picks it (model/pick.ts), before its rows are read: a layout mark's item
+ * the inspection reads there, or the topmost item picked, inside a bar,
+ * bin, box, violin, or cell, or within reach of a point or a line's
+ * observation, in its panel. Undefined over none.
  */
-export function clickedRows(
+export function clickedOn(
   model: ChartModel,
   tables: ReadonlySet<Table>,
   px: number,
   py: number,
-): PointRows | null | undefined {
+): { layout: string; key: string } | { picked: Picked; panel: DrawnPanel } | undefined {
   const layout = layoutAt(model, px, py);
   if (layout !== undefined) {
     const inspection = model.inspect(px, py);
-    return inspection?.axis === "item"
-      ? itemRows(model.items!, layout, tables, inspection.key)
-      : undefined;
+    return inspection?.axis === "item" ? { layout, key: inspection.key } : undefined;
   }
   const picked = model.picker?.(
     px,
@@ -762,7 +761,24 @@ export function clickedRows(
       !UNCLICKED.has(mark.spec.type),
   );
   const panel = picked && model.panels().find(({ key }) => key === picked.drawn.panel);
-  if (!panel) return undefined;
+  return panel && { picked: picked!, panel };
+}
+
+/**
+ * The rows of the item drawn under a pixel, among marks over `tables` (see
+ * `clickedOn`). Undefined over none; null over a layout mark's item that
+ * stands for none of their rows.
+ */
+export function clickedRows(
+  model: ChartModel,
+  tables: ReadonlySet<Table>,
+  px: number,
+  py: number,
+): PointRows | null | undefined {
+  const on = clickedOn(model, tables, px, py);
+  if (!on) return undefined;
+  if ("layout" in on) return itemRows(model.items!, on.layout, tables, on.key);
+  const { picked, panel } = on;
   const { part } = picked.item;
   const point = part.kind === "row" ? part.series : part.point;
   // An annotation's row is no series point.

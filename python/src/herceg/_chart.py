@@ -1120,6 +1120,7 @@ class _SharedOptions(TypedDict, total=False):
     box_aspect: tuple[float, float, float] | None
     rotate: bool | None
     drag: bool | None
+    toolbar: bool | None
     navigator: bool | Navigator | dict[str, Any] | None
 
 
@@ -1441,6 +1442,7 @@ class Chart:
         box_aspect: tuple[float, float, float] | None = None,
         rotate: bool | None = True,
         drag: bool | None = None,
+        toolbar: bool | None = True,
         navigator: bool | Navigator | dict[str, Any] | None = None,
         row_selection: SelectionBinding | Sequence[SelectionBinding] | None = None,
         selection: ChartSelection | None = None,
@@ -1593,6 +1595,7 @@ class Chart:
             "box_aspect": box_aspect,
             "rotate": rotate,
             "drag": drag,
+            "toolbar": toolbar,
             "navigator": navigator,
             "selection": selection,
             "viewport": viewport,
@@ -3797,9 +3800,10 @@ class Chart:
         is painted in the center unless ``center=False``; a click there goes up
         either way. ``gap`` is the pixels between sectors and rings (2 by
         default), or ``(angular, radial)``. Names go across sectors, or along
-        their radius with ``labels=hg.SunburstLabels(rotation="radial")``. Colors,
-        ``fill_opacity``, ``leaf``, ``branch``, ``sort``, and ``breadcrumbs`` as
-        for ``treemap``."""
+        their radius with ``labels=hg.SunburstLabels(rotation="radial")``, where
+        they fit or, with ``min_angle``, in every sector at least that many
+        degrees wide. Colors, ``fill_opacity``, ``leaf``, ``branch``, ``sort``,
+        and ``breadcrumbs`` as for ``treemap``."""
         if inner_radius is not None and not (
             is_number(inner_radius) and not isinstance(inner_radius, bool) and 0 <= inner_radius < 1
         ):
@@ -8259,7 +8263,7 @@ OPTIONS = (
     *("zoom", "pan", "brush", "select", "bindings", "limits", "sync", "animation"),
     *("renderer", "theme"),
     *("locale", "time_zone", "projection", "z", "camera", "box_aspect", "rotate", "navigator"),
-    "drag",
+    *("drag", "toolbar"),
 )
 
 
@@ -8436,6 +8440,7 @@ def spec_options(settings: dict[str, Any], table_name: TableName = _any_table) -
         choice_option(settings["theme"], get_args(ThemeName), "Chart theme")
     _flag(settings.get("rotate"), "Chart rotate")
     _flag(settings.get("drag"), "Chart drag")
+    _flag(settings.get("toolbar"), "Chart toolbar")
     interaction: dict[str, Any] = {
         key: value
         for key, value in {
@@ -8457,6 +8462,9 @@ def spec_options(settings: dict[str, Any], table_name: TableName = _any_table) -
     # Dragging moves a network's nodes when asked to.
     if settings.get("drag"):
         interaction["drag"] = True
+    # Controls show their buttons unless asked not to.
+    if settings.get("toolbar") is False:
+        interaction["toolbar"] = False
     # Axes', scales', and guides' new settings at their own paths, then each as a whole.
     for name in ("x", "y", "y_right", "z"):
         _check_axis_dict(settings.get(name), name)

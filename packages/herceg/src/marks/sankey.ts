@@ -579,6 +579,7 @@ export class SankeyMark implements LayoutMark {
         });
         return rows;
       },
+      holdsRows: (key, table) => table === this.table && !!find(key),
       // A node's rows: of the links drawn into and out of it, of a positive value.
       conditionOf: (key, table) => {
         const found = table === this.table ? find(key) : undefined;

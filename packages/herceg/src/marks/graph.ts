@@ -168,6 +168,8 @@ interface Network extends LayoutNetwork {
   /** Node names: the nodes table's in its order, then names only links use, as they appear. */
   names: string[];
   nodeOf: Map<string, number>;
+  /** How many of `names` come from the nodes table, which they stand for rows of. */
+  tabled: number;
   /** Per node: its group's index in `groups`, or -1 for none. */
   group: Int32Array;
   /** Group names, in the order of their first node. */
@@ -394,6 +396,7 @@ export class GraphMark implements LayoutMark {
         sizeOf[node] = Number.isFinite(size) ? size : Number.NaN;
       }
     }
+    const tabled = names.length;
 
     const from = links.categories(spec.source);
     const to = links.categories(spec.target);
@@ -468,6 +471,7 @@ export class GraphMark implements LayoutMark {
       versions,
       names,
       nodeOf,
+      tabled,
       group: new Int32Array(count).fill(-1),
       groups: [],
       size: spec.size === undefined ? undefined : new Float64Array(count).fill(Number.NaN),
@@ -1283,6 +1287,14 @@ export class GraphMark implements LayoutMark {
         for (const row of rows ?? network.linkOfRow.keys())
           if (network.linkOfRow[row] === link) out.push(row);
         return out;
+      },
+      // As `rowsOf` finds them, reading none.
+      holdsRows: (key, table) => {
+        const parts = keyParts(key);
+        if (!parts) return false;
+        if (parts.length > 2) return table === this.table && linkOfKey(parts) >= 0;
+        // A name no node has is undefined, under no count.
+        return table === this.nodes && network.nodeOf.get(parts[1] as string)! < network.tabled;
       },
       lassoed: (polygon, table, shows) => {
         if (table !== this.nodes) return undefined;

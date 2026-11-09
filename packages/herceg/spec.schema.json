@@ -4849,6 +4849,12 @@
           "title": "Drag",
           "description": "Dragging a network's node moves it, and it stays where it is dropped.",
           "type": "boolean"
+        },
+        "toolbar": {
+          "title": "Toolbar",
+          "description": "The buttons the controls of trees, maps, networks, and 3D charts show while the pointer or focus is in the chart (drill out, zoom, pan, turn, reset); `false` shows none. Their keys and gestures stay.",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false
@@ -6107,7 +6113,7 @@
       "additionalProperties": false
     },
     "PanelInteractionSpec": {
-      "description": "A panel's own `interaction`: the chart's settings but `sync`.",
+      "description": "A panel's own `interaction`: the chart's settings but `sync`, `select`, and `toolbar`.",
       "type": "object",
       "properties": {
         "pan": {
@@ -8106,6 +8112,13 @@
       "type": "object",
       "properties": {
         "rotation": { "title": "Rotation", "type": "string", "enum": ["horizontal", "radial"] },
+        "minAngle": {
+          "title": "Min angle",
+          "description": "Degrees: every sector at least this wide is named, whole, whether its name fits or not, and no narrower one is; without it, names show where they fit.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360
+        },
         "content": {
           "title": "Content",
           "type": "array",

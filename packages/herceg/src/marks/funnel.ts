@@ -323,7 +323,7 @@ export class FunnelMark implements LayoutMark {
       geometry.push(...this.#labels(stages, box, nameRoom, fill, frame, percent, amount));
 
     const itemOf = (i: number): LayoutItem => {
-      const { key, label, value, code } = stages[i]!;
+      const { key, name, label, value, code } = stages[i]!;
       const [x, y, w, h] = box(i);
       const previous = stages[i - 1]?.value ?? 0;
       let text = amount(value);
@@ -343,6 +343,7 @@ export class FunnelMark implements LayoutMark {
       return {
         key,
         label,
+        names: [name],
         color: fill,
         value,
         text,
@@ -383,6 +384,7 @@ export class FunnelMark implements LayoutMark {
         });
         return rows;
       },
+      holdsRows: (key, table) => table === this.table && stages.some((s) => s.key === key),
       soleRow: (key, table) => {
         const stage = table === this.table ? stages.find((s) => s.key === key) : undefined;
         return stage && this.#solesOf(frame.rows).of(stage.code);

@@ -22,6 +22,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { legendOf } from "../helpers/guides.ts";
 
 // B8's shape: markets by segments, in data order.
@@ -441,6 +442,69 @@ describe("tree labels", () => {
   });
 });
 
+describe("sunburst names by an angle", () => {
+  // Sectors of 237.6, 118.8, 2.38, and 1.19 degrees.
+  const slices = table({
+    name: category(["Wide", "Half", "A long name of a thin sector", "Thinner"]),
+    v: [100, 50, 1, 0.5],
+  });
+  const thin = (1 / 151.5) * 360;
+  const sectors = (labels: object, compilers = false) =>
+    build(
+      {
+        marks: [sunburst(slices, { path: ["name"], value: "v", labels })],
+        legend: false,
+      },
+      { compilers, width: 400, height: 400 },
+    ).scene;
+  const plain = (scene: Scene) =>
+    all(scene).flatMap((g) => (g.kind === "text" ? (g as TextGeometry).labels : []));
+  const parts = (scene: Scene) =>
+    all(scene)
+      .filter((g): g is LabelsGeometry => g.kind === "labels")
+      .flatMap((g) => g.items.map((item) => item.text));
+
+  it("names where names fit without it", () => {
+    const names = plain(sectors({}));
+    expect(names).toContain("Wide");
+    expect(names.some((name) => name.startsWith("A long"))).toBe(false);
+  });
+
+  contractTest(
+    "sunburst.labels.min-angle",
+    () => {
+      expect(plain(sectors({ minAngle: 2 }))).toEqual([
+        "Wide",
+        "Half",
+        "A long name of a thin sector",
+      ]);
+      // A sector as wide as the angle is named.
+      expect(plain(sectors({ minAngle: thin }))).toContain("A long name of a thin sector");
+      expect(plain(sectors({ minAngle: thin + 0.01 }))).toEqual(["Wide", "Half"]);
+      // 0: every sector drawn.
+      expect(plain(sectors({ minAngle: 0 }))).toHaveLength(4);
+    },
+    "names every sector at least that wide, whole, and no narrower one",
+  );
+
+  it("names whole along the radius and in parts' styles too", () => {
+    const radial = parts(sectors({ rotation: "radial", minAngle: 2 }, true));
+    expect(radial).toEqual(["Wide", "Half", "A long name of a thin sector"]);
+    const styled = parts(
+      sectors(
+        {
+          minAngle: 2,
+          content: [{ field: "name" }, "\n", { value: true }],
+          style: { fontSize: 14 },
+        },
+        true,
+      ),
+    );
+    expect(styled).toEqual(expect.arrayContaining(["A long name of a thin sector", "1"]));
+    expect(styled).not.toContain("Thinner");
+  });
+});
+
 describe("tree labels as painted", () => {
   const labelItems = (scene: Scene) =>
     all(scene)
@@ -710,6 +774,15 @@ describe("refused tree options", () => {
       () => treemap(sales, { path: ["market"], tile: "binary" as never }),
       'treemap tile: expected "squarify" or "slice-dice"; received "binary"',
     );
+    for (const minAngle of [-1, 361, Number.NaN, "2" as never])
+      refuses(
+        () => sunburst(sales, { path: ["market"], labels: { minAngle } }),
+        `sunburst labels.minAngle: expected degrees from 0 to 360; received ${JSON.stringify(minAngle)}`,
+      );
+    refuses(
+      () => treemap(sales, { path: ["market"], labels: { minAngle: 2 } as never }),
+      "treemap labels minAngle: treemap labels take at, parents, content, style; drop minAngle",
+    );
   });
 
   it("refuses time formats in labels, which write numbers", () => {
@@ -763,6 +836,15 @@ describe("refused tree options", () => {
     );
     expect(() => validateSpec(spec({ levels: 0 }))).toThrow(
       "marks[0].levels: expected a whole number of at least 1; received 0",
+    );
+    expect(() => validateSpec(spec({ labels: { minAngle: 2 } }))).toThrow(
+      "marks[0].labels.minAngle: treemap names show where they fit; drop minAngle",
+    );
+    expect(() =>
+      validateSpec(spec({ type: "sunburst", labels: { rotation: "radial", minAngle: 1.72 } })),
+    ).not.toThrow();
+    expect(() => validateSpec(spec({ type: "sunburst", labels: { minAngle: -1 } }))).toThrow(
+      "marks[0].labels.minAngle: expected degrees from 0 to 360; received -1",
     );
     // Loaded, both marks refuse formats they cannot write.
     for (const type of ["treemap", "sunburst"])

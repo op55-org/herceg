@@ -2,8 +2,8 @@
 // node with nodes under it (unless the chart's row selection takes clicks,
 // which then select its rows) and Enter on the node the keyboard reads
 // show the subtree under it; a click on a sunburst's middle (painted or
-// left empty), Backspace, and the toolbar's buttons go back up, and 0 to
-// the whole tree. The path the tree draws above itself is the breadcrumbs:
+// left empty), Backspace, and the toolbar's buttons (unless
+// `interaction.toolbar` is false) go back up, and 0 to the whole tree. The path the tree draws above itself is the breadcrumbs:
 // native buttons lie over each step but the last, invisible until focused,
 // so the pointer, the Tab key, and screen readers reach the steps the
 // drawing shows. Each change
@@ -22,7 +22,7 @@ import type { ItemPanel } from "../model/item-views.ts";
 import type { ChangeCause } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import type { Controls as ChartControls, ControlsHost } from "./controls.ts";
-import { pressOf, RESET_GLYPH, Toolbar } from "./toolbar.ts";
+import { pressOf, RESET_GLYPH, Toolbar, toolbars } from "./toolbar.ts";
 
 /** A panel drawing a tree, with the key of its state and the tree's drill. */
 type TreePanel = ItemPanel & { state: string; drill: Drill };
@@ -106,7 +106,7 @@ export class Controls implements ChartControls {
       }
       toolbar.style(scene.theme);
       if (state !== "") toolbar.place(plot, scene.width, scene.height);
-      toolbar.shown = this.#host.model.items?.drillRoot(key)?.key != null;
+      toolbar.shown = toolbars(this.#host) && this.#host.model.items?.drillRoot(key)?.key != null;
     }
     this.#placeCrumbs(trees, scene);
   }

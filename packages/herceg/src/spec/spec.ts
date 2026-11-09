@@ -325,8 +325,8 @@ export interface PanelSpec {
   interaction?: PanelInteractionSpec;
 }
 
-/** A panel's own `interaction`: the chart's settings but `sync`. */
-export type PanelInteractionSpec = Omit<InteractionSpec, "sync" | "select">;
+/** A panel's own `interaction`: the chart's settings but `sync`, `select`, and `toolbar`. */
+export type PanelInteractionSpec = Omit<InteractionSpec, "sync" | "select" | "toolbar">;
 
 export interface WrappedFacetSpec extends FacetLayoutSpec {
   field: Field;
@@ -940,6 +940,12 @@ export interface InteractionSpec {
   rotate?: boolean;
   /** Dragging a network's node moves it, and it stays where it is dropped. */
   drag?: boolean;
+  /**
+   * The buttons the controls of trees, maps, networks, and 3D charts show
+   * while the pointer or focus is in the chart (drill out, zoom, pan, turn,
+   * reset); `false` shows none. Their keys and gestures stay. @default true
+   */
+  toolbar?: boolean;
 }
 
 /** A brush with its settings (`interaction.brush`). */
@@ -2335,6 +2341,12 @@ export interface TreemapLabelsSpec extends TreeLabelsSpec {
 /** A sunburst's names: across the sector ("horizontal", the default), or along its radius, upright ("radial"). */
 export interface SunburstLabelsSpec extends TreeLabelsSpec {
   rotation?: "horizontal" | "radial";
+  /**
+   * Degrees: every sector at least this wide is named, whole, whether its
+   * name fits or not, and no narrower one is; without it, names show where
+   * they fit. @minimum 0 @maximum 360
+   */
+  minAngle?: number;
 }
 
 /**

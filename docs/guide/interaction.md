@@ -36,6 +36,7 @@ options) says what input does. Its presets cover the common cases:
 | `sync` | a group's name, or channels | What the chart shares ([below](#sync)). |
 | `rotate` | `true` (default), `false` | Dragging turns 3D charts. |
 | `drag` | `true` | Dragging a network's node moves it. |
+| `toolbar` | `true` (default), `false` | The buttons of trees, maps, networks, and 3D charts ([Controls' buttons](#what-a-click-does)); their keys and gestures stay. |
 
 ```ts
 createChart(element, { marks, interaction: { zoom: "x" } }); // drag pans, Ctrl/⌘+wheel or pinch zooms
@@ -496,6 +497,28 @@ in this order, so one click is never two that conflict:
 A leaf of a tree, which drills nowhere, is selected and pinned as other
 items are. The `click` event follows in every case.
 
+**The pointer cursor** shows where one of these acts: over a node that
+drills, a drilled tree's middle (which goes up), an item
+`interaction.select` selects (an item of a series, with `"series"`), an
+item a click pins, an item whose rows a row selection's clicks select,
+and a legend entry; not where a press clicks nothing (outside the plot,
+except on an axis label, or where a mouse drag is bound to the crosshair
+`cursor`). Elsewhere the chart sets none, so a cursor the
+application sets on an element around the chart shows (from `hover`'s
+target, say); a rule with `drag` keeps its resize cursor. A chart whose
+clicks act reads what the pointer is on as an inspecting chart does, once
+a frame while it moves and again when the scene changes: a move shows
+values playing at their end first, and a resting pointer keeps changed
+values from moving ([Animation](#animation)), so the cursor reads what is
+drawn. Touches and drags show none.
+
+**Controls' buttons.** Trees that drill, maps, networks, and 3D charts show
+a toolbar of buttons (drill out, zoom, pan, turn, reset) while the pointer
+or focus is in the chart. `interaction: { toolbar: false }` shows none;
+the keys and gestures stay (a drilled tree still goes up on its middle,
+Backspace, and 0). It is the chart's: panels take no `toolbar` of their
+own.
+
 ## Events
 
 `on(event, listener)` returns a function that stops listening. Events
@@ -575,6 +598,10 @@ chart.on("select", ({ revision }) => {
 
 - `inspection`: what [`inspection`](#inspection) reads there; undefined
   where it reads nothing, and for the pointer with `inspection: false`.
+  A point of a pie slice, a funnel stage, or a tree's node carries
+  `names`, its raw names from the top (a node's path below the whole
+  tree's root, drilled or not), as `renderTooltip` and `chart.inspect`
+  give them too.
 - `revision`: the frame the input acted on, what the user saw.
 
 **What a clicked item stands for.** On `click`, `contextMenu`, and Enter
@@ -1185,7 +1212,9 @@ loads with the chart's first frames: `await chart.loading`; charts with
 custom marks load theirs a request later); charts with a navigator or
 `sync`, off screen, read by the pointer or keyboard, or slow (over 10 ms a
 frame); pages preferring reduced motion. A pointer reads a chart unless it
-has `inspection: false` and no hover listener; drills play on under it.
+has `inspection: false`, no hover listener, and no click of its own to
+show with the cursor (`select`, `tooltip.pin`, a drill, a row selection's
+clicks); drills play on under it.
 Charts of several panels or with `sync` do not animate their views. Only
 the drawing moves: data, tooltips, and events have the new values at once
 (during a drill, the pointer reads the sectors as drawn).

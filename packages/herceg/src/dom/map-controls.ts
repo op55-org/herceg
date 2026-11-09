@@ -21,7 +21,7 @@ import type { Rect, Scene } from "../scene/scene.ts";
 import type { Theme } from "../theme.ts";
 import { Brush, type BrushPanel } from "./brush.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
-import { type Press, RESET_GLYPH, type ToolButton, Toolbar } from "./toolbar.ts";
+import { type Press, RESET_GLYPH, type ToolButton, Toolbar, toolbars } from "./toolbar.ts";
 
 /** Magnification per key press or button click. */
 const ZOOM = 1.25;
@@ -274,7 +274,8 @@ export class Controls implements ChartControls {
     for (const [state, toolbar] of this.#toolbars) {
       const panel = this.#planes().find((plane) => plane.state === state)?.key;
       toolbar.shown =
-        this.#can(state || undefined).zooms || (panel !== undefined && this.#extraShown(panel));
+        toolbars(this.#host) &&
+        (this.#can(state || undefined).zooms || (panel !== undefined && this.#extraShown(panel)));
       toolbar.refresh();
     }
   }

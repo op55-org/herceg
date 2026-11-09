@@ -243,3 +243,19 @@ out. React's, Vue's, and Svelte's `<Anchor>` render their content into it
 through a portal, a teleport, and the component's children. It is a
 module of its own: applications that never anchor load none of it. See
 [Anchors](docs/guide/interaction.md#anchors).
+
+The pointer cursor shows where the chart's own click acts: over a tree's
+node that drills and a drilled tree's middle, an item `interaction.select`
+selects, an item a click pins, an item whose rows a row selection's clicks
+select, and a legend entry; elsewhere the chart sets none, and a rule with
+`drag` keeps its resize cursor. Such a chart reads what the pointer is on
+as an inspecting chart does, so a move shows values playing at their end
+and a resting pointer keeps changed values from moving.
+`interaction.toolbar: false` (`hg.Chart(toolbar=False)`) leaves out the
+buttons of trees, maps, networks, and 3D charts, keeping their keys and
+gestures. Sunburst labels take `minAngle` (`hg.SunburstLabels(min_angle=...)`):
+every sector at least that many degrees wide is named whole, fitting or
+not, and no narrower one. An inspection's point of a pie slice, a funnel
+stage, or a tree's node carries `names`, its raw names from the top (a
+node's path below the whole tree's root), in tooltips, events,
+`chart.inspect`, the adapters, and Python's events.

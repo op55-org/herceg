@@ -3159,7 +3159,13 @@ const MARKS: MarkChecks = {
     required: [],
     checks: {
       ...hierarchyChecks(),
-      labels: treeLabels({ at: oneOf("top-left", "center"), parents: boolean }),
+      labels: treeLabels({
+        at: oneOf("top-left", "center"),
+        parents: boolean,
+        minAngle: (_, at) => {
+          throw refusal(at, "treemap names show where they fit; drop minAngle");
+        },
+      }),
       tile: oneOf("squarify", "slice-dice"),
       gap: width,
     },
@@ -3168,7 +3174,12 @@ const MARKS: MarkChecks = {
     required: [],
     checks: {
       ...hierarchyChecks(),
-      labels: treeLabels({ rotation: oneOf("horizontal", "radial") }),
+      labels: treeLabels({
+        rotation: oneOf("horizontal", "radial"),
+        minAngle: (v, at) => {
+          if (typeof v !== "number" || !(v >= 0 && v <= 360)) fail(at, "degrees from 0 to 360", v);
+        },
+      }),
       innerRadius: (v, path) => {
         if (typeof v !== "number" || !(v >= 0 && v < 1)) fail(path, "at least 0 and below 1", v);
       },
@@ -4202,6 +4213,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
         object(i, path);
         properties(i as Record<string, unknown>, path, {
           ...interactionChecks,
+          toolbar: boolean,
           select: (v, at) => {
             if (v !== false) oneOf("items", "series")(v, at);
           },

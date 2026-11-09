@@ -193,3 +193,100 @@ describe("a legend entry's click, as each front end reports it", () => {
     expect(clicks).toMatchObject([{ target }]);
   });
 });
+
+describe("an inspected tree node's names, as each front end reports them", () => {
+  const spec = sent({
+    data: {
+      sales: {
+        columns: {
+          region: ["Europe", "Europe", "Asia"],
+          country: ["France", "Spain", "Japan"],
+          revenue: [40, 20, 50],
+        },
+      },
+    },
+    marks: [{ type: "sunburst", data: "sales", path: ["region", "country"], value: "revenue" }],
+  } as unknown as DrawnCase["spec"]);
+  const inspection = {
+    axis: "item",
+    points: [{ label: "Europe / France", names: ["Europe", "France"] }],
+  };
+
+  /** Clicks the sector of France, once the chart has loaded. */
+  async function clickFrance(chart: MountedChart) {
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    chart.render();
+    const model = MountedChart.modelOf(chart);
+    const point = model.inspectItem('[0,"Europe","France"]')!.points[0]!;
+    const rect = chart.root.getBoundingClientRect();
+    const at = { clientX: rect.left + point.px, clientY: rect.top + point.py, bubbles: true };
+    for (const type of ["pointermove", "pointerdown", "pointerup"])
+      chart.root.dispatchEvent(new PointerEvent(type, { ...at, pointerType: "mouse", button: 0 }));
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  contractTest(
+    "inspection.names.widget",
+    async () => {
+      const model = new MockModel({
+        _chart: {
+          revision: 0,
+          spec: fullSpec(spec),
+          buffers: [],
+          selection: null,
+          viewport: null,
+          drill_root: null,
+          item_positions: {},
+        },
+        _listening: ["click"],
+      });
+      const widget = widgetModule();
+      const page = host();
+      const chart = made(() => {
+        cleanups.push(widget.initialize({ model }));
+        cleanups.push(widget.render({ model, el: page }));
+      });
+      await clickFrance(chart);
+      expect(model.messages("click")).toMatchObject([{ type: "click", event: { inspection } }]);
+    },
+    "names the node's path, in a notebook widget",
+  );
+
+  contractTest(
+    "inspection.names.streamlit",
+    async () => {
+      const payload = encodePayload(fullSpec(spec), [], { events: ["click"] });
+      let triggers: [string, unknown][] = [];
+      const chart = made(() => {
+        const ran = run(host(), payload);
+        cleanups.push(ran.cleanup);
+        triggers = ran.triggers;
+      });
+      await clickFrance(chart);
+      expect(triggers).toMatchObject([["click", { inspection }]]);
+    },
+    "names the node's path, in a Streamlit app",
+  );
+
+  contractTest(
+    "inspection.names.web",
+    async () => {
+      const page = host();
+      const inline = { protocol: 1, kind: "chart", spec: fullSpec(spec), buffers: [] };
+      const template = document.createElement("template");
+      template.setAttribute("data-herceg-payload", "");
+      template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      page.dataset.herceg = "";
+      page.append(template);
+      const clicks: unknown[] = [];
+      page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
+      const chart = await mountFragment(page);
+      cleanups.push(() => unmountFragment(page));
+      await clickFrance(chart as unknown as MountedChart);
+      expect(clicks).toMatchObject([{ inspection }]);
+    },
+    "names the node's path, in a web page",
+  );
+});
