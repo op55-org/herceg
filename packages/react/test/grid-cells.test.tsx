@@ -1216,7 +1216,7 @@ describe("<Grid> cells", () => {
     const refs = [...host.querySelectorAll(".hg-host")].map((one) => new WeakRef(one));
     act(() => root.render(view(["owner", "id"])));
     expect(model.sort).toEqual([{ field: "id", order: "descending" }]);
-    const released = refs.filter((ref) => !ref.deref()!.isConnected);
+    const released = refs.filter((ref) => !ref.deref()?.isConnected);
     expect(released.length).toBeGreaterThan(0);
     // React keeps a component's previous state until its next commit.
     act(() => root.render(view(["owner", "id"])));
@@ -1384,7 +1384,7 @@ describe("<Grid> cells", () => {
     before.clear();
     model.scrollTo({ left: 120 * 9 });
     await frames();
-    const gone = refs.filter((ref) => !ref.deref()!.isConnected).length;
+    const gone = refs.filter((ref) => !ref.deref()?.isConnected).length;
     expect(gone).toBeGreaterThan(0);
     // React keeps a component's previous state until its next commit.
     model.scrollTo({ top: ROW * 400 });

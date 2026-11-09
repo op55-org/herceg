@@ -1000,7 +1000,7 @@ describe("<Grid> cells", () => {
     before.clear();
     model.scrollTo({ left: 120 * 9 });
     await frames();
-    const gone = refs.filter((ref) => !ref.deref()!.isConnected).length;
+    const gone = refs.filter((ref) => !ref.deref()?.isConnected).length;
     expect(gone).toBeGreaterThan(0);
     await frames();
     await collectGarbage();
