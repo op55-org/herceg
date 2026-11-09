@@ -246,6 +246,8 @@ export interface InspectionPayload {
     row: number | null;
     value: number | null;
     text: string;
+    /** A layout item's names from the top (pies, funnels, treemaps, sunbursts). */
+    names?: string[];
     /** The fields of the row its mark's tooltip shows (`tooltip.fields`), times in epoch ms. */
     fields?: {
       field: string;
@@ -760,6 +762,7 @@ export function inspectionPayload(
       row: point.row ?? null,
       value: finite(point.value),
       text: point.text,
+      ...(point.names && { names: [...point.names] }),
       ...(point.fields && { fields: point.fields.map((field) => ({ ...field })) }),
     })),
     ...(inspection.axis === "item" && inspection.values && { values: inspection.values }),

@@ -1688,6 +1688,35 @@ def test_treemaps_and_sunbursts_send_their_paint_layout_and_labels():
     assert "<svg" in ring.to_svg()
 
 
+@pytest.mark.contract("sunburst.labels.min-angle.python")
+def test_sunbursts_name_sectors_by_an_angle():
+    # Sectors of 237.6, 118.8, 2.38, and 1.19 degrees.
+    slices = {
+        "name": ["Wide", "Half", "A long name of a thin sector", "Thinner"],
+        "v": [100, 50, 1, 0.5],
+    }
+
+    def names(labels: hg.SunburstLabels | None) -> list[str]:
+        chart = hg.Chart(slices, width=400, height=400, legend=False)
+        return re.findall(
+            r"<text[^>]*>(.*?)</text>", chart.sunburst(["name"], "v", labels=labels).to_svg()
+        )
+
+    assert names(None) == ["Wide", "Half"]
+    angled = hg.SunburstLabels(rotation="radial", min_angle=2)
+    assert names(angled) == ["Wide", "Half", "A long name of a thin sector"]
+    assert names(hg.SunburstLabels(min_angle=1)) == [*names(angled), "Thinner"]
+    spec = hg.Chart(slices).sunburst(["name"], "v", labels=angled).to_spec()
+    assert spec[0]["marks"][0]["labels"] == {"rotation": "radial", "minAngle": 2}
+    for refused in (-1, 361, True, "2", float("nan")):
+        with pytest.raises(
+            hg.ChartError, match="SunburstLabels min_angle: expected degrees from 0 to 360"
+        ):
+            hg.SunburstLabels(min_angle=refused)  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match='treemap labels: unknown key "minAngle"'):
+        hg.Chart(slices).treemap(["name"], labels={"minAngle": 2})
+
+
 def test_treemaps_and_sunbursts_refuse_paint_and_labels_they_cannot_draw():
     sales = {"market": ["A", "B"], "segment": ["x", "y"], "value": [1.0, 2.0]}
     org = {"node": ["root", "a"], "up": [None, "root"]}

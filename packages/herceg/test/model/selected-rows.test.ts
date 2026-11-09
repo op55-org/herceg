@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ColumnInput } from "../../src/data/column.ts";
 import { time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
@@ -14,11 +14,17 @@ import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
+import { funnel } from "../../src/marks/funnel.ts";
+import { graph } from "../../src/marks/graph.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { line } from "../../src/marks/line.ts";
+import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { rug } from "../../src/marks/rug.ts";
+import { sankey } from "../../src/marks/sankey.ts";
+import { sunburst } from "../../src/marks/sunburst.ts";
+import { treemap } from "../../src/marks/treemap.ts";
 import { violin } from "../../src/marks/violin.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -891,5 +897,85 @@ describe("lassos and clicks as rows", () => {
     expect(
       cursorRows(model, new Set([values]), { panel: "", key: s!.key, position: 0 }),
     ).toBeUndefined();
+  });
+});
+
+describe("layout items' rows, for the pointer's cursor", () => {
+  it("are said to be there as rowsOf finds them, without reading them", () => {
+    const sales = table({
+      region: ["Europe", "Europe", "Asia"],
+      country: ["France", "Spain", "Japan"],
+      n: [4, 2, 5],
+    });
+    const links = table({ from: ["a", "a", "b"], to: ["b", "c", "c"], v: [5, 2, 3] });
+    const nodes = table({ node: ["a", "b"], group: ["x", "y"] });
+    const other = table({ v: [1] });
+    const cases: [ChartConfig, Table[]][] = [
+      [{ marks: [pie(sales, { category: "region", value: "n" })] }, [sales]],
+      [{ marks: [funnel(sales, { category: "country", value: "n" })] }, [sales]],
+      [{ marks: [treemap(sales, { path: ["region", "country"], value: "n" })] }, [sales]],
+      [{ marks: [sunburst(sales, { path: ["region", "country"], value: "n" })] }, [sales]],
+      [{ marks: [sankey(links, { source: "from", target: "to", value: "v" })] }, [links]],
+      [
+        { marks: [graph(links, { source: "from", target: "to", nodes, node: "node" })] },
+        [links, nodes],
+      ],
+    ];
+    for (const [config, tables] of cases) {
+      const model = drawn(config);
+      const result = model.items!.result()!;
+      const keys = [...Array.from({ length: result.count }, (_, i) => result.item(i).key), "[0]"];
+      for (const key of keys)
+        for (const of of [...tables, other])
+          expect([key, result.holdsRows!(key, of)]).toEqual([
+            key,
+            result.rowsOf!(key, of) !== undefined,
+          ]);
+    }
+    // Drilled, a sunburst's sectors outside the node drilled into, which a
+    // drill's frames draw leaving, hold the rows the layout before gave them.
+    const rings = drawn(cases[3]![0]);
+    rings.items!.setDrillRoot(["Europe"]);
+    rings.scene(estimateText);
+    const drilled = rings.items!.result()!;
+    expect(drilled.rowsOf!('[0,"Asia"]', sales)).toBeUndefined();
+    expect(drilled.holdsRows!('[0,"Asia"]', sales)).toBe(true);
+    expect(drilled.holdsRows!('[0,"Africa"]', sales)).toBe(false);
+    // A node "c" only links name stands for no row of the nodes table.
+    const network = drawn(cases[5]![0]).items!.result()!;
+    expect(network.holdsRows!('[0,"c"]', nodes)).toBe(false);
+    expect(network.holdsRows!('[0,"a"]', nodes)).toBe(true);
+
+    // Where a row selection takes clicks, the pointer over each item reads
+    // no rows to say whether a click there selects some, true or false.
+    for (const [config, tables] of cases) {
+      const [first, ...more] = tables.map((of) => ({ store: selectionStore(of), channel: "c" }));
+      const selection = rowSelection(first!, ...more);
+      const model = drawn({ ...config, rowSelection: selection });
+      const chart = { selection: null, clear() {}, render() {}, root: new EventTarget() as never };
+      const link = selection.mount(
+        undefined,
+        model,
+        chart,
+        { emit() {} },
+        () => {},
+        () => 0,
+        () => null,
+        { textContent: null },
+      );
+      const result = model.items!.result()!;
+      const read = vi.spyOn(result, "rowsOf");
+      const answers = new Map<string, boolean | undefined>();
+      for (let i = 0; i < result.count; i++) {
+        const { key } = result.item(i);
+        const { px, py } = model.inspectItem(key)!.points[0]!;
+        answers.set(key, link.clicks(px, py));
+      }
+      expect(read).not.toHaveBeenCalled();
+      if (config === cases[5]![0]) {
+        expect(answers.get('[0,"c"]')).toBe(false);
+        expect(answers.get('[0,"a"]')).toBe(true);
+      }
+    }
   });
 });

@@ -52,7 +52,8 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   the pointer's frame.
 - **State** binds with `v-model:selection`, `v-model:viewport`,
   `v-model:visibility`, and `v-model:drill-root`.
-- **Tooltips** of your own render in the `renderTooltip` slot.
+- **Tooltips** of your own render in the `renderTooltip` slot; a tree
+  node's point carries its path (`point.names`).
 - **Anchors**: `<Anchor :at="{ x, y }" side="top">` in the chart's slot
   holds its slot's content at a place in the data, moving with every frame
   and hidden out of view, teleported with your app's provides.

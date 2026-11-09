@@ -31,6 +31,7 @@ import type { Frozen, InteractionSpec, SunburstSpec } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
 import { surface } from "../theme.ts";
 import type { LabelPartOf } from "./encoding.ts";
+import type { PartText } from "./features/part-text.ts";
 import type { TreeText } from "./features/tree-text.ts";
 import {
   type ItemInfo,
@@ -63,6 +64,12 @@ import {
  */
 export interface SunburstLabels<S extends Schema> {
   rotation?: "horizontal" | "radial";
+  /**
+   * Degrees: every sector at least this wide is named, whole, whether its
+   * name fits or not (it may run past its sector), and no narrower one is.
+   * Without it, names show where they fit.
+   */
+  minAngle?: number;
   content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true } | { label: string }>[];
   style?: TextStyle;
 }
@@ -84,7 +91,7 @@ export type SunburstOptions<S extends Schema> = (
   TreePaintOptions<CategoryField<S>> & {
     /** Number field summed over each node's rows; without it, rows count. */
     value?: NumberField<S>;
-    /** Names inside the sectors that have room for them; true by default. */
+    /** Names inside the sectors that have room for them (see `minAngle`); true by default. */
     labels?: boolean | SunburstLabels<S>;
     /** The center kept empty of rings, as a fraction of the sunburst's radius; 0.18 by default. */
     innerRadius?: number;
@@ -506,6 +513,7 @@ export class SunburstMark implements LayoutMark {
       // Its path as the fields' displays write it (`written`); keys read `view`.
       const label = pathText(node);
       const key = data.keyOf(frame.id, view, node);
+      const names = [...view.prefix, ...pathOf(tree, node)];
       if (node === 0) {
         // The root in the middle: its total, the whole of what is shown.
         const outer = hole - radial / 2;
@@ -514,6 +522,7 @@ export class SunburstMark implements LayoutMark {
         return {
           key,
           label,
+          names,
           color: centerColor,
           value: total,
           text,
@@ -529,6 +538,7 @@ export class SunburstMark implements LayoutMark {
       return {
         key,
         label,
+        names,
         color: fills[node] ?? colorOf(node) ?? theme.muted,
         value: shown[node]!,
         text: `${amount(shown[node]!)} (${percent(shown[node]! / total)}${where(written)})${data.selectedText(counts, node, locale, fieldText)}`,
@@ -637,6 +647,9 @@ export class SunburstMark implements LayoutMark {
       },
       summary: () => this.#summary(written, shown, percent, amount, fieldText),
       rowsOf: (key, of) => (of === this.table ? data.rowsOf(frame.id, view, key) : undefined),
+      // In the panel's whole tree: a sector leaving a drill's frames holds its rows too.
+      holdsRows: (key, of) =>
+        of === this.table && data.nodeOf(frame.id, data.view(frame.rows), key) >= 0,
       soleRow: (key, of) => (of === this.table ? data.soleRow(frame.id, view, key) : undefined),
       // An empty center goes up a level when clicked, though it is no item.
       drill: data.drill(
@@ -754,12 +767,17 @@ export class SunburstMark implements LayoutMark {
     }
     // The thinnest line radial names may have, for sectors too thin for any.
     const thinnest = radial ? labels.paint(frame, theme.text).lineHeight / 2 : 0;
+    // With `minAngle`, sectors at least that wide (before gaps) are named
+    // whole, past their edges if need be, and no others are.
+    const least = labels.minAngle;
     for (const nodes of byDepth) {
       for (const node of nodes) {
         const fill = fills[node];
         const [r0, r1] = radii(node);
         const [a0, a1] = angles(node);
         const sweep = a1 - a0;
+        const byAngle = least !== undefined;
+        if (byAngle && sweep < least - 1e-12) continue;
         const mid = (a0 + a1) / 2;
         const center = (r0 + r1) / 2;
         const [x, y] = [cx + center * Math.cos(mid), cy + center * Math.sin(mid)];
@@ -769,19 +787,22 @@ export class SunburstMark implements LayoutMark {
           // corners inside the ring's outer edge, and no thicker than the
           // sector at its inner end.
           const outer = 2 * r1 * Math.sin(Math.min(sweep, Math.PI) / 2) - angular;
-          if (outer < thinnest || r1 - r0 < 8) continue;
+          if (!byAngle && (outer < thinnest || r1 - r0 < 8)) continue;
           const parts = write(node);
           if (!parts) continue;
           const paint = labels.paint(frame, ink);
           const [padX, padY] = labels.padding(paint);
           const whole = labels.block(parts, paint, frame);
-          const half = (whole.lines.height + padY) / 2;
-          const reach = Math.sqrt(Math.max(0, (r1 - 2) ** 2 - half ** 2));
-          const block = whole.fit(2 * Math.min(reach - center, center - r0 - 2) - padX);
-          if (!block) continue;
-          const inner = Math.max(r0, center - (block.lines.width + padX) / 2);
-          const thick = 2 * inner * Math.sin(Math.min(sweep, Math.PI) / 2) - angular;
-          if (block.lines.height + padY > thick) continue;
+          let block: PartText | undefined = whole;
+          if (!byAngle) {
+            const half = (whole.lines.height + padY) / 2;
+            const reach = Math.sqrt(Math.max(0, (r1 - 2) ** 2 - half ** 2));
+            block = whole.fit(2 * Math.min(reach - center, center - r0 - 2) - padX);
+            if (!block) continue;
+            const inner = Math.max(r0, center - (block.lines.width + padX) / 2);
+            const thick = 2 * inner * Math.sin(Math.min(sweep, Math.PI) / 2) - angular;
+            if (block.lines.height + padY > thick) continue;
+          }
           const turn = (mid * 180) / Math.PI;
           const angle = Math.cos(mid) < 0 ? turn + 180 : turn;
           const made = labels.items(block, x, y, angle, paint, frame);
@@ -799,16 +820,18 @@ export class SunburstMark implements LayoutMark {
           return true;
         };
         if (!labels.styled) {
-          // No name keeps a box narrower than nothing inside: not measured.
-          if (!fits(0, lineHeight)) continue;
-          // The whole name first, then shorter and shorter cuts of it.
           const name = oneLineText(written.tree.names[node]!);
-          const width = measure(name, font);
-          let text = fits(width, lineHeight) ? name : "";
-          for (let room = width * 0.8; !text && room >= LEAST_NAME; room *= 0.8) {
-            const candidate = labelFor(name, room, measure, font);
-            if (!candidate) break;
-            if (fits(measure(candidate, font), lineHeight)) text = candidate;
+          let text = byAngle ? name : "";
+          // No name keeps a box narrower than nothing inside: not measured.
+          if (!byAngle && fits(0, lineHeight)) {
+            // The whole name first, then shorter and shorter cuts of it.
+            const width = measure(name, font);
+            if (fits(width, lineHeight)) text = name;
+            for (let room = width * 0.8; !text && room >= LEAST_NAME; room *= 0.8) {
+              const candidate = labelFor(name, room, measure, font);
+              if (!candidate) break;
+              if (fits(measure(candidate, font), lineHeight)) text = candidate;
+            }
           }
           if (!text) continue;
           let batch = plain.get(ink);
@@ -829,12 +852,14 @@ export class SunburstMark implements LayoutMark {
         // height: none fits where nothing that tall does.
         const [padX, padY] = labels.padding(paint);
         const tall = whole.lines.height + padY;
-        if (!fits(padX, tall)) continue;
-        let block = fits(whole.lines.width + padX, tall) ? whole : undefined;
-        for (let room = whole.lines.width * 0.8; !block && room >= LEAST_NAME; room *= 0.8) {
-          const cut = whole.fit(room);
-          if (!cut) break;
-          if (fits(cut.lines.width + padX, tall)) block = cut;
+        let block = byAngle ? whole : undefined;
+        if (!byAngle && fits(padX, tall)) {
+          if (fits(whole.lines.width + padX, tall)) block = whole;
+          for (let room = whole.lines.width * 0.8; !block && room >= LEAST_NAME; room *= 0.8) {
+            const cut = whole.fit(room);
+            if (!cut) break;
+            if (fits(cut.lines.width + padX, tall)) block = cut;
+          }
         }
         if (block) {
           const made = labels.items(block, x, y, 0, paint, frame);

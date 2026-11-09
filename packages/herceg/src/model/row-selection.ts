@@ -34,6 +34,7 @@ import { channelSelection, channelsChosen, membership } from "./memberships.ts";
 import type { ChangeCause, ChartConfig, ChartModel } from "./model.ts";
 import {
   brushedRows,
+  clickedOn,
   clickedRows,
   cursorRows,
   type PointRows,
@@ -529,6 +530,9 @@ export class RowLink {
       }
     | undefined;
   #disposed = false;
+  /** The bindings clicks and Space write, and their tables. */
+  readonly #clickable: readonly Bound[];
+  readonly #clicked: ReadonlySet<Table>;
 
   constructor(
     selection: RowSelection,
@@ -543,6 +547,8 @@ export class RowLink {
   ) {
     this.selection = selection;
     this.#bound = bound;
+    this.#clickable = bound.filter((b) => b.events.has("click"));
+    this.#clicked = new Set(this.#clickable.map((b) => b.table));
     this.#model = model;
     this.#chart = chart;
     this.#events = events;
@@ -689,6 +695,32 @@ export class RowLink {
     };
   }
 
+  /** Whether a binding takes clicks (`events`), which then select rows. */
+  get takesClicks(): boolean {
+    return this.#clickable.length > 0;
+  }
+
+  /**
+   * Whether a click at a pixel selects rows, as `clicked` finds them: on
+   * an item standing for rows of a table a binding takes clicks on.
+   * Undefined when no binding takes clicks. It reads no rows where the
+   * layout can say without (`holdsRows`), so the pointer may ask as it moves.
+   */
+  clicks(px: number, py: number): boolean | undefined {
+    if (!this.takesClicks) return undefined;
+    const tables = this.#clicked;
+    const on = clickedOn(this.#model, tables, px, py);
+    if (!on) return false;
+    // A point's rows, or an annotation's row, as `clickedRows` reads them.
+    if (!("layout" in on)) return on.picked.item.part.kind === "row" || !!on.picked.item.part.point;
+    const { key, layout } = on;
+    const items = this.#model.items!;
+    const drawn = items.result(layout);
+    for (const table of tables)
+      if (drawn?.holdsRows?.(key, table) ?? items.rowsAt(key, table, layout)) return true;
+    return false;
+  }
+
   /**
    * A click at a pixel: what it selects, found now, written when the
    * returned function is called: the rows of the point under it (Shift
@@ -701,10 +733,9 @@ export class RowLink {
    * rows before the write never makes it select others.
    */
   clicked(px: number, py: number, keys: Modifiers): (() => Written | null) | undefined {
-    const clickable = this.#bound.filter((b) => b.events.has("click"));
+    const clickable = this.#clickable;
     if (clickable.length === 0) return undefined;
-    const tables = new Set(clickable.map((b) => b.table));
-    const found = clickedRows(this.#model, tables, px, py);
+    const found = clickedRows(this.#model, this.#clicked, px, py);
     const mode = modeOf(keys);
     if (found === null) return () => null;
     const kept = found && new RowSet(found.table).addAll(found.rows);
@@ -719,7 +750,7 @@ export class RowLink {
    * clicks select.
    */
   #key(event: KeyPress) {
-    const clickable = this.#bound.filter((b) => b.events.has("click"));
+    const clickable = this.#clickable;
     if (event.target !== this.#chart.root || clickable.length === 0) return;
     if (event.key === "Escape") {
       if (!this.#previewing && !this.#escaped) this.#pick(clickable, undefined, "only", "keyboard");
@@ -730,8 +761,7 @@ export class RowLink {
     // as the arrow keys move it.
     this.#chart.render();
     const cursor = this.#cursor();
-    const tables = new Set(clickable.map((b) => b.table));
-    const found = cursor && cursorRows(this.#model, tables, cursor);
+    const found = cursor && cursorRows(this.#model, this.#clicked, cursor);
     if (!found) return;
     event.preventDefault();
     const [change] = this.#pick(clickable, found, modeOf(event), "keyboard");

@@ -10,7 +10,7 @@ import type { Scene } from "../scene/scene.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import { type Camera, MAX_ZOOM, MIN_ZOOM } from "../three/camera.ts";
 import type { Controls as ChartControls, ControlsHost } from "./controls.ts";
-import { RESET_GLYPH, Toolbar } from "./toolbar.ts";
+import { RESET_GLYPH, Toolbar, toolbars } from "./toolbar.ts";
 
 /**
  * Pixels a press moves before it turns the chart, as before it brushes or
@@ -134,6 +134,7 @@ export class Controls implements ChartControls {
         this.#toolbars.set(state, toolbar);
       }
       toolbar.element.setAttribute("aria-label", name);
+      toolbar.shown = toolbars(this.#host);
       if (state !== "") toolbar.place(plot, scene.width, scene.height);
       toolbar.style(scene.theme);
     }

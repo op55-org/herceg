@@ -1693,7 +1693,7 @@ export class ItemViews {
 
   #inspection(view: ItemView, item: LayoutItem | undefined): ItemInspection | undefined {
     if (!item) return undefined;
-    const { key, label, color, text, value, px, py, outline, values, row } = item;
+    const { key, label, names, color, text, value, px, py, outline, values, row } = item;
     // A map's or a 3D box's items name their layer among its layers.
     const mark = item.layer === undefined ? view.index : (view.indices?.[item.layer] ?? item.layer);
     const owner = view.marks[mark] as (ChartMark & { table?: Table }) | undefined;
@@ -1722,6 +1722,8 @@ export class ItemViews {
           value,
           px,
           py,
+          // A copy: marks may keep their items.
+          ...(names && { names: [...names] }),
           ...(fields && { fields }),
         },
       ],

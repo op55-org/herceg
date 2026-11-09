@@ -46,6 +46,13 @@ export interface InspectedPoint {
   py: number;
   /** The fields of `row` its mark's tooltip shows besides its value (the mark's `tooltip.fields`). */
   fields?: readonly InspectedField[];
+  /**
+   * A layout item's names from the top, as `getItems` gives them: a tree
+   * node's path below the whole tree's root (drilled or not), a pie slice's
+   * or a funnel stage's category. Only items of pies, funnels, treemaps,
+   * and sunbursts have them.
+   */
+  names?: readonly string[];
 }
 
 /** What a tooltip, hover event, or keyboard cursor is on. */

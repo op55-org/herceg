@@ -56,7 +56,10 @@ the model's `inspect()`.
   its `id`, the series key, and the row (`rowOf(series, position)`). Marks
   whose series index summaries (`summarizes`: histograms, box plots, boxen,
   violins) give no row; layout items give one where an item is one row.
-  This costs three fields and one map lookup per point.
+  This costs three fields and one map lookup per point. A pie's, funnel's,
+  treemap's, or sunburst's item also carries `names`, a copy of its
+  `ItemInfo.names` (its category, or a node's path below the whole tree's
+  root, drilled or not).
 - Keyboard navigation keeps a position within a series, so repeated x
   values are each reachable, and reads what the pointer would read at its
   point (`inspectPosition`, `model/keyboard.ts`). Along the series' axis
@@ -572,6 +575,24 @@ where a mark has `drag`.
   chart's legend notes the entry each click is on before it acts
   (`Legend.clicked`), so a click held while the controller loads is
   reported as that entry even when a listener took the legend away.
+- **The pointer cursor.** Where the chart's own click acts
+  (`#clicksAct`: `select`, a pin by click, a row selection taking clicks,
+  or a tree that drills), the pointer reads what it is on as an inspecting
+  chart does (`#reads`, so `busy` pauses value animation under it), and
+  `#aim`, after the hover read in each frame, decides whether a click there
+  acts in `#clicked`'s order: off the panels, only on an axis label, as
+  presses there click, and in a panel, nowhere a plain mouse drag moves
+  the crosshair cursor (whose presses click nothing); a row selection's click (`RowLink.clicks`, which
+  asks a layout whether an item holds rows, `LayoutResult.holdsRows`,
+  rather than reading them); a drill or the middle's drill out; `select`'s
+  item or series; the pin `#pinOf` would make. It decides once per move,
+  scene, and drill frame: `#on` keeps the scene, `transitionItems`, the
+  pointer, and the target the hover read picked, so one pick serves both,
+  and is dropped when clicks stop acting. The root's cursor is written
+  only when the chart's choice changes; a draggable rule's resize cursor
+  wins, touches and drags show none, and a frame after a drag shows it
+  again. Picking loads at the first move of such a chart; charts whose
+  clicks act on nothing pick nothing for it.
 
 ## Anchors
 
@@ -671,7 +692,8 @@ chunk:
   a network whose data changed and is not drawn again is dropped rather
   than misplaced.
 - They share a toolbar (`dom/toolbar.ts`) of named buttons, focusable while
-  hidden. Ordinary line charts carry only the public setters and small
+  hidden, which `interaction.toolbar: false` keeps from showing (`toolbars`,
+  read each time a family shows it); keys and gestures stay. Ordinary line charts carry only the public setters and small
   bridges for loading, drawing, and events.
 
 ## Selected rows
@@ -703,7 +725,7 @@ are never selected by lassos, clicks, or keys.
 | Range brush | Per table, the disjunction over marks in its panels of each mark's condition: its places along the brushed axes in range (category ranges as label lists), joined with a series field's shown series, a row view's filter, and the facet panels covered. Stacks brushed along values select their drawn tops as rows. |
 | Lasso | Each row's anchor tested against the outline in pixels, after its bounding box (bars through `BarMark.placement`). |
 | Click | The picker's topmost item under the pointer among marks of bound tables ([Picking](#picking)): its row, or a summarized point's rows through `Mark.summarized`. |
-| Layout items | The mark's own `rowsOf` (a slice's counted rows, a subtree's rows, a link's rows) and `lassoed`. An item standing for no bound row changes nothing. |
+| Layout items | The mark's own `rowsOf` (a slice's counted rows, a subtree's rows, a link's rows) and `lassoed`. An item standing for no bound row changes nothing. Whether a click would select rows, which the pointer's cursor shows as it moves, `holdsRows` says without reading them. |
 
 Results are computed for every table before any channel changes.
 

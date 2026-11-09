@@ -1486,24 +1486,37 @@ class SunburstLabels:
     """Names of a sunburst's sectors, inside those with room for them: each
     item's name, or ``content`` and ``style`` as ``hg.TreemapLabels`` take
     them, written across each sector (``rotation="horizontal"``, the default)
-    or along its radius, upright (``"radial"``)::
+    or along its radius, upright (``"radial"``). With ``min_angle`` (degrees),
+    every sector at least that wide is named, whole, whether its name fits
+    or not, and no narrower one is::
 
         chart.sunburst(path=["ring1", "ring2"], labels=hg.SunburstLabels(rotation="radial"))
+        chart.sunburst(path=["ring1", "ring2"], labels=hg.SunburstLabels(min_angle=1.72))
     """
 
     rotation: Literal["horizontal", "radial"] | None = None
+    min_angle: float | None = None
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.rotation is not None:
             _choice(self.rotation, ("horizontal", "radial"), "SunburstLabels rotation")
+        angle = self.min_angle
+        if angle is not None:
+            if isinstance(angle, bool) or not is_number(angle) or not 0 <= float(angle) <= 360:
+                raise ChartError(
+                    "SunburstLabels min_angle: expected degrees from 0 to 360; "
+                    f"received {shown(angle)}"
+                )
+            self.min_angle = float(angle)
         _tree_content(self.content, "SunburstLabels")
         self.style = _built(self.style, TextStyle, "SunburstLabels style")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
             "rotation": self.rotation,
+            "minAngle": self.min_angle,
             "content": content_spec(self.content, "SunburstLabels content"),
             "style": _spec(self.style) if self.style is not None else None,
         }

@@ -10,6 +10,7 @@ import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { custom } from "../../src/marks/custom.ts";
+import { funnel } from "../../src/marks/funnel.ts";
 import { gauge } from "../../src/marks/gauge.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
 import { geoshape } from "../../src/marks/geoshape.ts";
@@ -20,11 +21,13 @@ import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { radar } from "../../src/marks/radar.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { sunburst } from "../../src/marks/sunburst.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { violin } from "../../src/marks/violin.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel, type Inspection } from "../../src/model/model.ts";
 import { Nearest } from "../../src/model/nearest.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 import { xScale, yScale } from "../helpers/scales.ts";
 
@@ -172,6 +175,48 @@ describe("inspected items", () => {
     const key = tree.stepItem(undefined, 1)!;
     expect(identities(tree.inspectItem(key))![0]!.row).toBeUndefined();
   });
+
+  contractTest(
+    "inspection.names",
+    () => {
+      const sales = table({
+        region: ["Europe", "Europe", "Asia"],
+        country: ["France", "Spain", "Japan"],
+        n: [4, 2, 5],
+      });
+      const namesOf = (model: ChartModel, label: string) => {
+        const result = model.items!.result()!;
+        for (let i = 0; i < result.count; i++)
+          if (result.item(i).label === label)
+            return model.inspectItem(result.item(i).key)!.points[0]!.names;
+        throw new Error(`no item ${label}`);
+      };
+      const slices = build({ marks: [pie(sales, { category: "region", value: "n" })] });
+      expect(namesOf(slices, "Asia")).toEqual(["Asia"]);
+      const stages = build({ marks: [funnel(sales, { category: "country", value: "n" })] });
+      expect(namesOf(stages, "Spain")).toEqual(["Spain"]);
+      const tree = build({ marks: [treemap(sales, { path: ["region", "country"], value: "n" })] });
+      expect(namesOf(tree, "Europe")).toEqual(["Europe"]);
+      expect(namesOf(tree, "Europe / France")).toEqual(["Europe", "France"]);
+      // The pointer reads the same.
+      const japan = tree.items!.result()!.items!().find((item) => item.label === "Asia / Japan")!;
+      const { px, py } = tree.inspectItem(japan.key)!.points[0]!;
+      expect(tree.inspect(px, py)!.points[0]!.names).toEqual(["Asia", "Japan"]);
+      // Drilled, a node's names still start at the top, the centre's too.
+      const rings = build({
+        marks: [sunburst(sales, { path: ["region", "country"], value: "n" })],
+        interaction: { zoom: true },
+      });
+      rings.items!.setDrillRoot(["Europe"]);
+      rings.scene(estimateText);
+      expect(namesOf(rings, "Europe / Spain")).toEqual(["Europe", "Spain"]);
+      expect(namesOf(rings, "Europe")).toEqual(["Europe"]);
+      // Points of series have none.
+      const lines = build({ marks: [line(sales, { x: "n", y: "n" })] });
+      expect(lines.inspect(300, 150)!.points[0]!.names).toBeUndefined();
+    },
+    "name their path from the top: a slice's or a stage's category, a tree node's path",
+  );
 
   it("give the row of a gauge's value: the last finite one", () => {
     const cpu = table({ cpu: [40, 55, Number.NaN] });

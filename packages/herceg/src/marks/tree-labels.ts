@@ -1,5 +1,5 @@
 // Names of tree items (treemaps and sunbursts): which labels a mark's
-// `labels` asks for (`at`, `parents`, `rotation`, `content`, `style`),
+// `labels` asks for (`at`, `parents`, `rotation`, `minAngle`, `content`, `style`),
 // checked when the mark is made. Labels written by `content`, in a style,
 // or turned along a radius are drawn with the feature compiler's code
 // (marks/features/tree-text.ts), which charts load before drawing them;
@@ -25,13 +25,14 @@ type LabelsOption =
       readonly at?: string;
       readonly parents?: boolean;
       readonly rotation?: string;
+      readonly minAngle?: number;
       readonly content?: readonly unknown[];
       readonly style?: TextStyle;
     }
   | undefined;
 
 /** What each mark's labels take besides `content` and `style`. */
-const TAKES = { treemap: ["at", "parents"], sunburst: ["rotation"] } as const;
+const TAKES = { treemap: ["at", "parents"], sunburst: ["rotation", "minAngle"] } as const;
 
 /** The parts of a label's block, which its parts' styles leave to it. */
 const BLOCK = ["halo", "background", "padding", "align", "verticalAlign", "lineHeight", "font"];
@@ -70,6 +71,8 @@ export class TreeLabels {
   readonly at: "top-left" | "center";
   readonly parents: boolean;
   readonly rotation: "horizontal" | "radial";
+  /** A sunburst's least angle in radians that names a sector, whole, fitting or not; undefined: where names fit. */
+  readonly minAngle: number | undefined;
   readonly style: TextStyle | undefined;
   /** Whether they need the feature compiler's code: written by content, in a style, or turned. */
   readonly featured: boolean;
@@ -124,7 +127,15 @@ export class TreeLabels {
         "labels rotation",
         `expected "horizontal" or "radial"; received ${JSON.stringify(spec.rotation)}`,
       );
-    const { content } = spec;
+    const { minAngle, content } = spec;
+    if (
+      minAngle !== undefined &&
+      !(typeof minAngle === "number" && minAngle >= 0 && minAngle <= 360)
+    )
+      throw fail(
+        "labels.minAngle",
+        `expected degrees from 0 to 360; received ${JSON.stringify(minAngle)}`,
+      );
     if (content !== undefined) {
       if (!Array.isArray(content) || content.length === 0)
         throw fail(
@@ -180,6 +191,7 @@ export class TreeLabels {
     this.at = spec.at === "center" ? "center" : "top-left";
     this.parents = spec.parents ?? true;
     this.rotation = spec.rotation === "radial" ? "radial" : "horizontal";
+    this.minAngle = minAngle === undefined ? undefined : (minAngle * Math.PI) / 180;
     this.style = spec.style;
     this.featured =
       this.on && (content !== undefined || spec.style !== undefined || this.rotation === "radial");

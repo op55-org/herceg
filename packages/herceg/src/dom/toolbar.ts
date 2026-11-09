@@ -1,16 +1,22 @@
 // A chart's toolbar of buttons for what its controls do with a drag or a
 // key (turn a 3D chart, pan and zoom a map, reset moved nodes), for people
 // who use neither: shown while the pointer is over the chart or focus is in
-// it, and focusable while hidden, which shows it.
+// it, and focusable while hidden, which shows it. `interaction.toolbar:
+// false` leaves every toolbar out; the keys and gestures stay.
 
 import type { ChangeCause } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
+import type { ControlsHost } from "./controls.ts";
 
 /** A circling arrow: back to the view the chart starts with. */
 export const RESET_GLYPH = "M4.5 9A3.5 3.5 0 1 0 6 5.2M4 3v3h3";
 
 /** What pressed a control's button: the pointer, or a key. */
 export type Press = Extract<ChangeCause, "pointer" | "keyboard">;
+
+/** Whether the chart shows its controls' toolbars (`interaction.toolbar`). */
+export const toolbars = (host: ControlsHost): boolean =>
+  host.model.config.interaction?.toolbar !== false;
 
 /** What pressed a button, from its click's count: a key clicks with none. */
 export function pressOf(detail: number): Press {

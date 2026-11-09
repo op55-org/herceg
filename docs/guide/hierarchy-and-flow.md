@@ -113,7 +113,8 @@ hg.sunburst(flare, ["ring1", "ring2", "ring3"], "size", levels=2, inner_radius=1
 | `fillOpacity` | both | A number, or a measure read through a range: `{ measure, range }`, where the measure is an item's `"share"` of its parent, its `"value"`, or its `"depth"`. |
 | `leaf`, `branch` | both | Looks (`fill`, `fillOpacity`, and an `opacity` the fill opacity is multiplied by) for items without and with children, over the paint above. |
 | `breadcrumbs` | both | The strip above a drilled tree: shown while the chart drills or the tree is drilled (the default), never (`false`), or always (`true`). |
-| `labels` | both | `true`, `false`, or `{ content, style }` (parts as in [labels of parts](marks.md#parts-with-a-look-of-their-own)) with, on treemaps, `at` (`"top-left"`, the default, or `"center"`) and `parents` (`false` names only rectangles without others inside and keeps no strip at the top of the others), and on sunbursts `rotation` (`"horizontal"` or `"radial"`, upright along each sector's radius). A path field names the item, or its ancestor at that level; another field reads the one row the item stands for; `{ value: true }` writes its value. Fields are written on one line (only text parts break lines), names are black or white by what they are seen over, and those that do not fit are left out; `overlap` and time formats are refused. |
+| `labels` | both | `true`, `false`, or `{ content, style }` (parts as in [labels of parts](marks.md#parts-with-a-look-of-their-own)) with, on treemaps, `at` (`"top-left"`, the default, or `"center"`) and `parents` (`false` names only rectangles without others inside and keeps no strip at the top of the others), and on sunbursts `rotation` (`"horizontal"` or `"radial"`, upright along each sector's radius) and `minAngle`. A path field names the item, or its ancestor at that level; another field reads the one row the item stands for; `{ value: true }` writes its value. Fields are written on one line (only text parts break lines), names are black or white by what they are seen over, and those that do not fit are left out; `overlap` and time formats are refused. |
+| `labels.minAngle` | sunburst | Degrees, from 0 to 360: every sector at least this wide (before gaps) is named with its whole label, whether it fits or not (it may run past its sector, as d3's zoomable sunburst names do), and no narrower one is. `1.72` is d3's rule of 0.03 radians. Without it, names show where they fit. A drilled sunburst's middle keeps its name where it fits. Each layout drawn applies it; while a drill or value change moves, labels move and fade between the two layouts' own. |
 
 - With `color`, the legend lists the colors in `sort` order and toggles
   them; a hidden color's items leave the layout, and their ancestors'
@@ -150,7 +151,11 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
   above). A sunburst also puts the drilled node in its middle (unless
   `center: false`), where a click goes up.
 - Keys: Enter opens, Backspace goes up, 0 shows the whole tree; a toolbar
-  has Up and whole-tree buttons. Each change is announced.
+  has Up and whole-tree buttons (`interaction.toolbar: false` leaves it
+  out; the keys, the breadcrumbs, and the middle still go up). Each change
+  is announced.
+- The pointer cursor shows where a click drills: over a node with children,
+  and over a drilled tree's middle; not over leaves.
 - When a row selection takes clicks, a click selects the node's rows and
   Enter still drills.
 - Steps are named by their raw values in `setDrillRoot`, `getDrillRoot`,
@@ -167,6 +172,27 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
   does not stop it; meanwhile hovering, clicks, `getItems`, and text
   placed on items read the sectors as drawn. Treemaps show the new layout
   at once.
+- Inspected items carry their path: an inspection's point of a tree's node
+  has `names`, its raw names from the top below the whole tree's root,
+  drilled or not (a pie slice's and a funnel stage's: their category), in
+  `renderTooltip`, `hover`, `click`, and `contextMenu` events,
+  `chart.inspect`, the adapters' callbacks, and Python's events
+  (`event.inspection.points[0].names`, a tuple).
+
+```ts
+createChart(element, {
+  marks: [sunburst(classes, { path: ["level1", "level2"], value: "size", levels: 2,
+    labels: { rotation: "radial", minAngle: 1.72 } })],
+  interaction: { zoom: true, toolbar: false },
+  renderTooltip: ({ points: [point] }) => point && ["flare", ...(point.names ?? [])].join("/"),
+});
+```
+
+```python
+hg.Chart(classes, zoom=True, toolbar=False).sunburst(
+    path=["level1", "level2"], value="size", levels=2,
+    labels=hg.SunburstLabels(rotation="radial", min_angle=1.72))
+```
 
 ## Gauges
 

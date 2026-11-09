@@ -23,6 +23,7 @@ import {
   renderToSVG,
   rowView,
   rule,
+  sunburst,
   table,
   text,
   time,
@@ -625,3 +626,22 @@ async function exportChart() {
   renderToPDF(chart);
 }
 void exportChart;
+
+// Hierarchy and flow: a sunburst named by an angle, its tooltip by the path
+declare const classes: import("../../src/index.ts").Table<{
+  level1: "category";
+  level2: "category";
+  size: "number";
+}>;
+createChart(element, {
+  marks: [
+    sunburst(classes, {
+      path: ["level1", "level2"],
+      value: "size",
+      levels: 2,
+      labels: { rotation: "radial", minAngle: 1.72 },
+    }),
+  ],
+  interaction: { zoom: true, toolbar: false },
+  renderTooltip: ({ points: [point] }) => point && ["flare", ...(point.names ?? [])].join("/"),
+});

@@ -60,7 +60,10 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
   "Legend".
 - **A toolbar** of named buttons (zoom, pan, turn, drill out) appears in
   maps, networks, 3D charts, and trees that drill, while the pointer or
-  focus is in the chart.
+  focus is in the chart. `interaction.toolbar: false` leaves it out; the
+  keys that do what its buttons do stay (Backspace and 0 in a drilled
+  tree, plus, minus, 0, and Shift with the arrows in maps, networks, and
+  3D charts), and a drilled tree's middle still goes up.
 - **A range navigator's** window and edges are sliders; the summary
   describes the overview and the range in view.
 - **Trees** drilled into show their path as a navigation landmark of

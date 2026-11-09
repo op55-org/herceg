@@ -208,6 +208,10 @@ class InspectedPoint:
     key: str = ""
     #: The columns of ``row`` its mark's tooltip shows besides its value.
     fields: tuple[InspectedField, ...] = ()
+    #: An item's names from the top, as its data has them: a tree node's
+    #: path below the whole tree's root (drilled or not), a pie slice's or a
+    #: funnel stage's category. None for other points.
+    names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1535,6 +1539,7 @@ def decode_inspection(payload: Any) -> Inspection | None:
                     )
                     for field in point.get("fields", ())
                 ),
+                names=tuple(point["names"]) if "names" in point else None,
             )
             for point in payload.get("points", ())
         ),

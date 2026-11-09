@@ -176,6 +176,8 @@ export interface LayoutItem {
   key: string;
   /** What the item is: a category, or a node's path. */
   label: string;
+  /** Its names from the top, as `ItemInfo.names` holds them, for items of marks that publish them. */
+  names?: readonly string[];
   color: string;
   value: number;
   /** The value formatted, with its share where that means something. */
@@ -280,6 +282,13 @@ export interface LayoutResult {
    * none of `table`'s rows.
    */
   rowsOf?(key: string, table: Table): ArrayLike<number> | undefined;
+  /**
+   * Whether the item keyed `key` stands for rows of `table`, as `rowsOf`
+   * gives them (or, for a sector leaving a drill's frames, the layout
+   * before's), found without reading them: for the pointer's cursor as it
+   * moves. Where missing, `rowsOf` is asked.
+   */
+  holdsRows?(key: string, table: Table): boolean;
   /**
    * Exactly the rows of `table` the item keyed `key` stands for, as a
    * condition on its fields, where what the item groups by (`groupsOf`)

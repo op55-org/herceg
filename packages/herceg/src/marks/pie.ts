@@ -361,6 +361,7 @@ export class PieMark implements LayoutMark {
       items[i] = {
         key: slice.key,
         label: slice.label,
+        names: [secondOf(slice.key)!],
         color: frame.color(slice.key),
         value: slice.value,
         text: `${amount(slice.value)} (${percent(share(slice.value))})${
@@ -422,6 +423,7 @@ export class PieMark implements LayoutMark {
         });
         return rows;
       },
+      holdsRows: (key, table) => table === this.table && slices.some((s) => s.key === key),
       soleRow: (key, table) => {
         const slice = table === this.table ? slices.find((s) => s.key === key) : undefined;
         return slice && this.#solesOf(frame.rows).of(slice.code);

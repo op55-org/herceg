@@ -72,6 +72,22 @@ def test_treemaps_and_sunbursts_drill_with_zoom_and_select_rows():
     assert spec["interaction"] == {"zoom": True} and spec["rowSelection"]["channel"] == "c"
 
 
+@pytest.mark.contract("interaction.toolbar.python")
+def test_charts_hide_their_controls_buttons_and_keep_their_keys():
+    chart = hg.Chart(SALES, zoom=True, toolbar=False).sunburst(path=["region", "country"])
+    assert chart.to_spec()[0]["interaction"] == {"zoom": True, "toolbar": False}
+    # Shown by default: the spec says nothing.
+    shown = hg.Chart(SALES, zoom=True, toolbar=True).sunburst(path=["region"])
+    assert shown.to_spec()[0]["interaction"] == {"zoom": True}
+    assert "toolbar" not in hg.Chart(TALKS).graph("from", "to").to_spec()[0].get("interaction", {})
+    with pytest.raises(ValueError, match='Chart toolbar: expected True or False; received "auto"'):
+        hg.Chart(SALES, toolbar="auto").treemap(path=["region"])  # type: ignore[arg-type]
+    # Charts' updates and helpers take it as an option of the chart.
+    assert hg.treemap(SALES, path=["region"], toolbar=False).to_spec()[0]["interaction"] == {
+        "toolbar": False
+    }
+
+
 def test_networks_drag_nodes_draw_directed_links_and_link_labels():
     chart = hg.Chart(TALKS, drag=True).graph("from", "to", directed=True, link_label_field="kind")
     spec, _ = chart.to_spec()

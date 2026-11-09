@@ -19,6 +19,7 @@ from herceg._events import (
     ScaleView,
     ValueGroup,
     decode_input_event,
+    decode_inspection,
     decode_viewport_event,
 )
 
@@ -166,6 +167,16 @@ def test_hover_targets_carry_no_provenance():
     assert decode_input_event(payload).target.provenance is None
     with pytest.raises(ValueError):
         decode_input_event(_clicked({"groups": [{"field": 1}], "condition": None, "source": None}))
+
+
+@pytest.mark.contract("inspection.names.python")
+def test_inspected_layout_items_carry_their_names():
+    point = {"mark": 0, "key": '[0,"Europe","France"]', "label": "Europe / France", "text": "40"}
+    inspection = {"axis": "item", "value": 40, "label": "revenue", "points": [point]}
+    named = {**inspection, "points": [{**point, "names": ["Europe", "France"]}]}
+    assert decode_inspection(named).points[0].names == ("Europe", "France")  # type: ignore[union-attr]
+    # Points of series, and of other layouts, have none.
+    assert decode_inspection(inspection).points[0].names is None  # type: ignore[union-attr]
 
 
 def _legend_click(references: object) -> dict:
