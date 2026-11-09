@@ -863,6 +863,35 @@ describe("<Chart>", () => {
     }
   });
 
+  it("draws what @hover changes in the chart's data in the frame of the move", async () => {
+    const data = table({ t: [0, 1, 2, 3], v: [1, 3, 2, 4] });
+    const { view, chart } = chartRef();
+    let changed: number | undefined;
+    mount(`<Chart ref="view" @hover="handler"><Line :data="data" x="t" y="v" /></Chart>`, () => ({
+      data,
+      view,
+      handler: () => {
+        if (changed !== undefined) return;
+        data.setColumn("v", Float64Array.of(2, 4, 3, 5));
+        changed = chart().revision;
+      },
+    }));
+    await nextTick();
+    for (let loading = chart().loading; loading; loading = chart().loading) await loading;
+    const rect = chart().root.getBoundingClientRect();
+    const { plot } = chart().getPanels()[0]!;
+    chart().root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + plot.x + plot.width / 2,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    await frame();
+    expect(changed).toBeDefined();
+    expect(chart().drawnRevision).toBe(changed);
+  });
+
   it("emits render for the first frame, drawn as the chart mounts, with the ref set", async () => {
     const { view, chart } = chartRef();
     const panels: number[] = [];

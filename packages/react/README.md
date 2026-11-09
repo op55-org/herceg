@@ -47,7 +47,9 @@ export function Latency() {
   frame without rendering React.
 - **Events** are props (`onSelect`, `onViewport`, `onHover`, `onClick`,
   `onContextMenu`, ...); a `ref` gives herceg's chart handle for `setViewport`, `toSVG`,
-  and the rest.
+  and the rest. What `onHover` changes in a table or through the handle
+  draws in the pointer's frame; React state it sets renders when React
+  commits.
 - **State props** (`selection`, `viewport`, `visibility`, `drillRoot`) set
   the chart's state when their value changes; what events report can be
   written back without a loop.

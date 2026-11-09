@@ -1,9 +1,17 @@
 // One animation-frame loop for every chart on the page. Updates requested
 // during a frame (data appends, resizes, pointer moves) are coalesced into a
 // single render per chart on the next frame, and charts outside the viewport
-// wait until they scroll into view.
+// wait until they scroll into view. Each frame reads input first, every
+// chart's before any listener hears it, then reports it, then draws: what
+// listeners of the input change draws in the input's frame.
 
 export interface Scheduled {
+  /**
+   * Reads input against the frame on screen, before any chart draws or
+   * reports it: what reports it, called once every chart due has read.
+   * Charts its listeners change draw in the same frame.
+   */
+  read?(): (() => void) | undefined;
   /** Renders pending changes. Called at most once per frame. */
   flush(): void;
   /** False while the chart is outside the viewport. */
@@ -21,25 +29,35 @@ let frames = 0;
 let lastFrame = 0;
 
 function run() {
-  frame = 0;
   frames++;
+  // Input: every chart reads before any listener hears of it, and charts
+  // listeners change join the frame (see `Scheduled.read`): until the
+  // frame draws, `schedule` asks for no other.
+  let took = performance.now();
+  const reports = [...pending].map((item) => item.visible && attempt(() => item.read?.()));
+  for (const tell of reports) if (tell) attempt(tell);
+  frame = 0;
+  took = performance.now() - took;
   const due = [...pending];
   pending.clear();
-  let took = 0;
   for (const item of due) {
     // Invisible charts stay dirty and render when they become visible.
     if (!item.visible) continue;
     const { cold } = item;
     const started = performance.now();
-    // One failing chart must not stop the others from rendering.
-    try {
-      item.flush();
-    } catch (error) {
-      report(error);
-    }
+    attempt(() => item.flush());
     if (!cold) took += performance.now() - started;
   }
   lastFrame = took;
+}
+
+/** What `work` returns, or undefined if it throws: one failing chart must not stop the others. */
+function attempt<T>(work: () => T): T | undefined {
+  try {
+    return work();
+  } catch (error) {
+    report(error);
+  }
 }
 
 /** How many frames have run: work asked for between two frames shares the count. */
@@ -47,7 +65,7 @@ export function frameCount(): number {
   return frames;
 }
 
-/** How long every chart's rendering took in the last frame, in milliseconds, first frames left out. */
+/** How long every chart's input and rendering took in the last frame, in milliseconds, first frames left out. */
 export function lastFrameTime(): number {
   return lastFrame;
 }

@@ -217,3 +217,16 @@ point it read (a custom range item's among them); it stands at the
 cursor's point in every family, which a ring marks, with the cursor's
 series in bold, and at the middle only where that point is out of view
 and for cursors other charts share.
+
+`hover` reports every move of the pointer over the chart, margins and axes
+included, once a frame with its latest place and values, and what a hover
+listener changes synchronously (a table it writes, an option it sets, of
+its own chart or another) is drawn in the frame of the move: each frame
+reads every chart's pointer against the frame on screen first, then reports,
+then draws. A pointer at rest still reports again when what it reads
+changes, after the draw, and what listeners change then draws in the next
+frame, so a listener that changes what it reads every time runs once a
+frame. Where data changed since the frame on screen, the pointer is read
+after its draw, as before. React's `onHover`, Vue's `@hover`, and Svelte's
+`onhover` are the same listeners: what they change in a table or through
+the chart's handle draws with the move.

@@ -276,9 +276,14 @@ export interface ChartEvents {
     cause: ChangeCause;
   };
   /**
-   * What is under the pointer or a cursor changed: what it is on, or the
-   * data the inspection reads there (see `InputEvent`); for a cursor another
-   * chart shares (cause "sync") or `showCursor` shows ("api"), once drawn.
+   * The pointer moved over the chart, or what it or a cursor is on, or the
+   * data the inspection reads there, changed (see `InputEvent`). Pointer
+   * moves are read once a frame, before the frame draws, so what listeners
+   * change draws in it; keys report as they come, and a change under a
+   * resting pointer, data changed since the frame on screen, a cursor
+   * another chart shares (cause "sync") or `showCursor` shows ("api"), and
+   * the pointer leaving report once drawn (the interaction guide's "When
+   * hover is reported").
    */
   hover: InputEvent;
   /**

@@ -44,6 +44,8 @@ made per data point.
   directly: `data.appendRow(...)` draws on the next frame.
 - **Events** are callback props (`onselect`, `onviewport`, `onhover`,
   `onclick`, `oncontextmenu`, ...); `bind:chart` gives herceg's chart handle.
+  What `onhover` changes in a table or through the handle draws in the
+  pointer's frame.
 - **State** binds with `bind:selection`, `bind:viewport`, `bind:visibility`,
   and `bind:drillRoot`.
 - **Tooltips** of your own render in a `renderTooltip` snippet.

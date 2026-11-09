@@ -123,6 +123,35 @@ describe("<Chart>", () => {
       expect(props.chart!.toSVG()).not.toBe(before);
     });
   }
+  it("draws what onhover changes in the chart's data in the frame of the move", async () => {
+    const data = table({ t: [0, 1, 2, 3], a: [1, 3, 2, 4], b: [4, 3, 2, 1] });
+    let changed: number | undefined;
+    const props = lines({
+      data,
+      options: {
+        onhover: () => {
+          if (changed !== undefined) return;
+          data.setColumn("a", Float64Array.of(2, 4, 3, 5));
+          changed = props.chart.revision;
+        },
+      },
+    });
+    const { chart } = props;
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + plot.x + plot.width / 2,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    await frame();
+    expect(changed).toBeDefined();
+    expect(chart.drawnRevision).toBe(changed);
+  });
+
   it("passes encodings, markers, conditions, and label objects through Svelte", async () => {
     const props = $state({ chart: null as HercegChart | null });
     render(Encodings, props);
