@@ -10,6 +10,7 @@
 // package exports.
 
 import type {
+  AnchorOptions,
   area,
   bar,
   boxen,
@@ -63,6 +64,7 @@ import type { RemoteGrid } from "../src/grid/remote.js";
 import type { Grid as DataGrid } from "../src/grid.js";
 import type { Legend } from "../src/guides.ts";
 import type {
+  Anchor,
   Area,
   Bar,
   Boxen,
@@ -167,6 +169,7 @@ true satisfies Takes<
   PanelDefinition & Omit<InsetOptions, "panel" | "insets"> & Children
 >;
 true satisfies Takes<PropsOf<typeof Legend>, Omit<LegendGuideOptions, "type">>;
+true satisfies Takes<PropsOf<typeof Anchor>, AnchorOptions & Children>;
 
 /** <Chart>'s props of its own, which the API audit names (`chart svelte` in test/contracts/api.json). */
 type Own = "renderTooltip" | "marks" | "children" | "class" | "style" | "chart" | "initial";

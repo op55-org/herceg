@@ -42,10 +42,31 @@ export type PartOf = (
   at?: { x: number; y: number },
 ) => DrawnPart | undefined;
 
-/** What reads drawn-mark records' primitives: `partOf`, and the series a geometry draws. */
+/** What reads drawn-mark records' primitives: `partOf`, the series a geometry draws, and where a row is in one. */
 export interface PartReader {
   partOf: PartOf;
   seriesOf: PartBuilders["seriesOf"];
+  /** Where table row `row` is in `s`, or -1. */
+  positionOf(s: Series, row: number): number;
+}
+
+/**
+ * By rows arrays, the length they were read at and whether they ascend
+ * there: a row a search misses is then not among them. Arrays of rows are
+ * new when their order changes (a view's positions are copied per
+ * revision, drawn rows written per geometry); rows kept as a table streams
+ * are appended and shifted, which keeps them ascending.
+ */
+const ascending = /* @__PURE__ */ new WeakMap<Uint32Array, [length: number, up: boolean]>();
+
+/** Whether `rows`' first `length` ascend, as a table's do in a series or a drawing of no order of its own. */
+export function ascends(rows: Uint32Array, length: number): boolean {
+  const known = ascending.get(rows);
+  if (known?.[0] === length) return known[1];
+  let up = true;
+  for (let k = 1; up && k < length; k++) up = rows[k - 1]! < rows[k]!;
+  ascending.set(rows, [length, up]);
+  return up;
 }
 
 /** A `PartReader` reading with `kit`. */
@@ -143,7 +164,8 @@ export function partReader(kit: PartKit): PartReader {
       else hi = mid;
     }
     if (lo < s.length && rows[lo] === row) return lo;
-    // A view's rows may be in an order of its own.
+    // A view's rows may be in an order of its own, as may a mark's (band order).
+    if (ascends(rows, s.length)) return -1;
     for (let k = 0; k < s.length; k++) if (rows[k] === row) return k;
     return -1;
   }
@@ -263,5 +285,5 @@ export function partReader(kit: PartKit): PartReader {
     return Int32Array.from(out);
   }
 
-  return { partOf, seriesOf: parts.seriesOf };
+  return { partOf, seriesOf: parts.seriesOf, positionOf: positionIn };
 }

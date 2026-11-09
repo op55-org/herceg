@@ -230,3 +230,16 @@ frame. Where data changed since the frame on screen, the pointer is read
 after its draw, as before. React's `onHover`, Vue's `@hover`, and Svelte's
 `onhover` are the same listeners: what they change in a table or through
 the chart's handle draws with the move.
+
+`anchor(chart, element, { at, side, align, offset, panel })` holds an
+element of the application (a button, a popover) at a place in the
+chart's data: a point (values, categories, dates, `{ data, scale }`,
+`{ fraction }`, `{ px }`) or an item by key or reference, at its box as
+each frame draws it, cut to what is in view. It moves with every frame
+the chart draws (zoom, pan, resize, streaming, value transitions) and is
+hidden while its place is out of view, its item not drawn, or its panel
+not drawn; its input, keys, and focus stay its own, and exports leave it
+out. React's, Vue's, and Svelte's `<Anchor>` render their content into it
+through a portal, a teleport, and the component's children. It is a
+module of its own: applications that never anchor load none of it. See
+[Anchors](docs/guide/interaction.md#anchors).

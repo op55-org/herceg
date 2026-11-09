@@ -527,8 +527,12 @@ ${G} [data-cell=symbol] .hg-symbol{margin-inline-end:6px}`,
 /** SVG path data of a symbol of radius `r` about the origin (see draw/symbols.ts). */
 function symbolPath(shape: SymbolName, r: number): string {
   const n = (value: number) => String(Math.round(value * 100) / 100);
-  if (shape === "circle")
-    return `M${n(-r)} 0a${n(r)} ${n(r)} 0 1 1 ${n(2 * r)} 0a${n(r)} ${n(r)} 0 1 1 ${n(-2 * r)} 0`;
+  if (shape === "circle") {
+    // Across twice the radius as written (see draw/symbols.ts).
+    const radius = n(r);
+    const d = n(+radius * 2);
+    return `M${n(-r)} 0a${radius} ${radius} 0 1 1 ${d} 0a${radius} ${radius} 0 1 1 -${d} 0`;
+  }
   const v = vertices(shape);
   let d = `M${n(v[0]! * r)} ${n(v[1]! * r)}`;
   for (let i = 2; i < v.length; i += 2) d += `L${n(v[i]! * r)} ${n(v[i + 1]! * r)}`;

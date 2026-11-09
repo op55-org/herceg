@@ -1,5 +1,6 @@
 // Vue components for herceg charts.
 
+export { Anchor, type AnchorProps } from "./anchor.ts";
 export { Chart } from "./chart.ts";
 export {
   Area,

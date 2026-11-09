@@ -802,6 +802,12 @@ describe("point symbols", () => {
     expect(Math.min(...tips)).toBeGreaterThanOrEqual(drawn.plot.y - 0.01);
   });
 
+  it("draws a circle's arcs across twice its radius as written, so they reach no further", () => {
+    // 39.97 is written 40; its diameter, 79.94, would be written 79.9, and a 40 px
+    // circle's large arcs through points 79.9 apart reach 42 px from their middle.
+    expect(symbolPath("circle", 0, 0, 39.97)).toBe("M-40 0a40 40 0 1 1 80 0a40 40 0 1 1 -80 0");
+  });
+
   it("winds every shape clockwise, so overlapping shapes in one path do not cancel", () => {
     for (const symbol of SYMBOLS) {
       if (symbol === "circle") {

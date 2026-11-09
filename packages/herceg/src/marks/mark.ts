@@ -747,6 +747,13 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   pickItem?(drawn: DrawnMark, query: PickQuery): PickResult | undefined;
   /**
+   * The box `geometry` (the mark's, or a frame's of it between two scenes)
+   * draws the item of row `row` of series `s` at, for marks whose items are
+   * shapes of their own (custom marks): what its shapes paint; undefined
+   * where it drew none. Anchors read it (dom/anchor-items.ts `boxesOf`).
+   */
+  itemBox?(geometry: Geometry, row: number, s: Series): Rect | undefined;
+  /**
    * Picked by what it draws, shape by shape as marks without lookups are,
    * its lookup (`pickItem`) naming the item a shape stands for: marks whose
    * items are shapes of several kinds painted over each other (a candle's

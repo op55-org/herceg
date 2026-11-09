@@ -211,7 +211,7 @@ interface ShownPanel {
 }
 
 /** Categories' places in pixels, by name, along the category axes they stand on. */
-type Places = Partial<Record<Axis, ReadonlyMap<string, number>>>;
+export type Places = Partial<Record<Axis, ReadonlyMap<string, number>>>;
 
 /** A pie moving: the slices of both scenes in one order, with their widths and values at each end. */
 interface MovingPie {
@@ -232,6 +232,19 @@ interface MovingDial {
   from: number;
   to: number;
   draw: GaugeDial["draw"];
+}
+
+/**
+ * What a frame between two scenes draws, which anchors place by
+ * (dom/anchors.ts): each panel with its scales as the frame moves them,
+ * by panel the places of categories on axes whose order changes, and the
+ * geometry the frame draws for the scene's, whose primitives keep that
+ * scene's order first (bars and points going are drawn after them).
+ */
+export interface FrameDrawing {
+  readonly panels: readonly DrawnPanel[];
+  readonly places: ReadonlyMap<string, Places>;
+  geometry(of: Geometry): Geometry | undefined;
 }
 
 /** A change of values playing. */
@@ -582,6 +595,31 @@ export class ValueAnimation {
     this.#frame = undefined;
     const items = this.#model.items;
     if (items) items.transitionItems = items.transitionRecords = undefined;
+  }
+
+  /** How the frame on screen draws, while it is one between two scenes (see `FrameDrawing`). */
+  get drawing(): FrameDrawing | undefined {
+    const tween = this.#tween;
+    const frame = this.#between ? this.#frame : undefined;
+    if (!tween || !frame) return undefined;
+    const { elapsed, scene } = frame;
+    const panels = this.#model.panels();
+    let moved: DrawnPanel[] | undefined;
+    return {
+      // Planned when asked: only anchors at points read them.
+      get panels() {
+        moved ??= panelsAt(tween, elapsed, panels);
+        return moved;
+      },
+      places: placesAt(tween, elapsed),
+      geometry(of) {
+        for (const [p, { marks }] of tween.scene.panels.entries()) {
+          const k = marks.indexOf(of);
+          if (k >= 0) return scene.panels[p]!.marks[k];
+        }
+        return undefined;
+      },
+    };
   }
 
   /** Whether a drill plays, which the pointer passing does not stop. */

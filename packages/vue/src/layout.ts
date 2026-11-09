@@ -38,8 +38,8 @@ import {
   panel as toPanel,
   rows as toRows,
 } from "herceg/layout";
-import type { VNode } from "vue";
-import { collect, type PartComponent, type Parts, type Placing, vnodesOf } from "./chart.ts";
+import { Comment, cloneVNode, Fragment, isVNode, Text, type VNode } from "vue";
+import { collect, type PartComponent, type Parts, type Placing, pathKey } from "./chart.ts";
 import { optionsOf } from "./marks.ts";
 
 export interface ColumnsProps extends GridOptions {
@@ -80,6 +80,28 @@ interface Drawn {
 /** A component that is a node of a layout. */
 interface LayoutComponent extends PartComponent {
   nodeOf: (vnode: VNode, drawn: Drawn[]) => LayoutOptions;
+}
+
+/**
+ * The vnodes among `children`, those of fragments (v-for, v-if) included,
+ * without text and comments, each keyed by its path there: the keys, or
+ * places among their siblings, of its fragments and its own, so that what
+ * a panel's slot renders (`<Anchor>`'s) keeps its identity as fragments
+ * come and go (see chart.ts `collect`).
+ */
+function vnodesOf(children: unknown, out: VNode[] = [], path: unknown[] = []): VNode[] {
+  if (Array.isArray(children)) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i] as VNode | null;
+      vnodesOf(child, out, [...path, child?.key ?? [i]]);
+    }
+    return out;
+  }
+  // Text and comments (such as a false v-if) are not marks.
+  if (!isVNode(children) || children.type === Comment || children.type === Text) return out;
+  if (children.type === Fragment) return vnodesOf(children.children, out, path);
+  out.push(path.length ? cloneVNode(children, { key: pathKey(path) }) : children);
+  return out;
 }
 
 /** What a component's vnode holds: its default slot's content. */

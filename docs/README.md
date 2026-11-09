@@ -19,7 +19,7 @@ Python. Start with [Getting started](guide/getting-started.md).
 | [Axes and legends](guide/axes-and-legends.md) | Scales, ticks, formats, time breaks, legends, colorbars |
 | [Field displays](guide/fields.md) | Fields' labels, descriptions, formats, bounds, missing text, and value mappings, given once |
 | [Styling](guide/styling.md) | Colors, themes, role styles, CSS variables, halos, paint order |
-| [Interaction](guide/interaction.md) | Pan, zoom, brush, bindings, sync, tooltips, events, selected rows, the range navigator, animation |
+| [Interaction](guide/interaction.md) | Pan, zoom, brush, bindings, sync, tooltips, events, selected rows, the range navigator, animation, anchors |
 | [Accessibility](guide/accessibility.md) | Keyboard, screen readers, color and motion, static output |
 | [Export](guide/export.md) | SVG, images, PDF, fonts, server rendering, specs, payloads |
 | [Large data](guide/large-data.md) | Renderers, level of detail, WebGL points, streaming, many charts |

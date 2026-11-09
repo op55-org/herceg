@@ -24,6 +24,7 @@ import {
   type CSSProperties,
   Fragment,
   isValidElement,
+  type ReactElement,
   type ReactNode,
   type Ref,
   type RefObject,
@@ -161,11 +162,17 @@ function useChartEvent<K extends keyof ChartEvents>(
   return latest;
 }
 
-/** What a chart's children add to its options: marks, guides, and (from layout elements) its panels. */
+/**
+ * What a chart's children add to its options: marks, guides, and (from
+ * layout elements) its panels; and elements it renders (`<Anchor>`'s), with
+ * `chart`, its chart once made.
+ */
 export interface Parts {
   marks: ChartMark[];
   guides: GuideOptions[];
   panels?: Panels | undefined;
+  rendered: ReactElement[];
+  chart: RefObject<HercegChart | null>;
 }
 
 /**
@@ -185,22 +192,29 @@ export interface Placing {
 export interface PartElement<P> {
   (props: P): null;
   displayName: string;
-  /** Adds what the element's props describe, as `placing` says inside a panel. */
-  addTo: (props: P, parts: Parts, placing: Placing | undefined) => void;
+  /**
+   * Adds what the element's props describe, as `placing` says inside a
+   * panel; `key` is its key after its fragments' keys, for what it renders.
+   */
+  addTo: (props: P, parts: Parts, placing: Placing | undefined, key: string) => void;
 }
 
-/** Adds what `children` describe to `parts`, marks and guides as `placing` says inside a panel. */
-export function collect(children: ReactNode, parts: Parts, placing?: Placing): Parts {
+/**
+ * Adds what `children` describe to `parts`, marks and guides as `placing`
+ * says inside a panel; `scope`: the keys of the fragments they are in, each
+ * ending in ":" (which `Children.toArray`'s keys never have before a ".").
+ */
+export function collect(children: ReactNode, parts: Parts, placing?: Placing, scope = ""): Parts {
   for (const child of Children.toArray(children)) {
     if (!isValidElement(child)) continue;
     const props = child.props as { children?: ReactNode };
     if (child.type === Fragment) {
-      collect(props.children, parts, placing);
+      collect(props.children, parts, placing, `${scope}${child.key}:`);
       continue;
     }
     const element = child.type as Partial<PartElement<unknown>>;
     if (typeof element.addTo === "function") {
-      element.addTo(child.props, parts, placing);
+      element.addTo(child.props, parts, placing, scope + child.key);
       continue;
     }
     const build = markBuilder(child.type);
@@ -501,8 +515,9 @@ export function Chart({
   let marks: ChartMark[] = applied.current?.marks.slice() ?? [];
   let refused: ChartError | undefined;
   let given: Partial<Pick<Options, "panels" | "guides">> = {};
+  const parts: Parts = { marks: [], guides: [], rendered: [], chart };
   try {
-    const parts = collect(children, { marks: [], guides: [] });
+    collect(children, parts);
     marks = [...(markProp ?? []), ...parts.marks];
     if (parts.panels && props.panels)
       throw new Error(
@@ -634,6 +649,7 @@ export function Chart({
       {renderTooltip && (
         <TooltipContent shows={tooltip.shows} render={renderTooltip} marks={marks} />
       )}
+      {parts.rendered}
     </>
   );
 }

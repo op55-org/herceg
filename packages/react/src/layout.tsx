@@ -38,7 +38,14 @@ import {
   panel as toPanel,
   rows as toRows,
 } from "herceg/layout";
-import { Children, Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  Fragment,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { collect, type PartElement, type Parts, type Placing } from "./chart.tsx";
 
 export interface ColumnsProps extends GridOptions {
@@ -117,13 +124,20 @@ function placing(panel: string): Placing {
   };
 }
 
-/** The elements among `children`, those in fragments included. */
-function elementsOf(children: ReactNode): ReactElement[] {
+/**
+ * The elements among `children`, those in fragments included, keyed after
+ * their fragments' keys (`scope`), so that what they render keeps its
+ * identity as fragments come and go (see `collect`).
+ */
+function elementsOf(children: ReactNode, scope = ""): ReactElement[] {
   return Children.toArray(children).flatMap((child) => {
     if (!isValidElement(child)) return [];
     if (child.type === Fragment)
-      return elementsOf((child.props as { children?: ReactNode }).children);
-    return [child];
+      return elementsOf(
+        (child.props as { children?: ReactNode }).children,
+        `${scope}${child.key}:`,
+      );
+    return [scope ? cloneElement(child, { key: scope + child.key }) : child];
   });
 }
 

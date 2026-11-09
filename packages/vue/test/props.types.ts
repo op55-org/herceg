@@ -9,6 +9,7 @@
 // package exports.
 
 import type {
+  AnchorOptions,
   area,
   bar,
   boxen,
@@ -63,6 +64,7 @@ import type { RemoteGrid } from "../src/grid/remote.ts";
 import type { Grid as DataGrid } from "../src/grid.ts";
 import type { Legend } from "../src/guides.ts";
 import type {
+  Anchor,
   Area,
   Bar,
   Boxen,
@@ -155,6 +157,7 @@ true satisfies Takes<
   PanelDefinition & Omit<InsetOptions, "panel" | "insets">
 >;
 true satisfies Takes<PropsOf<typeof Legend>, Omit<LegendGuideOptions, "type">>;
+true satisfies Takes<PropsOf<typeof Anchor>, AnchorOptions>;
 
 /**
  * <Chart>'s options as props (the tooltip's content of your own is a slot),

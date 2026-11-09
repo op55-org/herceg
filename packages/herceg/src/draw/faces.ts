@@ -123,7 +123,9 @@ class SvgFaces implements FaceSink {
     this.d += "Z";
   }
   disc(x: number, y: number, r: number): void {
-    const [rr, d] = [n(r), n(r * 2)];
+    // Across twice the radius as written (see draw/symbols.ts).
+    const rr = n(r);
+    const d = n(+rr * 2);
     this.d += `M${n(x - r)} ${n(y)}a${rr} ${rr} 0 1 0 ${d} 0a${rr} ${rr} 0 1 0 -${d} 0`;
   }
 }

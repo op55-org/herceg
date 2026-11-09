@@ -146,6 +146,9 @@
       entries = untrack(() => entries).filter((other) => other !== entry);
     },
     nextPanel: () => ++declared,
+    get chart() {
+      return current;
+    },
   });
 
   const byPosition = (a: Entry, b: Entry) =>

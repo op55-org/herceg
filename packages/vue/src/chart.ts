@@ -152,11 +152,17 @@ const emits = {
   "update:drillRoot": (_: DrillState) => true,
 };
 
-/** What a chart's slot adds to its options: marks, guides, and (from layout components) its panels. */
+/**
+ * What a chart's slot adds to its options: marks, guides, and (from layout
+ * components) its panels; and vnodes it renders (`<Anchor>`'s), with
+ * `chart`, its chart once made.
+ */
 export interface Parts {
   marks: ChartMark[];
   guides: GuideOptions[];
   panels?: Panels | undefined;
+  rendered: VNode[];
+  chart: ShallowRef<HercegChart | null>;
 }
 
 /**
@@ -165,8 +171,12 @@ export interface Parts {
  */
 export interface PartComponent {
   displayName: string;
-  /** Adds what the vnode describes, as `placing` says inside a panel. */
-  addTo: (vnode: VNode, parts: Parts, placing: Placing | undefined) => void;
+  /**
+   * Adds what the vnode describes, as `placing` says inside a panel; `path`:
+   * the keys of its fragments and its own, or for those without, their
+   * places among their siblings (as `[place]`).
+   */
+  addTo: (vnode: VNode, parts: Parts, placing: Placing | undefined, path: unknown[]) => void;
 }
 
 /**
@@ -179,35 +189,64 @@ export interface Placing {
   props(type: unknown, props: object): object;
 }
 
-/** The vnodes among `children`, those of fragments (v-for, v-if) included, without text and comments. */
-export function vnodesOf(children: unknown, out: VNode[] = []): VNode[] {
+/**
+ * Adds what `children` describe to `parts`, marks and guides as `placing`
+ * says inside a panel, those of fragments (v-for, v-if) included; `path`:
+ * the keys, or places among their siblings, of the fragments they are in.
+ */
+export function collect(
+  children: unknown,
+  parts: Parts,
+  placing?: Placing,
+  path: unknown[] = [],
+): Parts {
   if (Array.isArray(children)) {
-    for (const child of children) vnodesOf(child, out);
-    return out;
+    for (let i = 0; i < children.length; i++) {
+      // A vnode's key, else its place (text and nested arrays have no key).
+      const child = children[i] as VNode | null;
+      collect(child, parts, placing, [...path, child?.key ?? [i]]);
+    }
+    return parts;
   }
+  const vnode = children;
   // Text and comments (such as a false v-if) are not marks.
-  if (!isVNode(children) || children.type === Comment || children.type === Text) return out;
-  if (children.type === Fragment) return vnodesOf(children.children, out);
-  out.push(children);
-  return out;
+  if (!isVNode(vnode) || vnode.type === Comment || vnode.type === Text) return parts;
+  if (vnode.type === Fragment) return collect(vnode.children, parts, placing, path);
+  const component = vnode.type as Partial<PartComponent>;
+  if (typeof component.addTo === "function") {
+    component.addTo(vnode, parts, placing, path);
+    return parts;
+  }
+  const build = markBuilder(vnode.type);
+  if (!build)
+    throw new Error(
+      "<Chart> children must be mark components such as <Line> or <Rule>, not components wrapping them: pass marks built with herceg's functions as :marks",
+    );
+  parts.marks.push(build(placing ? placing.props(vnode.type, { ...vnode.props }) : vnode.props));
+  return parts;
 }
 
-/** Adds what `children` describe to `parts`, marks and guides as `placing` says inside a panel. */
-export function collect(children: unknown, parts: Parts, placing?: Placing): Parts {
-  for (const vnode of vnodesOf(children)) {
-    const component = vnode.type as Partial<PartComponent>;
-    if (typeof component.addTo === "function") {
-      component.addTo(vnode, parts, placing);
-      continue;
+/** Tokens of the symbols vnodes are keyed by, held weakly: a symbol let go is forgotten. */
+const symbols = /* @__PURE__ */ new WeakMap<symbol, number>();
+let tokens = 0;
+
+/**
+ * A path of keys and places (see `collect`) as one key: JSON, so that keys
+ * of each kind and places stay apart, with a symbol by its name in the
+ * registry, or else by its token.
+ */
+export function pathKey(path: unknown[]): string {
+  return JSON.stringify(path, (_, v: unknown) => {
+    if (typeof v !== "symbol") return v;
+    const name = Symbol.keyFor(v);
+    if (name !== undefined) return { for: name };
+    let token = symbols.get(v);
+    if (token === undefined) {
+      token = ++tokens;
+      symbols.set(v, token);
     }
-    const build = markBuilder(vnode.type);
-    if (!build)
-      throw new Error(
-        "<Chart> children must be mark components such as <Line> or <Rule>, not components wrapping them: pass marks built with herceg's functions as :marks",
-      );
-    parts.marks.push(build(placing ? placing.props(vnode.type, { ...vnode.props }) : vnode.props));
-  }
-  return parts;
+    return { symbol: token };
+  });
 }
 
 /**
@@ -434,14 +473,15 @@ export const Chart = defineComponent({
     };
 
     // Called during render, so Vue tracks what the props and the slot read.
-    function describe(): View {
+    // What the slot renders (`<Anchor>`'s) goes into `anchors`.
+    function describe(anchors: VNode[]): View {
       const options: Record<string, unknown> = {};
       for (const key of OPTION_KEYS) {
         if (props[key] !== undefined) options[key] = plain(props[key]);
       }
       const marks = (props.marks ?? []).map((mark) => toRaw(mark));
       const rendered = slots.renderTooltip !== undefined;
-      const parts = collect(slots.default?.(), { marks, guides: [] });
+      const parts = collect(slots.default?.(), { marks, guides: [], rendered: anchors, chart });
       if (parts.panels) {
         if (options.panels)
           throw new Error(
@@ -597,8 +637,9 @@ export const Chart = defineComponent({
         // Thrown here, Vue would replace the container with a placeholder
         // and strand the chart in the old one, so the error is thrown again
         // from the mounted or updated hook, where Vue reports it as well.
+        const anchors: VNode[] = [];
         try {
-          rendered = describe();
+          rendered = describe(anchors);
           failure = undefined;
         } catch (error) {
           failure = { error };
@@ -626,6 +667,7 @@ export const Chart = defineComponent({
                 // What the last render described, refused marks aside.
                 marks: () => rendered?.marks ?? applied?.marks ?? [],
               }),
+            ...anchors,
           ],
         );
       },

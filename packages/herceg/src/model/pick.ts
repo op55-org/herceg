@@ -50,6 +50,10 @@ import type { ItemViews } from "./item-views.ts";
 import type { KeyPart } from "./items.ts";
 import type { Nearest } from "./nearest.ts";
 
+// Item anchors read drawn records as picking does (dom/anchor-items.ts).
+export { madeIn, rowsOfDrawn } from "../marks/drawn.ts";
+export { ascends, partReader } from "../marks/drawn-parts.ts";
+export { clipBox } from "../marks/lookups.ts";
 export { itemResolver } from "./items.ts";
 // Events name what was picked by its item key, which loads with picking.
 export { provenanceOf, rowsOfItem } from "./provenance.ts";
@@ -692,7 +696,7 @@ function sortedAlong(
 }
 
 /** The pixel of row `row` of `s` as its mark draws it, as a box of no size; undefined off the scales. */
-function pointBox(
+export function pointBox(
   kit: PickKit,
   s: Series,
   row: number,

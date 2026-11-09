@@ -11,9 +11,12 @@ const PI = Math.PI;
 /** SVG path data of a symbol of radius `r` centered at (x, y). */
 export function symbolPath(symbol: SymbolName, x: number, y: number, r: number): string {
   if (symbol === "circle") {
-    // Two half arcs, clockwise (sweep flag 1), as canvas arcs turn by default.
-    const d = n(r * 2);
-    return `M${n(x - r)} ${n(y)}a${n(r)} ${n(r)} 0 1 1 ${d} 0a${n(r)} ${n(r)} 0 1 1 -${d} 0`;
+    // Two half arcs, clockwise (sweep flag 1), as canvas arcs turn by default,
+    // across twice the radius as written: rounded apart, a shorter diameter
+    // would bend the large arcs out past the radius.
+    const radius = n(r);
+    const d = n(+radius * 2);
+    return `M${n(x - r)} ${n(y)}a${radius} ${radius} 0 1 1 ${d} 0a${radius} ${radius} 0 1 1 -${d} 0`;
   }
   const v = vertices(symbol);
   let d = `M${n(x + v[0]! * r)} ${n(y + v[1]! * r)}`;

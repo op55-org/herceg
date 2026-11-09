@@ -312,6 +312,48 @@ describe("the interaction controller", () => {
     chart.destroy();
   });
 
+  it("leaves a pan held while it loaded to its own finger, not one pressed meanwhile in an anchor", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    const { anchor } = await import("../../src/dom/anchors.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, {
+      interaction: { zoom: "x" },
+      marks: [line(data(), { x: "t", y: "v" })],
+    });
+    await frame();
+    chart.setViewport([1, 3]);
+    const peak = document.createElement("button");
+    peak.style.cssText = "width:40px;height:20px;margin:0;padding:0;border:0";
+    anchor(chart, peak, { at: { x: 2, y: 30 }, side: "center" });
+    await frame();
+    await frame();
+    const plot = chart.getPanels()[0]!.plot;
+    const finger = (id: number) => ({ pointerId: id, pointerType: "touch", isPrimary: id === 11 });
+    const [x, y] = [plot.x + plot.width / 2, plot.y + plot.height - 10];
+    // Made-up fingers cannot be captured, as the chart captures a drag's while it loads.
+    chart.root.setPointerCapture = () => {};
+    pointer(chart, "pointerdown", x, y, finger(11));
+    const box = peak.getBoundingClientRect();
+    const [px, py] = [box.left + 20, box.top + 10];
+    peak.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: px, clientY: py, ...finger(12) }),
+    );
+    attach(module);
+    await chart.loading;
+    await frame();
+    const before = chart.getViewport().x;
+    // The anchor's finger, over the plot once its button lets go of it, moves nothing.
+    pointer(chart, "pointermove", x - 120, y, finger(12));
+    await frame();
+    expect(chart.getViewport().x).toEqual(before);
+    pointer(chart, "pointermove", x + 60, y, finger(11));
+    await frame();
+    expect(chart.getViewport().x![0]).toBeLessThan(before![0]!);
+    pointer(chart, "pointerup", x + 60, y, finger(11));
+    chart.destroy();
+  });
+
   it("loads after the first frame, which draws without it", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
     expect(chart.root.querySelectorAll("svg path[clip-path]")).toHaveLength(1);

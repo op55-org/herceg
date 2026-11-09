@@ -6,6 +6,7 @@ import type {
   CustomDataOptions,
   CustomOptions,
   GuideOptions,
+  Chart as HercegChart,
   Panels,
   RegionDataOptions,
   RegionOptions,
@@ -97,6 +98,8 @@ export interface MarkList {
   remove(entry: Entry): void;
   /** The next panel's place among those declared, for an id when it gives none ("panel-3"). */
   nextPanel(): number;
+  /** The chart once made (for <Anchor>): reading it tracks it. */
+  readonly chart: HercegChart | null;
 }
 
 const MARKS = Symbol("herceg marks");
