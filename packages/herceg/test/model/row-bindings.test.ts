@@ -22,7 +22,7 @@ import { point } from "../../src/marks/point.ts";
 import { region } from "../../src/marks/region.ts";
 import { bindRows, type RowBindings } from "../../src/marks/row-bindings.ts";
 import { rule } from "../../src/marks/rule.ts";
-import { placeAt, rowOf, samePositions } from "../../src/marks/series.ts";
+import { placeAt, rowOf } from "../../src/marks/series.ts";
 import { type AxisContext, createScale } from "../../src/model/axis.ts";
 import { facet } from "../../src/model/facet.ts";
 import type { FeatureKit } from "../../src/model/features.ts";
@@ -306,7 +306,7 @@ describe("marks of rows placed by coordinates", () => {
         line(shares, { x: { fraction: { field: "t" } }, y: "v" }),
       ],
     });
-    const stops = keyboardStops(both.model.inspectorOf(both.scene.panels[0]!.key), samePositions);
+    const stops = keyboardStops(both.model.inspectorOf(both.scene.panels[0]!.key));
     expect(stops).toHaveLength(2);
   });
 

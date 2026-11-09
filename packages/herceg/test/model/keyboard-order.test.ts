@@ -5,6 +5,10 @@ import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { histogram } from "../../src/marks/histogram.ts";
+import { line } from "../../src/marks/line.ts";
+import { point } from "../../src/marks/point.ts";
+import { placeAt, rowOf } from "../../src/marks/series.ts";
+import { orderAt } from "../../src/model/keyboard.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { readKeys } from "../helpers/keyboard.ts";
 
@@ -64,5 +68,82 @@ describe("the arrow keys", () => {
       "1.5. x 0 – 3, y 0 – 25: 3",
       "4.5. x 3 – 6, y 0 – 25: 1",
     ]);
+  });
+});
+
+describe("Up and Down", () => {
+  /**
+   * The order Up and Down visit the first panel's series in at `x`, from a
+   * cursor at `y` (both in data values): each series' label, with the value
+   * of its point the cursor lands on.
+   */
+  function order(model: ChartModel, x: number, y: number): string[] {
+    const panel = model.panels()[0]!;
+    const visits = orderAt(model, panel.key, "x", panel.x.map(x), panel.y.map(y), {
+      placeAt,
+      rowOf,
+    });
+    return visits.map(({ key, position }) => {
+      const s = model.series().find((part) => part.key === key)!;
+      return `${s.label} ${s.y[rowOf(s, position)]}`;
+    });
+  }
+
+  it("visit series in screen order at the place, top first, each at its point nearest there", () => {
+    const lines = table({ x: [0, 4, 8], a: [10, 40, 25], b: [30, 5, 35], c: [20, 20, 20] });
+    const model = drawn({ marks: [line(lines, { x: "x", y: ["a", "b", "c"] })] });
+    expect(order(model, 0, 0)).toEqual(["b 30", "c 20", "a 10"]);
+    expect(order(model, 4, 0)).toEqual(["a 40", "c 20", "b 5"]);
+    // Between points, by where the paths cross the place: at 1.5, a at
+    // 21.25 and b at 20.63 over c; each at its point at 0, the nearest.
+    expect(order(model, 1.5, 0)).toEqual(["a 10", "b 30", "c 20"]);
+  });
+
+  it("place a path crossing the place more than once where it crosses nearest the cursor", () => {
+    const folded = table({ x: [0, 10, 10, 0], y: [30, 30, 0, 0] });
+    const flat = table({ x: [0, 10], y: [20, 20] });
+    const model = drawn({
+      marks: [
+        line(folded, { x: "x", y: "y", label: "A" }),
+        line(flat, { x: "x", y: "y", label: "B" }),
+      ],
+    });
+    // From the top, A crosses at 30, above B; from the bottom, at 0, below.
+    expect(order(model, 0, 30)).toEqual(["A 30", "B 20"]);
+    expect(order(model, 0, 0)).toEqual(["B 20", "A 0"]);
+    // As near one crossing as the other: the first drawn.
+    expect(order(model, 0, 15)).toEqual(["A 30", "B 20"]);
+  });
+
+  it("keep series at one height in series order", () => {
+    const tied = table({ x: [0, 10], a: [10, 20], b: [10, 5], c: [30, 30] });
+    expect(order(drawn({ marks: [line(tied, { x: "x", y: ["a", "b", "c"] })] }), 0, 0)).toEqual([
+      "c 30",
+      "a 10",
+      "b 10",
+    ]);
+    expect(order(drawn({ marks: [line(tied, { x: "x", y: ["b", "a", "c"] })] }), 0, 0)).toEqual([
+      "c 30",
+      "b 10",
+      "a 10",
+    ]);
+    // A jump at a repeated position spans the cursor's height: it is drawn there.
+    const jump = table({ x: [0, 5, 5, 10], a: [10, 10, 50, 50], b: [35, 35, 35, 35] });
+    const model = drawn({ marks: [line(jump, { x: "x", y: ["a", "b"] })] });
+    expect(order(model, 5, 35)).toEqual(["a 50", "b 35"]);
+  });
+
+  it("leave out series of marks the inspection skips, and points not drawn", () => {
+    const rows = table({ x: [0, 1, 2], a: [10, 20, 30], b: [40, 50, 60], c: [5, 5, Number.NaN] });
+    const model = drawn({
+      marks: [
+        line(rows, { x: "x", y: "a" }),
+        line(rows, { x: "x", y: "b", inspect: false }),
+        point(rows, { x: "x", y: "c" }),
+      ],
+    });
+    expect(order(model, 0, 0)).toEqual(["a 10", "c 5"]);
+    // c's point at 2 is not drawn: its nearest drawn point stands for it.
+    expect(order(model, 2, 0)).toEqual(["a 30", "c 5"]);
   });
 });

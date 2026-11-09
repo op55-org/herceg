@@ -372,7 +372,8 @@ describe("the interaction controller", () => {
     const live = chart.root.querySelector("[aria-live]")!;
     expect(live.textContent).toBe("");
     await chart.loading;
-    expect(live.textContent).toContain("v: 40");
+    // End named the series; Left reads the point before the last.
+    expect(live.textContent).toContain("40 at");
     chart.destroy();
   });
 

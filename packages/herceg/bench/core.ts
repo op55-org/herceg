@@ -77,6 +77,14 @@ import { planAxis } from "../src/model/axis.ts";
 import { axisGuide } from "../src/model/axis-guide.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
+import {
+  inspectPosition,
+  itemAt,
+  keyedItem,
+  keyedPoint,
+  orderAt,
+  standing,
+} from "../src/model/keyboard.ts";
 import { membership } from "../src/model/memberships.ts";
 import { type ChartConfig, ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
@@ -1654,6 +1662,124 @@ const pickShuffled = pickCrowdColumns((i) => (i * 1201) % PICK_CROWD);
 measure(
   "pick: 12 unordered lines × 2,160, under 100 places",
   pickUnder(picking([line(pickShuffled, { x: "t", y: pickNames as never })])),
+);
+// The keyboard's Up and Down (model/keyboard.ts) over the same crowd: where
+// the cursor stands, its run's order there (as a run's first press takes
+// it, the costliest), then what the press reads: the next series' point
+// alone and the inspection there. Each case presses at 100 places of s0.
+const upDown = (chart: ChartModel) => {
+  const readers = { placeAt, rowOf };
+  const { key: panel } = chart.panels()[0]!;
+  const { key } = chart.series()[0]!;
+  const positions = Array.from({ length: 100 }, (_, i) => (i * 97) % PICK_CROWD);
+  return () => {
+    for (const position of positions) {
+      const stood = standing(chart, panel, key, position, readers)!;
+      const order = orderAt(chart, panel, stood.axis, stood.place, stood.height, readers);
+      const to = order[(order.findIndex((visit) => visit.key === key) + 1) % order.length]!;
+      keyedPoint(chart, to.key, to.position, panel, readers);
+      inspectPosition(chart, to.key, to.position, panel, readers);
+    }
+  };
+};
+measure("keyboard: Up or Down over 12 lines × 2,160, at 100 places", upDown(pickCrowdChart()));
+measure(
+  "keyboard: Up or Down over 12 unordered lines × 2,160, at 100 places",
+  upDown(picking([line(pickShuffled, { x: "t", y: pickNames as never })])),
+);
+// What each scene does for a keyboard cursor at rest (the controller's
+// `draw`): finds what it is on again, wherever data changes moved it, and
+// where it stands, or finds it gone. The cursor came to the row at the
+// middle of a series (a heatmap's cell) before the change.
+const resting = (chart: ChartModel, change: (position: number) => void, length: number) => {
+  const readers = { placeAt, rowOf };
+  const { key: panel } = chart.panels()[0]!;
+  const { key } = chart.series()[0]!;
+  const position = length / 2;
+  const item = keyedItem(chart, panel, key, position, readers)!;
+  change(position);
+  chart.scene(estimateText);
+  return () => {
+    const now = itemAt(chart, panel, key, position, item, readers);
+    if (now >= 0) standing(chart, panel, key, now, readers);
+  };
+};
+// A 1M-row stream that has dropped its first 1,000 rows (a heatmap's grid,
+// its first row of cells).
+const restingLine = table({
+  t: Float64Array.from({ length: N }, (_, i) => i),
+  v: Float64Array.from({ length: N }, (_, i) => Math.sin(i / 1000)),
+});
+measure(
+  "keyboard: a scene's cursor at rest, 1M-row line",
+  resting(picking([line(restingLine, { x: "t", y: "v" })]), () => restingLine.dropFirst(1000), N),
+  { repeat: 100 },
+);
+const restingCells = table({
+  x: Float64Array.from({ length: N }, (_, i) => i % 1000),
+  y: Float64Array.from({ length: N }, (_, i) => Math.floor(i / 1000)),
+  v: Float64Array.from({ length: N }, (_, i) => i % 97),
+});
+measure(
+  "keyboard: a scene's cursor at rest, 1M-row heatmap",
+  resting(
+    picking([heatmap(restingCells, { x: "x", y: "y", color: "v" })]),
+    () => restingCells.dropFirst(1000),
+    N,
+  ),
+  { repeat: 100 },
+);
+// An ordered 10M-row stream that a row joined at its end, the cursor's row
+// where it was; and a 10M-row table split in two series, the cursor's row
+// moved to the other (gone).
+const M = 10_000_000;
+const restingOrdered = orderedTable(
+  { t: Float64Array.from({ length: M }, (_, i) => i), v: new Float64Array(M) },
+  { orderBy: "t" },
+);
+measure(
+  "keyboard: a scene's cursor at rest, ordered 10M-row line",
+  resting(
+    picking([line(restingOrdered, { x: "t", y: "v" })]),
+    () => restingOrdered.append({ t: [M], v: [0] }),
+    M,
+  ),
+  { repeat: 100 },
+);
+// An ordered 10M-row stream of one time throughout: a row of that time
+// joins at the end, the cursor's row where it was; then its first row
+// leaves, the cursor's row one place back.
+const restingTies = orderedTable(
+  { t: new Float64Array(M), v: new Float64Array(M) },
+  { orderBy: "t" },
+);
+measure(
+  "keyboard: a scene's cursor at rest, ordered 10M rows of one time",
+  resting(
+    picking([line(restingTies, { x: "t", y: "v" })]),
+    () => restingTies.append({ t: [0], v: [0] }),
+    M,
+  ),
+  { repeat: 100 },
+);
+measure(
+  "keyboard: a scene's cursor one row back, ordered 10M rows of one time",
+  resting(picking([line(restingTies, { x: "t", y: "v" })]), () => restingTies.dropFirst(1), M),
+  { repeat: 100 },
+);
+const restingSplit = table({
+  t: Float64Array.from({ length: M }, (_, i) => i >> 1),
+  v: new Float64Array(M),
+  s: Array.from({ length: M }, (_, i) => (i % 2 ? "b" : "a")),
+});
+measure(
+  "keyboard: a scene's cursor whose row left its series, 10M rows",
+  resting(
+    picking([line(restingSplit, { x: "t", y: "v", series: "s" })]),
+    (position) => restingSplit.replace(2 * position, { s: ["b"] }),
+    M / 2,
+  ),
+  { repeat: 100 },
 );
 // Overlapping fills: 50 translucent regions over each other under the crowd,
 // and 50 bars over it, which cover what is under them.

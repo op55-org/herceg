@@ -1,4 +1,4 @@
-import type { Inspection } from "../model/model.ts";
+import type { InspectedPoint, Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
 
 /**
@@ -27,11 +27,16 @@ export class Tooltip {
       "position:absolute;left:0;top:0;pointer-events:none;display:none;white-space:nowrap;padding:8px 10px;border-radius:8px;line-height:1.4;z-index:1;font-variant-numeric:tabular-nums";
   }
 
+  /**
+   * Shows `inspection` beside `pointer`, within `bounds`; the point at
+   * index `own` (the keyboard cursor's) has its label in bold.
+   */
   show(
     inspection: Inspection,
     theme: Theme,
     pointer: { x: number; y: number },
     bounds: { width: number; height: number },
+    own = -1,
   ) {
     const { element } = this;
     const document = element.ownerDocument;
@@ -77,6 +82,7 @@ export class Tooltip {
       const [swatch, label, value] = row.children as unknown as HTMLSpanElement[];
       if (this.#colors[i] !== point.color) swatch!.style.background = this.#colors[i] = point.color;
       write(label!, point.label);
+      label!.style.fontWeight = i === own ? "600" : "";
       write(value!, point.text);
     });
     element.style.display = "block";
@@ -102,9 +108,11 @@ function write(element: HTMLElement, text: string): void {
 export function describeInspection(inspection: Inspection): string {
   return [
     inspection.label,
-    ...inspection.points.map(
-      ({ label, text, fields = [] }) =>
-        `${label}: ${[text, ...fields.map((field) => `${field.label}: ${field.link?.text ?? field.text}`)].join(", ")}`,
-    ),
+    ...inspection.points.map((point) => `${point.label}: ${point.text}${fieldsSpoken(point)}`),
   ].join(". ");
+}
+
+/** A point's tooltip fields, as announcements read them after its value. */
+export function fieldsSpoken({ fields = [] }: InspectedPoint): string {
+  return fields.map((field) => `, ${field.label}: ${field.link?.text ?? field.text}`).join("");
 }

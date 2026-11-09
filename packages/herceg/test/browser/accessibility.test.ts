@@ -82,6 +82,18 @@ const metrics = table({
   b: Float64Array.from({ length: 48 }, (_, i) => 80 + Math.cos(i / 5) * 15),
   host: Array.from({ length: 48 }, (_, i) => (i % 2 ? "east" : "west")),
 });
+// Twelve crowded, crossing lines, as in the customisation study's A1.
+const twelveNames = Array.from({ length: 12 }, (_, k) => `s${k}`);
+// Columns named at run time: a table of number fields by any name.
+const twelve = table<Record<string, Float64Array>>({
+  t: Float64Array.from({ length: 40 }, (_, i) => i),
+  ...Object.fromEntries(
+    twelveNames.map((name, k) => [
+      name,
+      Float64Array.from({ length: 40 }, (_, i) => 50 + 10 * Math.sin(i / 5 + k) + k),
+    ]),
+  ),
+});
 const dense = table({
   t: Float64Array.from({ length: 20_000 }, (_, i) => i),
   v: Float64Array.from({ length: 20_000 }, (_, i) => Math.sin(i / 300)),
@@ -208,6 +220,22 @@ describe("accessibility audits", () => {
     expect(await violations(chart.root)).toEqual([]);
   });
 
+  it("find nothing to fix with twelve lines, the keyboard's ring and tooltip shown, and every series read", async () => {
+    const chart = mount({
+      title: "Twelve",
+      marks: [line(twelve, { x: "t", y: twelveNames })],
+      interaction: { select: "series" },
+      locale: "en-US",
+    });
+    await chart.loading;
+    chart.root.focus();
+    for (const key of ["ArrowRight", "ArrowDown", "ArrowDown", "Enter", "i"])
+      chart.root.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(chart.root.querySelector("[aria-live]")!.textContent).toMatch(/^12 series at 0: /);
+    expect(await violations(chart.root)).toEqual([]);
+  });
+
   for (const theme of ["light", "dark", "high-contrast", "high-contrast-dark"] as const) {
     it(`find nothing to fix in a range navigator, zoomed and focused, in the ${theme} theme`, async () => {
       const chart = mount({
@@ -289,7 +317,7 @@ describe("the accessibility tree", () => {
     await chart.loading;
     const tree = await accessibilityTree();
     expect(tree[0]).toMatch(
-      /^figure "Latency" \(Line chart with 2 series\. a: 48 points, .*arrow keys to read values\.\)$/,
+      /^figure "Latency" \(Line chart with 2 series\. a: 48 points, .*arrow keys to read values, and i to read every series\.\)$/,
     );
     // The description is read as the figure's, never again as text.
     expect(tree.filter((line) => line.includes("Line chart with"))).toHaveLength(1);
@@ -320,7 +348,9 @@ describe("the accessibility tree", () => {
     const lines = mount({ marks: [line(metrics, { x: "t", y: "a" })], locale: "en-US" });
     await Promise.all([rules.loading, lines.loading]);
     expect(described(rules)).not.toContain("arrow keys");
-    expect(described(lines)).toContain("use the arrow keys to read values");
+    expect(described(lines)).toContain(
+      "use the arrow keys to read values, and i to read every series.",
+    );
   });
 
   it.each(["svg", "canvas"] as const)(
@@ -385,14 +415,47 @@ describe("the accessibility tree", () => {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const tree = (await accessibilityTree()).map(dateTimes);
     const live = tree.findIndex((line) => line.includes("live=polite"));
-    expect(tree[live + 1]).toMatch(/^ {4}StaticText "Jan 1, 2026, 00:00\. a: 100\. b: 95"$/);
-    // The tooltip shows the same values, hidden from assistive technology
+    // The series the cursor is on, named as it arrives.
+    expect(tree[live + 1]).toMatch(/^ {4}StaticText "a: 100 at Jan 1, 2026, 00:00"$/);
+    // The tooltip shows every series, hidden from assistive technology
     // (the legend's button "a" is named, its text presentational).
     expect(tree.filter((line) => line.includes('StaticText "a"'))).toEqual([]);
     press(chart, "ArrowRight");
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    expect((await accessibilityTree()).map(dateTimes).join("\n")).toContain(
-      'StaticText "Jan 1, 2026, 01:00.',
+    expect((await accessibilityTree()).map(dateTimes).join("\n")).toMatch(
+      /StaticText "[\d.]+ at Jan 1, 2026, 01:00"/,
+    );
+    // `i` reads every series there, as the tooltip lists them.
+    press(chart, "i");
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect((await accessibilityTree()).map(dateTimes).join("\n")).toMatch(
+      /StaticText "2 series at Jan 1, 2026, 01:00: a [\d.]+; b [\d.]+"/,
+    );
+  });
+
+  it("announces the cursor's series alone as Up and Down move it among twelve, and all twelve with i", async () => {
+    const chart = mount({
+      title: "Twelve",
+      marks: [line(twelve, { x: "t", y: twelveNames })],
+      interaction: { select: "series" },
+      locale: "en-US",
+    });
+    await chart.loading;
+    chart.root.focus();
+    const heard = async (key: string) => {
+      press(chart, key);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const tree = await accessibilityTree();
+      // The tooltip's twelve rows and the cursor's ring are kept from the tree.
+      expect(tree.filter((line) => /StaticText "s\d+"/.test(line))).toEqual([]);
+      return tree.at(-1);
+    };
+    expect(await heard("ArrowRight")).toMatch(/^ {4}StaticText "s0: [\d.]+ at 0"$/);
+    expect(await heard("ArrowDown")).toMatch(/^ {4}StaticText "s\d+, \d+ of 12: [\d.]+ at 0"$/);
+    expect(await heard("ArrowRight")).toMatch(/^ {4}StaticText "[\d.]+ at 1"$/);
+    expect(await heard("Enter")).toMatch(/^ {4}StaticText "s\d+ selected"$/);
+    expect(await heard("i")).toMatch(
+      /^ {4}StaticText "12 series at 1: s0 [\d.]+; .*; s11 [\d.]+"$/,
     );
   });
 
@@ -591,14 +654,15 @@ describe("the keyboard", () => {
     });
     await chart.loading;
     chart.root.focus();
-    expect(await step(chart, "ArrowRight")).toContain("east: 10");
-    expect(await step(chart, "ArrowRight")).toContain("east: 20");
-    // Down goes to the next series, at the point nearest the cursor's x.
-    expect(await step(chart, "ArrowDown")).toMatch(/west: (15|25)/);
-    expect(await step(chart, "ArrowRight")).toContain("west: 25");
-    // Past the last series, Down does nothing; Up goes back.
-    expect(await step(chart, "ArrowDown")).toContain("west: 25");
-    expect(await step(chart, "ArrowUp")).toMatch(/east: (20|30)/);
+    expect(await step(chart, "ArrowRight")).toBe("east: 10 at 1");
+    expect(await step(chart, "ArrowRight")).toBe("20 at 2");
+    // Down goes to the series drawn below at the cursor's x, at its point
+    // nearest there (of two as near, the nearer in height).
+    expect(await step(chart, "ArrowDown")).toBe("west, 2 of 2: 15 at 1.5");
+    expect(await step(chart, "ArrowRight")).toBe("25 at 2.5");
+    // At 2.5 west is drawn above east: Up goes nowhere, Down to east.
+    expect(await step(chart, "ArrowUp")).toBe("west, 1 of 2");
+    expect(await step(chart, "ArrowDown")).toBe("east, 2 of 2: 20 at 2");
   });
 
   it("steps across bars colored by their x, the x written as a name or a coordinate", async () => {
@@ -614,9 +678,8 @@ describe("the keyboard", () => {
     }
   });
 
-  it("stops once at lines, which report every series at their x, and at each series of points, along x", async () => {
+  it("stops at every series, fields of one table included, and reads them all with i", async () => {
     const both = table({ x: [0, 1, 2], a: [1, 2, 3], b: [4, 5, 6], c: [7, 8, 9] });
-    // Lines and points read the point nearest by default, each series a stop of its own.
     const chart = mount({
       marks: [line(both, { x: "x", y: ["a", "b"] }), point(both, { x: "x", y: "c" })],
       inspection: { mode: "nearest-x" },
@@ -624,12 +687,16 @@ describe("the keyboard", () => {
     });
     await chart.loading;
     chart.root.focus();
-    const first = await step(chart, "ArrowRight");
-    expect(first).toContain("a: 1");
-    expect(first).toContain("b: 4");
-    expect(await step(chart, "ArrowDown")).toContain("c: 7");
-    expect(await step(chart, "ArrowDown")).toContain("c: 7");
-    expect(await step(chart, "ArrowUp")).toContain("a: 1");
+    // The cursor's series alone is announced; the tooltip lists all three.
+    expect(await step(chart, "ArrowRight")).toBe("a: 1 at 0");
+    // a is drawn lowest: Down goes nowhere; Up climbs b, then c.
+    expect(await step(chart, "ArrowDown")).toBe("a, 3 of 3");
+    expect(await step(chart, "ArrowUp")).toBe("b, 2 of 3: 4 at 0");
+    expect(await step(chart, "ArrowUp")).toBe("c, 1 of 3: 7 at 0");
+    expect(await step(chart, "ArrowRight")).toBe("8 at 1");
+    expect(await step(chart, "i")).toBe("3 series at 1: a 2; b 5; c 8");
+    // Pressed again, the same is read again.
+    expect(await step(chart, "i")).toBe("3 series at 1: a 2; b 5; c 8\u00a0");
   });
 
   it("walks a heatmap's rows and columns as they are drawn", async () => {
@@ -651,8 +718,8 @@ describe("the keyboard", () => {
     expect(await step(chart, "ArrowDown")).toBe("b. bottom: 4");
     expect(await step(chart, "ArrowLeft")).toBe("a. bottom: 3");
     expect(await step(chart, "ArrowUp")).toBe("a. top: 1");
-    // The top edge: nowhere further to go.
-    expect(await step(chart, "ArrowUp")).toBe("a. top: 1");
+    // The top edge: nowhere further to go, which the cell says again.
+    expect(await step(chart, "ArrowUp")).toBe("a. top: 1\u00a0");
   });
 
   it("skips holes in a heatmap and reads the value drawn in each cell", async () => {
@@ -689,12 +756,13 @@ describe("the keyboard", () => {
     });
     await chart.loading;
     chart.root.focus();
-    expect(await step(chart, "ArrowRight")).toBe("0. early: 1");
-    expect(await step(chart, "ArrowDown")).toBe("1. late: 3");
-    // Hiding the series the cursor is on: Up and Down start again in what is left.
+    expect(await step(chart, "ArrowRight")).toBe("early: 1 at 0");
+    // late's nearest point to 0 is above early's.
+    expect(await step(chart, "ArrowUp")).toBe("late, 1 of 2: 3 at 1");
+    // Hiding the series the cursor is on hands the cursor to the series next to it.
     chart.root.querySelectorAll("button")[1]!.click();
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    expect(await step(chart, "ArrowUp")).toMatch(/early: (1|2)/);
+    expect(await step(chart, "ArrowUp")).toBe("early: 1 at 0");
   });
 
   it("reads fields of one table row by row where x repeats, and keeps x when a series hides", async () => {
@@ -702,8 +770,10 @@ describe("the keyboard", () => {
     const lines = mount({ marks: [line(repeats, { x: "x", y: ["a", "b"] })], locale: "en-US" });
     await lines.loading;
     lines.root.focus();
-    expect(await step(lines, "ArrowRight")).toBe("0. a: 1. b: 10");
-    expect(await step(lines, "ArrowRight")).toBe("0. a: 2. b: 20");
+    expect(await step(lines, "ArrowRight")).toBe("a: 1 at 0");
+    expect(await step(lines, "ArrowRight")).toBe("2 at 0");
+    // The series sharing its positions are read at its row.
+    expect(await step(lines, "i")).toBe("2 series at 0: a 2; b 20");
     const host = lines.root.parentElement;
     lines.destroy();
     host?.remove();
@@ -715,10 +785,10 @@ describe("the keyboard", () => {
     await points.loading;
     points.root.focus();
     await step(points, "End");
-    expect(await step(points, "ArrowDown")).toBe("10. b: 30");
+    expect(await step(points, "ArrowUp")).toBe("b, 1 of 2: 30 at 10");
     points.root.querySelectorAll("button")[1]!.click();
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    expect(await step(points, "ArrowUp")).toBe("10. a: 3");
+    expect(await step(points, "ArrowUp")).toBe("a: 3 at 10");
   });
 
   it("starts a keyboard selection afresh on another axis", async () => {

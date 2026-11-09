@@ -401,9 +401,10 @@ describe("new marks in the browser", () => {
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
       await frame();
       expect(chart.root.querySelector("[aria-live]")!.textContent).toContain("z: 2 – 5");
+      // The next band, drawn below at the cursor's place.
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
       await frame();
-      expect(chart.root.querySelector("[aria-live]")!.textContent).toContain("z: 5 – 8");
+      expect(chart.root.querySelector("[aria-live]")!.textContent).toMatch(/^z, 2 of 2: 5 – 8 /);
       chart.destroy();
     }
   });
@@ -658,15 +659,16 @@ describe("new marks in the browser", () => {
     await frame();
     expect(tooltipOf(chart.root).textContent).toBe("1a2%b5%");
     expect(hovers).toEqual(["5%"]);
-    // The keyboard steps through the first series, reporting each series at its x.
+    // The keyboard steps through the first series; `i` reads each series at its x.
     chart.root.focus();
     const key = (k: string) =>
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
     key("ArrowRight");
     key("ArrowRight");
     const live = chart.root.querySelector("[aria-live]")!;
-    expect(live.textContent).toContain("a: 2%");
-    expect(live.textContent).toContain("b: 5%");
+    expect(live.textContent).toBe("2% at 1");
+    key("i");
+    expect(live.textContent).toBe("2 series at 1: a 2%; b 5%");
     // Hiding b from the legend leaves it out of what draw receives.
     const buttons = chart.root.querySelectorAll("button");
     expect([...buttons].map((b) => b.textContent)).toEqual(["a", "b"]);
@@ -1111,7 +1113,8 @@ it.each(["svg", "canvas"] as const)(
       );
       await frame();
       expect(tooltipOf(chart.root).textContent).toContain("0 – 2: 1");
-      expect(stopsOf(model, "")).toHaveLength(1);
+      // Each series is a stop; a bin's stop reads both series' bins there.
+      expect(stopsOf(model, "")).toHaveLength(2);
       expect(positionOf(model, model.series()[0]!.key, 0)!.points).toHaveLength(2);
       chart.destroy();
     }

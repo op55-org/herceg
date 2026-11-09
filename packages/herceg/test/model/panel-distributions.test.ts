@@ -169,9 +169,9 @@ describe("histograms split by facets", () => {
     expect(inspection!.points.map((p) => [p.label, p.text, p.row])).toEqual([
       ["s", "10 – 15: 2", undefined],
     ]);
-    // Series sharing bins share a keyboard stop, which reads both.
+    // Each series is a stop; one reads both, which share their bins.
     const stops = stopsOf(model, "A");
-    expect(stops.map((s) => s.label)).toEqual(["s"]);
+    expect(stops.map((s) => s.label)).toEqual(["s", "t"]);
     const read = positionOf(model, stops[0]!.key, 0, "A")!;
     expect(read.points.map((p) => [p.label, p.value])).toEqual([
       ["s", 2],

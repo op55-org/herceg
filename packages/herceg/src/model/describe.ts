@@ -131,13 +131,15 @@ export function describeChart(model: ChartModel): string {
 
 /**
  * A mounted chart's description: what it shows, and how keys read it,
- * where they read anything (annotations and dendrograms alone they do not).
+ * where they read anything (annotations and dendrograms alone they do not),
+ * and `i` where it has series.
  */
 export function chartDescription(model: ChartModel): string {
   const hint = model.items?.hint;
+  const series = model.series().length > 0;
   const keys =
-    model.items || model.series().length
-      ? " Focus the chart and use the arrow keys to read values."
+    model.items || series
+      ? ` Focus the chart and use the arrow keys to read values${series ? ", and i to read every series" : ""}.`
       : "";
   return `${describeChart(model)}${keys}${hint ? ` ${hint}` : ""}`;
 }

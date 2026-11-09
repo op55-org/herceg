@@ -90,6 +90,22 @@ describe("orderedTable()", () => {
     expect(t.positionOf(7, 0, 30)).toBe(-1);
   });
 
+  it("keeps rows of one order value in the order they arrived, their identities ascending", () => {
+    // Ties made with the table, appended after its last row, and merged into
+    // place late. The keyboard cursor finds rows by halves on this order.
+    const t = orderedTable({ t: [5, 1, 5, 5], v: [0, 0, 0, 0] }, { orderBy: "t" });
+    t.append({ t: [5, 9], v: [0, 0] });
+    t.append({ t: [5, 1, 5], v: [0, 0, 0] });
+    expect(times(t)).toEqual([1, 1, 5, 5, 5, 5, 5, 5, 9]);
+    expect(identities(t)).toEqual([1, 7, 0, 2, 3, 4, 6, 8, 5]);
+    const values = t.numbers("t");
+    for (let position = 0; position < t.length; position++)
+      expect(t.positionOf(t.identity(position), 0, values[position])).toBe(position);
+    // Not among the rows of another value, nor after a reset.
+    expect(t.positionOf(2, 0, 1)).toBe(-1);
+    expect(t.positionOf(2, 1, 5)).toBe(-1);
+  });
+
   it("drops from the first row up, so rows that sort first leave first", () => {
     const t = orderedTable({ t: [10, 20, 30], v: [1, 2, 3] }, { orderBy: "t", maxRows: 3 });
     const changes = changesOf(t);

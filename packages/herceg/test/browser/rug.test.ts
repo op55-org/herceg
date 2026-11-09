@@ -66,10 +66,10 @@ describe("rug renderers", () => {
       expect(color[1]).toBeLessThan(50);
       expect(color[2]).toBeLessThan(50);
     }
-    expect(key(chart, "ArrowRight")).toBe("1. v: 1");
-    expect(key(chart, "ArrowRight")).toBe("2. v: 2");
-    expect(key(chart, "ArrowRight")).toBe("2. v: 2");
-    expect(key(chart, "ArrowRight")).toBe("3. v: 3");
+    expect(key(chart, "ArrowRight")).toBe("v: 1 at 1");
+    expect(key(chart, "ArrowRight")).toBe("2 at 2");
+    expect(key(chart, "ArrowRight")).toBe("2 at 2");
+    expect(key(chart, "ArrowRight")).toBe("3 at 3");
   });
 
   it.each(["x", "y"] as const)(
@@ -80,11 +80,11 @@ describe("rug renderers", () => {
         marks: [axis === "x" ? rug(t, { x: "v" }) : rug(t, { y: "v" })],
         [axis]: { type: "log" },
       });
-      expect(key(chart, "ArrowRight")).toBe("1. v: 1");
-      expect(key(chart, "ArrowRight")).toBe("10. v: 10");
-      expect(key(chart, "Home")).toBe("1. v: 1");
-      expect(key(chart, "ArrowLeft")).toBe("1. v: 1");
-      expect(key(chart, "End")).toBe("10. v: 10");
+      expect(key(chart, "ArrowRight")).toBe("v: 1 at 1");
+      expect(key(chart, "ArrowRight")).toBe("10 at 10");
+      expect(key(chart, "Home")).toBe("1 at 1");
+      expect(key(chart, "ArrowLeft")).toBe("1 at 1");
+      expect(key(chart, "End")).toBe("10 at 10");
     },
   );
 
@@ -110,8 +110,8 @@ describe("rug renderers", () => {
       marks: [rug(table({ v: [1, 2, 3] }), { y: "v" })],
       x: { type: "time", domain: [0, 4], breaks: timeBreaks([{ from: 2, to: 3 }]) },
     });
-    expect(key(chart, "ArrowRight")).toBe("1. v: 1");
-    expect(key(chart, "ArrowRight")).toBe("2. v: 2");
-    expect(key(chart, "ArrowRight")).toBe("3. v: 3");
+    expect(key(chart, "ArrowRight")).toBe("v: 1 at 1");
+    expect(key(chart, "ArrowRight")).toBe("2 at 2");
+    expect(key(chart, "ArrowRight")).toBe("3 at 3");
   });
 });

@@ -191,3 +191,29 @@ lines, areas, error bars, candlesticks, heatmaps): the view's report of
 its table's write showed every change at once. They move as marks over
 tables do; a view's own query or restriction changing still shows at
 once.
+
+The keyboard does what the pointer does. Every series shown is a stop,
+whatever the inspection reads (marks with `inspect: false` have none), so
+twelve lines of one table no longer need `inspection: { mode: "nearest" }`
+to reach each one. Up and Down go in screen order at the cursor's place,
+by where each series is drawn there (steps, curves, and folded paths as
+drawn), left to right for series along y, and keep that order while they
+follow, so crossing lines are each reached once; past the last series,
+they go on to the next panel. The cursor reads what the pointer would at
+its point, under the chart's `mode`, `snap`, and `within`. Each move
+announces the cursor's series where it changes, with its place in the
+order ("api, 2 of 12: 304 ms at 10:00"), and names it again where Up or
+Down can go no further ("auth, 1 of 12"); `i` reads every series the
+tooltip lists, and what Enter selects is announced ("api selected").
+The cursor, its ring, and its tooltip follow the row, cell, or layout
+item it is on where data changes move it within its series; when that
+goes (dropped, filtered out, moved to another series) or the legend
+hides its series or item, there is none (`hover` listeners hear that
+nothing is hovered) until the next key hands it to its neighbour (in a
+series alone, its nearest point; for a layout item, its panel's items).
+The chart's description names `i` where it has series.
+Fixed: the keyboard's tooltip stood at the plot's middle, away from the
+point it read (a custom range item's among them); it stands at the
+cursor's point in every family, which a ring marks, with the cursor's
+series in bold, and at the middle only where that point is out of view
+and for cursors other charts share.

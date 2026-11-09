@@ -117,7 +117,7 @@ describe("facets in the browser", () => {
     key(chart, "ArrowRight");
     key(chart, "ArrowDown");
     const live = chart.root.querySelector("[aria-live]")!;
-    expect(live.textContent).toBe("b: 0. v: 100");
+    expect(live.textContent).toBe("b: v: 100 at 0");
     chart.destroy();
   });
 
@@ -159,15 +159,15 @@ describe("facets in the browser", () => {
     key(chart, "ArrowRight");
     expect(live.textContent).toMatch(/^a: /);
     key(chart, "ArrowRight");
-    expect(live.textContent).not.toMatch(/^a: /);
-    expect(live.textContent).toContain("v: 1");
-    // Down moves to the same x in the next panel; past the last, nothing changes.
+    expect(live.textContent).toBe("1 at 1");
+    // Down moves to the same x in the next panel; past the last, the cursor
+    // stays and names its series again (alone in its panel, with no rank).
     key(chart, "ArrowDown");
-    expect(live.textContent).toMatch(/^b: 1\. v: 100/);
+    expect(live.textContent).toBe("b: v: 100 at 1");
     key(chart, "ArrowDown");
-    expect(live.textContent).toMatch(/^b: 1\. v: 100/);
+    expect(live.textContent).toBe("v");
     key(chart, "ArrowUp");
-    expect(live.textContent).toMatch(/^a: 1\. v: 1/);
+    expect(live.textContent).toBe("a: v: 1 at 1");
     chart.destroy();
   });
 
@@ -711,7 +711,7 @@ describe("facet panels with x scales of their own", () => {
     expect(brushOf(chart.selection)!.x).toEqual([8, 9]);
     // Down to b, at the same place across its plot: 8 of 0..9 is 108 of 100..109.
     key(chart, "ArrowDown");
-    expect(live.textContent).toMatch(/^b: 108\. /);
+    expect(live.textContent).toMatch(/^b: .* at 108$/);
     // A range does not reach from a's values into b's.
     shift("ArrowLeft");
     expect(brushOf(chart.selection)!.x).toEqual([107, 108]);
@@ -849,12 +849,12 @@ describe("facet panels with categories of their own", () => {
     const chart = createChart(host, options());
     const live = chart.root.querySelector("[aria-live]")!;
     key(chart, "ArrowRight");
-    expect(live.textContent).toBe("N: b. units: 1");
+    expect(live.textContent).toBe("N: units: 1 at b");
     key(chart, "ArrowRight");
-    expect(live.textContent).toBe("d. units: 3");
+    expect(live.textContent).toBe("3 at d");
     // S's second band, where N's d was, is c.
     key(chart, "ArrowDown");
-    expect(live.textContent).toBe("S: c. units: 4");
+    expect(live.textContent).toBe("S: units: 4 at c");
     chart.destroy();
   });
 
@@ -965,7 +965,7 @@ describe("facet panels with heatmaps and points on categories of their own", () 
     expect(pixel(n!.x.map(1), n!.y.map(4))).toEqual([255, 0, 0, 255]);
     const live = chart.root.querySelector("[aria-live]")!;
     key(chart, "ArrowRight");
-    expect(live.textContent).toBe("N: b. cpu: 1");
+    expect(live.textContent).toBe("N: cpu: 1 at b");
     chart.destroy();
   });
 });
@@ -997,10 +997,10 @@ describe("facet panels with histograms and box plots", () => {
     expect(tooltip.textContent).toContain("100 – 105: 1");
     const live = chart.root.querySelector("[aria-live]")!;
     key(chart, "ArrowRight");
-    expect(live.textContent).toBe("N: 2.5. units: 0 – 5: 3");
+    expect(live.textContent).toBe("N: units: 0 – 5: 3 at 2.5");
     // Into S, whose x scale is its own, at the same place across the plot.
     key(chart, "ArrowDown");
-    expect(live.textContent).toBe("S: 77.5. units: 75 – 80: 0");
+    expect(live.textContent).toBe("S: units: 75 – 80: 0 at 77.5");
     chart.destroy();
   });
 
@@ -1034,12 +1034,12 @@ describe("facet panels with histograms and box plots", () => {
       });
       const live = chart.root.querySelector("[aria-live]")!;
       key(chart, "ArrowRight");
-      expect(live.textContent).toMatch(/^N: a\. /);
+      expect(live.textContent).toMatch(/^N: units: .* at a$/);
       key(chart, "ArrowRight");
-      expect(live.textContent).toMatch(/^b\. /);
+      expect(live.textContent).toMatch(/^median .* at b$/);
       // Into S at the same place down the plot: its second category, c.
       key(chart, "ArrowDown");
-      expect(live.textContent).toMatch(/^S: c\. /);
+      expect(live.textContent).toMatch(/^S: units: .* at c$/);
       chart.destroy();
     }
   });
@@ -1072,9 +1072,9 @@ describe("facet panels with histograms and box plots", () => {
     expect(red(pixel(n!.x.map(0), n!.y.map(220)))).toBe(false);
     const live = chart.root.querySelector("[aria-live]")!;
     key(chart, "ArrowRight");
-    expect(live.textContent).toMatch(/^N: a\. units: median 2,/);
+    expect(live.textContent).toMatch(/^N: units: median 2,.* at a$/);
     key(chart, "ArrowDown");
-    expect(live.textContent).toMatch(/^S: b\. units: median 200,/);
+    expect(live.textContent).toMatch(/^S: units: median 200,.* at b$/);
     chart.destroy();
   });
 });
@@ -1203,7 +1203,7 @@ describe("right axes in panels", () => {
     });
     const live = chart.root.querySelector("[aria-live]")!;
     key(chart, "ArrowRight");
-    expect(live.textContent).toMatch(/^a: Rule: deploy \(x 1\)\. 0\. ms: 10/);
+    expect(live.textContent).toMatch(/^a: Rule: deploy \(x 1\)\. ms: 10 at 0/);
     // Within the panel, it is not repeated.
     key(chart, "ArrowRight");
     expect(live.textContent).not.toContain("deploy");

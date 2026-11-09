@@ -118,7 +118,8 @@ describe("the inspection policy", () => {
     chart.root.focus();
     key(chart, "Home");
     const first = hovers.at(-1)?.inspection?.points.map((p) => p.label);
-    key(chart, "ArrowDown");
+    // api's point nearest auth's first is drawn above it.
+    key(chart, "ArrowUp");
     const second = hovers.at(-1)?.inspection?.points.map((p) => p.label);
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
@@ -266,7 +267,8 @@ describe("the keyboard", () => {
     });
     const clicks = heard(chart, "click");
     chart.root.focus();
-    for (const name of ["Home", "Enter", "ArrowDown", "Enter"]) key(chart, name);
+    // B's box is drawn above A's.
+    for (const name of ["Home", "Enter", "ArrowUp", "Enter"]) key(chart, name);
     await frame();
     const targets = clicks.map(({ target }) => (target?.kind === "item" ? target : undefined));
     expect(targets.map((target) => target?.series)).toEqual(['["boxes","A"]', '["boxes","B"]']);

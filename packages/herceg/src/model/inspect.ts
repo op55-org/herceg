@@ -157,8 +157,10 @@ export class Inspector {
   readonly marks: ReadableMark[];
   readonly #frame: Frame;
   readonly mode: InspectionMode;
-  readonly #snap: Snap;
-  readonly #within: number;
+  /** Which point of each series an inspection along an axis reads (see `Snap`). */
+  readonly snap: Snap;
+  /** How far from the pointer a point read may be, in the mode's units (see `InspectionSpec`). */
+  readonly within: number;
   readonly #formatX: Formatter;
   readonly #formatValue: Formatter;
   readonly #fields: FieldReader | undefined;
@@ -196,8 +198,8 @@ export class Inspector {
     this.mode = scene.mode;
     // A number, or one in pixels or milliseconds.
     const within = scene.within as { px?: number; milliseconds?: number } | undefined;
-    this.#snap = scene.snap ?? "shared";
-    this.#within = within?.px ?? within?.milliseconds ?? (within as number | undefined) ?? Infinity;
+    this.snap = scene.snap ?? "shared";
+    this.within = within?.px ?? within?.milliseconds ?? (within as number | undefined) ?? Infinity;
     this.#formatX = scene.formatX;
     this.#formatValue = scene.formatValue;
     this.#fields = scene.fields;
@@ -236,13 +238,13 @@ export class Inspector {
     px: number,
     py: number,
     mode?: InspectionMode,
-    snap = this.#snap,
+    snap = this.snap,
   ): AxisInspection | undefined {
     const { plot } = this.#frame;
     if (px < plot.x || px > plot.x + plot.width || py < plot.y || py > plot.y + plot.height)
       return undefined;
     const requested = mode ?? this.mode;
-    const within = this.#within;
+    const within = this.within;
     // Cells are always found under the pointer, so with nothing placed along
     // an axis (heatmaps only) every mode inspects the nearest cell.
     const axis = requested === "nearest-y" ? "y" : "x";
@@ -384,7 +386,7 @@ export class Inspector {
         k =
           by < 0 ? breaks.shownBefore(s.x, k, s.rows) : breaks.shownFrom(s.x, k, s.length, s.rows);
       if (k < 0 || k >= s.length) return -1;
-      if (this.#drawn(s, rowOf(s, k))) return k;
+      if (this.drawn(s, rowOf(s, k))) return k;
     }
     return -1;
   }
@@ -412,7 +414,7 @@ export class Inspector {
       const at = placeAt(s, axis, row);
       if (!(at >= lo && at <= hi)) continue;
       const distance = Math.abs(scale.map(at) - at0);
-      if (distance >= bestDistance || !this.#drawn(s, row)) continue;
+      if (distance >= bestDistance || !this.drawn(s, row)) continue;
       best = k;
       bestDistance = distance;
     }
@@ -425,12 +427,12 @@ export class Inspector {
   }
 
   /**
-   * Whether a point is drawn: its value is finite and both scales can place
-   * it. A point of a mark inspected along y (a horizontal bar) also needs
-   * part of it, from base to end, inside the x domain; its end may lie
-   * outside the plot.
+   * Where a point is drawn, as inspections mark it; undefined unless its
+   * value is finite and both scales can place it. A point of a mark
+   * inspected along y (a horizontal bar) also needs part of it, from base
+   * to end, inside the x domain; its end may lie outside the plot.
    */
-  #drawn(s: Series, row: number): readonly [number, number] | undefined {
+  drawn(s: Series, row: number): readonly [number, number] | undefined {
     const pixels = this.#pixels(s, row);
     const mark = this.#ownerOf.get(s)!.mark;
     if (!pixels || mark.place || mark.tooltip !== "y") return pixels;
@@ -502,7 +504,7 @@ export class Inspector {
       for (const s of series) {
         const consider = (k: number) => {
           const row = rowOf(s, k);
-          const pixels = this.#drawn(s, row);
+          const pixels = this.drawn(s, row);
           if (pixels)
             found.take(
               { series: s, position: k, distance: Math.hypot(pixels[0] - px, pixels[1] - py) },
@@ -567,7 +569,7 @@ export class Inspector {
     if (s.sorted && (axis === "x" || this.#ownerOf.get(s)!.mark.place)) {
       // Of several points at this x, the first one drawn.
       for (let k = lowerPosition(s, value); k < s.length && xAt(s, k) === value; k++)
-        if (this.#drawn(s, rowOf(s, k))) return k;
+        if (this.drawn(s, rowOf(s, k))) return k;
       return -1;
     }
     return this.#scanNearest(s, axis, value, value, value);

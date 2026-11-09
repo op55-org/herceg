@@ -124,21 +124,28 @@ export function ownContent(
    * line up under its label; a field's link is written as its text, and is
    * a link once the tooltip is pinned (`linked`), when it takes the pointer.
    */
-  const builtIn = (inspection: Inspection, theme: Theme, linked: boolean) => {
+  const builtIn = (inspection: Inspection, theme: Theme, linked: boolean, own: number) => {
     const header = document.createElement("div");
     header.textContent = inspection.label;
     // Line breaks in labels break the tooltip's lines too.
     header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
     element.append(header);
     // A point's swatch is its series', and its label reads as its name; a field's is its value's.
-    const row = (name: string, text: string, color?: string, field = false, link?: RowLink) => {
+    const row = (
+      name: string,
+      text: string,
+      color?: string,
+      field = false,
+      link?: RowLink,
+      bold = false,
+    ) => {
       const line = document.createElement("div");
       line.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
       const swatch = document.createElement("span");
       swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${color ?? "none"};flex:none`;
       const label = document.createElement("span");
       label.textContent = name;
-      label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}`;
+      label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}${bold ? ";font-weight:600" : ""}`;
       const anchor = !!link && linked;
       const value = document.createElement(anchor ? "a" : "span");
       value.textContent = link?.text ?? text;
@@ -154,16 +161,16 @@ export function ownContent(
       line.append(swatch, label, value);
       element.append(line);
     };
-    for (const point of inspection.points) {
-      row(point.label, point.text, point.color);
+    for (const [i, point] of inspection.points.entries()) {
+      row(point.label, point.text, point.color, false, undefined, i === own);
       for (const field of point.fields ?? [])
         row(field.label, field.text, field.color, true, field.link);
     }
   };
-  tooltip.show = (inspection, theme, pointer, bounds) => {
+  tooltip.show = (inspection, theme, pointer, bounds, ownRow = -1) => {
     const own = render();
     const linked = pinned();
-    const key = JSON.stringify(inspection);
+    const key = JSON.stringify([inspection, ownRow]);
     const revised = revision();
     // A framework may have taken its content out of the box (a snippet removed and given again).
     const kept = !(shown[5] instanceof Node) || element.contains(shown[5]);
@@ -188,7 +195,7 @@ export function ownContent(
       const content = changed ? own?.(inspection) : null;
       // Text is shown as text, never parsed as markup.
       if (content != null) element.append(content);
-      else builtIn(inspection, theme, linked);
+      else builtIn(inspection, theme, linked, ownRow);
       // Whether the built-in content was drawn pinned; a fragment leaves its
       // children in the box, not itself.
       shown = [

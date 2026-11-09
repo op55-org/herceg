@@ -365,7 +365,7 @@ describe("areas", () => {
     expect(Array.from(model.series()[1]!.y)).toEqual([10, Number.NaN, 30]);
   });
 
-  it("stops the keyboard once at fields of one table, in every panel, and at each other series", () => {
+  it("stops the keyboard at every series, fields of one table included, in every panel", () => {
     const t = table({
       x: [0, 1, 2, 0, 1, 2],
       a: [1, 2, 3, 4, 5, 6],
@@ -379,10 +379,10 @@ describe("areas", () => {
     };
     expect(
       stops({ marks: [line(t, { x: "x", y: ["a", "b"] }), line(other, { x: "x", y: "c" })] }),
-    ).toEqual([["a", "c"]]);
+    ).toEqual([["a", "b", "c"]]);
     expect(stops({ marks: [line(t, { x: "x", y: ["a", "b"] })], facet: facet("g") })).toEqual([
-      ["a"],
-      ["a"],
+      ["a", "b"],
+      ["a", "b"],
     ]);
     expect(stops({ marks: [point(t, { x: "x", y: "a" }), point(t, { x: "x", y: "b" })] })).toEqual([
       ["a", "b"],

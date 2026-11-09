@@ -406,9 +406,13 @@ describe("row selection across charts and grids", () => {
     });
     a.root.focus();
     await userEvent.keyboard("{ArrowRight}");
-    // The view changes before the next frame: Space reads the chart as drawn then.
+    // The view changes before the next frame: Space reads the chart as drawn
+    // then, where the cursor's row is gone, and selects nothing; Down hands
+    // the cursor to its series' point nearest there, which Space selects.
     view.restrict(new RowSet(source).addAll([4, 7]));
     await userEvent.keyboard(" ");
+    expect(store.get("focus")).toBeNull();
+    await userEvent.keyboard("{ArrowDown} ");
     expect(rowsOf(store.get("focus"), source)).toEqual([4]);
     // A selection shown without writing its rows leaves the channel be.
     a.select([1, 2], { rows: false });
