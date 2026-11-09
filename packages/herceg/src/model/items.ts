@@ -137,7 +137,11 @@ export function itemResolver(
   };
 }
 
-/** The rows of `table` that `key` (parsed as `parts`) names, whether `mark` draws them or not. */
+/**
+ * The rows of `table` that `key` (parsed as `parts`) names, whether `mark`
+ * draws them or not. Anchors read keys naming rows by a field's value as
+ * this does, for many keys in one pass (dom/anchor-items.ts `rowsNamed`).
+ */
 function rowsNamed(mark: Mark, key: string, parts: readonly KeyPart[], table: Table): Uint32Array {
   // A wide mark's items are of its value fields now, not of fields it drew before.
   if (wide(mark) && !mark.identity?.values.includes(parts[1] as string)) return NONE;

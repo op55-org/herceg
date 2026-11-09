@@ -2,7 +2,8 @@
 
 What dragging, the wheel, touch, and keys do; how charts share cursors,
 views, and selections; tooltips; events; linked row selections; the range
-navigator; animation; and reading panels and pixels.
+navigator; animation; reading panels and pixels; and holding elements of
+your own at places in the data.
 
 - [Pan, zoom, and brush](#pan-zoom-and-brush)
 - [Bindings](#bindings)
@@ -17,6 +18,7 @@ navigator; animation; and reading panels and pixels.
 - [Animation](#animation)
 - [Hiding series](#hiding-series)
 - [Panels and pixels](#panels-and-pixels)
+- [Anchors](#anchors)
 
 ## Pan, zoom, and brush
 
@@ -1232,3 +1234,124 @@ const found = chart.inspect(x, y); // what the tooltip would show there
 - These describe the last frame drawn: after changing a table, call
   `render()` before inspecting. `inspect` moves no cursor and emits no
   event.
+
+## Anchors
+
+An anchor holds an element of the application (a button, a popover, a
+form) at a place in the chart's data. The chart moves it with every frame
+it draws (zoom, pan, resize, streamed rows, transitions) and hides it while
+the place is out of view. The element keeps its own styles, input, and
+focus; only where it stands is the chart's.
+
+```ts
+import { type Anchor, anchor } from "herceg";
+
+const button = document.createElement("button");
+button.textContent = "Investigate";
+anchor(chart, button, { at: { x: peak.time, y: peak.value }, side: "top", offset: 8 });
+
+// A popover over the band a click was on, at its visible part's start.
+let opened: Anchor | undefined;
+chart.on("click", ({ target }) => {
+  if (target?.kind !== "item" || target.markId !== "downtime") {
+    opened?.remove(); // the element is detached, and its place forgotten
+    opened = undefined;
+    return;
+  }
+  const options = { at: { item: target.item }, side: "top", align: "start" } as const;
+  if (opened) opened.set(options);
+  else opened = anchor(chart, popover, options);
+});
+```
+
+```tsx
+// React: the children render through a portal, with the application's context
+<Chart interaction={{ zoom: "x" }}>
+  <Line data={metrics} x="time" y="latency" />
+  <Anchor at={{ x: peak.time, y: peak.value }} side="top" offset={8}>
+    <button onClick={investigate}>Investigate</button>
+  </Anchor>
+</Chart>
+```
+
+In Vue, `<Anchor>`'s slot is teleported; in Svelte, its children render
+into the element the chart holds ([React, Vue, and
+Svelte](frameworks.md#anchors)). Changing an `<Anchor>`'s props moves it;
+unmounting it removes it.
+
+| Option | Means |
+| --- | --- |
+| `at` | A point, `{ x, y }`, each a value on the panel's axis (a number, epoch ms or a `Date` on time axes, a category's name), `{ data, scale?, offset? }` on a scale the chart names ("x", "y", "yRight", or one of its `scales`), or `{ fraction }` or `{ px }` of the plot (with `frame: "chart"`, of the chart), as [annotations' places](marks.md#annotations) are. Or an item, `{ item }`: a key from an event, or a reference (`{ mark: "bars", item: ["S"] }`). |
+| `side` | Where the element sits: above the place (`"top"`, the default), `"right"`, `"bottom"`, `"left"`, or centred on it (`"center"`). For an item, its box's edge on that side. |
+| `align` | Where along that side: the element's start, centre (the default), or end at the place's (an item box's start or end edge). Start is the left in left-to-right text, the right in right-to-left text, and the top beside the place. |
+| `offset` | Pixels between the place and the element. |
+| `panel` | The panel: a facet value or subplot id. Needed in charts of several panels, and for an item drawn in several. |
+
+- **Where.** A point is placed through its panel's scales as drawn; a
+  `{ fraction }` or `{ px }` is never out of view. An item stands at its
+  box as the frame drew it, cut to what its geometry shows: a band half in
+  view, at its visible half. A line's or area's observation and a point
+  cloud's point stand where their row is placed; a custom mark's item,
+  around the shapes it paints; a layout mark's item (a treemap's node, a
+  funnel's stage), at its box; a pie's or sunburst's slice, at its
+  middle (halfway along its ring, between its angles).
+- **Heatmap cells** are anchored as points at their coordinates:
+  `at: { x: "Mon", y: "10:00" }` lands at the cell's centre, as categories
+  place at their band's centre; numeric bins by their values.
+- **Not anchored by item:** contours, box plots, violins, and boxen. Their
+  items (a contour's level, a box's whiskers and outliers, a violin's
+  shape) have no one box to stand at; anchor them as points. Of layout
+  marks, only pies', funnels', treemaps', and sunbursts' items are
+  anchored, as `getItems` gives them: networks, Sankey diagrams, gauges,
+  radars, maps, and 3D plots keep an item anchor hidden.
+- **When.** As every frame the chart draws finishes, in the same task,
+  before its listeners (`hover`, `viewport`, `select`, ...) run and before
+  `render` tells of it, so element and chart paint together. `anchor` and
+  `set` ask for a frame that only places anchors; such a frame draws
+  nothing and tells no `render` listener, so `set` in a `render` listener
+  does not loop. An element changing size needs no frame: the chart places
+  it by its own percentages, so it keeps its side of the place.
+- **During transitions**, a point follows the frame's scales, and an item
+  the frame's own geometry: a bar turning from +10 to −10 passes through
+  no height. One exception: a line's or area's observation stands at its
+  destination while its trace moves.
+- **Hidden.** While the point is outside its panel's plot, the item is not
+  drawn (out of view, hidden by the legend, gone), or the panel is not
+  drawn (a facet value without rows), the element is not displayed and the
+  anchor's `shown` is false; read in a `render` listener, it says what that
+  frame showed. Focus inside an element being hidden moves to the chart's
+  root; focus elsewhere is never moved.
+- **Input and focus.** Pointer input and keys inside an anchor are the
+  element's: the chart neither picks, pans, nor reads keys there. A finger
+  pressed in an anchor stays the element's until it leaves the chart, so
+  it neither moves nor ends another finger's pan. The element follows the
+  chart's root in the tab order; focus moving into it
+  ends the keyboard cursor, as leaving the chart does. Anchors are over
+  the plots and the legend, under the tooltip.
+- **Exports** (`toSVG`, `toPNG`, PDF) leave anchors out.
+- **One anchor per element**, in this chart or another: `set` moves it.
+- **Refusals.** `anchor` throws for an element anchored already and for a
+  destroyed chart. Options the chart cannot place keep the element hidden
+  and are told of once per `set`, as other refusals are (`onError`,
+  `"error"` listeners, or the console): `anchor at.y: expected a value on
+  the y axis, a category, or { fraction } or { px }; received undefined`,
+  `anchor at.item: no mark "downtime" in the chart; marks with ids are
+  "lines"`, `anchor panel: no panel "West"; name one of "North",
+  "South"`, `anchor at.item: the item is drawn in panels "eu", "us"; name
+  one with panel`, `anchor at.x: "Tuesday" is a category, and the x axis
+  holds numbers; give a number`. TypeScript refuses most of these first.
+- **Limits.** The chart's root clips what it holds: an anchor reaching
+  past the chart's edge is cut there. One anchor per element holds within
+  one copy of the engine on a page.
+- **Cost.** `anchor` is a module of its own: an application that imports
+  it loads about 5.2 KB (gzip) more with the engine, and charts of
+  applications that never anchor carry only the frame's call to it. The
+  first item anchor loads the picking code hover also loads. Each frame
+  maps a point through two scales and reads an item's drawn pieces (bars
+  and points by the rows they record); an item's rows are found once per
+  change of its data or its view's question, and after an append in the
+  rows appended. A wrapper's
+  `transform` is written only when its place moves.
+- **No spec or Python.** An anchor holds the application's DOM, which
+  neither a spec nor Python has. Python's notebooks place text, rules, and
+  pinned tooltips, which are portable.

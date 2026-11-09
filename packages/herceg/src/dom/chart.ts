@@ -70,6 +70,7 @@ import {
 import { surface, themeReadsPage } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { AdoptedChart } from "./adopt.ts";
+import type { AnchorHost, Anchors } from "./anchors.ts";
 import type { Brush } from "./brush.ts";
 import { ascending, DRAG_THRESHOLD, normalize } from "./brushed.ts";
 import { ChartState } from "./chart-state.ts";
@@ -230,8 +231,8 @@ const NAVIGATION_KEYS = [
   "Enter",
 ];
 
-/** What the controller shares with charts (see `InteractionKit`). */
-const KIT: InteractionKit = {
+/** What the controller shares with charts (see `InteractionKit`), and anchors with picking. */
+export const KIT: InteractionKit = {
   svgElement,
   placeAt,
   rowOf,
@@ -531,6 +532,8 @@ export class MountedChart implements Chart, ExportsScene {
    * scene's, or once nothing waits to be drawn, the selection's drawn over it.
    */
   #shown = 0;
+  /** The chart's anchors (dom/anchors.ts), made with the first, which each frame places. */
+  #anchors: Anchors | undefined;
 
   /**
    * Mounts a chart in `container`, or with `adopted`, takes over the element
@@ -700,6 +703,16 @@ export class MountedChart implements Chart, ExportsScene {
     if (mounted.#destroyed) return false;
     mounted.#changeView(() => mounted.#model.applyViews(changes), "options");
     return true;
+  }
+
+  /**
+   * `chart`'s anchors (dom/anchors.ts `anchor`), made by `make` with what
+   * the chart lends them at the first; undefined once it is destroyed.
+   */
+  static anchors(chart: MountedChart, make: (host: AnchorHost) => Anchors): Anchors | undefined {
+    if (chart.#destroyed) return undefined;
+    chart.#anchors ??= make({ ...chart.#host(), drawing: () => chart.#values?.drawing });
+    return chart.#anchors;
   }
 
   update(options: ChartUpdate): void {
@@ -1249,6 +1262,7 @@ export class MountedChart implements Chart, ExportsScene {
       this.#brushLoading,
       this.#state.loading,
       this.#navigator?.loading,
+      this.#anchors?.loading,
     ].filter((loading) => loading !== undefined);
     return pending.length > 1
       ? Promise.all(pending).then(() => {})
@@ -1601,6 +1615,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.#model.items?.disposeControls();
     this.#navigator?.dispose();
     this.#rows?.dispose();
+    this.#anchors?.dispose();
     // A transition waiting for its first frame leaves the frame's batch;
     // values let go of what they moved.
     this.#animation?.settle();
@@ -1765,6 +1780,8 @@ export class MountedChart implements Chart, ExportsScene {
     // Input that waited for this frame picks what it drew, before listeners change it.
     if (drawn) this.#controller?.resolve(revision);
     const scene = this.#scene;
+    // Anchors move with what the frame drew, before listeners of its reports can change it.
+    this.#anchors?.place();
     const report = () => {
       items?.();
       // Zoomed instances the frame no longer drew are fitted now: reported as
@@ -2522,7 +2539,8 @@ export class MountedChart implements Chart, ExportsScene {
   #gate(): void {
     const hold = (event: Event): void => {
       const held = this.#held;
-      if (this.#controller || !held) return;
+      // Input inside an anchor is the application's.
+      if (this.#controller || !held || this.#anchors?.layer.contains(event.target as Node)) return;
       this.#loadController().catch(() => {});
       // The plot it is over, of marks along axes or a layout mark's (for
       // menus, and subplots of settings of their own, whose input it is).
@@ -2671,6 +2689,7 @@ export class MountedChart implements Chart, ExportsScene {
       live: this.#live,
       legend: this.#legend.element,
       legendClicks: this.#legend.clicked,
+      anchors: () => this.#anchors?.layer,
       members: (keys) => this.#members(keys),
       references: (keys) => this.#references(keys),
       events: this.#events,

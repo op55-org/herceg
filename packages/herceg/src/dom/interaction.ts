@@ -135,6 +135,8 @@ export interface InteractionHost {
   readonly live: HTMLElement;
   /** The legend's element, whose presses and clicks are its own. */
   readonly legend: HTMLElement;
+  /** What holds the chart's anchors (dom/anchors.ts), whose input is the application's; undefined before the first. */
+  anchors(): HTMLElement | undefined;
   /** The entry each click on the legend was on, as drawn then (see `Legend.clicked`). */
   readonly legendClicks: WeakMap<Event, LegendClick>;
   /** What a legend entry of `keys` (its own, or its targets) stands for (see `legendMembers`). */
@@ -479,6 +481,12 @@ export class Interaction {
   #previewedIn = -1;
   /** Where each touch is, for pinches. */
   readonly #touches = new Map<number, { x: number; y: number }>();
+  /**
+   * The chart's own fingers: those it took the press of, until they leave.
+   * Another finger (pressed in an anchor, even while the controller loaded,
+   * or on a button) has no business with the chart's presses and pinches.
+   */
+  readonly #fingers = new Set<number>();
   #pinch: Pinch | null = null;
   /**
    * A press with nothing to drag (on a layout mark's items, or off the
@@ -1075,9 +1083,25 @@ export class Interaction {
     return !!rule && rule.pointer !== event.pointerId;
   }
 
-  /** Whether an event's target is in the pinned tooltip, whose content takes its own input. */
-  #onPin(target: EventTarget | null): boolean {
-    return !!this.#pin && this.#tooltip.element.contains(target as Node);
+  /** Whether an event's target is content that takes its own input: the pinned tooltip's, or an anchor. */
+  #onContent(target: EventTarget | null): boolean {
+    return (
+      (!!this.#pin && this.#tooltip.element.contains(target as Node)) || this.#inAnchor(target)
+    );
+  }
+
+  /** Whether an event's target is in an anchor (dom/anchors.ts), whose input is the application's. */
+  #inAnchor(target: EventTarget | null): boolean {
+    return !!this.#host.anchors()?.contains(target as Node);
+  }
+
+  /**
+   * Whether an event is of a finger not the chart's (see `#fingers`),
+   * whatever it is over now. (A mouse's or pen's events are of the press it
+   * has, or of none.)
+   */
+  #stray(event: PointerEvent): boolean {
+    return event.pointerType === "touch" && !this.#fingers.has(event.pointerId);
   }
 
   /** The rule with `drag` within reach of (x, y), picked with the reach of `event`'s pointer. */
@@ -2554,13 +2578,15 @@ export class Interaction {
       return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     };
 
-    // Over a pinned tooltip, the pointer is on its content, not on the chart.
+    // Over a pinned tooltip or an anchor, the pointer is on its content, not on the chart.
     const leave = () => {
       this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
       host.shareCursor(null);
     };
     on("pointermove", (event) => {
-      if (this.#onPin(event.target) && !this.#press) {
+      // Another finger than the chart's moves nothing of the chart's, wherever it goes.
+      if (this.#stray(event)) return;
+      if (this.#onContent(event.target) && !this.#press) {
         if (this.#pointer) {
           leave();
           host.schedule();
@@ -2639,6 +2665,7 @@ export class Interaction {
       this.#sharePointer(x, y);
     });
     on("pointerleave", (event) => {
+      if (event.pointerType === "touch" && !this.#fingers.delete(event.pointerId)) return;
       leave();
       // A captured drag leaves only when released; any other press ends
       // here. A rule's goes on where it holds the pointer (a leave played
@@ -2656,8 +2683,8 @@ export class Interaction {
     on(
       "wheel",
       (event) => {
-        // A pinned tooltip's content scrolls as its own.
-        if (!host.scene() || this.#onPin(event.target)) return;
+        // A pinned tooltip's content scrolls as its own, as an anchor does.
+        if (!host.scene() || this.#onContent(event.target)) return;
         const point = local(event);
         if (this.#onItems(point.x, point.y)) return;
         // Outside the plots, the wheel acts on the x scale every panel
@@ -2694,12 +2721,12 @@ export class Interaction {
       { passive: false },
     );
     on("pointerdown", (event) => {
-      // Buttons (the legend's, controls') and a pinned tooltip's content
-      // take their own presses; a rule being dragged keeps its pointer's.
+      // Buttons (the legend's, controls'), a pinned tooltip's content, and
+      // anchors take their own presses; a rule being dragged keeps its pointer's.
       if (
         !host.scene() ||
         (event.target as Element).closest?.("button") ||
-        this.#onPin(event.target) ||
+        this.#onContent(event.target) ||
         this.#besideRule(event)
       )
         return;
@@ -2711,6 +2738,7 @@ export class Interaction {
       }
       const { x, y } = local(event);
       if (event.pointerType === "touch") {
+        this.#fingers.add(event.pointerId);
         this.#touches.set(event.pointerId, { x, y });
         if (this.#touches.size === 2 && this.#startPinch(event)) return;
       }
@@ -2780,6 +2808,9 @@ export class Interaction {
       }
     });
     on("pointerup", (event) => {
+      if (this.#stray(event)) return;
+      // Released over an anchor, a press clicks nothing of the chart's.
+      const off = this.#inAnchor(event.target);
       this.#touches.delete(event.pointerId);
       if (this.#pinch) {
         this.#pinch = null;
@@ -2790,7 +2821,7 @@ export class Interaction {
       if (tap && this.#press?.rule?.pointer !== event.pointerId) {
         if (tap.pointer !== event.pointerId) return;
         this.#tap = null;
-        if (!tap.moved) this.#click(local(event), event, tap.label);
+        if (!tap.moved && !off) this.#click(local(event), event, tap.label);
         return;
       }
       if (this.#besideRule(event)) return;
@@ -2798,7 +2829,7 @@ export class Interaction {
       this.#press = null;
       if (!press) return;
       if (!press.moved) {
-        if (event.button === 0 && press.mode !== "cursor") this.#click(local(event), event);
+        if (event.button === 0 && press.mode !== "cursor" && !off) this.#click(local(event), event);
         return;
       }
       if (press.mode === "move") {
@@ -2855,6 +2886,7 @@ export class Interaction {
     // The browser took the pointer (a touch turned into scrolling, say): a
     // pan keeps where it got, a brush goes. A tap ends only with its own pointer.
     const cancel = (event: PointerEvent) => {
+      if (this.#stray(event)) return;
       this.#touches.delete(event.pointerId);
       this.#pinch = null;
       if (!this.#besideRule(event)) this.#cancelPress();
@@ -2867,7 +2899,7 @@ export class Interaction {
     // Double click resets: on a plot, its scales; elsewhere, every one. The
     // legend's buttons keep their clicks.
     on("dblclick", (event) => {
-      if (host.legend.contains(event.target as Node) || this.#onPin(event.target)) return;
+      if (host.legend.contains(event.target as Node) || this.#onContent(event.target)) return;
       const { x, y } = local(event);
       if (this.#onItems(x, y)) return;
       const panel = this.#panelAt(x, y);
@@ -2883,7 +2915,7 @@ export class Interaction {
     // A secondary press reports where it is and what it is on; while it is
     // listened to, the browser's own menu stays off the plots.
     on("contextmenu", (event) => {
-      if (!host.scene() || !host.events.has("contextMenu") || this.#onPin(event.target)) return;
+      if (!host.scene() || !host.events.has("contextMenu") || this.#onContent(event.target)) return;
       const { x, y } = local(event);
       if (this.#panelAt(x, y) || this.#onItems(x, y)) event.preventDefault();
       if (this.#fresh()) this.#menu(x, y, event)();
@@ -2919,10 +2951,13 @@ export class Interaction {
       else if (click) host.events.emit("click", click);
     });
 
-    on("keydown", (event) => this.#key(event));
-    // Focus moving to the chart's own controls (its legend) keeps the cursor.
+    // Keys in an anchor are the application's.
+    on("keydown", (event) => this.#inAnchor(event.target) || this.#key(event));
+    // Focus moving to the chart's own controls (its legend) keeps the cursor;
+    // to an anchor, the application's, it leaves the chart.
     on("focusout", (event) => {
-      if (host.root.contains(event.relatedTarget as Node | null)) return;
+      const to = event.relatedTarget;
+      if (host.root.contains(to as Node | null) && !this.#inAnchor(to)) return;
       this.#keyboard = this.#gone = null;
       this.#brushAnchor = null;
       host.schedule();

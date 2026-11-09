@@ -12,6 +12,7 @@ bypass the framework entirely.
 - [Live data](#live-data)
 - [Layouts](#layouts)
 - [Tooltips](#tooltips)
+- [Anchors](#anchors)
 - [When a chart cannot draw](#when-a-chart-cannot-draw)
 - [Server rendering](#server-rendering)
 - [Grids](#grids)
@@ -317,6 +318,55 @@ table it names.
   {/snippet}
 </Chart>
 ```
+
+## Anchors
+
+`<Anchor>` holds its content at a place in the chart's data, moving it with
+every frame and hiding it while the place is out of view, as the engine's
+`anchor` does ([Anchors](interaction.md#anchors)): its props are
+`anchor`'s options. It goes among the chart's children; inside a `<Panel>`
+or an `<Inset>`, it is in that panel. Changing its props moves it from the
+next frame; unmounting it removes it. Its content is the framework's, with
+the application's context: React renders it through a portal, Vue
+teleports the slot, and Svelte renders the children into the element the
+chart holds. `<Anchor>` imports the engine's anchors, so an application
+that uses only `<Chart>` does not load them.
+
+```tsx
+// React
+<Chart onClick={({ target }) => setOpen(target?.kind === "item" ? target.item : null)}>
+  <Region data={incidents} id="downtime" x1="start" x2="end" itemKey="id" />
+  {open && (
+    <Anchor at={{ item: open }} side="top" align="start">
+      <IncidentCard id={open} />
+    </Anchor>
+  )}
+</Chart>
+```
+
+```vue
+<!-- Vue -->
+<Chart :interaction="{ zoom: 'x' }">
+  <Line :data="metrics" x="time" y="latency" />
+  <Anchor :at="{ x: peak.time, y: peak.value }" side="top" :offset="8">
+    <button @click="investigate">Investigate</button>
+  </Anchor>
+</Chart>
+```
+
+```svelte
+<!-- Svelte -->
+<Chart interaction={{ zoom: "x" }}>
+  <Line data={metrics} x="time" y="latency" />
+  <Anchor at={{ x: peak.time, y: peak.value }} side="top" offset={8}>
+    <button onclick={investigate}>Investigate</button>
+  </Anchor>
+</Chart>
+```
+
+React's and Vue's `<Anchor>` render nothing on the server and in the first
+render of a hydrated chart; Svelte's renders its children hidden, with the
+chart's other children, until the chart holds them.
 
 ## When a chart cannot draw
 

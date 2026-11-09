@@ -619,7 +619,9 @@ and draws no grid lines.
 
 Rules, regions, and text mark thresholds, spans, and notes. Each takes
 places along the axes: a value (a number, or a `Date` on a time axis), a
-field (one item per row of the table given), or a coordinate.
+field (one item per row of the table given), or a coordinate. To hold an
+element of your own there (a button, a popover), anchor it
+([Anchors](interaction.md#anchors)).
 
 ```ts
 rule({ y: 250, label: { text: "Threshold", place: { attachment: "start", outside: true } } });

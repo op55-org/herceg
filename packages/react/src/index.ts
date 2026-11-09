@@ -1,5 +1,6 @@
 // React components for herceg charts.
 
+export { Anchor, type AnchorProps } from "./anchor.tsx";
 export { Chart, type ChartProps } from "./chart.tsx";
 export {
   Area,

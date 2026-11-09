@@ -80,6 +80,13 @@ export type {
 } from "./data/table.ts";
 export { fromRows, Table, table } from "./data/table.ts";
 export { RowTotals, rowTotals } from "./data/totals.ts";
+export {
+  type Anchor,
+  type AnchorAt,
+  type AnchorCoordinate,
+  type AnchorOptions,
+  anchor,
+} from "./dom/anchors.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
 export type {

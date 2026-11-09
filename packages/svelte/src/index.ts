@@ -1,5 +1,6 @@
 // Svelte components for herceg charts.
 
+export { default as Anchor } from "./Anchor.svelte";
 export { default as Area } from "./Area.svelte";
 export { default as Bar } from "./Bar.svelte";
 export { default as Boxen } from "./Boxen.svelte";

@@ -6243,12 +6243,15 @@
       "spec_schema": "the spec's JSON Schema, for editors"
     },
     "react": {
+      "Anchor": "the application's content, held at a place in the chart's data",
       "Chart": "the chart the marks are drawn in"
     },
     "vue": {
+      "Anchor": "the application's content, held at a place in the chart's data",
       "Chart": "the chart the marks are drawn in"
     },
     "svelte": {
+      "Anchor": "the application's content, held at a place in the chart's data",
       "Chart": "the chart the marks are drawn in"
     }
   }

@@ -49,6 +49,7 @@ One name per concept, used the same way in code and docs.
 | **Reference** | An item or series named by its mark's `id` (`ItemReference`, `SeriesReference`) rather than by its opaque key: what selections may be set by, what legend entries list (`references`), and what `chart.referenceOf` reads a key as. |
 | **Chart state** | What a chart's user changes: the selection, the viewport, what is hidden (visibility), drill roots, and the pinned tooltip; events report it, state options give it, and conditional writes set it. |
 | **Pin** | Where the tooltip is held (`PinTarget`, `chart.pinned`): at an item, which it follows, or at a value on an axis in a panel, read again as data changes; a click (`tooltip.pin`), Enter, or `chart.pin` sets it. |
+| **Anchor** | An application's element a chart holds at a place in its data (`anchor`, the adapters' `<Anchor>`): a point, or an item at its box as each frame draws it; placed after every frame, hidden while its place is out of view. JavaScript only: no spec or Python surface. |
 | **Basis** | An opaque name of a chart's state as a report saw it (`basis`), which a conditional write gives as `expected` so that it applies only if that state has not changed since. |
 | **Controls** | What a chart of a 3D, map, tree, or network mark loads to turn, pan and zoom, drill, or move nodes by pointer, keyboard, and toolbar (`dom/controls.ts`). |
 | **Spec** | The portable, JSON-serializable description of a chart (`ChartSpec`). |
@@ -159,7 +160,7 @@ formats, field displays, and expression trees; no functions or typed arrays.
 | [Marks](architecture/marks.md) | Series keys, identity and color, encodings and channels, band axes, bars, heatmaps, contours, annotations, custom marks, layout marks, networks, maps, 3D |
 | [Rendering](architecture/rendering.md) | Drawings, renderers and how one is chosen, browser layers, paint order and picking, points and GPU clouds, rasters, scheduling, animation |
 | [Layout](architecture/layout.md) | Scale instances, positions, chart layout, guides, legends, facets and subplots, insets, two y axes, text, themes and styles, time breaks, the range navigator |
-| [Interaction](architecture/interaction.md) | Inspection, picking, the lazy interaction controller, bindings, views and limits, brushes, sync, tooltips, pins, rule drags, and what a click does, layout controls, selected rows, accessibility, the chart handle, errors |
+| [Interaction](architecture/interaction.md) | Inspection, picking, the lazy interaction controller, bindings, views and limits, brushes, sync, tooltips, pins, rule drags, and what a click does, anchors, layout controls, selected rows, accessibility, the chart handle, errors |
 | [Export](architecture/export.md) | The export plan, static SVG, images, PDF, fonts and text admission, server snapshots, web payloads and fragments |
 | [Grids](architecture/grids.md) | Grid models, columns, grouped rows, pivots, headings and the totals row, selection, the virtualized DOM grid and its events, remote grids, export and copy |
 | [Packages](architecture/packages.md) | Package layout, the React, Vue, and Svelte adapters, the Python package's live charts and Streamlit, the DOM-free core |

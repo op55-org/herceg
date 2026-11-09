@@ -55,6 +55,10 @@ export function Latency() {
   written back without a loop.
 - **Tooltips** of your own: `renderTooltip` returns React content,
   rendered with your app's context in the chart's tooltip box.
+- **Anchors**: `<Anchor at={{ x, y }} side="top">` among the chart's
+  children holds its React content at a place in the data, moving with
+  every frame and hidden out of view, rendered through a portal with your
+  app's context.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are
   thrown in render for an error boundary.
 - **Server rendering**: `initial={hydration(snapshot)}` adopts markup from

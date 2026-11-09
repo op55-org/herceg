@@ -21,7 +21,14 @@ import type {
 } from "../data/table.ts";
 import { n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
-import type { PathShape, PlotRect, Rect, ShapesGeometry, TextShape } from "../scene/scene.ts";
+import type {
+  Geometry,
+  PathShape,
+  PlotRect,
+  Rect,
+  ShapesGeometry,
+  TextShape,
+} from "../scene/scene.ts";
 import type { ChannelsSpec, RowChannelsSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import { dashPattern } from "../style/dash.ts";
@@ -824,11 +831,15 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
       path,
       rect: (x, y, width, height, style) =>
         path(`M${n(x)} ${n(y)}h${n(width)}v${n(height)}h${n(-width)}Z`, style),
-      circle: (cx, cy, r, style) =>
-        path(
-          `M${n(cx - r)} ${n(cy)}a${n(r)} ${n(r)} 0 1 0 ${n(2 * r)} 0a${n(r)} ${n(r)} 0 1 0 ${n(-2 * r)} 0Z`,
+      circle: (cx, cy, r, style) => {
+        // Across twice the radius as written (see draw/symbols.ts).
+        const radius = n(r);
+        const d = n(+radius * 2);
+        return path(
+          `M${n(cx - r)} ${n(cy)}a${radius} ${radius} 0 1 0 ${d} 0a${radius} ${radius} 0 1 0 -${d} 0Z`,
           style,
-        ),
+        );
+      },
       line: (x1, y1, x2, y2, style) =>
         path(`M${n(x1)} ${n(y1)}L${n(x2)} ${n(y2)}`, {
           ...style,
@@ -1026,6 +1037,12 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
       position: rowOf(series, position),
       series: { series, position },
     };
+  }
+
+  itemBox(geometry: Geometry, row: number, series: Series): Rect | undefined {
+    const items = drawnItems.get(geometry as ShapesGeometry);
+    const position = positionOf(series, row);
+    return items && position >= 0 ? this.#boxOf(items, series, position) : undefined;
   }
 
   /** Where row `row`'s item of `series` is in `frame`'s plot: its drawn box's middle, inside the plot. */

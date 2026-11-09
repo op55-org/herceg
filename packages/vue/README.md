@@ -53,6 +53,9 @@ const metrics = table({ time: time(timestamps), p50, p99 });
 - **State** binds with `v-model:selection`, `v-model:viewport`,
   `v-model:visibility`, and `v-model:drill-root`.
 - **Tooltips** of your own render in the `renderTooltip` slot.
+- **Anchors**: `<Anchor :at="{ x, y }" side="top">` in the chart's slot
+  holds its slot's content at a place in the data, moving with every frame
+  and hidden out of view, teleported with your app's provides.
 - **Errors** show in the chart's place, or with `error-mode="throw"` are
   thrown for `onErrorCaptured` or the app's `errorHandler`.
 - **Server rendering**: `:initial="hydration(snapshot)"` adopts markup

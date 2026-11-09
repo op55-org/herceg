@@ -13,6 +13,8 @@ do, see the [Interaction guide](../guide/interaction.md).
 - [Selections and chart state](#selections-and-chart-state)
 - [Sync channels](#sync-channels)
 - [Tooltips and crosshair labels](#tooltips-and-crosshair-labels)
+- [Pins, drags, and what a click does](#pins-drags-and-what-a-click-does)
+- [Anchors](#anchors)
 - [Layout controls](#layout-controls)
 - [Selected rows](#selected-rows)
 - [Accessibility](#accessibility)
@@ -570,6 +572,74 @@ where a mark has `drag`.
   chart's legend notes the entry each click is on before it acts
   (`Legend.clicked`), so a click held while the controller loads is
   reported as that entry even when a listener took the legend away.
+
+## Anchors
+
+An anchor (`anchor(chart, element, options)`, `dom/anchors.ts`) is a
+module of its own, which applications load by importing it; a chart keeps
+only hooks for it, so charts of applications that never anchor carry a
+field and a few calls (`MountedChart.anchors`, which makes a chart's
+`Anchors` with what it lends its controller, picking's kit, and the frame
+on screen's drawing).
+
+- **Placing.** As each frame finishes (`#finishFrame`), before its reports
+  (drills, viewports, selections, then the controller's overlay and hover)
+  can run listeners that change what it drew, and so before `render` is
+  emitted, `Anchors.place` places every anchor of the frame on screen:
+  every place is read first, then anchors are shown and hidden, so what
+  that runs (focus leaving a hidden anchor, refusals' listeners) changes
+  nothing read; a placing begun meanwhile ends this one. A point maps
+  through its panel's scales as drawn: the value transition's moving
+  panels and category places while values move (`ValueAnimation.drawing`),
+  else the model's. Each wrapper is positioned by two translations, the
+  place in pixels and the wrapper's own percentages for its side and
+  alignment, so nothing is measured and an element changing size needs no
+  frame. Its `transform` is written only when it changes, its `display`
+  only when it shows or hides. `anchor()` and `set()` ask for a frame,
+  which draws nothing new when nothing else changed: it places, and
+  reports no `render`.
+- **Items** (`dom/anchor-items.ts`) are read with picking's code, which the
+  first item anchor loads (`model/pick.ts`, passed in once loaded, so no
+  chunk is made for anchors). A layout mark's item stands at its box among
+  the panel's items (a sector at its middle; marks that publish none, such
+  as networks, keep it hidden); another mark's at what draws
+  it in each drawn-mark record of the frame (`boxesOf`): bars' and points'
+  primitives by the rows they record (searched for where those ascend; a
+  point as its symbol's own box at its radius), a line's or area's
+  observation and a cloud's point at its row's place, a custom mark's shapes
+  (`Mark.itemBox`), others by each primitive's part; each piece cut to its
+  geometry's clip and a decoration's panel box, then joined. During value
+  transitions the frame's geometry stands in for the scene's
+  (`FrameDrawing.geometry`), so a bar moves with its interpolated root and
+  tip. Lines' and areas' observations stay at their destination while
+  their trace moves.
+- **Rows.** The rows an anchored item names are found once per change of
+  its table or of its mark's view's question (`AnchorRows`): in full through the item resolver after most
+  changes, and after rows are appended and dropped from the front, in the
+  rows appended alone (by the field's codes or values the key names, as
+  `rowsNamed` reads keys), those kept moving forward. Keys no anchor
+  names, and tables of none, are forgotten, and their subscriptions end.
+- **Wrappers.** A layer of the chart's, before the legend in the root
+  (so after the root in the tab order, over the plots and the legend,
+  under the tooltip), holds one wrapper per anchor, `display: none` until
+  placed. The controller and the chart's held input before it loads leave
+  events inside the layer to the application (`InteractionHost.anchors`):
+  no hover, press, wheel, double click, menu, or key of the chart's; focus
+  moving into it ends the keyboard cursor. The controller keeps the
+  fingers it took the press of until they leave the chart; another finger
+  (pressed in the layer, even while the controller loaded) moves, ends, or
+  cancels none of the chart's presses and pinches, wherever it moves.
+  Hiding an anchor whose wrapper holds focus focuses the root first.
+- **Refusals.** Options are checked once per `set` and refused through
+  the chart's report path (`invalid-option` or `unknown-reference`, phase
+  `validate`, path `anchor.*`), as the frame that places them meets them;
+  the anchor stays hidden. Only an element anchored already (a `WeakMap`
+  of elements to their anchors, across charts of one engine copy) and a
+  destroyed chart throw.
+- **Ownership.** The chart owns wrappers and its `Anchors`; the
+  application owns the element, which `remove()` detaches. Destroying the
+  chart removes every anchor and ends its tables' subscriptions; a handle
+  the application keeps holds its chart until it lets go of it.
 
 ## Layout controls
 

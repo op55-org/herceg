@@ -160,7 +160,8 @@ function pointCircles(mark: PointGeometry): string {
 function pointPath(mark: PointGeometry): string {
   const c = mark.coords;
   const r = n(mark.radius);
-  const d2 = n(mark.radius * 2);
+  // Across twice the radius as written (see draw/symbols.ts).
+  const d2 = n(+r * 2);
   let d = "";
   for (let i = 0; i < mark.count; i++) {
     d += `M${n(c[i * 2]! - mark.radius)} ${n(c[i * 2 + 1]!)}a${r} ${r} 0 1 0 ${d2} 0a${r} ${r} 0 1 0 -${d2} 0`;

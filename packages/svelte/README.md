@@ -49,6 +49,9 @@ made per data point.
 - **State** binds with `bind:selection`, `bind:viewport`, `bind:visibility`,
   and `bind:drillRoot`.
 - **Tooltips** of your own render in a `renderTooltip` snippet.
+- **Anchors**: `<Anchor at={{ x, y }} side="top">` among the chart's
+  children holds its children at a place in the data, moving with every
+  frame and hidden out of view, with your component's contexts.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are
   thrown to the nearest `<svelte:boundary>`.
 - **Server rendering**: `initial={hydration(snapshot)}` adopts markup from
