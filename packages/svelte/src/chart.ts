@@ -56,7 +56,13 @@ export interface ChartProps
    * moves, then "commit" or "cancel".
    */
   onselect?: ChartListener<"select"> | undefined;
-  /** What the pointer or keyboard cursor is on, or the data the inspection reads there, changed. */
+  /**
+   * The pointer moved, or what it or the keyboard cursor is on, or the data
+   * the inspection reads there, changed. Pointer moves are read before the
+   * frame draws, so what the handler changes in the chart's tables or
+   * through its handle draws in it; see the interaction guide's "When hover
+   * is reported".
+   */
   onhover?: ChartListener<"hover"> | undefined;
   /**
    * A plot, item, axis label, or legend entry was clicked, or Enter pressed

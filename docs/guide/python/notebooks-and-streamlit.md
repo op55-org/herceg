@@ -118,7 +118,8 @@ live.on_pin(lambda pinned: print(pinned))  # clicks with hg.Tooltip(pin="click")
   (`df.iloc[row]`); None for points that summarize rows (bins, boxes,
   slices, tree nodes). A 3D inspection also has `values` by column.
 - Hover, zoom, and selection reach Python at most every 100 ms, ending
-  with the latest. Hover and click are sent only while a callback listens.
+  with the latest; what a callback changes draws once it reaches the
+  browser. Hover and click are sent only while a callback listens.
   Selection and viewport callbacks run for Python's own changes too.
 - **Writing back.** `live.select(value, expected=event.basis)` applies
   only if the selection has not changed since that report, so an answer

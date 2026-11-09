@@ -454,6 +454,12 @@ export class Interaction {
    * listener could change it: hover reports it whatever they change.
    */
   #captured: { scene: Scene; event: InputEvent } | null = null;
+  /**
+   * What a hover read since the controller last drew was of: the scene,
+   * and the pointer and keyboard cursor, which each move replaces. The draw
+   * that follows reads it again only where one of them changed.
+   */
+  #heard: Heard | null = null;
   /** The inspection options last reported for a reach in milliseconds off a time axis (see `draw`). */
   #checked: ChartOptions["inspection"];
   /** What the pointer read last, of a scene, which sharing it and drawing it read once (`#read`). */
@@ -1339,7 +1345,7 @@ export class Interaction {
     this.#pending = [];
     this.#waiting = null;
     this.#due = [];
-    this.#captured = null;
+    this.#captured = this.#heard = null;
     for (const stop of this.#cleanup) stop();
   }
 
@@ -1369,7 +1375,7 @@ export class Interaction {
       );
     const pointer = this.#pointer;
     this.#captured =
-      pointer && host.events.has("hover")
+      pointer && host.events.has("hover") && this.#hear(scene)
         ? {
             scene,
             event: this.#stamped({
@@ -1381,6 +1387,33 @@ export class Interaction {
             }),
           }
         : null;
+  }
+
+  /**
+   * Reads what the pointer is on against the frame on screen, before any
+   * chart draws or reports (see `Scheduled.read`): the hover that reports
+   * it, once every chart has read. None where no one listens, the frame on
+   * screen no longer shows the data (read once a frame draws it, `resolve`).
+   * Keys report as they come.
+   */
+  read(): (() => void) | undefined {
+    const host = this.#host;
+    const scene = host.scene();
+    if (!this.#pointer || !scene || !host.events.has("hover") || !this.#fresh()) return undefined;
+    const heard = this.#hear(scene);
+    const event = this.#inputEvent(this.#inspection());
+    // Taken now: listeners of other charts' hovers may move the row it names.
+    const key = hoverKey(event);
+    // Not once a newer read reported it (a listener drew this chart since).
+    return () => {
+      if (this.#heard === heard && !this.#disposed) this.#hover(event, key);
+    };
+  }
+
+  /** Notes that the pointer and keyboard cursor as they are now were read in `scene`. */
+  #hear(scene: Scene): Heard {
+    this.#heard = [scene, this.#pointer, this.#keyboard];
+    return this.#heard;
   }
 
   /**
@@ -1802,16 +1835,11 @@ export class Interaction {
     );
   }
 
-  /** Emits `event` as a hover, when what it is on, reads, or where the pointer is changed. */
-  #hover(event: InputEvent): void {
-    const { pointer, target, inspection, cause } = event;
-    // Nothing, as before anything was hovered, is "". A pointer that stays
-    // where it is on a view that moved is at other values.
-    const key =
-      pointer || target || inspection ? JSON.stringify([pointer, target, inspection]) : "";
+  /** Emits `event` as a hover, when what it is on, reads, or where the pointer is changed (`key`). */
+  #hover(event: InputEvent, key = hoverKey(event)): void {
     if (key === this.#hovered) return;
     this.#hovered = key;
-    this.#cursorCause = cause;
+    this.#cursorCause = event.cause;
     this.#host.events.emit("hover", event);
   }
 
@@ -1827,6 +1855,9 @@ export class Interaction {
     const [revision, inspected] = [host.revision(), host.scene()];
     const changed = () =>
       host.stale() || host.revision() !== revision || host.scene() !== inspected;
+    // Whether this scene found the keyboard cursor's target gone: reported
+    // once, as nothing hovered; after it the chart has no cursor of its own.
+    let lost = false;
     if (frame) {
       // A new scene ends a run of Up and Down: its order is of the last one.
       this.#run = null;
@@ -1838,6 +1869,7 @@ export class Interaction {
         const now = this.#itemNow(keyboard, keyboard.item);
         if (now) now.stood = standing(host.model, now.panel, now.key, now.position, this.#kit);
         else this.#gone = keyboard;
+        lost = !now;
         this.#keyboard = now;
       }
       this.#framed.clear();
@@ -1869,6 +1901,10 @@ export class Interaction {
     }
     const scene = host.scene();
     if (!scene) return;
+    // What was read since the last draw, kept no longer: what the hover depends on beyond
+    // the scene and input (a gesture ending, listeners leaving) is read at each draw.
+    const heard = this.#heard;
+    this.#heard = null;
     // Input resolved as a frame drew is reported now, whatever listeners changed since.
     const due = this.#due;
     this.#due = [];
@@ -1883,8 +1919,7 @@ export class Interaction {
     if (later && this.#picking) this.#pinAsked(later);
     const captured = this.#captured;
     this.#captured = null;
-    const resolved = captured?.scene === scene;
-    if (resolved) this.#hover(captured.event);
+    if (captured?.scene === scene) this.#hover(captured.event);
     // New data may move what a pointer at rest reads, and so its cursor.
     if (frame && this.#pointer) this.#sharePointer(this.#pointer.x, this.#pointer.y, true);
     // Listeners of what this frame reported: edges, the cursor shared.
@@ -1941,10 +1976,12 @@ export class Interaction {
               : []
           : [],
     );
-    // What the pointer or keyboard is on and reads (a cursor shown here is reported once drawn).
-    // Once what it is on can be read (`needPicking`).
-    const mine = !!(this.#pointer || this.#keyboard || this.#gone);
-    if (hovering && mine && !resolved && (this.#picking || !this.#pickingLoad)) {
+    // What the pointer or keyboard is on and reads (a cursor shown here is reported once drawn),
+    // unless read in this scene since the last draw; in the scene that lost the keyboard
+    // cursor's target, that nothing is hovered. Once what it is on can be read (`needPicking`).
+    const mine = !!(this.#pointer || this.#keyboard);
+    const read = heard?.[0] === scene && heard[1] === this.#pointer && heard[2] === this.#keyboard;
+    if (hovering && (mine || lost) && !read && (this.#picking || !this.#pickingLoad)) {
       this.#hover(this.#inputEvent(active));
       if (changed()) return;
     }
@@ -3742,14 +3779,16 @@ export class Interaction {
     const { panel, key, position } = keyboard;
     this.#pointer = null;
     if (!ranked) this.#run = null;
-    // The cursor moves on the frame drawn: what listeners changed while it
-    // drew waits for the next.
-    host.finishFrame();
+    // What it is on, reads, and stands at are taken on the frame drawn,
+    // before listeners of its hover can change the data under it.
     const inspection = this.#inspection();
     const own = this.#keyedPoint();
     keyboard.stood = standing(model, panel, key, position, this.#kit);
     keyboard.item = this.#keyedItem(keyboard);
-    if (!inspection && !own) return undefined;
+    // The cursor moves on the frame drawn: what listeners changed while it
+    // drew waits for the next.
+    host.finishFrame();
+    if (this.#disposed || (!inspection && !own)) return undefined;
     let text = describeInspection((inspection ?? own)!);
     const [point] = own?.points ?? [];
     if (point && !cell) {
@@ -4082,6 +4121,18 @@ function describeSelection(selection: BrushSelection, format: AxisFormat): strin
 }
 
 /** Whether a plot holds a point of the chart. */
+/** What a hover read was of: a scene, and the pointer and keyboard cursor then. */
+type Heard = [scene: Scene, pointer: object | null, keyboard: object | null];
+
+/**
+ * What a hover reports, to report only changes: "" for nothing, as before
+ * anything was hovered. A pointer that stays where it is on a view that
+ * moved is at other values.
+ */
+function hoverKey({ pointer, target, inspection }: InputEvent): string {
+  return pointer || target || inspection ? JSON.stringify([pointer, target, inspection]) : "";
+}
+
 function holds(plot: PlotRect, x: number, y: number): boolean {
   return x >= plot.x && x <= plot.x + plot.width && y >= plot.y && y <= plot.y + plot.height;
 }

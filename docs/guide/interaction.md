@@ -516,7 +516,7 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 | --- | --- |
 | `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), each panel's whole view (`views`), and the chart's whole view as the option takes it (`state`). A map's or network's view is its plane's ranges. |
 | `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, the selection committed (`state`), `conditions` (each table's condition, and its `source` through [derived tables](data.md#derived-tables)), and with `rowSelection`, `rows` per table. |
-| `hover` | What the pointer or keyboard cursor is on, or what inspection reads there, changed: an input event (below). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
+| `hover` | The pointer moved over the chart, or what it or the keyboard cursor is on, or what inspection reads there, changed: an input event (below), [once a frame](#when-hover-is-reported). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
 | `click` | A press released without moving on a plot, an item, an axis label, or a legend entry, or Enter on the keyboard cursor (cause `"keyboard"`): an input event; with `rowSelection`, `rows`. |
 | `contextMenu` | A secondary press (a right click, a long press): an input event with its `pointer`. While a listener listens, the browser's own menu stays off the plots and items (not off axes or legends). |
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
@@ -681,6 +681,55 @@ the axis the keys step along; Enter zooms to it where zoom is on; Escape
 clears. Selections are announced. Without a selection to zoom to, Enter
 is a `click` on the keyboard cursor's point (cause `"keyboard"`, no
 `pointer`).
+
+### When hover is reported
+
+- **Moving.** While the pointer moves over the chart, margins and axes
+  included, `hover` reports once a frame with its latest place and
+  values: moves between two frames are one report.
+- **At rest.** Again whenever what it is on or reads changes (data
+  streamed under it, a view moved under it).
+- **Leaving.** Once, with no pointer.
+- **`inspection: false`.** The same reports, without an inspection.
+- **Keys.** The keyboard cursor reports as each key moves it.
+
+Each frame reads every chart's pointer against the frame on screen, then
+reports, then draws. What a listener changes synchronously (data,
+options, or state, of this chart or another) is drawn in the frame of
+the move:
+
+```ts
+const DAY = 86_400_000;
+let day: number | undefined;
+chart.on("hover", ({ pointer }) => {
+  const x = pointer?.values.x;
+  const at = x === undefined ? undefined : Math.round(x / DAY) * DAY;
+  if (at === undefined || at === day) return;
+  day = at;
+  rebaseAt(at); // writes the lines' columns: drawn in this frame
+});
+```
+
+- **After the draw.** A pointer whose scene changed reports again where
+  what it reads changed, and what listeners change then draws in the next
+  frame. So a listener that changes what it reads every time runs once a
+  frame, never in a loop. Write only what changed: writing a column with
+  the values it holds is still a change, drawn and reported again.
+- **Streaming data.** Where the data changed since the frame on screen,
+  the pointer is read once that frame draws the change, and a listener's
+  change shows a frame later.
+- **Read before reporting.** Every chart's read is taken before any
+  listener runs. A listener that draws a chart at once (`render()`) gets
+  that chart's newer hover instead of the one read before.
+- **Shared cursors and leaving** report once drawn, after the frame.
+- **Another copy of herceg** on the page (each bundle that includes its
+  own, as notebook widgets do) runs frames of its own: what a listener
+  changes in its charts draws in their next frame.
+- **React, Vue, and Svelte.** State a handler sets renders when the
+  framework commits it, usually after the frame; changes that must draw
+  with the move go to the chart: its tables, or the handle.
+- **Python** hears the latest hover at most every 100 ms, and what a
+  callback changes draws once it reaches the browser.
 
 ## Selections
 

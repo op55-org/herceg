@@ -81,7 +81,13 @@ export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" 
    * moves, then "commit" or "cancel".
    */
   onSelect?: ChartListener<"select"> | undefined;
-  /** What the pointer or keyboard cursor is on, or the data the inspection reads there, changed. */
+  /**
+   * The pointer moved, or what it or the keyboard cursor is on, or the data
+   * the inspection reads there, changed. Pointer moves are read before the
+   * frame draws, so what the handler changes in the chart's tables or
+   * through its handle draws in it (state it sets renders when React
+   * commits); see the interaction guide's "When hover is reported".
+   */
   onHover?: ChartListener<"hover"> | undefined;
   /**
    * A plot, item, axis label, or legend entry was clicked, or Enter pressed

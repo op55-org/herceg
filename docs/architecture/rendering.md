@@ -229,11 +229,34 @@ so a streaming chart's points do not change shape or color.
 
 ## Scheduling
 
-All charts share one `requestAnimationFrame` loop. Table changes, resizes,
-option updates, and pointer moves mark a chart dirty; the next frame
-renders each dirty chart once, however many changes arrived. Charts outside
-the viewport (IntersectionObserver) stay dirty and render when visible. A
-chart's first frame renders synchronously when it is created.
+All charts share one `requestAnimationFrame` loop (`dom/scheduler.ts`).
+Table changes, resizes, option updates, and pointer moves mark a chart
+dirty; the next frame renders each dirty chart once, however many changes
+arrived. Charts outside the viewport (IntersectionObserver) stay dirty and
+render when visible. A chart's first frame renders synchronously when it
+is created.
+
+Each frame has three steps, so that what an application changes in answer
+to the pointer draws in the pointer's frame:
+
+1. **Read.** Every chart due whose pointer moved reads it against the
+   frame on screen (`Scheduled.read`, the controller's `read`): target and
+   inspection. Every read is taken before any listener runs. A chart with
+   a change waiting to draw, or whose drawn records are no longer current
+   (data written since), reads after its draw instead, as input on stale
+   records always does ([Interaction](interaction.md#the-interaction-controller)).
+2. **Report.** The `hover`s go out, each in its chart's report queue, so a
+   frame a listener draws at once reports after it. Charts listeners change
+   join the frame: until the draw step, `schedule` asks for no other.
+3. **Draw.** Every chart due draws once, those listeners changed included.
+   A chart whose pointer rests on a scene that changed reports `hover`
+   again after its draw; what those listeners change, and anything
+   scheduled from here on, draws in the next frame. The steps never loop.
+
+The frame's time (`lastFrameTime`, which transitions read to skip frames
+on slow pages) counts reading and reporting with drawing. Each copy of the
+engine on a page has its own loop: a listener's change to a chart of
+another copy draws in that copy's next frame.
 
 Charts that share an `interaction.sync` name share the cursor and viewport
 through the same loop (see [Sync](interaction.md#sync-channels)).

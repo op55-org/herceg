@@ -190,6 +190,20 @@ wheels and keys a binding takes have their defaults prevented. The
 controller replays what was kept through its own handlers, so an early
 drag goes on and an early hover shows its tooltip.
 
+**Input before drawing.** The pointer's `hover` is read before the frame
+draws ([Scheduling](rendering.md#scheduling)): `read` takes the target,
+inspection, and the report's key (an item's `row` getter reads live, and
+another chart's listener may move it), and notes what it read
+(`#heard`: the scene, and the pointer and keyboard cursor objects each
+move replaces), as `resolve` notes the hover it captures after a draw.
+The controller's next `draw` takes the note: it skips a hover read in
+the scene it draws, and keeps nothing after, so what else a hover reads
+(a gesture's end, say) is read again at each draw, as before. A report
+whose chart a listener drew at once in the meantime is dropped: that
+draw reported the newer read. Keys report from their handlers, which
+draw the cursor at once; cursors other charts share, `showCursor`, and
+the pointer leaving report from `draw`, once drawn.
+
 **Failure.** If the import fails or the controller refuses the options
 (bindings it cannot compile), the chart reports a [chart
 error](#chart-errors), releases captured presses, drops kept input, and

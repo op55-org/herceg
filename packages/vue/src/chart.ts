@@ -362,10 +362,13 @@ export const Chart = defineComponent({
      */
     initial: Object as PropType<Hydration>,
     /**
-     * What the pointer or keyboard cursor is on, or the data the inspection
-     * reads there, changed (`@hover`). Input events are props, not events, so
-     * that the chart knows whether they are listened to: only then does it
-     * load what reads what input is on.
+     * The pointer moved, or what it or the keyboard cursor is on, or the
+     * data the inspection reads there, changed (`@hover`). Pointer moves are
+     * read before the frame draws, so what the handler changes in the
+     * chart's tables or through its handle draws in it (the interaction
+     * guide's "When hover is reported"). Input events are props, not
+     * events, so that the chart knows whether they are listened to: only
+     * then does it load what reads what input is on.
      */
     onHover: Function as PropType<ChartListener<"hover">>,
     /**

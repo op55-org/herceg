@@ -48,7 +48,8 @@ const metrics = table({ time: time(timestamps), p50, p99 });
 - **Events** are Vue events (`@select`, `@viewport`, ...); input events
   (`@hover`, `@click`, `@context-menu`) are listener props, which the chart
   listens for only while given. A template ref's `chart` is herceg's chart
-  handle.
+  handle. What `@hover` changes in a table or through the handle draws in
+  the pointer's frame.
 - **State** binds with `v-model:selection`, `v-model:viewport`,
   `v-model:visibility`, and `v-model:drill-root`.
 - **Tooltips** of your own render in the `renderTooltip` slot.

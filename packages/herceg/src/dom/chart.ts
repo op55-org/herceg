@@ -365,10 +365,15 @@ export class MountedChart implements Chart, ExportsScene {
    */
   #drawTime = 0;
   /**
-   * The chart in the shared frame loop: it draws pending changes once a
-   * frame while the chart is on screen.
+   * The chart in the shared frame loop: it reads input, then draws pending
+   * changes, once a frame while the chart is on screen.
    */
-  readonly #scheduled = { flush: () => this.#flush(), visible: true, cold: true };
+  readonly #scheduled = {
+    read: () => this.#read(),
+    flush: () => this.#flush(),
+    visible: true,
+    cold: true,
+  };
   /**
    * How synced charts reach this one: what they share is shown here without
    * being shared again. Broadcasts name it as their sender.
@@ -1787,7 +1792,11 @@ export class MountedChart implements Chart, ExportsScene {
       if (this.#scene === scene) this.#controller?.draw(drawn);
       if (rendered) this.#events.emit("render", { revision: shown });
     };
-    // A frame a listener draws reports once this one's reports are out.
+    this.#inTurn(report);
+  }
+
+  /** Runs `report` once the reports being made are out: a frame a listener draws reports after them. */
+  #inTurn(report: () => void): void {
     if (this.#finishing) {
       this.#finishing.push(report);
       return;
@@ -1799,6 +1808,17 @@ export class MountedChart implements Chart, ExportsScene {
     } finally {
       this.#finishing = undefined;
     }
+  }
+
+  /**
+   * Reads input against the frame on screen before any chart draws (see
+   * `Scheduled.read`), while that frame shows what the chart shows: with a
+   * change waiting to draw, input is read after its draw (`resolve`).
+   */
+  #read(): (() => void) | undefined {
+    if (this.#dirty || this.#pageChanged) return undefined;
+    const report = this.#controller?.read();
+    return report && (() => this.#inTurn(report));
   }
 
   /**
