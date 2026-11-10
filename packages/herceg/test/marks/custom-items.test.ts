@@ -9,10 +9,10 @@ import { RowSet } from "../../src/data/row-set.ts";
 import { type RowView, rowView } from "../../src/data/row-view.ts";
 import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Table, table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { type CustomDataOptions, custom, type DataDrawContext } from "../../src/marks/custom.ts";
 import { DIM } from "../../src/marks/mark.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -41,7 +41,7 @@ function build(config: ChartConfig, width = 600, height = 400) {
     new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, staticCompilers()),
   );
   // As a chart does once it has loaded what reads tooltips' fields.
-  model.fields = fieldReader;
+  model.writers = tooltipWriters;
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

@@ -10,7 +10,6 @@ import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { type SelectionStore, selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Schema, type Table, table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
@@ -20,6 +19,7 @@ import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point3d } from "../../src/marks/point3d.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { facet } from "../../src/model/facet.ts";
 import type { PlaneViewChange } from "../../src/model/item-views.ts";
@@ -394,7 +394,7 @@ describe("maps in subplots", () => {
       projection,
     });
     // As a chart does once it has loaded what reads the fields.
-    model.fields = fieldReader;
+    model.writers = tooltipWriters;
     model.setSize(800, 400, 1);
     model.scene(estimateText);
     const drawn = items(model, "b");

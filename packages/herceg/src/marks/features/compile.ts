@@ -1648,7 +1648,6 @@ function areaFeatures(
     () => mark.rows!(),
     bandAxis(mark),
   );
-  const asks = spec.continuity || spec.where !== undefined;
   if (
     spec.continuity &&
     spec.curve === "monotone" &&
@@ -1657,13 +1656,8 @@ function areaFeatures(
     throw new Error(
       `${path} continuity: monotone bands cannot break yet; give a linear or step curve`,
     );
-  if (spec.where !== undefined && spec.stack)
-    throw new Error(`${path} where: stacked areas cannot leave rows out yet; drop it or the stack`);
-
   const along = mark.tooltip as "x" | "y";
   const field = positionField(spec[along]);
-  const continuity = asks ? new Topology(kit, table, spec, { field, log }, zone, path) : undefined;
-  continuity?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
   // A series field's stack (its series given, or its color's field, as the
   // mark resolved it) breaks its layers' edges where their runs do; stacks
   // of fields share rows, so trace their runs as single areas do.
@@ -1672,10 +1666,27 @@ function areaFeatures(
     spec.y1 === undefined &&
     spec.x1 === undefined &&
     mark.identity?.field !== undefined;
+  const filtered = spec.where !== undefined;
+  const continuity =
+    spec.continuity || filtered
+      ? new Topology(
+          kit,
+          table,
+          spec,
+          { field, log, series: unioned ? mark.identity!.field : undefined },
+          zone,
+          path,
+        )
+      : undefined;
+  continuity?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
   const topology = unioned ? undefined : continuity;
+  // The stack's breaks: none for a condition on the series field alone, which picks layers.
+  const breaks = unioned && (spec.continuity || !continuity?.picks) ? continuity : undefined;
   let theme: Theme | undefined;
   return {
-    continuity: unioned ? continuity : undefined,
+    continuity: breaks,
+    layer: unioned && filtered ? (rows, x) => continuity!.layer(rows, x) : undefined,
+    kept: spec.stack && !unioned && filtered ? (s) => continuity!.kept(s) : undefined,
     displayColors: styles.displayColors,
     ...(styles.hasKeys && { listKeys: () => styles.keys() }),
     use(t, p) {
@@ -1743,7 +1754,7 @@ function areaFeatures(
         },
       };
       // A layer of a series field's stack stops where the stack's edges break.
-      if (unioned && continuity) features.pathEnds = (series) => stackEnds(series, along);
+      if (breaks) features.pathEnds = (series) => stackEnds(series, along);
       if (runs)
         features.lookAt = (series) => {
           const ends = tracedEnds(s, series, runs.ends);

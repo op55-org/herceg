@@ -4,7 +4,6 @@
 import { describe, expect, it } from "vitest";
 import { category, time } from "../../src/data/column.ts";
 import { type Table, table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { chartFields } from "../../src/fields/chart.ts";
 import type { FieldDisplays } from "../../src/fields.ts";
 import { estimateText } from "../../src/layout/text.ts";
@@ -21,6 +20,7 @@ import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
@@ -39,7 +39,7 @@ function build(config: ChartConfig, width = 640, height = 360) {
     undefined,
     staticCompilers(),
   );
-  model.fields = fieldReader;
+  model.writers = tooltipWriters;
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }
@@ -86,15 +86,15 @@ describe("loading", () => {
   it("needs the display code for fields and for series named by parts, and nothing more", () => {
     const data = requests();
     const plain = new ChartModel({ marks: [line(data, { x: "time", y: ["latency", "p50"] })] });
-    expect(plain.lacks()).toEqual([false, false, false]);
+    expect(plain.lacks()).toEqual([false, false, false, false]);
     const named = new ChartModel({
       marks: [line(data, { x: "time", y: "latency", label: [{ label: "latency" }, " p99"] })],
     });
-    expect(named.lacks()).toEqual([false, true, true]);
+    expect(named.lacks()).toEqual([false, true, true, false]);
     const shown = new ChartModel({ fields, marks: [line(data, { x: "time", y: "latency" })] });
-    expect(shown.lacks()).toEqual([true, true, true]);
+    expect(shown.lacks()).toEqual([true, true, true, false]);
     shown.use(staticCompilers());
-    expect(shown.lacks()).toEqual([false, false, false]);
+    expect(shown.lacks()).toEqual([false, false, false, false]);
   });
 });
 

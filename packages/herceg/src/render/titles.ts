@@ -9,12 +9,12 @@
 // points saying which row each item draws (their `rows`), without the DOM;
 // only exports asking for titles load this module.
 
-import { fieldReader } from "../dom/tooltip-content.ts";
 import { escapeXml, n, SvgPath } from "../draw/markup.ts";
 import { rectPath, traceSides } from "../draw/rect.ts";
 import { SYMBOLS, symbolPath } from "../draw/symbols.ts";
 import type { MeasureText } from "../layout/text.ts";
 import { placeAt, rowOf, type Series, visibleRange } from "../marks/series.ts";
+import { tooltipWriters } from "../marks/tooltip-writers.ts";
 import type { AxisInspection } from "../model/inspect.ts";
 import type { ChartModel } from "../model/model.ts";
 import {
@@ -59,14 +59,14 @@ export function titlesOf(
 ): { scene: Scene; titles: SvgTitles } {
   // Every mark is drawn as the chart draws it (highlighted, if it is),
   // its bars and points saying which row each draws, and inspected with
-  // the fields its tooltip shows.
-  const { fields } = model;
-  model.fields = fields ?? fieldReader;
+  // the fields and content its tooltip shows.
+  const { writers } = model;
+  model.writers = writers ?? tooltipWriters;
   let scene: Scene;
   try {
     scene = model.scene(measure, false, page);
   } finally {
-    model.fields = fields;
+    model.writers = writers;
   }
   const after = new Map<Geometry, string>();
   let count = 0;
@@ -203,13 +203,18 @@ function positionsOf(s: Series, wanted: ReadonlySet<number>): Map<number, number
   return at;
 }
 
-/** What the tooltip says of an inspection, a line each: its heading, then each point and its fields. */
+/**
+ * What the tooltip says of an inspection, a line each: its heading, then
+ * each point (its name and value, or its content) and its fields.
+ */
 function titleOf(inspection: AxisInspection): string {
   return [
     inspection.label,
-    ...inspection.points.map(
-      ({ label, text, fields = [] }) =>
-        `${label}: ${[text, ...fields.map((field) => `${field.label}: ${field.link?.text ?? field.text}`)].join(", ")}`,
+    ...inspection.points.map(({ label, text, content, fields = [] }) =>
+      [
+        content ? content.map((run) => run.text).join("") : `${label}: ${text}`,
+        ...fields.map((field) => `${field.label}: ${field.link?.text ?? field.text}`),
+      ].join(", "),
     ),
   ].join("\n");
 }

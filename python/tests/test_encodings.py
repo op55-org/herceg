@@ -170,8 +170,18 @@ def test_conditional_bands_shade_where_the_condition_holds():
     )
     assert marks(chart)[0]["where"] == ["<", ["field", "e"], ["field", "limit"]]
     assert "<path" in chart.to_svg()
-    with pytest.raises(ValueError, match="area where: stacked areas cannot leave rows out yet"):
-        hg.Chart(SITES).area(x="t", y="gain", series="site", stack=True, where=hg.col("gain") > 1)
+
+
+def test_stacks_take_the_series_where_keeps():
+    # Of one table's series, a stack of some: the others are no layers.
+    chart = hg.Chart(SITES, width=300, height=150).area(
+        x="t", y="gain", series="site", stack=True, where=hg.col("site").is_in("A")
+    )
+    assert marks(chart)[0]["where"] == ["in", ["field", "site"], "A"]
+    assert marks(chart)[0]["stack"] is True
+    assert chart.to_svg().count("<path") == hg.Chart(
+        {key: values[:3] for key, values in SITES.items()}, width=300, height=150
+    ).area(x="t", y="gain", series="site", stack=True).to_svg().count("<path")
 
 
 def test_bars_group_unless_asked_to_overlap_and_take_outlines_and_label_objects():

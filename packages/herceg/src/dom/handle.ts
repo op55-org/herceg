@@ -404,8 +404,11 @@ export interface Chart {
   readonly loading: Promise<void> | undefined;
   /**
    * Settles once the chart's first frame is on screen, the code it waits
-   * for loaded (its compilers), or rejects with the `ChartError` that kept
-   * the first frame from drawing. A later failure is an "error" event.
+   * for loaded (its compilers), and what writes its marks' `tooltip.fields`
+   * and `tooltip.content` loaded (which the first frame does not wait
+   * for), so that `inspect()` carries them; or rejects with the
+   * `ChartError` that kept the first frame from drawing or that code from
+   * loading. A later failure is an "error" event.
    */
   readonly ready: Promise<void>;
   /**

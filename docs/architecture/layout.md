@@ -596,8 +596,11 @@ Renderers draw one kind of guide for every chart rather than a second,
 smaller path for unstyled ones.
 
 What only some charts need loads with them: the guide compiler, the
-feature compiler, the display code, `herceg/fonts`, color ramps' SVG with the marks whose
-legends have them, and the panel layout with subplots.
+feature compiler, the display code, the tooltip writers (marks'
+`tooltip.fields` and `tooltip.content`, which the first frame does not
+wait for), `herceg/fonts`, color ramps' SVG
+with the marks whose legends have them, and the panel layout with
+subplots.
 
 ## Time axis breaks
 

@@ -6,7 +6,6 @@ import { category, encodedCategory, time } from "../../src/data/column.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Table, type TableChange, table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { ViewAnimation } from "../../src/dom/transition.ts";
 import { drawSectors, moveSunburst, sectorAt, sectorsOf } from "../../src/dom/value-sectors.ts";
 import {
@@ -43,6 +42,7 @@ import { region } from "../../src/marks/region.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { text } from "../../src/marks/text.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { planAxis } from "../../src/model/axis.ts";
 import { axisGuide } from "../../src/model/axis-guide.ts";
 import { facet } from "../../src/model/facet.ts";
@@ -1200,7 +1200,7 @@ describe("sunbursts changing values and drill roots", () => {
       ],
       legend: false,
     });
-    model.fields = fieldReader;
+    model.writers = tooltipWriters;
     const shown = snapshot(model.scene(estimateText), model.panels(), 0)!;
     model.items!.setDrillRoot(["a"]);
     const tween = plan(shown, model.scene(estimateText), model.panels(), 750, BUILDERS)!;

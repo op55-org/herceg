@@ -33,6 +33,7 @@ import {
 import { mapValue } from "../lod/m4.ts";
 import type { Mark } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
+import type { TooltipWriters } from "../marks/tooltip-fields.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, timeTicks } from "../scale/time.ts";
@@ -75,16 +76,18 @@ import type { ChartStyles } from "./styles.ts";
 /**
  * The code charts load before they draw what needs it, once a chart on the
  * page has loaded it (dom/chart.ts): the guide compiler, the feature
- * compiler, and the display code (`DisplayCode`, which static output
- * brings with its compilers).
+ * compiler, the display code (`DisplayCode`, which static output brings
+ * with its compilers), and what writes marks' tooltip fields and content
+ * (`TooltipWriters`).
  */
-export const LOADED: [GuideCompiler?, FeatureCompiler?, DisplayCode?] = [];
+export const LOADED: [GuideCompiler?, FeatureCompiler?, DisplayCode?, TooltipWriters?] = [];
 
 /** Compilers as `LOADED` holds them, which models take (the display code they read from `LOADED`). */
 export type Compilers = readonly [
   guides?: GuideCompiler | undefined,
   features?: FeatureCompiler | undefined,
   displays?: DisplayCode | undefined,
+  writers?: TooltipWriters | undefined,
 ];
 
 /**

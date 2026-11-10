@@ -66,7 +66,7 @@ Most marks take these; where only some do, the row says which, and
 | `clip` | What the drawing is cut to: `"plot"` (data's and regions' default), `"chart"`, or `false` for nothing, so markers at the plot's edge show whole. Rules and text have their own default ([Annotations](#annotations)). |
 | `zIndex` | Paint order ([Styling](styling.md#paint-order)). |
 | `pick: false`, `inspect: false` | Not an event target (clicks pass through to what is under it), and not read by inspection: tooltips, the crosshair, hover events ([Interaction](interaction.md#inspection)). |
-| `tooltip: { fields }` | More of the row in tooltips ([Interaction](interaction.md#tooltips)); marks that summarize rows (histograms, box plots, boxen, violins, contours) and networks refuse it. |
+| `tooltip: { fields, content }` | More of the row in tooltips, and each point's row written as one line of parts ([Interaction](interaction.md#tooltips)); marks that summarize rows (histograms, box plots, boxen, violins, contours) and networks refuse it. |
 
 ### Item keys
 
@@ -150,6 +150,7 @@ area(pumps, {
   continuity: { maxGap: { milliseconds: 300_000 } },
   stack: { gaps: "interpolate", support: "intersection" },
 }); // stops where any pump has no data
+area(observations, { x: "time", y: "value", series: "series", stack: true, where: col("series").isIn("pump-a", "pump-b") });
 bar(sales, { x: "region", y: ["q1", "q2"], stack: "fill", labels: { format: { style: "percent" } } });
 ```
 
@@ -160,6 +161,8 @@ hg.area(cpu, x="time", y="load", series="host", stack=hg.Stack(gaps="interpolate
 hg.area(pumps, x="time", y="flow", series="pump", continuity=hg.Continuity(max_gap=hg.Duration(minutes=5)),
         stack=hg.Stack(gaps="interpolate", support="intersection"))
 hg.area(usage, x="time", y=["user", "system"], stack=hg.Stack(offset="wiggle", order="inside-out"))
+hg.area(observations, x="time", y="value", series="series", stack=True,
+        where=hg.col("series").is_in("pump-a", "pump-b"))
 ```
 
 A single area is outlined along its top in its own color; stacks and bands
@@ -195,6 +198,20 @@ and turns it on; `line: false` or a width of 0 turns it off.
   condition). Tooltips, labels, and the value axis' domain skip the
   positions a stack leaves out. Stacks of several fields share their rows
   and break as one area does.
+- **`where`.** A condition on the series field alone picks the layers
+  (`col("series").isIn(...)`): one table can feed lines of all its series
+  and a stack of some, which stacks as a table of those series would,
+  on any curve. Other conditions test rows (and refuse monotone curves):
+  rows left out between a series' kept rows along x break the whole stack
+  there, under either `support`, as a `continuity` break does; rows left
+  out before its first kept row or after its last shorten the series; a
+  series with no row kept is no layer. Offsets
+  (fill, center, wiggle) of a stack of fields take only the rows kept, so
+  rows left out may hold negative values; while it leaves rows out, such
+  a stack is offset anew at each change, as one over a [row view](data.md#row-views)'s
+  rows is. A stack keeps a top and a base for every row of its table,
+  rows left out included: where memory matters, a table of the stacked
+  series' own takes less.
 - **Readings.** Tooltips and the keyboard read each series' own rows; fill
   shows the share and the raw value. Bar labels show shares for fill.
 - **Visibility.** Hiding a legend layer restacks the visible ones. Zoom
@@ -203,8 +220,8 @@ and turns it on; `line: false` or a width of 0 turns it off.
 - **Log axes.** Stacks stand on the axis' low end. Center and wiggle refuse
   log axes. Bands and stacks on log y are drawn straight.
 - **Limits.** Bars take only `true` and `"fill"`, and no `gaps` or
-  `support`, since they stack at their positions. Stacked areas refuse
-  `where`; `gaps` and `support` need a `series` field.
+  `support`, since they stack at their positions. `gaps` and `support`
+  need a `series` field.
 
 Histograms take `stack: "fill"` with the same meaning (see
 [Statistical charts](statistical-charts.md#histograms)).

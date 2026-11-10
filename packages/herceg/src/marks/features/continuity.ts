@@ -6,8 +6,11 @@
 // one, so level of detail never bridges a break. Where `where` leaves rows
 // out, runs end at the crossing: for linear curves where the condition's
 // comparison changes sign between the rows, for steps where the interval a
-// row owns ends.
+// row owns ends. A series field's stack takes a layer's rows from the first
+// `where` keeps to the last, and on the series field alone `where` picks
+// layers rather than leaving rows out.
 
+import type { NumericArray } from "../../data/column.ts";
 import type { Expression } from "../../data/expression.ts";
 import { compileExpression } from "../../data/expression.ts";
 import type { Table } from "../../data/table.ts";
@@ -45,6 +48,8 @@ interface Flags {
   rowOffset: number;
   length: number;
   flags: Uint8Array;
+  /** How many of the rows are not drawn. */
+  out: number;
 }
 
 const DAY = 86_400_000;
@@ -150,6 +155,12 @@ export class Topology {
   readonly #side: ((row: number, place: (v: number) => number) => number) | undefined;
   /** Whether `where` reads only the positions' field, so compares positions, not values. */
   readonly #onPositions: boolean = false;
+  /**
+   * With `where`, whether it reads a stack's series field alone: it picks
+   * the stack's layers (`layer`) and leaves no row of a layer out; false
+   * where it tests rows (see `Connections.picks`).
+   */
+  readonly picks: boolean | undefined;
   /** Whether the positions lie on a log scale, as extents, which know no scale, place them. */
   readonly #log: boolean;
   readonly #defined: ((row: number) => boolean) | undefined;
@@ -171,7 +182,7 @@ export class Topology {
     kit: GuideKit,
     table: Table,
     spec: { continuity?: ContinuitySpec; where?: Expression; curve?: Curve },
-    position: { field: unknown; log: boolean },
+    position: { field: unknown; log: boolean; series?: string | undefined },
     zone: string,
     path: string,
   ) {
@@ -182,14 +193,16 @@ export class Topology {
     this.#curve = spec.curve;
     const { continuity, where } = spec;
     if (where !== undefined) {
-      if (spec.curve === "monotone")
+      this.#where = predicate(table, where, `${path} where`);
+      const fields = fieldsOf(where);
+      this.#onPositions = fields.length > 0 && fields.every((field) => field === position.field);
+      this.picks = fields.length > 0 && fields.every((field) => field === position.series);
+      // Picking a stack's layers changes no curve; leaving rows out does.
+      if (spec.curve === "monotone" && !this.picks)
         throw new Error(
           `${path} where: monotone curves cannot meet a condition where it changes; give a linear or step curve`,
         );
-      this.#where = predicate(table, where, `${path} where`);
       this.#side = sideOf(where, table);
-      const fields = fieldsOf(where);
-      this.#onPositions = fields.length > 0 && fields.every((field) => field === position.field);
     }
     if (continuity?.defined !== undefined)
       this.#defined = predicate(table, continuity.defined, `${path} continuity.defined`);
@@ -237,17 +250,29 @@ export class Topology {
       dropped <= kept.length;
     let flags: Uint8Array;
     let from = 0;
+    let out = 0;
     if (keeps) {
+      out = kept.out;
+      for (let row = 0; row < dropped; row++) if (kept.flags[row] !== DRAWN) out--;
       flags = kept.flags.length >= length ? kept.flags : new Uint8Array(length * 2);
       flags.set(kept.flags.subarray(dropped, kept.length));
       from = kept.length - dropped;
     } else flags = new Uint8Array(length);
-    const where = this.#where;
+    const where = this.picks ? undefined : this.#where;
     const defined = this.#defined;
-    for (let row = from; row < length; row++)
-      flags[row] = defined && !defined(row) ? HIDDEN : where && !where(row) ? SUPPRESSED : DRAWN;
-    this.#flags = { version: table.version, generation, rowOffset, length, flags };
+    for (let row = from; row < length; row++) {
+      const flag = defined && !defined(row) ? HIDDEN : where && !where(row) ? SUPPRESSED : DRAWN;
+      flags[row] = flag;
+      if (flag !== DRAWN) out++;
+    }
+    this.#flags = { version: table.version, generation, rowOffset, length, flags, out };
     return flags;
+  }
+
+  /** A series' drawn rows (as `shown`), undefined while the table has no row left out. */
+  kept(series: Series): Uint32Array | undefined {
+    this.#rowFlags();
+    return this.#flags!.out > 0 ? this.shown(series).rows : undefined;
   }
 
   /** Whether a row is drawn: false where `where` or `defined` leave it out. */
@@ -269,6 +294,42 @@ export class Topology {
     }
     const codes = this.#codes?.();
     return !codes || (codes[a]! >= 0 && codes[a] === codes[b]);
+  }
+
+  /**
+   * A series' rows as a layer of a stack takes them, in their order: where
+   * `where` picks layers, all or none, as it holds at their first; else
+   * from the first row it keeps to the last along the stack's positions
+   * (ties in their order), rows it leaves out between them breaking the
+   * stack; none when it keeps none. Rows not in order along the positions
+   * come with them (`x`).
+   */
+  layer(rows: Uint32Array, x?: NumericArray): Uint32Array | undefined {
+    // Read from `where` itself: rows `defined` hides are a layer's where it keeps them.
+    const where = this.#where!;
+    if (this.picks) return rows.length > 0 && where(rows[0]!) ? rows : undefined;
+    // The first and last rows kept along x, ties in their order.
+    let [first, last, low, high] = [Infinity, -Infinity, -1, -1];
+    if (x)
+      rows.forEach((row, k) => {
+        const at = x[row]!;
+        if (!where(row)) return;
+        if (at < first) [first, low] = [at, k];
+        if (at >= last) [last, high] = [at, k];
+      });
+    else
+      for (low = rows.findIndex(where), high = rows.length - 1; high > low; high--)
+        if (where(rows[high]!)) break;
+    const layer = x
+      ? rows.filter((row, k) => {
+          const at = x[row]!;
+          return (
+            where(row) ||
+            ((at > first || (at === first && k > low)) && (at < last || (at === last && k < high)))
+          );
+        })
+      : rows.subarray(low, high + 1);
+    return layer.length === rows.length ? rows : layer.length > 0 ? layer : undefined;
   }
 
   /** The series' drawn observations, as a series of those rows, found once per data version. */

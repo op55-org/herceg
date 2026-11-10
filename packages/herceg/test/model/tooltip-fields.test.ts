@@ -5,7 +5,6 @@ import { time } from "../../src/data/column.ts";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";
 import { table } from "../../src/data/table.ts";
 import { describeInspection } from "../../src/dom/tooltip.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { funnel } from "../../src/marks/funnel.ts";
@@ -21,6 +20,7 @@ import { radar } from "../../src/marks/radar.ts";
 import { sankey } from "../../src/marks/sankey.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { surface } from "../../src/marks/surface.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -33,7 +33,7 @@ import { xScale, yScale } from "../helpers/scales.ts";
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
   // As a chart does once it has loaded what reads the fields.
-  model.fields = fieldReader;
+  model.writers = tooltipWriters;
   model.setSize(600, 300, 1);
   model.scene(estimateText);
   return model;

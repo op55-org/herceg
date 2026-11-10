@@ -55,7 +55,8 @@ export function Latency() {
   written back without a loop.
 - **Tooltips** of your own: `renderTooltip` returns React content,
   rendered with your app's context in the chart's tooltip box; a tree
-  node's point carries its path (`point.names`).
+  node's point carries its path (`point.names`), and a mark's
+  `tooltip.content` its row as written (`point.content`).
 - **Anchors**: `<Anchor at={{ x, y }} side="top">` among the chart's
   children holds its React content at a place in the data, moving with
   every frame and hidden out of view, rendered through a portal with your

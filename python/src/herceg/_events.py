@@ -181,6 +181,38 @@ class InspectedField:
     link: RowLink | None = None
 
 
+#: A run's style as the browser writes it, by the names ``ContentStyle`` gives it.
+_CONTENT_STYLE = {
+    "fontSize": "font_size",
+    "fontWeight": "font_weight",
+    "fontStyle": "font_style",
+    "color": "color",
+    "opacity": "opacity",
+}
+
+
+@dataclass(frozen=True)
+class ContentStyle:
+    """The look of a run of a tooltip's row: its part's ``style`` (an
+    ``hg.TextStyle``'s ``font_size``, ``font_weight``, ``font_style``,
+    ``color``, and ``opacity``), None where the part gives none."""
+
+    font_size: float | None = None
+    font_weight: float | str | None = None
+    font_style: str | None = None
+    color: str | None = None
+    opacity: float | None = None
+
+
+@dataclass(frozen=True)
+class ContentRun:
+    """A run of a tooltip's row as its mark's ``hg.Tooltip(content=...)``
+    wrote it: a part's text, in its part's style."""
+
+    text: str
+    style: ContentStyle | None = None
+
+
 @dataclass(frozen=True)
 class InspectedPoint:
     """One point under the pointer: a series' value, or a pie slice, a tree's node,
@@ -212,6 +244,10 @@ class InspectedPoint:
     #: path below the whole tree's root (drilled or not), a pie slice's or a
     #: funnel stage's category. None for other points.
     names: tuple[str, ...] | None = None
+    #: The point's row as its mark's ``hg.Tooltip(content=...)`` wrote it, in
+    #: place of ``label`` and ``text``: each part's text and style, as
+    #: inspected. None for marks without content.
+    content: tuple[ContentRun, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1440,6 +1476,7 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
             and (point.get("row") is None or index(point["row"]))
             and number(point.get("value"))
             and isinstance(point.get("fields", []), list)
+            and isinstance(point.get("content", []), list)
         ):
             raise ChartError(
                 f"points[{i}]: expected mark, key, label, text, and value as the browser "
@@ -1455,6 +1492,16 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ChartError(
                     f"points[{i}].fields[{j}]: expected field, label, kind, text, and value, "
                     f"not {field!r}"
+                )
+        for j, run in enumerate(point.get("content", [])):
+            if not (
+                isinstance(run, dict)
+                and text(run.get("text"))
+                and (run.get("style") is None or isinstance(run["style"], dict))
+                and set(run.get("style") or {}) <= set(_CONTENT_STYLE)
+            ):
+                raise ChartError(
+                    f"points[{i}].content[{j}]: expected text and a style, not {run!r}"
                 )
     values = payload.get("values")
     if values is not None and not (
@@ -1540,6 +1587,19 @@ def decode_inspection(payload: Any) -> Inspection | None:
                     for field in point.get("fields", ())
                 ),
                 names=tuple(point["names"]) if "names" in point else None,
+                content=tuple(
+                    ContentRun(
+                        text=run["text"],
+                        style=ContentStyle(
+                            **{_CONTENT_STYLE[key]: value for key, value in run["style"].items()}
+                        )
+                        if run.get("style")
+                        else None,
+                    )
+                    for run in point["content"]
+                )
+                if "content" in point
+                else None,
             )
             for point in payload.get("points", ())
         ),

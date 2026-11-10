@@ -1,89 +1,14 @@
-// What charts load for tooltips that show more than their marks' values:
-// the fields of rows marks' tooltips show (`tooltip.fields`), read and
-// written for inspections, and content of the application's own
-// (`renderTooltip`) in the tooltip's box. It imports only types of the
-// chart's modules, and writes with the chart's code handed in (the kit), so
-// that loading it later shares no code with the chart's own.
+// What charts load for tooltips that show more than their marks' names and
+// values: the fields of rows marks' tooltips show (`tooltip.fields`) and
+// their rows of parts (`tooltip.content`), which inspections carry, drawn
+// in the tooltip's box, and content of the application's own
+// (`renderTooltip`) in it. It imports only types of the chart's modules.
 
 import type { RowLink } from "../fields/links.ts";
-import type { Formatter } from "../format/format.ts";
-import { intlWrites } from "../format/intl-options.ts";
-import { formatWriter, formOf } from "../format/patterns.ts";
-import type { FieldReaders, InspectedField } from "../marks/tooltip-fields.ts";
+import type { ContentRun } from "../marks/tooltip-fields.ts";
 import type { Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
 import type { RenderTooltip, Tooltip } from "./tooltip.ts";
-
-const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
-
-/**
- * Reads tooltip fields in a chart's locale and zone, through the chart's
- * field displays (missing values, mappings, labels): written with their
- * formats (any form of their kind's, `FormatSpec`), else their displays',
- * else numbers as the chart's other numbers, and times as `times` does (the
- * x axis' formatter, on time axes) or as dates and times. A format of the
- * wrong kind is refused as it is first read, as a malformed one is.
- */
-export const fieldReader: FieldReaders = (locale, zone, kit, features, times) => {
-  const numbers = (value: number) => kit.formatNumber(value, locale);
-  const formats = new Map<string, Formatter>();
-  const fallback = (kind: string): Formatter =>
-    kind === "number" ? numbers : (times ?? kit.timeFormatter(DATE_TIME, zone, locale));
-  const write = (field: string, kind: InspectedField["kind"], format: object, at: string) => {
-    const key = `${kind} ${JSON.stringify(format)}`;
-    let formatter = formats.get(key);
-    if (!formatter) {
-      formatter = formatWriter(kit, format, kind === "time", zone, locale, at);
-      const form = formOf(format, at);
-      // As a display's format of the wrong kind is refused (fields/check.ts, `misfit`).
-      if (
-        kind === "category" ||
-        (form === "intl" ? !intlWrites(format, kind) : (form === "time") !== (kind === "time"))
-      )
-        throw new Error(
-          `${at}: ${JSON.stringify(field)} holds ${kind === "category" ? "categories" : `${kind}s`}; ${
-            kind === "category"
-              ? "formats are for numbers and times; drop format"
-              : kind === "time"
-                ? "give { time } or Intl date options"
-                : "give a number format"
-          }`,
-        );
-      formats.set(key, formatter);
-    }
-    return formatter;
-  };
-  return (mark, row) =>
-    mark?.spec.tooltip?.fields?.map((entry, i) => {
-      const table = mark.table!;
-      const { field, label, format } = typeof entry === "string" ? { field: entry } : entry;
-      const value = table.value(field, row);
-      const kind = table.kind(field) as InspectedField["kind"];
-      const own = format && write(field, kind, format, `tooltip.fields[${i}].format`);
-      const shown = features?.fields?.of(table, field);
-      const writes = shown?.writer(own, fallback(kind));
-      // Times beyond what dates hold (an infinity among them) have no date to write.
-      const text = writes
-        ? writes(value)
-        : value === null || (kind === "time" && !(Math.abs(value as number) <= 8.64e15))
-          ? "–"
-          : typeof value === "string"
-            ? value
-            : (own ?? fallback(kind))(value);
-      const color = shown?.color?.(value);
-      const link = shown?.link?.(table, row, writes!);
-      const read: InspectedField = {
-        field,
-        label: label ?? shown?.label ?? field,
-        kind,
-        value,
-        text,
-      };
-      if (color !== undefined) read.color = color;
-      if (link) read.link = link;
-      return read;
-    });
-};
 
 /**
  * Makes the chart's tooltip, `tooltip`, show the fields of the rows its
@@ -120,9 +45,11 @@ export function ownContent(
   const resized = new ResizeObserver(place);
   resized.observe(element);
   /**
-   * The built-in content, each point's row followed by its fields', which
-   * line up under its label; a field's link is written as its text, and is
-   * a link once the tooltip is pinned (`linked`), when it takes the pointer.
+   * The built-in content, each point's row (its name and value, or its
+   * content's runs, each in its part's style) followed by its fields',
+   * which line up under its label; a field's link is written as its text,
+   * and is a link once the tooltip is pinned (`linked`), when it takes the
+   * pointer.
    */
   const builtIn = (inspection: Inspection, theme: Theme, linked: boolean, own: number) => {
     const header = document.createElement("div");
@@ -138,6 +65,7 @@ export function ownContent(
       field = false,
       link?: RowLink,
       bold = false,
+      runs?: readonly ContentRun[],
     ) => {
       const line = document.createElement("div");
       line.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
@@ -146,6 +74,28 @@ export function ownContent(
       const label = document.createElement("span");
       label.textContent = name;
       label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}${bold ? ";font-weight:600" : ""}`;
+      if (runs) {
+        // The content's runs in place of the name and value, each part in its style.
+        label.textContent = "";
+        for (const { text, style } of runs) {
+          const run = document.createElement("span");
+          run.textContent = text;
+          if (style) {
+            const { fontSize, fontWeight, fontStyle, color, opacity } = style;
+            Object.assign(run.style, {
+              fontSize: fontSize === undefined ? "" : `${fontSize}px`,
+              fontWeight: fontWeight ?? "",
+              fontStyle: fontStyle ?? "",
+              color: color ?? "",
+              opacity: opacity ?? "",
+            });
+          }
+          label.append(run);
+        }
+        line.append(swatch, label);
+        element.append(line);
+        return;
+      }
       const anchor = !!link && linked;
       const value = document.createElement(anchor ? "a" : "span");
       value.textContent = link?.text ?? text;
@@ -162,7 +112,7 @@ export function ownContent(
       element.append(line);
     };
     for (const [i, point] of inspection.points.entries()) {
-      row(point.label, point.text, point.color, false, undefined, i === own);
+      row(point.label, point.text, point.color, false, undefined, i === own, point.content);
       for (const field of point.fields ?? [])
         row(field.label, field.text, field.color, true, field.link);
     }

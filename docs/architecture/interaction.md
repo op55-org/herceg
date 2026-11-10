@@ -484,12 +484,26 @@ the view, and the selection, each on one of the chart's scales.
   only text and colors that changed.
 - Values are written with the axis' `tooltipFormat`, else its `format`, the
   same formatter `formatValue` and the keyboard use.
-- **Fields.** Marks check `tooltip.fields` against their tables when made
-  (`marks/tooltip-fields.ts`). Reading and writing them
-  (`dom/tooltip-content.ts`) loads the first time a chart has fields or
-  `renderTooltip`: the chart gives the model a reader per panel, in its
-  locale and time zone, and inspections carry the fields. Layout items
-  read fields at their row, or at the one row `rowsOf` gives.
+- **Fields and content.** Marks check the fields `tooltip.fields` and
+  `tooltip.content` read against their tables when made
+  (`marks/tooltip-fields.ts`). What writes them
+  (`marks/tooltip-writers.ts`) is a fourth lazy compiler beside the guide
+  and feature compilers and the display code: a chart whose marks have a
+  `tooltip` loads it (`ChartModel.lacks`), others never do. It changes no
+  frame, so the first frame draws without it. The controller attaches only
+  once it is here, so no tooltip or announcement is written without it,
+  and `ready` settles with the frame drawn with it, from which inspections
+  read it. An update that first needs it once a controller is attached
+  draws at once too, and its tooltips gain fields and content as it
+  arrives. One that cannot load is reported as a compiler is, and `ready`
+  rejects. The model hands each inspector a writer in the chart's locale
+  and time zone, and inspections carry the fields and each point's content
+  (its parts' text and styles), written when inspected; layout items write
+  them at their row, or at the one row `rowsOf` gives. A part's problem
+  drawn on (a format on `{ series: true }`) is told once through the
+  model's `report`, which the chart sets to its error path. Drawing
+  content's styled runs in the box (`dom/tooltip-content.ts`) loads with
+  the controller.
 - **`renderTooltip`** content is asked for when what the tooltip is at
   changes (compared as JSON, with the theme and renderer) or the chart's
   revision does (data or options), and never of an inspection the data
@@ -931,7 +945,8 @@ What keeps a chart from drawing has one shape everywhere
   same fields in Python's spelling (`Chart facet: ...`, `line
   stroke_width: ...`), and checks what it can before the engine.
 - A mounted chart reports through one path (`MountedChart.#fail`), once per
-  change of options or data: `ready` rejects if nothing was drawn,
+  change of options or data: `ready` rejects if nothing was drawn (or
+  the tooltip writers it waits for did not load),
   `onError` and `"error"` listeners hear it, else the console.
 - With `errorMode: "inline"` (default), the chart shows a box of its size
   in its place, or a banner over the last frame for a refused update

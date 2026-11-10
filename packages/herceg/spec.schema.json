@@ -164,12 +164,12 @@
         },
         "continuity": {
           "title": "Continuity",
-          "description": "Which observations the areas connect (areas that do not stack).",
+          "description": "Which observations the areas connect; a series field's stack breaks where a layer's runs do.",
           "$ref": "#/$defs/ContinuitySpec"
         },
         "where": {
           "title": "Where",
-          "description": "Rows the areas leave out, as gaps (areas that do not stack).",
+          "description": "Rows the areas leave out, as gaps: they fill only where it holds. A series field's stack breaks where it leaves a layer's rows out, and a series it leaves out wholly is no layer.",
           "$ref": "#/$defs/Expression"
         },
         "curve": {
@@ -5660,6 +5660,11 @@
           "description": "Fields of the row the tooltip is at, shown in order under the mark's values: data that is not plotted, such as a request count. The keyboard's announcements and hover events read them too.",
           "type": "array",
           "items": { "$ref": "#/$defs/TooltipField" }
+        },
+        "content": {
+          "title": "Content",
+          "description": "Each point's row as one line of parts, in place of its name and value (`LabelPart`): text, `{ series: true }` (what the tooltip names the point by), `{ value: true }` (its value as the tooltip writes it, or in `format`, a time where it is a time pattern or Intl date options), `{ field }` of its row (as `fields` write it, or in `format`; \"–\" where no one row is the point), or `{ label }`, each in its `style`. The swatch stays and `fields` follow under it; the keyboard's announcements and hover events read the same text.",
+          "$ref": "#/$defs/LabelContent"
         }
       },
       "additionalProperties": false

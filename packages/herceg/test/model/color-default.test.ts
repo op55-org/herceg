@@ -198,7 +198,7 @@ describe("names of tables of value fields", () => {
         },
         false,
       );
-      expect(one.lacks()).toEqual([false, false, false]);
+      expect(one.lacks()).toEqual([false, false, false, false]);
       one.scene(estimateText);
       expect(entries(one).map(({ key }) => key)).toEqual([
         identityKey({ table: { mark: 0 } }, "v"),
@@ -216,7 +216,7 @@ describe("names of tables of value fields", () => {
       const v = entries(model)[1]!;
       expect(v.key).toBe(identityKey({ table: { mark: 1 } }, "v"));
       model.update({ marks: [line(data, { x: "t", y: "v" }), line(rows(), { x: "t", y: "v" })] });
-      expect(model.lacks()).toEqual([false, true, false]);
+      expect(model.lacks()).toEqual([false, true, false, false]);
       model.use([undefined, staticCompilers()[1]]);
       model.scene(estimateText);
       expect(entries(model).map(({ key }) => key)).toEqual([

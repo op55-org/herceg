@@ -30,7 +30,7 @@ import {
 } from "../marks/layout-mark.ts";
 import type { ChartMark, Frame, Mark, MarkKey } from "../marks/mark.ts";
 import type { LayoutClock, NodePositions } from "../marks/node-positions.ts";
-import type { FieldReader } from "../marks/tooltip-fields.ts";
+import type { TooltipWriter } from "../marks/tooltip-fields.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import type { Guide, Panel, Rect, Scene } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -198,8 +198,8 @@ const ITEM_STEPS: Record<string, number> = {
 
 /** One chart's record of what its layout marks drew; layout marks give charts the class. */
 export class ItemViews {
-  /** Reads the fields tooltips show of items' rows (`tooltip.fields`); set by the model. */
-  declare fields: FieldReader | undefined;
+  /** Writes the fields and content tooltips show of items (`tooltip.fields`, `tooltip.content`); set by the model. */
+  declare writer: TooltipWriter | undefined;
   /**
    * Optional sink for item changes, which reads what caused each in `cause`;
    * model-only consumers keep the returned values.
@@ -1704,7 +1704,7 @@ export class ItemViews {
         ? (view.result.soleRow?.(key, owner.table) ??
           this.#leaving(key, view.key)?.soleRow?.(key, owner.table))
         : undefined);
-    const fields = one === undefined ? undefined : this.fields?.(owner, one);
+    const written = this.writer?.(owner, one, { label, value, text }, names);
     return {
       axis: "item",
       key,
@@ -1724,7 +1724,7 @@ export class ItemViews {
           py,
           // A copy: marks may keep their items.
           ...(names && { names: [...names] }),
-          ...(fields && { fields }),
+          ...written,
         },
       ],
       outline,

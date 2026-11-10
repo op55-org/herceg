@@ -51,6 +51,7 @@ import { withoutHidden } from "./hidden.ts";
 import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
+  ANY_KIND,
   type AxisFormat,
   type BandContext,
   type BandList,
@@ -269,7 +270,6 @@ const RADIUS_RANGE: readonly [number, number] = [2, 12];
 /** Opacity of a field's smallest value; its largest is opaque. */
 const MIN_OPACITY = 0.15;
 const NO_COORDS = new Float32Array(0);
-const POSITION: readonly ["number", "time", "category"] = ["number", "time", "category"];
 /** Legend shapes: circles of this radius, other shapes reaching at most LEGEND_REACH. */
 const LEGEND_RADIUS = 4.5;
 const LEGEND_REACH = 6;
@@ -352,8 +352,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     this.bound = bound;
     const position = fields as { x: string; y: string };
     this.#fields = position;
-    requireField(table, position.x, POSITION, "point x");
-    requireField(table, position.y, POSITION, "point y");
+    requireField(table, position.x, ANY_KIND, "point x");
+    requireField(table, position.y, ANY_KIND, "point y");
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "point series");
     // A category color names the series, as on lines and bars.
     const series = seriesOf(spec as PointSpec as never, table, "fill");
@@ -1290,7 +1290,7 @@ function pointChannels(spec: Frozen<PointSpec>, table: Table) {
         throw new RangeError(
           `point symbol: no shape or field "${given}"; name a category field or one of ${SYMBOLS.map((s) => `"${s}"`).join(", ")}`,
         );
-      requireField(table, given, numbers ? NUMERIC : POSITION, `point ${path}`);
+      requireField(table, given, numbers ? NUMERIC : ANY_KIND, `point ${path}`);
       // A field named as a color the feature compiler refuses, as on lines,
       // whether or not a chart on the page loaded it.
       return table.kind(given) === "category" ||
@@ -1320,7 +1320,7 @@ function pointChannels(spec: Frozen<PointSpec>, table: Table) {
         });
     }
     if (c.field !== undefined) {
-      requireField(table, c.field, POSITION, `point ${path}.field`);
+      requireField(table, c.field, ANY_KIND, `point ${path}.field`);
       // A number field without a scale is mapped as its name is.
       if (c.scale === undefined && table.kind(c.field) !== "category" && name !== "symbol")
         return { given, own: c.field };

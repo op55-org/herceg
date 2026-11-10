@@ -181,9 +181,9 @@ let nextId = 0;
 
 /**
  * The imports of the code a configuration may need before it draws: the
- * guide compiler, the feature compiler, and the display code, held in
- * `compilers` (`LOADED`, model/guides.ts) once a chart on the page has
- * loaded them.
+ * guide compiler, the feature compiler, the display code, and the tooltip
+ * writers, held in `compilers` (`LOADED`, model/guides.ts) once a chart on
+ * the page has loaded them.
  */
 const imports: (Promise<unknown> | undefined)[] = [];
 const COMPILERS = [
@@ -194,6 +194,7 @@ const COMPILERS = [
       module.featureCompiler({ ...GUIDE_KIT, isColor: (value) => CSS.supports("color", value) }),
     ),
   () => import("../fields/compile.ts"),
+  () => import("../marks/tooltip-writers.ts").then((module) => module.tooltipWriters),
 ];
 
 /**
@@ -282,6 +283,16 @@ export function forgetInteraction(
   importControllers = load;
 }
 
+/**
+ * Forgets the loaded tooltip writers, so that the next chart whose marks
+ * need them loads them with `load`, which resolves with them: for this
+ * package's tests of what charts do before they arrive.
+ */
+export function forgetWriters(load: () => Promise<NonNullable<(typeof compilers)[3]>>): void {
+  compilers.length = imports.length = 3;
+  COMPILERS[3] = load;
+}
+
 /** Most pointer moves kept of a press held for the controller: of a longer path, the last. */
 const HELD_MOVES = 256;
 
@@ -345,6 +356,12 @@ export class MountedChart implements Chart, ExportsScene {
   #cloudsLoading: Promise<void> | undefined;
   /** The compilers' loading while the configuration waits for them. */
   #compiling: Promise<void> | undefined;
+  /**
+   * `#compiling` loads only the tooltip writers, which only inspections
+   * read: the chart draws meanwhile, and its controller (until attached)
+   * and `ready` wait for them.
+   */
+  #drawsWithout: boolean | undefined;
   /** Why the compilers did not load or take the configuration, until an update tries again. */
   #compileFailure: ChartError | undefined;
   /** The fonts measured with, as the page uses them, how, and their faces' loading while pending. */
@@ -560,6 +577,8 @@ export class MountedChart implements Chart, ExportsScene {
       refused = error;
       this.#model = model({ marks: [] });
     }
+    // What the model's lazy code draws otherwise than asked is told, drawing on.
+    this.#model.report = (error) => this.#report(chartError(error, "compile"), true);
     this.#state = new ChartState({
       model: this.#model,
       events: this.#events,
@@ -656,9 +675,9 @@ export class MountedChart implements Chart, ExportsScene {
       // The first frame renders synchronously so the chart is never blank.
       this.#flush(true);
       // Its interaction follows: at once where a chart on the page loaded
-      // it and that frame drew, else once that frame is on screen, or at
-      // the first input, and once the code it waits for draws it.
-      if (controllers && this.#scene) {
+      // it and that frame drew with all the code it loads, else once that
+      // frame is on screen, or at the first input, and once that code is here.
+      if (controllers && this.#scene && !this.#compiling) {
         try {
           this.#attach(controllers);
         } catch (error) {
@@ -1576,7 +1595,8 @@ export class MountedChart implements Chart, ExportsScene {
     // A chart drawing nothing of its options exports nothing in their place.
     const refusal = this.#refusal ?? this.#compileFailure;
     if (refusal) throw refusal;
-    if (this.#compiling) throw new Error("chart: its code has not loaded; await chart.loading");
+    if (this.#compiling && !this.#drawsWithout)
+      throw new Error("chart: its code has not loaded; await chart.loading");
     this.#remember();
     this.#settle();
     const { width, height } = this.#size();
@@ -1716,8 +1736,11 @@ export class MountedChart implements Chart, ExportsScene {
   #succeed(): void {
     this.#drawn = true;
     this.#failing = false;
-    this.#settleReady?.[0]();
-    this.#settleReady = undefined;
+    // Inspections after `ready` carry what the tooltip writers write.
+    if (!this.#compiling) {
+      this.#settleReady?.[0]();
+      this.#settleReady = undefined;
+    }
     if (!this.#failure) return;
     this.#failure.remove();
     this.#failure = undefined;
@@ -1728,7 +1751,7 @@ export class MountedChart implements Chart, ExportsScene {
   #drawPending(): boolean {
     // A configuration waiting for a compiler keeps the last frame, or none;
     // a chart whose options were refused draws nothing until an update.
-    if (this.#destroyed || this.#compiling || this.#refusal) return false;
+    if (this.#destroyed || (this.#compiling && !this.#drawsWithout) || this.#refusal) return false;
     if (this.#pageChanged) {
       this.#pageChanged = false;
       if (readPage(this.#container, (page) => this.#model.refreshTheme(page))) {
@@ -2065,6 +2088,7 @@ export class MountedChart implements Chart, ExportsScene {
    */
   #loadCompilers(): void {
     const lacks = this.#model.lacks();
+    this.#drawsWithout = lacks.indexOf(true) > 2;
     if (!lacks.includes(true)) {
       this.#compiling = this.#compileFailure = undefined;
       return;
