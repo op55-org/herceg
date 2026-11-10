@@ -985,11 +985,12 @@ export function requireField(
 
 export const NUMERIC: readonly FieldKind[] = ["number", "time"];
 export const CATEGORY: readonly FieldKind[] = ["category"];
-const ITEM_KEYS: readonly FieldKind[] = ["number", "time", "category"];
+/** Every kind of field, for fields that may be any: positions, item keys, tooltips' fields. */
+export const ANY_KIND: readonly FieldKind[] = ["number", "time", "category"];
 
 /** Checks a `type` mark's `itemKey`, which names each row's item: a category, number, or time field. */
 export function checkItemKey(table: Table, field: string | undefined, type: string): void {
-  if (field !== undefined) requireField(table, field, ITEM_KEYS, `${type} itemKey`);
+  if (field !== undefined) requireField(table, field, ANY_KIND, `${type} itemKey`);
 }
 
 /**

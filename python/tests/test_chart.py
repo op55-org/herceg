@@ -2489,6 +2489,95 @@ def test_tooltip_fields_are_refused_where_they_do_not_belong():
         hg.histogram(data, "p99", tooltip=hg.Tooltip(fields=["t"]))
 
 
+def test_tooltip_content_belongs_to_marks():
+    data = {
+        "time": [dt.datetime(2026, 10, 1, 11, 42, 7, 318_000), dt.datetime(2026, 10, 1, 11, 42, 8)],
+        "series": ["pump-a", "flow"],
+        "value": [245.31, 12.04],
+    }
+    row = [
+        hg.LabelPart(series=True, style=hg.TextStyle(font_weight=600)),
+        " ",
+        hg.LabelPart(value=True, format=hg.Format(number=".1f")),
+        " ",
+        {"field": "time", "format": {"time": "%H:%M:%S.%L"}},
+    ]
+    content = [
+        {"series": True, "style": {"fontWeight": 600}},
+        " ",
+        {"value": True, "format": {"number": ".1f"}},
+        " ",
+        {"field": "time", "format": {"time": "%H:%M:%S.%L"}},
+    ]
+    spec, buffers = (
+        hg.Chart(data)
+        .line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
+        .to_spec()
+    )
+    assert spec["marks"][0]["tooltip"] == {"content": content}
+    hg_render.svg(spec, buffers)
+    # A one-call helper gives content to its mark, and keeps the chart's own options.
+    spec, _ = hg.line(
+        data, "time", "value", tooltip=hg.Tooltip(content=row, fields=["series"], pin="click")
+    ).to_spec()
+    assert spec["tooltip"] == {"pin": "click"}
+    assert spec["marks"][0]["tooltip"] == {"content": content, "fields": ["series"]}
+    # Content comes last, so the options before it keep their places.
+    assert hg.Tooltip(False, ["series"], "click") == hg.Tooltip(fields=["series"], pin="click")
+    with pytest.raises(ValueError, match=r"^Chart tooltip content: belongs to the marks"):
+        hg.Chart(data, tooltip=hg.Tooltip(content=row)).line("time", "value").to_spec()
+    with pytest.raises(hg.ChartError, match=r"^line tooltip content\[0\] field: no column 'temp'"):
+        hg.Chart(data).line(
+            "time", "value", tooltip=hg.Tooltip(content=[hg.LabelPart(field="temp")])
+        )
+    with pytest.raises(hg.ChartError, match=r"^line tooltip content\[1\] label: no column 'unit'"):
+        hg.Chart(data).line(
+            "time", "value", tooltip=hg.Tooltip(content=["v", hg.LabelPart(label="unit")])
+        )
+    with pytest.raises(ValueError, match=r'^line tooltip content\[0\] format: "series" holds'):
+        hg.Chart(data).line(
+            "time",
+            "value",
+            tooltip=hg.Tooltip(
+                content=[hg.LabelPart(field="series", format=hg.Format(number=".1f"))]
+            ),
+        )
+    with pytest.raises(ValueError, match=r"^LabelPart format: a series' name is written as it is"):
+        hg.LabelPart(series=True, format=hg.Format(number=".1f"))
+    with pytest.raises(ValueError, match=r"^line tooltip content: expected a list of parts"):
+        hg.Chart(data).line("time", "value", tooltip=hg.Tooltip(content="value"))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=r"^histogram tooltip content: its points summarize rows"):
+        hg.histogram(data, "value", tooltip=hg.Tooltip(content=["n"]))
+    with pytest.raises(ValueError, match=r"^histplot tooltip content: express charts write"):
+        hx.histplot(data, x="value", tooltip=hg.Tooltip(content=["n"]))
+
+
+@pytest.mark.contract("inspection.content.python")
+def test_tooltip_content_decodes_with_its_points():
+    from herceg._events import decode_inspection
+
+    point = {"mark": 0, "markId": None, "key": "0:v", "label": "v", "row": 0, "value": 2}
+    runs = [{"text": "v", "style": {"fontWeight": 600, "opacity": 0.5}}, {"text": " 2.0"}]
+    inspection = decode_inspection(
+        {
+            "axis": "x",
+            "value": 1,
+            "time": False,
+            "label": "1",
+            "points": [{**point, "text": "2", "content": runs}],
+        }
+    )
+    assert inspection is not None
+    assert inspection.points[0].content == (
+        hg.ContentRun("v", hg.ContentStyle(font_weight=600, opacity=0.5)),
+        hg.ContentRun(" 2.0"),
+    )
+    plain = decode_inspection(
+        {"axis": "x", "value": 1, "time": False, "label": "1", "points": [{**point, "text": "2"}]}
+    )
+    assert plain is not None and plain.points[0].content is None
+
+
 def test_layout_marks_tooltips_show_more_of_their_items_rows():
     data = {
         "host": ["a", "b", "c"],

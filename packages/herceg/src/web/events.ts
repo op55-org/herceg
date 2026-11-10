@@ -20,7 +20,7 @@ import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../do
 import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { Expression } from "../spec/spec.ts";
+import type { Expression, PartStyle } from "../spec/spec.ts";
 import type { ItemReference, Phase, PinTarget, SeriesReference } from "../spec/state.ts";
 
 type Ends = [number, number] | [string, string];
@@ -258,6 +258,8 @@ export interface InspectionPayload {
       color?: string;
       link?: { url: string; text: string };
     }[];
+    /** The row its mark's `tooltip.content` wrote: each part's text, with its style. */
+    content?: { text: string; style?: PartStyle }[];
   }[];
   /** An item's data by field (a 3D chart's point): numbers, times in epoch ms, and categories. */
   values?: Readonly<Record<string, number | string>>;
@@ -764,6 +766,11 @@ export function inspectionPayload(
       text: point.text,
       ...(point.names && { names: [...point.names] }),
       ...(point.fields && { fields: point.fields.map((field) => ({ ...field })) }),
+      ...(point.content && {
+        content: point.content.map(({ text, style }) =>
+          style ? { text, style: { ...style } } : { text },
+        ),
+      }),
     })),
     ...(inspection.axis === "item" && inspection.values && { values: inspection.values }),
   };

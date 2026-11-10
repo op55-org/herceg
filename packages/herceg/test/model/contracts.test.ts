@@ -267,7 +267,7 @@ describe("mark functions", () => {
       marks: [lines],
       scales: { depth: { type: "linear", padding: 0.5 } },
     });
-    expect(live.lacks()).toEqual([true, true, false]);
+    expect(live.lacks()).toEqual([true, true, false, false]);
     expect(thrown(() => live.use(staticCompilers()))).toMatchObject({
       code: "invalid-option",
       path: "scales.depth.padding",

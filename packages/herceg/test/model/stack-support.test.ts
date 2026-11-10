@@ -476,12 +476,6 @@ describe("stack support", () => {
         marks: [{ type: "bar", data: "d", x: "t", y: "v", stack: { support: "union" } }],
       } as never),
     ).toThrow("bars stack at their positions; drop support");
-    // `where` still leaves stacks alone.
-    expect(() =>
-      build({
-        marks: [area(data, { x: "t", y: "v", series: "s", stack: true, where: col("v").gt(1) })],
-      }),
-    ).toThrow("where: stacked areas cannot leave rows out yet; drop it or the stack");
   });
 
   it("loads support and continuity on stacks from a spec", () => {

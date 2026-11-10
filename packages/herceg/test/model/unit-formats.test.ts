@@ -4,7 +4,6 @@
 // tooltip fields, and gauges.
 import { describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { axis, colorbar } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
@@ -13,6 +12,7 @@ import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { text } from "../../src/marks/text.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { needsGuides } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -25,7 +25,7 @@ function build(config: ChartConfig, width = 640, height = 320) {
     undefined,
     staticCompilers(),
   );
-  model.fields = fieldReader;
+  model.writers = tooltipWriters;
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

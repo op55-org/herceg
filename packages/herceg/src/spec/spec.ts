@@ -14,6 +14,7 @@ import type {
   ChannelsSpec,
   ContinuitySpec,
   EncodingsSpec,
+  LabelContent,
   LabelLayoutSpec,
   LabelPart,
   LabelPlaceSpec,
@@ -1436,6 +1437,17 @@ export interface MarkTooltipSpec {
    * keyboard's announcements and hover events read them too.
    */
   fields?: readonly TooltipField[];
+  /**
+   * Each point's row as one line of parts, in place of its name and value
+   * (`LabelPart`): text, `{ series: true }` (what the tooltip names the
+   * point by), `{ value: true }` (its value as the tooltip writes it, or in
+   * `format`, a time where it is a time pattern or Intl date options),
+   * `{ field }` of its row (as `fields` write it, or in
+   * `format`; "–" where no one row is the point), or `{ label }`, each in
+   * its `style`. The swatch stays and `fields` follow under it; the
+   * keyboard's announcements and hover events read the same text.
+   */
+  content?: LabelContent;
 }
 
 /** Marks whose points are rows of their table, so that tooltips can show more of the row. */
@@ -1574,9 +1586,13 @@ interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
   encode?: Pick<EncodingsSpec, "color" | "fill" | "stroke" | "opacity">;
   /** Looks by series (`by`). */
   style?: Pick<MarkStyleSpec, "by">;
-  /** Which observations the areas connect (areas that do not stack). */
+  /** Which observations the areas connect; a series field's stack breaks where a layer's runs do. */
   continuity?: ContinuitySpec;
-  /** Rows the areas leave out, as gaps (areas that do not stack). */
+  /**
+   * Rows the areas leave out, as gaps: they fill only where it holds. A
+   * series field's stack breaks where it leaves a layer's rows out, and a
+   * series it leaves out wholly is no layer.
+   */
   where?: Expression;
   /**
    * How the area's edges join their points (see `Curve`); "linear" by default.

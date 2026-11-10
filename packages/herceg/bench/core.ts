@@ -373,6 +373,44 @@ measure("stack: areas of 10 series, 100k rows again", () => {
     support: "union",
   });
 });
+// A chart's shares stack of three fields over a 100k window, 100 rows a
+// tick: without `where`, with one keeping every row (stacked as without),
+// and with one leaving rows out, whose offsets take the rows it keeps anew.
+const shareRows = (from: number, count: number) => {
+  const t = Float64Array.from({ length: count }, (_, i) => from + i);
+  return { t, a: t.map((v) => 1 + (v % 7)), b: t.map((v) => 2 + (v % 5)), c: t.map(() => 3) };
+};
+for (const [name, where] of [
+  ["without where", undefined],
+  ["where keeping every row", col("a").ge(0)],
+  ["where leaving 100 rows in 10,000 out", col("t").mod(10_000).ge(100)],
+] as const) {
+  const shares = table(shareRows(0, 100_000), { maxRows: 100_000 });
+  const model = new ChartModel(
+    {
+      legend: false,
+      marks: [
+        area(shares, {
+          x: "t",
+          y: ["a", "b", "c"],
+          series: false,
+          stack: { offset: "fill" },
+          ...(where && { where }),
+        }),
+      ],
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(1100, 400, 1);
+  model.scene(estimateText);
+  let at = 100_000;
+  measure(`stack: a chart's shares of 3 fields, ${name}, append 100 rows, 100k window`, () => {
+    shares.append(shareRows(at, 100));
+    at += 100;
+    model.scene(estimateText);
+  });
+}
 // Row views over a million rows: positions only, no column copies.
 const hosts = Array.from({ length: 200 }, (_, i) => `host-${(i * 7919) % 1000}`);
 const rows = table({
@@ -426,9 +464,9 @@ measure(
 // 30-minute window (180,000 rows). Each tick brings a tenth of a second's rows;
 // one row in 150 arrives 5 s to 2 min late and merges into place. Rows leaving
 // the window drop, and two charts draw again: lines by series, and an
-// intersection stack of three series over a view of the table. As in the
-// study's feed, s3 has a 7-minute gap and s4 starts 4 minutes late, which
-// break the lines and the stack.
+// intersection stack of three series, over a view of the table or picked
+// from the table by `where`. As in the study's feed, s3 has a 7-minute gap
+// and s4 starts 4 minutes late, which break the lines and the stack.
 const FEED = 10;
 const FEED_WINDOW = 18_000;
 const feedNames = Array.from({ length: FEED }, (_, s) => `s${s}`);
@@ -488,18 +526,22 @@ const gap = { maxGap: { milliseconds: 300_000 } };
 const feedLines = feedModel([
   line(feed, { x: "time", y: "value", series: "series", continuity: gap }),
 ]);
+const stackOptions = {
+  x: "time",
+  y: "value",
+  series: "series",
+  continuity: gap,
+  stack: { gaps: "interpolate", support: "intersection" },
+} as const;
 const feedStack = feedModel([
-  area(rowView(feed, { filter: col("series").isIn("s2", "s3", "s4") }), {
-    x: "time",
-    y: "value",
-    series: "series",
-    continuity: gap,
-    stack: { gaps: "interpolate", support: "intersection" },
-  }),
+  area(rowView(feed, { filter: col("series").isIn("s2", "s3", "s4") }), stackOptions),
 ]);
+// As in a chart, the code keeping a streaming table's series split loads
+// after the first scene; without it, every tick would group the rows again.
+await new Promise((resolve) => setTimeout(resolve, 50));
 let feedTick = FEED_WINDOW;
 let late: { due: number; at: number; s: number }[] = [];
-const feedOnce = () => {
+const feedOnce = (stack = feedStack) => {
   const k = feedTick++;
   const rows = { time: [] as number[], series: [] as string[], value: [] as number[] };
   const deliver = (at: number, s: number) => {
@@ -520,12 +562,21 @@ const feedOnce = () => {
     feed.dropBefore("time", (k - FEED_WINDOW) * 100);
   });
   feedLines.scene(estimateText);
-  feedStack.scene(estimateText);
+  stack.scene(estimateText);
 };
-measure("ordered: feed tick, 10 series, 1 in 150 late, 180k rows", feedOnce, {
+measure("ordered: feed tick, 10 series, 1 in 150 late, 180k rows", () => feedOnce(), {
   warmup: 600,
   samples: 300,
 });
+// Made only now: the series split of a chart on the table follows its every tick.
+const feedWhere = feedModel([
+  area(feed, { ...stackOptions, where: col("series").isIn("s2", "s3", "s4") }),
+]);
+measure(
+  "ordered: feed tick, the stack by where on the table, 180k rows",
+  () => feedOnce(feedWhere),
+  { warmup: 600, samples: 300 },
+);
 const feedPlot = feedLines.scene(estimateText).panels[0]!.plot;
 measure(
   "ordered: inspect 10 series of the feed along x, 180k rows",

@@ -5,6 +5,7 @@
 // with the charts that use it: a live chart imports it before drawing such
 // a configuration, and static output brings it with it.
 
+import type { NumericArray } from "../data/column.ts";
 import type { ReadonlyTable, Table } from "../data/table.ts";
 import type { ChartFieldKit, ChartFields } from "../fields/chart.ts";
 import type { mappedColors, stepsAt } from "../fields/colors.ts";
@@ -249,6 +250,18 @@ export interface MarkFeatures {
   readonly steps?: Steps | undefined;
   /** Which rows connect, where a stack of a series field breaks (marks/union-stack.ts). */
   readonly continuity?: Connections | undefined;
+  /**
+   * For a series field's stack with `where`: a series' rows as a layer
+   * takes them, without those left out at its ends along the stack's
+   * positions (`x`, given for rows not in their order); undefined for a
+   * series that is no layer.
+   */
+  readonly layer?: ((rows: Uint32Array, x?: NumericArray) => Uint32Array | undefined) | undefined;
+  /**
+   * For a stack of fields with `where`: the rows of a series it keeps,
+   * which alone its offsets take; undefined while it leaves none out.
+   */
+  readonly kept?: ((series: Series) => Uint32Array | undefined) | undefined;
   /**
    * For marks drawing a shape per row without series (regions): each row's
    * look, an index into `paints` (colors read), for the table's version

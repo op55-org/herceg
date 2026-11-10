@@ -76,7 +76,8 @@ the generated [capability matrix](../capabilities.md).
   the axis inspection modes. [Accessibility](accessibility.md#keyboard)
 - **Tooltip fields** show more of the row a point or item is; items
   summing several rows (pie slices of several rows, inner tree nodes) show
-  none, and networks take none. [Tooltips](interaction.md#tooltips)
+  none, and networks take none. Tooltip `content`, the row written as one
+  line of parts, is taken wherever fields are. [Tooltips](interaction.md#tooltips)
 - **Dragging.** Rules at a number or a time drag (`drag: true`); rules of
   a table's rows, rules placed by shares or pixels, regions, and text do
   not. Network nodes drag with `interaction.drag`.

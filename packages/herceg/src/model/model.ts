@@ -9,6 +9,7 @@ import type { CompiledFields } from "../fields/display.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { type Formatter, formatNumber } from "../format/format.ts";
+import type { TimeZone } from "../format/zone.ts";
 import type {
   AxisOptions,
   ChartAxisOptions,
@@ -49,7 +50,7 @@ import {
 } from "../marks/mark.ts";
 import { offAxis, standsOn } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
-import type { FieldReaders } from "../marks/tooltip-fields.ts";
+import type { TooltipWriters } from "../marks/tooltip-fields.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
 import type { TimeBreaks } from "../scale/breaks.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -476,10 +477,14 @@ export class ChartModel {
   declare looks: typeof geometryOf | undefined;
   declare layoutLooks: Frame["highlighted"];
   /**
-   * Reads the fields marks' tooltips show of rows (`tooltip.fields`) for
-   * inspections: set by a chart once it has loaded what reads them.
+   * Writes what marks' tooltips show besides points' names and values
+   * (`tooltip.fields` and `tooltip.content`) into inspections: given with
+   * the compilers, which charts load for marks that have them (see
+   * `lacks`) as they draw without them; scenes made after read them.
    */
-  declare fields: FieldReaders | undefined;
+  writers: TooltipWriters | undefined;
+  /** Tells the chart of an option it draws otherwise than asked, drawing on (see `TooltipWriters`); set by a chart. */
+  declare report: ((error: Error) => void) | undefined;
   /**
    * Picks the topmost item drawn within reach of a point, of marks `accept`
    * takes: set by a chart once its interaction controller has loaded
@@ -600,9 +605,10 @@ export class ChartModel {
    * (`LOADED`).
    */
   constructor(config: ChartConfig, page?: ThemeEnvironment, compilers: Compilers = []) {
-    const [guides, features] = compilers;
+    const [guides, features, , writers] = compilers;
     this.#guides = guides;
     this.#features = features;
+    this.writers = writers;
     this.#configure(config, page);
   }
 
@@ -710,8 +716,12 @@ export class ChartModel {
     this.#style(theme);
   }
 
-  /** Which of the guide compiler, the feature compiler, and the display code the configuration needs and the model lacks. */
-  lacks(): [boolean, boolean, boolean] {
+  /**
+   * Which of the guide compiler, the feature compiler, the display code,
+   * and the tooltip writers (for marks with `tooltip.fields` or
+   * `tooltip.content`) the configuration needs and the model lacks.
+   */
+  lacks(): [boolean, boolean, boolean, boolean] {
     const config = this.#source;
     const features = needsFeatures(config);
     // Panels' own visibility, and marks hidden whole or rows by value, show
@@ -723,7 +733,14 @@ export class ChartModel {
           [...this.hidden].some((key) => key.startsWith('{"mark":'))),
       !this.#features && (features > 0 || this.#clash),
       !LOADED[2] && features > 1,
+      // A mark's tooltip shows fields, content, or both.
+      !this.writers && config.marks.some((mark) => mark.spec.tooltip),
     ];
+  }
+
+  /** A scene's tooltip writer in `locale` and `zone`, writing times as `times` does (see `TooltipWriters`). */
+  #writer(locale: string | undefined, zone: TimeZone, times?: Formatter) {
+    return this.writers?.(locale, zone, GUIDE_KIT, this.#featured, this.report, times);
   }
 
   /**
@@ -731,9 +748,10 @@ export class ChartModel {
    * when given), resolving styles in `page`; throws for what they refuse of
    * the configuration.
    */
-  use([guides, features]: Compilers, page?: ThemeEnvironment): void {
+  use([guides, features, , writers]: Compilers, page?: ThemeEnvironment): void {
     this.#guides ||= guides;
     this.#features ||= features;
+    this.writers ||= writers;
     this.#configure(this.#source, page);
   }
 
@@ -2669,7 +2687,7 @@ export class ChartModel {
       // A layout mark draws its rows in the panel, which has no axes.
       if (item) {
         this.#items ??= new item.mark.views(this);
-        this.#items.fields = this.fields?.(locale, zone, GUIDE_KIT, this.#featured);
+        this.#items.writer = this.#writer(locale, zone);
         // Its room is its plot: drawn on the plot's paint, its halos on the plot's fill.
         const paint = styles.plot(i);
         const frame = {
@@ -2857,11 +2875,9 @@ export class ChartModel {
         formatX: formatXOf(h, i),
         formatY: formatOf(i),
         formatValue: formatNumbers,
-        fields: this.fields?.(
+        writer: this.#writer(
           locale,
           zone,
-          GUIDE_KIT,
-          this.#featured,
           xContexts[h]!.type === "time" ? formatXOf(h, i) : undefined,
         ),
       });
@@ -3365,12 +3381,7 @@ export class ChartModel {
     this.#floats.clear();
     this.#doubles.clear();
     this.#bytes.clear();
-    items.fields = this.fields?.(
-      locale,
-      this.#config.timeZone ?? "local",
-      GUIDE_KIT,
-      this.#featured,
-    );
+    items.writer = this.#writer(locale, this.#config.timeZone ?? "local");
     const paint = this.#styles.plot(0);
     const under = plotSurface(paint?.fill);
     const { guides, box, inside } = header;

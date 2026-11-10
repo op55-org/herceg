@@ -321,7 +321,7 @@ export class RowStack {
     positions?: NumericArray,
   ) {
     const gather = (values: NumericArray | undefined) =>
-      Float64Array.from(rows, (row) => {
+      Float64Array.from(rows).map((row) => {
         const value = values ? values[row]! : 0;
         return Number.isFinite(value) ? value : Number.NaN;
       });

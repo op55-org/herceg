@@ -396,6 +396,8 @@ READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
 READ |= {"PinTarget", "ItemMove", "ItemPosition"}
 # What a clicked item stands for, which click events report.
 READ |= {"Provenance", "ProvenanceSource", "ValueGroup", "IntervalGroup"}
+# Points' tooltip content, which inspections report.
+READ |= {"ContentRun", "ContentStyle"}
 
 # Fields that replace what an object is given above, which are refused together.
 REPLACING = {("Ticks", "every"), ("Ticks", "values"), ("Place", "inside"), ("Label", "content")}

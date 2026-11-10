@@ -41,6 +41,11 @@ export interface UnionLayers {
 export interface Connections {
   drawn(row: number): boolean;
   joins(a: number, xa: number, b: number, xb: number): boolean;
+  /**
+   * False where `where` tests rows, which trims layers (rows anywhere in a
+   * series not in x order may be taken in later); true or undefined else.
+   */
+  readonly picks?: boolean | undefined;
 }
 
 /** What layers count as where they have no row (`gaps`), where the stack stands, and which rows connect. */
@@ -192,8 +197,9 @@ export class UnionStack {
   /** Row identities of the live rows at the last update: from `#offset` up to `#end`. */
   #offset = 0;
   #end = 0;
-  /** Per shown layer: its first row's identity, at the last update. */
+  /** Per shown layer: its first and last rows' identities, at the last update. */
   #first = new Float64Array(0);
+  #last = new Float64Array(0);
 
   /** Union x, layer tops, and bases (ordinary stacks omit the first); fill adds totals. */
   #buffers: Float64Array[] = [];
@@ -415,16 +421,21 @@ export class UnionStack {
     let from = Number.POSITIVE_INFINITY;
     let until = Number.NEGATIVE_INFINITY;
     for (const [l, rows] of shown.entries()) {
-      // Each layer's rows from the first changed on, ascending from the last before.
       const first = lowerBound(rows, changed - offset);
       if (first === 0) return false;
-      let previous = x[rows[first - 1]!]!;
-      for (let k = first; k < rows.length; k++) {
+      // A layer's rows before the change are those it had, and rows `where`
+      // left out at its end, which it takes once it goes on past them
+      // (anywhere in a series not in x order): they ascend, and restack from
+      // its last row before.
+      const last = this.#last[l]!;
+      const before = last < changed ? lowerBound(rows, last - offset) : first - 1;
+      let previous = -Infinity;
+      for (let k = continuity?.picks === false ? 0 : before; k < rows.length; k++) {
         const value = x[rows[k]!]!;
         if (!(value >= previous && Number.isFinite(value))) return false;
         previous = value;
       }
-      if (first < rows.length) from = Math.min(from, x[rows[back ? first - 1 : first]!]!);
+      if (first < rows.length) from = Math.min(from, x[rows[back ? before : first]!]!);
       if (this.#first[l]! < offset) until = Math.max(until, x[rows[0]!]!);
     }
     if (until >= from) return false;
@@ -524,9 +535,14 @@ export class UnionStack {
     this.#generation = table.generation;
     this.#offset = table.rowOffset;
     this.#end = table.rowOffset + table.length;
-    if (this.#first.length !== shown.length) this.#first = new Float64Array(shown.length);
+    if (this.#first.length !== shown.length) {
+      this.#first = new Float64Array(shown.length);
+      this.#last = new Float64Array(shown.length);
+    }
     shown.forEach((rows, l) => {
-      this.#first[l] = rows.length > 0 ? table.rowOffset + rows[0]! : Number.POSITIVE_INFINITY;
+      const some = rows.length > 0;
+      this.#first[l] = some ? table.rowOffset + rows[0]! : Number.POSITIVE_INFINITY;
+      this.#last[l] = some ? table.rowOffset + rows[rows.length - 1]! : Number.POSITIVE_INFINITY;
     });
   }
 

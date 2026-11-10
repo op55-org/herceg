@@ -8,7 +8,6 @@ import { fromGeoJSON } from "../../src/data/geojson.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";
 import { describeInspection } from "../../src/dom/tooltip.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { linkable } from "../../src/fields/check.ts";
 import { columnDisplay } from "../../src/fields/grid.ts";
 import {
@@ -21,6 +20,7 @@ import {
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { NO_PAGE } from "../../src/render/fallbacks.ts";
@@ -298,7 +298,7 @@ describe("tooltip fields' links", () => {
       NO_PAGE,
       staticCompilers(),
     );
-    model.fields = fieldReader;
+    model.writers = tooltipWriters;
     model.setSize(400, 300, 1);
     model.scene(estimateText);
     return model;

@@ -81,9 +81,12 @@ export class Tooltip {
       }
       const [swatch, label, value] = row.children as unknown as HTMLSpanElement[];
       if (this.#colors[i] !== point.color) swatch!.style.background = this.#colors[i] = point.color;
-      write(label!, point.label);
+      // A row of content is its text alone, until what draws its parts' styles loads.
+      const content = contentText(point);
+      write(label!, content ?? point.label);
       label!.style.fontWeight = i === own ? "600" : "";
       write(value!, point.text);
+      value!.hidden = content !== undefined;
     });
     element.style.display = "block";
     // Right of the pointer, flipped when it would overflow the chart.
@@ -108,8 +111,15 @@ function write(element: HTMLElement, text: string): void {
 export function describeInspection(inspection: Inspection): string {
   return [
     inspection.label,
-    ...inspection.points.map((point) => `${point.label}: ${point.text}${fieldsSpoken(point)}`),
+    ...inspection.points.map(
+      (point) => `${contentText(point) ?? `${point.label}: ${point.text}`}${fieldsSpoken(point)}`,
+    ),
   ].join(". ");
+}
+
+/** A point's row as its mark's `tooltip.content` wrote it, as text; undefined without content. */
+export function contentText({ content }: InspectedPoint): string | undefined {
+  return content?.map((run) => run.text).join("");
 }
 
 /** A point's tooltip fields, as announcements read them after its value. */

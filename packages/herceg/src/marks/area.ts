@@ -5,7 +5,7 @@ import { areaDrawing } from "../draw/area.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { Polyline } from "../lod/polyline.ts";
-import { asksFeatures } from "../model/features.ts";
+import { asksFeatures, type MarkFeatures } from "../model/features.ts";
 import type { AreaGeometry, Geometry } from "../scene/scene.ts";
 import type {
   AreaSpec,
@@ -95,13 +95,7 @@ import {
   tracePath,
   unionExtent,
 } from "./trace.ts";
-import {
-  type Connections,
-  type StackLayer,
-  type StackRules,
-  stackedRows,
-  UnionStack,
-} from "./union-stack.ts";
+import { type StackLayer, type StackRules, stackedRows, UnionStack } from "./union-stack.ts";
 
 interface AreaCommon<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -146,9 +140,13 @@ interface AreaCommon<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   encode?: Pick<Encodings<S>, "color" | "fill" | "stroke" | "opacity">;
   /** Looks by series (`by`). */
   style?: Pick<MarkStyle<S>, "by">;
-  /** Which observations the areas connect (not with `stack`). */
+  /** Which observations the areas connect; a series field's stack breaks where a layer's runs do. */
   continuity?: Continuity<S>;
-  /** Rows to leave out, as gaps: the areas fill only where it holds (not with `stack`). */
+  /**
+   * Rows to leave out, as gaps: the areas fill only where it holds. A
+   * series field's stack breaks where it leaves a layer's rows out, and a
+   * series it leaves out wholly is no layer.
+   */
   where?: Condition;
   /** How the area's edges join their points (see `Curve`); "linear" by default. */
   curve?: Curve;
@@ -377,8 +375,8 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       rules: StackRules | undefined;
     }
   >();
-  /** What a series field's stack breaks by: the mark's `continuity`, as last compiled. */
-  #continuity: Connections | undefined;
+  /** The mark's compiled features, as last drawn: what a stack breaks by, and which rows `where` keeps. */
+  #features: MarkFeatures | undefined;
   readonly #indexes = new IndexUse();
   /** With `dodge`, each series' slot in the bands, as last drawn. */
   readonly #shares: BandShares | undefined;
@@ -535,7 +533,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   ) {
     const { spec, table } = this;
     const { orient, position, values, banded } = this.#roles;
-    this.#continuity = _context?.features?.of(this)?.continuity;
+    this.#features = _context?.features?.of(this);
     // A category position is each row's band index on the chart's axis.
     const positions = banded
       ? categoryIndices(this.rows(), position, bands[orient]?.keys ?? [])
@@ -571,6 +569,16 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       }
     } else {
       series = buildSeries(table, this.#split.sources(), positions, key, palette, fill);
+      // A stack's layers are the rows `where` keeps from the first to the
+      // last along x; a series it leaves out wholly is no layer, nor series.
+      const layer = this.#union && this.#features?.layer;
+      if (layer)
+        series = series.flatMap((s) => {
+          const rows = layer(s.rows!, s.sorted ? undefined : s.x);
+          if (rows && rows !== s.rows)
+            [s.rows, s.length, s.stream] = [rows, rows.length, undefined];
+          return rows ? [s] : [];
+        });
     }
     for (const s of series) {
       // Rows without a category are not drawn; stacks take the others in their order.
@@ -599,7 +607,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   /** How a series field's stack counts layers without rows, where it stands, and where it breaks. */
   #rules(): StackRules {
     const { gaps = "zero", support = "union" } = this.#stacking;
-    return { gaps, support, continuity: this.#continuity };
+    return { gaps, support, continuity: this.#features?.continuity };
   }
 
   /** Stacks the series of a series field, or of several fields row by row, as `stack` says. */
@@ -632,9 +640,14 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       if (split && typeof this.#stacking.mode === "string") return;
       // Hidden layers drop out of the stack, so the layers above settle down.
       const shown = series.map((s) => !hidden.has(s.key));
-      // Offsets over a view's rows take those alone, and follow them.
+      // Offsets over a view's rows take those alone, and follow them; so
+      // too the rows `where` keeps, where it leaves some out.
       const rows = this.rows();
-      const viewed = rows.view && typeof this.#stacking.mode === "string";
+      const offset = typeof this.#stacking.mode === "string";
+      const viewed = rows.view && offset;
+      const source = offset ? series[0] : undefined;
+      let kept = source && this.#features?.kept?.(source);
+      if (kept?.length === source?.length) kept = undefined;
       const layers = this.#stack.update(
         viewed ? stackedRows(rows) : this.table,
         series.map((s, i) => (shown[i] ? s.values : undefined)),
@@ -643,7 +656,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
           ? Float64Array.from(positions, (p) => (p < 0 ? Number.NaN : p))
           : positions,
         places,
-        viewed ? rows.positions : undefined,
+        kept ?? (viewed ? rows.positions : undefined),
       );
       this.#stackIndexes.clear();
       series.forEach((s, i) => {
@@ -788,7 +801,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
           UnionStack.once(
             x,
             y,
-            layersOf(series, hidden),
+            layersOf(series, hidden, this.#features?.layer, x),
             rules!,
             stacks!.tops[0]!,
             stacks!.bases[0]!,
@@ -801,10 +814,13 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
         for (const [p, series] of panels.entries()) {
           const source = series[0];
           if (!source) continue;
+          // The panel's rows, or those of them `where` keeps.
+          const kept = this.#features?.kept?.(source);
+          const length = kept?.length ?? source.length;
           for (const [l, s] of series.entries()) {
             const shown = !hidden.has(s.key);
-            for (let i = 0; i < source.length; i++) {
-              const row = rowOf(source, i);
+            for (let i = 0; i < length; i++) {
+              const row = kept ? kept[i]! : rowOf(source, i);
               stacks.tops[l]![row] = shown ? s.values[row]! : 0;
             }
           }
@@ -816,7 +832,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
             source[this.#roles.orient],
             stacks.totals,
             "area stack",
-            source.rows,
+            kept ?? source.rows,
           );
         }
       }
@@ -1073,9 +1089,21 @@ function dressed(area: AreaGeometry, s: Series, frame: Frame): Geometry[] {
   return own ? own(area, s, frame) : [area];
 }
 
-/** The layers of a series field's stack, in stacking order: each series' rows, and whether it is shown. */
-function layersOf(series: readonly Series[], hidden: ReadonlySet<string>): StackLayer[] {
-  return series.map((s) => ({ name: s.key, rows: s.rows!, shown: !hidden.has(s.key) }));
+/**
+ * The layers of a series field's stack, in stacking order: each series'
+ * rows, and whether it is shown; in a facet's panel, as `where` keeps them
+ * there along the stack's positions `x` (see `MarkFeatures.layer`).
+ */
+function layersOf(
+  series: readonly Series[],
+  hidden: ReadonlySet<string>,
+  layer?: MarkFeatures["layer"],
+  x?: NumericArray,
+): StackLayer[] {
+  return series.map((s) => {
+    const rows = layer ? layer(s.rows!, x) : s.rows!;
+    return { name: s.key, rows: rows ?? s.rows!, shown: !hidden.has(s.key) && rows !== undefined };
+  });
 }
 
 /** [min, max] of values a scale can place (`log`: positive ones), at a series' rows or all of them. */

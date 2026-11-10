@@ -221,10 +221,11 @@ export function loadSpec(
 }
 
 /**
- * Refuses a format of a mark's tooltip field (`tooltip.fields`) that its
- * field's kind does not take: a number form on a time field, a time
- * pattern on a number field, or any on a category field, as the chart's
- * tooltips would when they first read it (dom/tooltip-content.ts).
+ * Refuses a format of a mark's tooltip field (`tooltip.fields`), or of a
+ * field its content writes (`tooltip.content`), that its field's kind does
+ * not take: a number form on a time field, a time pattern on a number
+ * field, or any on a category field, as the chart's tooltips would when
+ * they first write it (marks/tooltip-writers.ts).
  */
 function tooltipKinds(mark: Mark | LayoutMark, index: number): void {
   const { table } = mark as { table?: Table };
@@ -233,12 +234,15 @@ function tooltipKinds(mark: Mark | LayoutMark, index: number): void {
     id?: string;
     tooltip?: MarkTooltipSpec;
   };
-  tooltip?.fields?.forEach((entry, i) => {
-    if (typeof entry === "string" || entry.format === undefined || !table) return;
+  const formatted = [
+    ...(tooltip?.fields ?? []).map((entry, i) => [entry, `tooltip.fields[${i}].format`] as const),
+    ...(tooltip?.content ?? []).map((part, i) => [part, `tooltip.content[${i}].format`] as const),
+  ];
+  formatted.forEach(([entry, at]) => {
+    if (typeof entry !== "object" || entry.format === undefined || !entry.field || !table) return;
     const kind = table.kind(entry.field);
     const wrong = kind !== "geometry" && misfit(kind, "format", entry.format);
     if (!wrong) return;
-    const at = `tooltip.fields[${i}].format`;
     throw within(
       `marks[${index}]`,
       new ChartError({

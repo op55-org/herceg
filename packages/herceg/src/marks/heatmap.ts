@@ -35,6 +35,7 @@ import {
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { definedFields } from "./line.ts";
 import {
+  ANY_KIND,
   type AxisFormat,
   type BandContext,
   type BandList,
@@ -262,7 +263,6 @@ export function heatmapFormError(spec: Record<string, unknown>): string | undefi
 /** What only heatmaps of cells at an x and a y take. */
 const GRID = ["x", "y", "x1", "x2", "y1", "y2", "xStep", "yStep", "xBanded", "yBanded"] as const;
 
-const ANY: readonly ["number", "time", "category"] = ["number", "time", "category"];
 const WEEK_STARTS: readonly string[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const REDUCERS: readonly string[] = ["last", "mean", "sum", "min", "max"];
 const SAMPLERS: readonly string[] = ["mean", "max", "min"];
@@ -372,7 +372,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       for (const axis of ["x", "y"] as const) {
         const low = spec[`${axis}1`];
         if (low === undefined) {
-          requireField(table, spec[axis]!, ANY, `heatmap ${axis}`);
+          requireField(table, spec[axis]!, ANY_KIND, `heatmap ${axis}`);
           continue;
         }
         const high = spec[`${axis}2`]!;

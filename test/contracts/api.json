@@ -890,7 +890,8 @@
     },
     "settings TooltipSpec hg.Tooltip": {
       "only": {
-        "fields": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses fields (`Chart tooltip fields: belong to the marks whose rows they show; give them to a mark`)."
+        "fields": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses fields (`Chart tooltip fields: belong to the marks whose rows they show; give them to a mark`).",
+        "content": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses content (`Chart tooltip content: belongs to the marks whose rows it writes; give it to a mark`)."
       }
     },
     "settings RowSelectionSpec hg.SelectionBinding": {

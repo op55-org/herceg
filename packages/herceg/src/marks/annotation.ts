@@ -26,10 +26,16 @@ import type { StrokeStyle } from "../spec/style.ts";
 import { dashPattern } from "../style/dash.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { markKey, rowKey, shownItems } from "./hidden.ts";
-import { type Frame, type Mark, type MarkKey, type RowParts, requireField } from "./mark.ts";
+import {
+  ANY_KIND,
+  type Frame,
+  type Mark,
+  type MarkKey,
+  type RowParts,
+  requireField,
+} from "./mark.ts";
 
 /** Kinds of fields places on a scale read: values, and categories in their bands. */
-const POSITIONS: readonly FieldKind[] = ["number", "time", "category"];
 
 /** Fields whose values can be drawn as text: categories and numbers. */
 export type TextField<S extends Schema> = string extends keyof S
@@ -482,7 +488,7 @@ export class AnnotationData {
       requireField(
         table,
         field,
-        share ? ["number"] : POSITIONS,
+        share ? ["number"] : ANY_KIND,
         `${role} ${channel}${share ? `.${"fraction" in place ? "fraction" : "px"}.field` : ""}`,
       );
     }

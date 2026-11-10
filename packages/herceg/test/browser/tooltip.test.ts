@@ -3,7 +3,7 @@
 import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
-import { type Chart, type ChartOptions, createChart, MountedChart } from "../../src/dom/chart.ts";
+import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import { line } from "../../src/marks/line.ts";
 import type { Inspection } from "../../src/model/model.ts";
 
@@ -242,7 +242,11 @@ describe("the tooltip", () => {
     const loading = early.loading;
     early.destroy();
     await loading;
-    expect(MountedChart.modelOf(early).fields).toBeUndefined();
+    // Its tooltip's box was never watched: what draws its content did not load into it.
+    const inside = observed.filter(
+      ([, target]) => early.root.contains(target) && target !== early.root,
+    );
+    expect(inside).toEqual([]);
     const late = await mount({ marks, renderTooltip: () => "own" });
     const box = late.root.querySelector('div[aria-hidden="true"]')!;
     const watching = observed.filter(([, target]) => target === box).map(([observer]) => observer);

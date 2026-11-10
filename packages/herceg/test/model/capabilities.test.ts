@@ -8,7 +8,6 @@ import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Table, table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { plan, sidesOf, snapshot } from "../../src/dom/value-transition.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { colorbar, legend } from "../../src/guides/options.ts";
@@ -47,6 +46,7 @@ import { sankey } from "../../src/marks/sankey.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { surface } from "../../src/marks/surface.ts";
 import { text } from "../../src/marks/text.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { violin } from "../../src/marks/violin.ts";
 import { planAxis } from "../../src/model/axis.ts";
@@ -1837,7 +1837,7 @@ describe("capabilities: tooltip fields", () => {
   it.each(rows)("$name shows fields of the row its point is", (c) => {
     const model = new ChartModel({ locale: "en-US", timeZone: "UTC", marks: [c.make()] });
     // As a chart does once it has loaded what reads them.
-    model.fields = fieldReader;
+    model.writers = tooltipWriters;
     model.setSize(600, 400, 1);
     model.scene(estimateText);
     const point = c.items
@@ -1866,7 +1866,7 @@ describe("capabilities: tooltip fields", () => {
   ];
   it.each(sums)("$name shows fields of an item that is one row", (c) => {
     const model = new ChartModel({ locale: "en-US", timeZone: "UTC", marks: [c.make()] });
-    model.fields = fieldReader;
+    model.writers = tooltipWriters;
     model.setSize(600, 400, 1);
     model.scene(estimateText);
     // Every item here but a Sankey node is one row.

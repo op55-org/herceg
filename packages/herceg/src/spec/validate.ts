@@ -2175,10 +2175,14 @@ const legended: Check = (v, path) => {
   if (v !== false) fail(path, "false, which leaves the mark out of the legends", v);
 };
 
-/** What a mark's tooltips show of its rows: fields, by name or with a label and format. */
+/**
+ * What a mark's tooltips show of its rows: fields, by name or with a label
+ * and format, and a row of parts in place of each point's name and value.
+ */
 const tooltip: Check = (v, path) => {
   object(v, path);
   properties(v as Record<string, unknown>, path, {
+    content: labelContent,
     fields: (list, at) => {
       if (!Array.isArray(list)) fail(at, "an array of fields", list);
       list.forEach((entry, i) => {
@@ -3843,14 +3847,22 @@ const mark: Check = (v, path) => {
       `${path}.drag`,
       `a dragged rule stands at a number along its axis; give ${spec.x === undefined ? "y" : "x"} one`,
     );
-  // A summary's items stand for many rows, which have no one value of a field.
+  // A summary's items stand for many rows, which have no one value of a
+  // field, and its tooltips write the summary.
   const summary = SUMMARIES[spec.type as string];
-  if (summary && spec.tooltip !== undefined)
-    throw refusal(
-      `${path}.tooltip${(spec.tooltip as { fields?: unknown } | null)?.fields !== undefined ? ".fields" : ""}`,
-      `${summary}, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them`,
-      "unsupported",
-    );
+  const asked = spec.tooltip as { fields?: unknown; content?: unknown } | null | undefined;
+  if (summary && asked !== undefined)
+    throw asked?.content !== undefined && asked.fields === undefined
+      ? refusal(
+          `${path}.tooltip.content`,
+          `${summary}, and its tooltips write each summary as it is; drop content`,
+          "unsupported",
+        )
+      : refusal(
+          `${path}.tooltip${asked?.fields !== undefined ? ".fields" : ""}`,
+          `${summary}, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them`,
+          "unsupported",
+        );
   const problem = FORMS[spec.type as MarkSpec["type"]]?.(spec);
   if (problem) throw refusal(path, problem);
   if (spec.type === "text" && !series && (spec.label as TextLabelSpec).place)

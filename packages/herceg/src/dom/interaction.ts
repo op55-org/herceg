@@ -74,7 +74,7 @@ import type { LegendClick } from "./legend.ts";
 import { pressed, pressFocus } from "./press-focus.ts";
 import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
-import { describeInspection, fieldsSpoken, Tooltip } from "./tooltip.ts";
+import { contentText, describeInspection, fieldsSpoken, Tooltip } from "./tooltip.ts";
 
 // Layout controls compile their bindings with this module's class
 // (layout-controls.ts), which keeps it in this module's chunk: in a chunk
@@ -416,8 +416,9 @@ export class Interaction {
   /** Labels on the axes at the crosshair, once loaded for `tooltip.axisLabels`; null if it failed to load. */
   #crosshair: CrosshairLabels | null | undefined;
   #crosshairLoading: Promise<void> | undefined;
-  /** Whether the tooltip shows tooltip fields and `renderTooltip`'s content. */
+  /** What draws tooltip fields and content and `renderTooltip`'s content, while it loads; and once it has. */
   #content: Promise<void> | undefined;
+  #drawsContent = false;
   #pointer: { x: number; y: number } | null = null;
   /** Whether the pointer is a touch, which reaches further (see `#slop`). */
   #touch = false;
@@ -3982,7 +3983,9 @@ export class Interaction {
       // A series of one place (a box plot's category) is not named twice.
       const where = own!.label === point.label ? "" : ` at ${own!.label}`;
       const named = from?.panel !== panel || from.key !== key;
-      text = `${named ? `${point.label}${rank}: ` : ""}${point.text}${where}${fieldsSpoken(point)}`;
+      // A row of content is read whole, in place of the name and value.
+      const content = contentText(point);
+      text = `${content === undefined ? `${named ? `${point.label}${rank}: ` : ""}${point.text}` : `${content}${rank}`}${where}${fieldsSpoken(point)}`;
     }
     // Arriving in a panel, the cursor names it and the annotations it alone draws.
     if (model.namesPanels && from?.panel !== panel)
@@ -4162,7 +4165,10 @@ export class Interaction {
       inspection.axis === "item"
         ? describeInspection(inspection)
         : `${inspection.points.length} series at ${inspection.label}: ${inspection.points
-            .map((point) => `${point.label} ${point.text}${fieldsSpoken(point)}`)
+            .map(
+              (point) =>
+                `${contentText(point) ?? `${point.label} ${point.text}`}${fieldsSpoken(point)}`,
+            )
             .join("; ")}`;
     this.#say(text);
   }
@@ -4254,17 +4260,17 @@ export class Interaction {
   }
 
   /**
-   * Loads what reads the fields of rows marks' tooltips show, which
-   * inspections then carry, and has the tooltip draw them and
-   * `renderTooltip`'s content.
+   * Loads what draws the fields and content marks' tooltips show, which
+   * inspections carry (written as the chart inspects), and
+   * `renderTooltip`'s content, in the tooltip.
    */
   #loadContent(): void {
     const host = this.#host;
-    if (this.#content || host.model.fields) return;
+    if (this.#content || this.#drawsContent) return;
     this.#content = import("./tooltip-content.ts")
-      .then(({ fieldReader, ownContent }) => {
+      .then(({ ownContent }) => {
         if (this.#disposed) return;
-        host.model.fields = fieldReader;
+        this.#drawsContent = true;
         this.#cleanup.push(
           ownContent(
             this.#tooltip,
@@ -4274,11 +4280,10 @@ export class Interaction {
           ),
         );
       })
-      // Without it, tooltips show the built-in content, and inspections no fields.
+      // Without it, tooltips show points' names and values (or their content's text).
       .catch((error: unknown) => this.#host.report(error, "load"))
       .then(() => {
         this.#content = undefined;
-        // Inspections read the fields from the next frame on.
         if (!this.#disposed) host.invalidate();
       });
   }

@@ -112,13 +112,6 @@ describe("conditional bands", () => {
     expect(band!.upper.starts).toEqual(band!.lower!.starts);
     expect(band!.upper.starts).toHaveLength(2);
   });
-
-  it("refuse stacked areas", () => {
-    const wide = table({ t: [0, 1], a: [1, 2], b: [2, 3] });
-    expect(() =>
-      build({ marks: [area(wide, { x: "t", y: ["a", "b"], stack: true, where: col("a").gt(1) })] }),
-    ).toThrow("area (mark 0) where: stacked areas cannot leave rows out yet; drop it or the stack");
-  });
 });
 
 describe("area continuity", () => {

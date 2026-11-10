@@ -281,8 +281,8 @@ import { Columns, Inset, Panel, Rows } from "@herceg/react/layout";
 
 ## Tooltips
 
-Marks take `tooltip={{ fields: [...] }}`, and axes `tooltipFormat`, as in
-the engine ([Tooltips](interaction.md#tooltips)). For content of your own,
+Marks take `tooltip={{ fields: [...], content: [...] }}`, and axes
+`tooltipFormat`, as in the engine ([Tooltips](interaction.md#tooltips)). For content of your own,
 each framework renders its own component in the chart's tooltip box, which
 keeps its placement, crosshair, and keyboard announcements. Only the
 content for what the tooltip is at renders, when that changes. Content

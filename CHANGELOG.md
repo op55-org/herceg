@@ -259,3 +259,28 @@ not, and no narrower one. An inspection's point of a pie slice, a funnel
 stage, or a tree's node carries `names`, its raw names from the top (a
 node's path below the whole tree's root), in tooltips, events,
 `chart.inspect`, the adapters, and Python's events.
+
+A mark's `tooltip.content` (`hg.Tooltip(content=...)`) writes each of its
+points as one line of label parts, in place of its name and value: text,
+`{ series: true }`, `{ value: true }`, `{ field }` of its row, and
+`{ label }`, each with its own `style`, values and fields with a `format`
+(a value's says whether it is a time).
+The tooltip draws each part in its style beside the swatch, with `fields`
+under it; the keyboard's announcements and `i`, SVG titles, and
+inspections read it (`point.content`, each part's text and style, in
+events, `chart.inspect`, the adapters, `herceg/web` pages, notebook
+widgets, Streamlit, and Python's `hg.InspectedPoint.content`). What writes
+`fields` and `content` loads as the first frame of a chart whose marks
+have them draws, which does not wait for it; tooltips, announcements, and
+`ready` do, so `chart.inspect()` after `ready` carries both, and no other
+chart loads it. See [Content](docs/guide/interaction.md#content).
+
+Stacked areas take `where`. A condition on the series field alone picks
+the layers, so one table can feed lines of all its series and a stack of
+some (`where: col("series").isIn(...)`), stacked as a table of those
+series would be. Other conditions test rows: a row left out between a
+series' kept rows along x breaks the whole stack there, rows left out at
+a series' ends shorten it, and a series with none kept is no layer.
+Streaming stacks still restack only what appends, drops, and late rows
+touch; stacks of fields offset (fill, center, wiggle) only the rows kept.
+See [Areas and stacks](docs/guide/marks.md#areas-and-stacks).

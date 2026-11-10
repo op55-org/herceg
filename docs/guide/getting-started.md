@@ -122,8 +122,8 @@ methods of their own (see [Notebooks](python/notebooks-and-streamlit.md)).
 | `update(options)` | Changes options ([below](#updating-a-chart)). |
 | `render()` | Draws now instead of on the next frame. |
 | `destroy()` | Removes the chart and frees its resources. |
-| `ready` | A promise of the first frame, rejected with what kept it from drawing. |
-| `loading` | A promise while code loads (compilers a configuration needs before it draws; after the first frame, interaction, the GPU painter, animation, controls, fonts); `undefined` otherwise. |
+| `ready` | A promise of the first frame (and, where marks' tooltips show `fields` or `content`, of the code that writes them), rejected with what kept it from drawing or that code from loading. |
+| `loading` | A promise while code loads (compilers a configuration needs before it draws; beside the first frame, what writes tooltip fields and content; after it, interaction, the GPU painter, animation, controls, fonts); `undefined` otherwise. |
 | `on(event, listener)` | Listens to events; returns a function that stops listening ([Events](interaction.md#events)). |
 | `setViewport`, `getViewport` | The view of the axes ([below](#views-and-selections)). |
 | `select`, `selection`, `selectionOwner` | The selection: brushed, lassoed, or of items or series ([Interaction](interaction.md#selections)). |

@@ -16,7 +16,7 @@ import {
   valueAt,
   xAt,
 } from "../marks/series.ts";
-import type { FieldReader, InspectedField } from "../marks/tooltip-fields.ts";
+import type { ContentRun, InspectedField, TooltipWriter } from "../marks/tooltip-fields.ts";
 import type { InspectionMode, Snap } from "../spec/spec.ts";
 import { type Nearest, settle } from "./nearest.ts";
 
@@ -46,6 +46,12 @@ export interface InspectedPoint {
   py: number;
   /** The fields of `row` its mark's tooltip shows besides its value (the mark's `tooltip.fields`). */
   fields?: readonly InspectedField[];
+  /**
+   * The point's row as its mark's `tooltip.content` writes it, in place of
+   * `label` and `text`: its parts' text, each with its part's style, as
+   * written when inspected.
+   */
+  content?: readonly ContentRun[];
   /**
    * A layout item's names from the top, as `getItems` gives them: a tree
    * node's path below the whole tree's root (drilled or not), a pie slice's
@@ -150,8 +156,8 @@ export interface DrawnScene {
   formatX: Formatter;
   formatY: Formatter;
   formatValue: Formatter;
-  /** Reads the fields marks' tooltips show of rows, once the chart has loaded what reads them. */
-  fields?: FieldReader | undefined;
+  /** Writes the fields and content marks' tooltips show, once the chart has loaded what writes them. */
+  writer?: TooltipWriter | undefined;
 }
 
 interface ReadableMark extends InspectedMark {
@@ -170,7 +176,7 @@ export class Inspector {
   readonly within: number;
   readonly #formatX: Formatter;
   readonly #formatValue: Formatter;
-  readonly #fields: FieldReader | undefined;
+  readonly #writer: TooltipWriter | undefined;
   readonly #left: YAxisView;
   readonly #right: DrawnScene["right"];
 
@@ -209,7 +215,7 @@ export class Inspector {
     this.within = within?.px ?? within?.milliseconds ?? (within as number | undefined) ?? Infinity;
     this.#formatX = scene.formatX;
     this.#formatValue = scene.formatValue;
-    this.#fields = scene.fields;
+    this.#writer = scene.writer;
     this.#left = { frame: scene.frame, formatY: scene.formatY };
     this.#right = scene.right;
     this.marks = scene.marks.map((entry) => {
@@ -634,18 +640,20 @@ export class Inspector {
     const axis = along ? format.x : format.y;
     // A series of a field's values writes them as the field's display does, over its axis.
     const formatValue = s.write?.(axis) ?? axis;
+    const label = mark.pointLabel?.(s, row, format) ?? s.label;
+    const text = mark.pointText?.(s, row, format) ?? formatValue(value);
     // Summarizing marks' series index rows of their summaries.
-    const fields = mark.summarizes ? undefined : this.#fields?.(mark, row);
+    const one = mark.summarizes ? undefined : row;
     return {
       mark: index,
       markId: mark.spec.id,
       key: s.key,
-      label: mark.pointLabel?.(s, row, format) ?? s.label,
-      row: mark.summarizes ? undefined : row,
-      ...(fields && { fields }),
+      label,
+      row: one,
+      ...this.#writer?.(mark, one, { label, value, text }),
       color: mark.pointColor?.(s, row, this.#frame.theme, this.#frame.paint) ?? s.color,
       value,
-      text: mark.pointText?.(s, row, format) ?? formatValue(value),
+      text,
       px,
       py,
     };

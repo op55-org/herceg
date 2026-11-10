@@ -73,6 +73,7 @@ from ._encoding import (
     channel_spec,
     choice_option,
     condition_spec,
+    content_spec,
     coordinate_field,
     coordinate_spec,
     dash_spec,
@@ -798,6 +799,22 @@ class Tooltip:
     one-call helper, ``hg.line(..., tooltip=...)``, whose one mark
     takes them. The keyboard's announcements and hover events read them too.
 
+    ``content`` writes each point's row as one line of parts, in place of
+    its name and value, as labels' parts do (see ``hg.LabelPart``): text,
+    ``hg.LabelPart(series=True)`` (what the tooltip names the point by),
+    ``(value=True)`` (its value as the tooltip writes it, or in its
+    ``format``, a time where that is a time pattern or Intl date options),
+    ``(field=...)`` of its row ("–" where no one row is the
+    point, as for a slice of several rows), or ``(label=...)``, each in its
+    ``style``. The swatch stays, ``fields`` follow under it, and the keyboard
+    and hover events read the same text. It belongs to the marks that take
+    ``fields``::
+
+        row = [hg.LabelPart(series=True), " ",
+               hg.LabelPart(value=True, format=hg.Format(number=".1f")), " ",
+               hg.LabelPart(field="time", format=hg.Format(time="%H:%M:%S.%L"))]
+        chart.line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
+
     ``pin="click"`` pins the tooltip where a click (or Enter on the keyboard
     cursor) inspects: it stays, takes the pointer and focus so its links
     work, and goes on Escape, a click outside, or another click. Pinned at
@@ -809,12 +826,18 @@ class Tooltip:
     axis_labels: bool = False
     fields: Sequence[str | TooltipField] | None = None
     pin: Literal["click"] | None = None
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
 
     def _spec(self) -> dict[str, Any]:
         if self.fields is not None:
             raise ChartError(
                 "Chart tooltip fields: belong to the marks whose rows they show; give "
                 "them to a mark, as in chart.line(..., tooltip=hg.Tooltip(fields=[...]))"
+            )
+        if self.content is not None:
+            raise ChartError(
+                "Chart tooltip content: belongs to the marks whose rows it writes; give it "
+                "to a mark, as in chart.line(..., tooltip=hg.Tooltip(content=[...]))"
             )
         spec: dict[str, Any] = {}
         if _flag(self.axis_labels, "Tooltip axis_labels"):
@@ -824,13 +847,19 @@ class Tooltip:
         return spec
 
     def _mark_spec(self, mark: str) -> dict[str, Any]:
-        """The tooltip of mark ``mark``: its fields."""
+        """The tooltip of mark ``mark``: its fields and content."""
         role = Role(mark).field("tooltip")
         for name in ("axis_labels", "pin"):
             if getattr(self, name):
                 raise role.field(name).error("is the chart's; give it to the chart's tooltip")
+        spec: dict[str, Any] = {}
+        if self.content is not None:
+            spec["content"] = located(
+                role.field("content"),
+                lambda: content_spec(self.content, f"{mark} tooltip content"),
+            )
         if self.fields is None:
-            return {}
+            return spec
         at = role.field("fields")
         if isinstance(self.fields, str) or not listlike(self.fields):
             raise at.error(f"expected a list of columns; received {shown(self.fields)}")
@@ -844,7 +873,7 @@ class Tooltip:
                 raise at.index(i).error(
                     f"expected a column name or an hg.TooltipField; received {shown(entry)}"
                 )
-        return {"fields": fields}
+        return {**spec, "fields": fields}
 
 
 @refuses
@@ -2015,7 +2044,11 @@ class Chart:
         line between its rows on either side; ``hg.Stack(support=
         "intersection")`` stands the stack only where every shown series has
         a row or runs across, and a series' run that ``continuity`` breaks
-        is a gap in the whole stack. On a category axis, ``dodge=True``
+        is a gap in the whole stack. ``where`` leaves rows out of a stack: one
+        left out between a series' rows is a gap in the whole stack, those
+        at a series' ends shorten it, and a series it leaves out wholly is no
+        layer (``where=hg.col("series").is_in(...)`` stacks some of a table's
+        series). On a category axis, ``dodge=True``
         places unstacked series side by side in each band.
 
         ``stack="fill"`` shows shares of each position's visible total.
@@ -2032,7 +2065,7 @@ class Chart:
         it); a ``series`` column splits bands too. ``encode``,
         ``style``, ``continuity``, and ``where`` work as for lines, with
         ``where`` shading only where its condition holds (a conditional
-        band; not on stacks).
+        band).
         ``item_key`` names a numeric, datetime, or category column whose value
         names each row's item, which selections and transitions follow across
         replaced data.
@@ -2122,10 +2155,6 @@ class Chart:
                     f"area stack {option}: for stacks by a series column; give series, "
                     f"or drop {option}"
                 )
-        if spread and where is not None:
-            raise ChartError(
-                "area where: stacked areas cannot leave rows out yet; drop it or the stack"
-            )
         return self._add(
             {
                 "type": "area",
@@ -6685,9 +6714,28 @@ class Chart:
             return None
         if not isinstance(tooltip, Tooltip):
             raise ChartError(
-                f"{mark} tooltip: expected an hg.Tooltip with fields; received {shown(tooltip)}"
+                f"{mark} tooltip: expected an hg.Tooltip with fields or content; "
+                f"received {shown(tooltip)}"
             )
         spec = tooltip._mark_spec(mark)
+        for i, part in enumerate(spec.get("content", ())):
+            column = part.get("field", part.get("label")) if isinstance(part, dict) else None
+            if column is None:
+                continue
+            at = f"{mark} tooltip content[{i}] {'field' if 'field' in part else 'label'}"
+            self._require(table, column, ("number", "time", "category"), at)
+            kind = self._kind(table, column)
+            if "field" in part and "format" in part and kind is not None:
+                if kind == "category" or not writes(part["format"], kind):
+                    fix = {
+                        "category": "formats are for numbers and times; drop format",
+                        "time": "give hg.Format(time=...) or Intl date options",
+                        "number": "give a number format",
+                    }[kind]
+                    raise ChartError(
+                        f"{mark} tooltip content[{i}] format: {shown(column)} holds "
+                        f"{'categories' if kind == 'category' else kind + 's'}; {fix}"
+                    )
         for i, entry in enumerate(spec.get("fields", ())):
             field = entry if isinstance(entry, str) else entry["field"]
             self._require(
@@ -9638,6 +9686,19 @@ def helper(function: Callable[_P, _R]) -> Callable[_P, _R]:
                         "drop fields"
                     )
                 )
+            if not rows and isinstance(tooltip, Tooltip) and tooltip.content is not None:
+                raise (
+                    Role(function.__name__)
+                    .field("tooltip")
+                    .field("content")
+                    .error(
+                        "express charts write their own statistics in their tooltips; draw the "
+                        "chart with hg.Chart and give content to its marks"
+                        if express
+                        else "its points summarize rows, and its tooltips write each summary as "
+                        "it is; drop content"
+                    )
+                )
             try:
                 return function(*args, **kwargs)
             except ChartError as error:
@@ -9720,14 +9781,21 @@ def _unknown_option(function: Callable[..., Any], name: str, known: set[str]) ->
 
 def _rows_chart_of(data: Any, options: RadarOptions) -> tuple[Chart, Tooltip | None]:
     """The chart of a helper whose mark's points are rows, and the mark's
-    tooltip: the ``fields`` of the helper's ``tooltip``, which are the mark's."""
+    tooltip: the ``fields`` and ``content`` of the helper's ``tooltip``,
+    which are the mark's."""
     tooltip = options.get("tooltip")
-    if not (isinstance(tooltip, Tooltip) and tooltip.fields is not None):
+    if not (
+        isinstance(tooltip, Tooltip) and (tooltip.fields is not None or tooltip.content is not None)
+    ):
         return _chart_of(data, options), None
     # The chart keeps the rest, or its default tooltip without any.
-    shared = Tooltip(axis_labels=True) if tooltip.axis_labels else None
+    shared = (
+        Tooltip(axis_labels=tooltip.axis_labels, pin=tooltip.pin)
+        if tooltip.axis_labels or tooltip.pin is not None
+        else None
+    )
     chart = _chart_of(data, {**options, "tooltip": shared})
-    return chart, Tooltip(fields=tooltip.fields)
+    return chart, Tooltip(fields=tooltip.fields, content=tooltip.content)
 
 
 def _chart_of(data: Any, options: RadarOptions) -> Chart:

@@ -20,7 +20,8 @@ whose data is large or changes often.
   by click and drawn in looks of their own, chart state that React, Vue,
   Svelte, and Python bind and write back, gesture bindings, synced cursors
   and views across charts, tooltips that read each series as the chart's
-  inspection says and pin on a click with links inside, rules dragged to a
+  inspection says, write each row from styled parts, and pin on a click
+  with links inside, rules dragged to a
   new value, legends that select, the pointer cursor where a click acts,
   events naming the item, axis label, or legend entry under the pointer
   (and a tree node's path), keyboard navigation, and animated changes.

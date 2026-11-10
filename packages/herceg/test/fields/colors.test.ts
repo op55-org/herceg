@@ -7,7 +7,6 @@ import { category } from "../../src/data/column.ts";
 import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { table } from "../../src/data/table.ts";
-import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { displayOf, type FieldDisplays, type MissingDisplay } from "../../src/fields.ts";
 import { legend } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
@@ -25,6 +24,7 @@ import { point } from "../../src/marks/point.ts";
 import { region } from "../../src/marks/region.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { rowOf } from "../../src/marks/series.ts";
+import { tooltipWriters } from "../../src/marks/tooltip-writers.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -48,7 +48,7 @@ function build(config: ChartConfig, width = 640, height = 360) {
     undefined,
     staticCompilers(),
   );
-  model.fields = fieldReader;
+  model.writers = tooltipWriters;
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

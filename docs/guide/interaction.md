@@ -330,6 +330,7 @@ where that point is out of view, and in charts following a cursor through
 | `tooltip.pin` | `"click"`: a click or Enter pins the tooltip ([Pinned tooltips](#pinned-tooltips)). |
 | axis `tooltipFormat` | How tooltips, the keyboard, and crosshair labels write values, without changing ticks. |
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
+| mark `tooltip: { content }` | Each point's row as one line of parts, in place of its name and value ([Content](#content)). |
 | `renderTooltip` | JavaScript only: content of your own, text or a node. |
 
 ```ts
@@ -372,6 +373,61 @@ hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
   marks change, the chart inspects them again before calling it.
   React, Vue, and Svelte render their own components there
   ([Frameworks](frameworks.md#tooltips)).
+
+### Content
+
+A mark's `tooltip.content` writes each of its points as one line of parts,
+the parts [labels take](marks.md#parts-with-a-look-of-their-own): text,
+`{ series: true }` (what the tooltip names the point by: its series, or a
+slice's or node's name), `{ value: true }` (its value as the tooltip
+writes it, or in its own `format`: a time pattern or Intl date options
+write it as a time, other formats as a number), `{ field }` of the
+point's row (in its own `format`, else as the field's
+[display](fields.md) writes it), and `{ label }` (a field's label), each
+in its own `style` (size, weight, slant, color, opacity). The swatch
+stays, and `fields` follow under the line. The keyboard's announcements
+and `i` read the line in place of the name and value, and inspections
+carry it (`point.content`: each part's text and style), as hover events,
+`herceg/web` pages, notebook widgets, and Streamlit do.
+
+```ts
+const row = [
+  { series: true, style: { fontWeight: 600 } }, " ",
+  { value: true, format: { number: ".1f" } }, " ",
+  { field: "time", format: { time: "%H:%M:%S.%L" } },
+] as const;
+line(observations, { x: "time", y: "value", series: "series", tooltip: { content: row } });
+// pump-a 105.3 11:42:12.318
+```
+
+```python
+row = [hg.LabelPart(series=True, style=hg.TextStyle(font_weight=600)), " ",
+       hg.LabelPart(value=True, format=hg.Format(number=".1f")), " ",
+       hg.LabelPart(field="time", format=hg.Format(time="%H:%M:%S.%L"))]
+chart.line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
+```
+
+- **Where.** The marks that take `fields` take `content`. Where no one row
+  is the point (a pie slice or tree node of several rows), a field part
+  writes "–", but the fields naming it (a slice's category, a node's
+  path) write its name. Marks whose points summarize rows (histograms,
+  box plots, boxen, violins, contours) refuse `tooltip`, so `content` too.
+- **Checks.** Parts are typed by the mark's table: a field it lacks is a
+  compile error, and in JavaScript `line tooltip.content[0].field: no
+  field "temperature"; the table has "time", "series", "value"`. A
+  format on `{ series: true }` is reported once, as the chart reports
+  errors it draws on through (`onError`, "error" listeners, or the
+  console), and the name is written as it is.
+- **Loading.** What writes `fields` and `content` loads with the charts
+  whose marks have them, as their first frame draws, which does not wait
+  for it. `ready` settles once it has loaded, so `chart.inspect()` after
+  `ready` carries both; before that, inspections have neither. Tooltips
+  and announcements wait for it: the pointer and keys that arrive first
+  are played once it is here, as they are while the interaction
+  controller loads. Once a chart takes input, an update that first gives
+  its marks `fields` or `content` on a page where no chart had them draws
+  at once, and a tooltip shown before the code arrives shows names and
+  values until it does. Charts without them never load it.
 
 ## Pinned tooltips
 
