@@ -333,22 +333,30 @@ chart holds. `<Anchor>` imports the engine's anchors, so an application
 that uses only `<Chart>` does not load them.
 
 ```tsx
-// React
+// React: a popover over the band clicked
 <Chart onClick={({ target }) => setOpen(target?.kind === "item" ? target.item : null)}>
   <Region data={incidents} id="downtime" x1="start" x2="end" itemKey="id" />
   {open && (
-    <Anchor at={{ item: open }} side="top" align="start">
+    <Anchor at={{ item: open }} side="top" align="start" offset={8}>
       <IncidentCard id={open} />
     </Anchor>
   )}
 </Chart>
 ```
 
+The region's bands are as tall as the plot, so the chart's top leaves no
+room above one: `fit`, `"flip"` by default, puts the card just below the
+band's top edge, inside the chart, and its wrapper's `data-side` says
+`"bottom"` for the card's CSS (an arrow pointing up at the edge). `fit="shift"`
+keeps it above and slides it down inside; `fit="none"` leaves it where it
+was told, cut by the chart's edge ([Fitting inside the
+chart](interaction.md#fitting-inside-the-chart)).
+
 ```vue
 <!-- Vue -->
 <Chart :interaction="{ zoom: 'x' }">
   <Line :data="metrics" x="time" y="latency" />
-  <Anchor :at="{ x: peak.time, y: peak.value }" side="top" :offset="8">
+  <Anchor :at="{ x: peak.time, y: peak.value }" side="top" :offset="8" fit="shift">
     <button @click="investigate">Investigate</button>
   </Anchor>
 </Chart>
@@ -366,7 +374,11 @@ that uses only `<Chart>` does not load them.
 
 React's and Vue's `<Anchor>` render nothing on the server and in the first
 render of a hydrated chart; Svelte's renders its children hidden, with the
-chart's other children, until the chart holds them.
+chart's other children, until the chart holds them. Content meant to float
+over the page rather than the chart, such as a menu larger than the chart,
+belongs to the application's popover system: hold an empty element with
+`fit="none"` as its reference ([Floating over the
+page](interaction.md#floating-over-the-page)).
 
 ## When a chart cannot draw
 

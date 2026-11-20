@@ -1,5 +1,5 @@
 import { type Chart as HercegChart, table } from "herceg";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   type App,
   type Component,
@@ -63,10 +63,21 @@ async function mount(template: string, setup: () => object = () => ({})) {
   return made;
 }
 
+/** Waits for what the chart loads and the frames after it, an anchor measured on another side than it showed on among them. */
 async function settle(chart: HercegChart) {
   for (let loading = chart.loading; loading; loading = chart.loading) await loading;
   await frame();
   await frame();
+  await frame();
+}
+
+/** The guide's arrow, turned by the wrapper's side: whether it reaches `.popover` through what the adapter mounts it in. */
+function arrowTurned() {
+  const style = document.head.appendChild(document.createElement("style"));
+  style.textContent =
+    '.popover::before { content: "" } [data-side="bottom"] .popover::before { transform: rotate(180deg) }';
+  onTestFinished(() => style.remove());
+  return () => getComputedStyle(host.querySelector(".popover")!, "::before").transform !== "none";
 }
 
 /** The middle of `element`'s bottom edge, from the chart's root. */
@@ -83,7 +94,7 @@ describe("<Anchor>", () => {
     const chart = await mount(
       `<Chart ref="chart">
         <Line :data="metrics" x="t" y="a" />
-        <Anchor v-if="shown" :at="{ x, y: 4 }" side="top" :offset="8"><Label /></Anchor>
+        <Anchor v-if="shown" :at="{ x, y: 2 }" side="top" :offset="8"><Label /></Anchor>
       </Chart>`,
       () => ({ x, shown }),
     );
@@ -93,7 +104,7 @@ describe("<Anchor>", () => {
     const at = (value: number) => {
       const place = bottomOf(chart, button());
       expect(Math.abs(place.x - chart.toPixel(value, { axis: "x" })!)).toBeLessThanOrEqual(1);
-      expect(Math.abs(place.y - (chart.toPixel(4, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(place.y - (chart.toPixel(2, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
     };
     at(1);
     button().click();
@@ -112,6 +123,38 @@ describe("<Anchor>", () => {
     await nextTick();
     await settle(chart);
     expect(chart.root.contains(button())).toBe(true);
+  });
+
+  it("passes :fit through, its wrapper's data-side telling the side used, to the element's CSS", async () => {
+    const fit = ref<"flip" | "shift" | "none" | undefined>(undefined);
+    const turned = arrowTurned();
+    // At the peak, the plot's top: no room above it.
+    const chart = await mount(
+      `<Chart ref="chart">
+        <Line :data="metrics" x="t" y="a" />
+        <Anchor :at="{ x: 1, y: 4 }" side="top" :offset="8" :fit="fit"><b class="popover">peak</b></Anchor>
+      </Chart>`,
+      () => ({ fit }),
+    );
+    // The wrapper the chart places, which holds the element.
+    const held = () => host.querySelector("b")!.closest<HTMLElement>("[data-side]")!;
+    const side = () => held().dataset.side;
+    const top = () => held().getBoundingClientRect().top - chart.root.getBoundingClientRect().top;
+    // Flipped below it by default.
+    expect(side()).toBe("bottom");
+    expect(top()).toBeGreaterThan(chart.toPixel(4, { axis: "y" })!);
+    expect(turned()).toBe(true);
+    fit.value = "none";
+    await nextTick();
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(top()).toBeLessThan(0);
+    expect(turned()).toBe(false);
+    fit.value = "shift";
+    await nextTick();
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(Math.abs(top())).toBeLessThanOrEqual(1);
   });
 
   it.each([

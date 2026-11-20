@@ -1,6 +1,6 @@
-<!-- Anchors the tests move, mount, and put in panels, by `shape`. -->
+<!-- Anchors the tests move, fit, mount, and put in panels, by `shape`. -->
 <script lang="ts">
-  import type { Chart as HercegChart, Table } from "herceg";
+  import type { AnchorFit, Chart as HercegChart, Table } from "herceg";
   import { setContext } from "svelte";
   import { Anchor, Chart, Line } from "../src/index.js";
   import { Columns, Panel } from "../src/layout.js";
@@ -11,12 +11,14 @@
     shape,
     x = 1,
     shown = true,
+    fit,
     chart = $bindable(null),
   }: {
     data: Table<{ t: "number"; a: "number" }>;
-    shape: "point" | "panels";
+    shape: "point" | "peak" | "panels";
     x?: number | string | Date;
     shown?: boolean;
+    fit?: AnchorFit;
     chart?: HercegChart | null;
   } = $props();
   setContext("unit", "ms");
@@ -26,8 +28,11 @@
   {#if shape === "point"}
     <Line {data} x="t" y="a" />
     {#if shown}
-      <Anchor at={{ x, y: 4 }} side="top" offset={8}><Label /></Anchor>
+      <Anchor at={{ x, y: 2 }} side="top" offset={8}><Label /></Anchor>
     {/if}
+  {:else if shape === "peak"}
+    <Line {data} x="t" y="a" />
+    <Anchor at={{ x: 1, y: 4 }} side="top" offset={8} {fit}><b class="popover">peak</b></Anchor>
   {:else}
     <Columns>
       <Panel id="a"><Line {data} x="t" y="a" /><Anchor at={{ x: 1, y: 4 }}><i>a</i></Anchor></Panel>

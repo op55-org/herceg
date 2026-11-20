@@ -59,8 +59,9 @@ export function Latency() {
   `tooltip.content` its row as written (`point.content`).
 - **Anchors**: `<Anchor at={{ x, y }} side="top">` among the chart's
   children holds its React content at a place in the data, moving with
-  every frame and hidden out of view, rendered through a portal with your
-  app's context.
+  every frame, kept inside the chart (`fit`; its wrapper's `data-side`
+  tells your CSS the side used), and hidden out of view, rendered through
+  a portal with your app's context.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are
   thrown in render for an error boundary.
 - **Server rendering**: `initial={hydration(snapshot)}` adopts markup from

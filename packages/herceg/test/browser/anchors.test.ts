@@ -1,12 +1,12 @@
 // Anchors: application elements a chart holds at a place in its data,
 // moved with every frame it draws and hidden while the place is out of view.
 import "./interactive.ts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";
 import { AnchorItems } from "../../src/dom/anchor-items.ts";
-import { anchor } from "../../src/dom/anchors.ts";
+import { Anchors, anchor } from "../../src/dom/anchors.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import type { InputEvent, ItemTarget } from "../../src/dom/events.ts";
 import { columns, panel } from "../../src/layout.ts";
@@ -54,9 +54,14 @@ async function mount(options: ChartOptions, into = host()): Promise<Chart> {
   return chart;
 }
 
-/** Waits for what the chart loads (picking, for item anchors) and the frames that follow. */
+/**
+ * Waits for what the chart loads (picking, for item anchors) and the frames
+ * that follow: a fitted anchor measured on another side than it showed on
+ * shows in the second, after the step that reads `frame()`'s promise.
+ */
 async function settle(chart: Chart): Promise<void> {
   for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+  await frame();
   await frame();
   await frame();
 }
@@ -115,8 +120,13 @@ describe("anchor", () => {
   it("holds A3's button 8 px above its point within a pixel through zoom, pan, resize, and streaming", async () => {
     const data = values();
     const into = host();
+    // Room above the peak, so that it stays on its side as it fits.
     const chart = await mount(
-      { marks: [line(data, { x: "x", y: "y" })], interaction: { zoom: "x" } },
+      {
+        marks: [line(data, { x: "x", y: "y" })],
+        y: { domain: [0, 12] },
+        interaction: { zoom: "x" },
+      },
       into,
     );
     const peak = button();
@@ -177,15 +187,22 @@ describe("anchor", () => {
   });
 
   it("keeps an element's place when its size changes, without a frame", async () => {
-    const chart = await mount({ marks: [line(values(), { x: "x", y: "y" })] });
+    const chart = await mount({
+      marks: [line(values(), { x: "x", y: "y" })],
+      y: { domain: [0, 12] },
+    });
     const peak = button();
     anchor(chart, peak, { at: { x: 3, y: 8 }, side: "top", offset: 8 });
-    await frame();
+    await settle(chart);
     const px = chart.toPixel(3, { axis: "x" })!;
     const py = chart.toPixel(8, { axis: "y" })!;
     peak.style.width = "120px";
     peak.style.height = "48px";
     // Read before any frame: the wrapper's transform puts its bottom centre there whatever its size.
+    expectAbove(chart, peak, px, py);
+    // Measured, it still fits there.
+    await frame();
+    await frame();
     expectAbove(chart, peak, px, py);
   });
 
@@ -290,8 +307,10 @@ describe("anchor", () => {
   it("places a bar's item at its box, and an item's visible part", async () => {
     const sales = table({ region: ["N", "S", "E"], value: [3, 5, 2] });
     const bands = table({ id: ["a"], start: [2], end: [4] });
+    // Room above the tallest bar, so that its tag stays on its side as it fits.
     const chart = await mount({
       marks: [bar(sales, { id: "bars", x: "region", y: "value", itemKey: "region" })],
+      y: { domain: [0, 8] },
     });
     const tag = button("S");
     const held = anchor(chart, tag, { at: { item: { mark: "bars", item: ["S"] } }, side: "top" });
@@ -314,7 +333,8 @@ describe("anchor", () => {
     await settle(banded);
     const plot = banded.getPanels()[0]!.plot;
     near(boxIn(banded, popover).x, banded.toPixel(2, { axis: "x" })!);
-    near(boxIn(banded, popover).y + 20, plot.y);
+    // A full-height band: no room above it, so below it, where a 20 px tag has room.
+    near(boxIn(banded, popover).y, plot.y + plot.height);
     // Half in view: its visible half's start.
     banded.setViewport([3, 9]);
     await frame();
@@ -850,6 +870,604 @@ describe("anchor", () => {
   });
 });
 
+describe("anchors that fit", () => {
+  /** A chart of 600 by 300 whose axes hold 0 to 10, its plot inside margins. */
+  const fixed = () =>
+    mount({
+      marks: [line(values(), { id: "lines", x: "x", y: "y" })],
+      x: { domain: [0, 10] },
+      y: { domain: [0, 10] },
+    });
+  /** A point `px` and `py` pixels from the chart's left and top. */
+  const at = (px: number, py: number) => ({
+    x: { px, frame: "chart" as const },
+    y: { px: py, frame: "chart" as const },
+  });
+  /** A box of `width` by `height`, without margins. */
+  function block(width: number, height: number): HTMLDivElement {
+    const element = document.createElement("div");
+    element.style.cssText = `margin:0;width:${width}px;height:${height}px`;
+    return element;
+  }
+  /** That `element` is inside the chart's box, within a pixel. */
+  function expectInside(chart: Chart, element: Element) {
+    const { x, y, width, height } = boxIn(chart, element);
+    const { width: w, height: h } = chart.root.getBoundingClientRect();
+    expect(x, "left").toBeGreaterThanOrEqual(-1);
+    expect(y, "top").toBeGreaterThanOrEqual(-1);
+    expect(x + width, "right").toBeLessThanOrEqual(w + 1);
+    expect(y + height, "bottom").toBeLessThanOrEqual(h + 1);
+  }
+  /** A style sheet for the test, removed after it. */
+  function css(text: string): HTMLStyleElement {
+    const sheet = document.createElement("style");
+    sheet.textContent = text;
+    document.head.append(sheet);
+    onTestFinished(() => sheet.remove());
+    return sheet;
+  }
+  /** The errors the window hears during the test (a ResizeObserver loop's among them). */
+  function windowErrors(): string[] {
+    const heard: string[] = [];
+    const listen = (event: ErrorEvent) => heard.push(event.message);
+    addEventListener("error", listen);
+    onTestFinished(() => removeEventListener("error", listen));
+    return heard;
+  }
+  /**
+   * The ResizeObservers made from here on, each with what it observes now,
+   * held weakly; the global one is restored after the test.
+   */
+  function spyOnObservers() {
+    const Original = globalThis.ResizeObserver;
+    const made: WeakRef<ResizeObserver>[] = [];
+    const watched = new WeakMap<ResizeObserver, Set<Element>>();
+    globalThis.ResizeObserver = class extends Original {
+      constructor(callback: ResizeObserverCallback) {
+        super(callback);
+        made.push(new WeakRef(this));
+        watched.set(this, new Set());
+      }
+      override observe(target: Element, options?: ResizeObserverOptions) {
+        watched.get(this)!.add(target);
+        super.observe(target, options);
+      }
+      override unobserve(target: Element) {
+        watched.get(this)!.delete(target);
+        super.unobserve(target);
+      }
+      override disconnect() {
+        watched.get(this)!.clear();
+        super.disconnect();
+      }
+    };
+    onTestFinished(() => {
+      globalThis.ResizeObserver = Original;
+    });
+    return {
+      made,
+      /** The elements observed by every observer still alive. */
+      observed: () => made.flatMap((ref) => [...(watched.get(ref.deref()!) ?? [])]),
+    };
+  }
+
+  it("put a popover on a full-height band just below its top edge, inside the chart", async () => {
+    const bands = table({ id: ["a"], start: [3], end: [5] });
+    const chart = await mount({
+      marks: [
+        line(values(), { x: "x", y: "y" }),
+        region(bands, { id: "downtime", x1: "start", x2: "end", itemKey: "id" }),
+      ],
+      x: { domain: [0, 10] },
+    });
+    // Taller than the room above the plot and below it.
+    const popover = block(160, 80);
+    const held = anchor(chart, popover, {
+      at: { item: { mark: "downtime", item: ["a"] } },
+      offset: 8,
+    });
+    await settle(chart);
+    const { plot } = chart.getPanels()[0]!;
+    const box = boxIn(chart, popover);
+    expect(held.side).toBe("bottom");
+    expect(popover.parentElement!.dataset.side).toBe("bottom");
+    near(box.y, plot.y + 8);
+    near(box.x + 80, chart.toPixel(4, { axis: "x" })!);
+    expectInside(chart, popover);
+  });
+
+  it("flip a point at each edge to the other side of it", async () => {
+    const chart = await fixed();
+    const { width, height } = chart.root.getBoundingClientRect();
+    const sides = [
+      ["left", at(6, 150), "right"],
+      ["right", at(width - 6, 150), "left"],
+      ["top", at(300, 6), "bottom"],
+      ["bottom", at(300, height - 6), "top"],
+    ] as const;
+    const held = sides.map(([side, place]) =>
+      anchor(chart, button(), { at: place, side, offset: 4 }),
+    );
+    await settle(chart);
+    for (const [k, [, , other]] of sides.entries()) {
+      expect(held[k]!.side).toBe(other);
+      expect(held[k]!.element.parentElement!.dataset.side).toBe(other);
+      expectInside(chart, held[k]!.element);
+    }
+    // Beside the place on its other side, 4 px away.
+    near(boxIn(chart, held[0]!.element).x, 6 + 4);
+    near(boxIn(chart, held[1]!.element).x + 40, width - 6 - 4);
+    near(boxIn(chart, held[2]!.element).y, 6 + 4);
+    near(boxIn(chart, held[3]!.element).y + 20, height - 6 - 4);
+  });
+
+  it("slide along their side to stay inside, across it with shift, and both ways centred", async () => {
+    const chart = await fixed();
+    const along = anchor(chart, button(), { at: at(4, 150), side: "top" });
+    const shifted = anchor(chart, button(), { at: at(300, 6), side: "top", fit: "shift" });
+    const centred = anchor(chart, button(), { at: at(2, 3), side: "center" });
+    await settle(chart);
+    // On its side, slid to the chart's left edge.
+    expect(along.side).toBe("top");
+    near(boxIn(chart, along.element).x, 0);
+    near(boxIn(chart, along.element).y + 20, 150);
+    // Shifted: on its side still, slid down to the top edge over its place.
+    expect(shifted.side).toBe("top");
+    near(boxIn(chart, shifted.element).y, 0);
+    near(boxIn(chart, shifted.element).x + 20, 300);
+    // Centred: never flipped, slid both ways.
+    expect(centred.side).toBe("center");
+    expect(centred.element.parentElement!.dataset.side).toBe("center");
+    near(boxIn(chart, centred.element).x, 0);
+    near(boxIn(chart, centred.element).y, 0);
+  });
+
+  it("start an element larger than the chart at its start edge, in either direction", async () => {
+    const chart = await fixed();
+    const large = block(800, 400);
+    const held = anchor(chart, large, { at: at(300, 150), side: "bottom" });
+    await settle(chart);
+    // Crossing as far above its place as below it: its side, the first of equals.
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, large).x, 0);
+    near(boxIn(chart, large).y, 0);
+    chart.root.parentElement!.dir = "rtl";
+    held.set({ at: at(310, 150), side: "bottom" });
+    await settle(chart);
+    near(boxIn(chart, large).x + 800, 600);
+  });
+
+  it("keep an element's margins inside, however uneven", async () => {
+    const chart = await fixed();
+    const element = button();
+    element.style.margin = "12px 0 0 30px";
+    const held = anchor(chart, element, { at: at(5, 5), side: "left", offset: 4 });
+    await settle(chart);
+    // Flipped right; its wrapper, which holds its margins, inside the chart.
+    expect(held.side).toBe("right");
+    expectInside(chart, element.parentElement!);
+    near(boxIn(chart, element).x, 5 + 4 + 30);
+    held.set({ at: at(300, 5), side: "top", offset: 4 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, element).y, 5 + 4 + 12);
+    near(boxIn(chart, element).x + 20 - 15, 300 + 15 - 15);
+  });
+
+  /**
+   * What each frame paints of `element`, once anchored in `chart`, and for
+   * each frame it is displayed, whether it was seen (not laid out unseen
+   * for measuring): a probe observer, made after the anchors' own (for a
+   * block anchored first) and fed a size change every frame, reads the
+   * page after the anchors' observer and before the browser paints.
+   */
+  async function paints(chart: Chart, element: HTMLElement) {
+    const spy = spyOnObservers();
+    anchor(chart, block(10, 10), { at: at(300, 150) });
+    await settle(chart);
+    expect(spy.made).toHaveLength(1);
+    const probe = block(1, 1);
+    document.body.append(probe);
+    const painted: { side: string | undefined; top: number; bottom: number }[] = [];
+    const seen: boolean[] = [];
+    const watcher = new ResizeObserver(() => {
+      const wrapper = element.parentElement;
+      if (wrapper?.style.display !== "flex") return;
+      seen.push(wrapper.style.opacity !== "0");
+      if (!seen.at(-1)) return;
+      const box = boxIn(chart, element);
+      painted.push({ side: wrapper.dataset.side, top: box.y, bottom: box.y + box.height });
+    });
+    watcher.observe(probe);
+    let resizing = true;
+    const resize = () => {
+      probe.style.width = probe.style.width === "1px" ? "2px" : "1px";
+      if (resizing) requestAnimationFrame(resize);
+    };
+    requestAnimationFrame(resize);
+    onTestFinished(() => {
+      resizing = false;
+      watcher.disconnect();
+      probe.remove();
+    });
+    return { painted, seen };
+  }
+
+  it("never paint an element unfitted as it first shows, though CSS sizes it by its side", async () => {
+    const errors = windowErrors();
+    css(
+      `[data-side="top"] > .fit-tip { height: 60px } [data-side="bottom"] > .fit-tip { height: 24px }`,
+    );
+    const chart = await fixed();
+    const tip = document.createElement("div");
+    tip.className = "fit-tip";
+    tip.style.width = "50px";
+    const { painted, seen } = await paints(chart, tip);
+    // 40 px above the place: room for its bottom size, not its top size.
+    const held = anchor(chart, tip, { at: at(300, 48), offset: 8 });
+    for (let k = 0; k < 6; k++) await frame();
+    expect(held.side).toBe("bottom");
+    // Measured on top as it showed, then below it in the next frame, and shown there.
+    expect(seen.indexOf(true)).toBe(1);
+    expect(painted.length).toBeGreaterThan(2);
+    for (const shown of painted) {
+      expect(shown.side).toBe("bottom");
+      near(shown.top, 48 + 8);
+      near(shown.bottom, 48 + 8 + 24);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  it("never paint a shown element crossing the chart's edge as fitting is set on it", async () => {
+    const errors = windowErrors();
+    const chart = await fixed();
+    const tall = block(50, 60);
+    const { painted } = await paints(chart, tall);
+    // Cut by the chart's top edge as told, then fitted: below its place.
+    const held = anchor(chart, tall, { at: at(300, 48), offset: 8, fit: "none" });
+    await settle(chart);
+    expect(painted.at(-1)!.top).toBeLessThan(0);
+    // Set and placed at once: what paints from here on is fitted.
+    held.set({ at: at(300, 48), offset: 8 });
+    chart.render();
+    painted.length = 0;
+    for (let k = 0; k < 6; k++) await frame();
+    expect(held.side).toBe("bottom");
+    expect(painted.length).toBeGreaterThan(2);
+    for (const shown of painted) expect(shown.top).toBeGreaterThanOrEqual(-1);
+    near(painted.at(-1)!.top, 48 + 8);
+    expect(errors).toEqual([]);
+  });
+
+  it("start on their side as they show again, measured afresh on each side they take", async () => {
+    const errors = windowErrors();
+    // Wide below its place, until the chart's host loses the class.
+    css(
+      `.fit-tag { width: 40px; height: 20px } .fit-wide [data-side="bottom"] > .fit-tag { width: 80px }`,
+    );
+    const chart = await fixed();
+    const into = chart.root.parentElement!;
+    into.classList.add("fit-wide");
+    const tag = document.createElement("div");
+    tag.className = "fit-tag";
+    const { width } = chart.root.getBoundingClientRect();
+    // At the right edge: slid left along its side, to end at the chart's right.
+    const high = { at: at(width - 4, 6), side: "top", offset: 4 } as const;
+    const low = { at: at(width - 4, 150), side: "top", offset: 4 } as const;
+    const held = anchor(chart, tag, high);
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, tag).x + 80, width);
+    // Hidden, then shown where its side has room: on its side again.
+    held.set({ at: { x: 30, y: 5 }, side: "top", offset: 4 });
+    await settle(chart);
+    expect(held.shown).toBe(false);
+    held.set(low);
+    await settle(chart);
+    expect(held.side).toBe("top");
+    near(boxIn(chart, tag).x + 40, width);
+    // Below its place it is now as wide as above it: measured there, not judged by before.
+    into.classList.remove("fit-wide");
+    held.set(high);
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    expect(boxIn(chart, tag).width).toBe(40);
+    near(boxIn(chart, tag).x + 40, width);
+    expect(errors).toEqual([]);
+  });
+
+  it("slide an element whose size changes along its side, without a chart frame", async () => {
+    const chart = await fixed();
+    const { width } = chart.root.getBoundingClientRect();
+    const tag = block(40, 20);
+    const held = anchor(chart, tag, { at: at(width - 60, 150), side: "top" });
+    await settle(chart);
+    near(boxIn(chart, tag).x + 20, width - 60);
+    const placings = vi.spyOn(Anchors.prototype, "place");
+    onTestFinished(() => placings.mockRestore());
+    // Wider, it would cross the chart's right edge.
+    tag.style.width = "160px";
+    await frame();
+    await frame();
+    expect(placings).not.toHaveBeenCalled();
+    expect(held.side).toBe("top");
+    near(boxIn(chart, tag).x + 160, width);
+    near(boxIn(chart, tag).y + 20, 150);
+  });
+
+  it("do not flip back and forth where CSS sizes the element by its side", async () => {
+    const errors = windowErrors();
+    css(
+      `[data-side="top"] > .fit-flap { height: 60px } [data-side="bottom"] > .fit-flap { height: 24px }`,
+    );
+    const chart = await fixed();
+    const flap = block(50, 0);
+    flap.className = "fit-flap";
+    flap.style.height = "";
+    // 40 px above its place: the bottom's size would fit there, not the top's.
+    const held = anchor(chart, flap, { at: at(300, 48), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    const sides: (string | undefined)[] = [];
+    const changes = new MutationObserver(() => sides.push(flap.parentElement!.dataset.side));
+    changes.observe(flap.parentElement!, { attributeFilter: ["data-side"] });
+    onTestFinished(() => changes.disconnect());
+    // Every frame moves its place, so that every frame chooses its side
+    // again, and changes its width, which its side's CSS leaves its height.
+    for (let k = 0; k < 24; k++) {
+      flap.style.width = `${[50, 30, 70][k % 3]}px`;
+      held.set({ at: at(300 + (k % 2), 48), offset: 8 });
+      await frame();
+    }
+    await frame();
+    expect(sides).toEqual([]);
+    expect(held.side).toBe("bottom");
+    expect(errors).toEqual([]);
+  });
+
+  it("place from the latest frame while measured on the side they flipped to", async () => {
+    const data = values();
+    const chart = await mount({
+      marks: [line(data, { x: "x", y: "y" })],
+      x: { domain: [0, 10] },
+      y: { domain: [0, 8] },
+      interaction: { zoom: "x" },
+    });
+    const peak = button();
+    // At the plot's top, so measured above it, then measured again below it.
+    const held = anchor(chart, peak, { at: { x: 3, y: 8 }, offset: 8 });
+    await frame();
+    chart.setViewport([1, 7]);
+    await frame();
+    chart.setViewport([2, 8]);
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, peak).x + 20, chart.toPixel(3, { axis: "x" })!);
+    near(boxIn(chart, peak).y, chart.toPixel(8, { axis: "y" })! + 8);
+  });
+
+  it("do not flip back and forth as content wrapped by its side changes size", async () => {
+    const errors = windowErrors();
+    css(
+      `.fit-text { margin: 0; font: 20px/20px monospace; overflow-wrap: anywhere }
+      [data-side="top"] > .fit-text { width: 160px } [data-side="bottom"] > .fit-text { width: 40px }`,
+    );
+    const chart = await fixed();
+    const text = document.createElement("p");
+    text.className = "fit-text";
+    text.textContent = "a".repeat(26);
+    // 22 px above its place: room for neither the top's two lines nor the bottom's nine.
+    const held = anchor(chart, text, { at: at(300, 30), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    // Shorter, it wraps to fewer lines below its place, as many above it.
+    text.textContent = "a".repeat(14);
+    await settle(chart);
+    const sides: (string | undefined)[] = [];
+    const changes = new MutationObserver(() => sides.push(text.parentElement!.dataset.side));
+    changes.observe(text.parentElement!, { attributeFilter: ["data-side"] });
+    onTestFinished(() => changes.disconnect());
+    for (let k = 0; k < 16; k++) {
+      held.set({ at: at(300 + (k % 2), 30), offset: 8 });
+      await frame();
+    }
+    await frame();
+    expect(sides).toEqual([]);
+    expect(held.side).toBe("bottom");
+    expect(errors).toEqual([]);
+  });
+
+  it("keep a side they fit on while they fit, though their own has room again", async () => {
+    const chart = await fixed();
+    const tag = block(40, 20);
+    // At the chart's top: below it.
+    const held = anchor(chart, tag, { at: at(300, 10), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    // Room above it now; below, where it still fits, it stays.
+    held.set({ at: at(300, 150), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, tag).y, 150 + 8);
+    // No room below: the first place that fits, its own side.
+    held.set({ at: at(300, 290), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("top");
+    near(boxIn(chart, tag).y + 20, 290 - 8);
+    // Back at the top, below it again; told another side, then its own, it starts there.
+    held.set({ at: at(300, 10), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    held.set({ at: at(300, 150), side: "bottom", offset: 8 });
+    await settle(chart);
+    held.set({ at: at(300, 150), side: "top", offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("top");
+    near(boxIn(chart, tag).y + 20, 150 - 8);
+  });
+
+  it("judge every place by their size now: grown on another side, they stay where they fit", async () => {
+    const errors = windowErrors();
+    const chart = await fixed();
+    const tag = block(80, 20);
+    // At the chart's top: below it.
+    const held = anchor(chart, tag, { at: at(300, 10), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    tag.style.height = "60px";
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    // Room above it for the 20 px it was there, not for its 60 now.
+    held.set({ at: at(300, 48), offset: 8 });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    near(boxIn(chart, tag).y, 48 + 8);
+    expect(errors).toEqual([]);
+  });
+
+  it("settle by the size they have where CSS sizes them by their side, though another side would fit", async () => {
+    const errors = windowErrors();
+    css(
+      `[data-side="top"] > .sided { height: 200px } [data-side="bottom"] > .sided { height: 40px }`,
+    );
+    const chart = await fixed();
+    const card = block(80, 20);
+    card.style.removeProperty("height");
+    card.className = "sided";
+    const { painted, seen } = await paints(chart, card);
+    // 200 px tall above its place, with 152 px of room; below, 132 px: it
+    // fits nowhere at 200, and has the most room above, slid inside. That
+    // it would be 40 px below is not known before it goes there.
+    const held = anchor(chart, card, { at: at(300, 160), offset: 8 });
+    for (let k = 0; k < 6; k++) await frame();
+    expect(held.side).toBe("top");
+    expect(seen.indexOf(true)).toBe(0);
+    expect(painted.length).toBeGreaterThan(2);
+    for (const shown of painted) {
+      expect(shown.side).toBe("top");
+      near(shown.top, 0);
+      near(shown.bottom, 200);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  it("measure by the options they were placed with, set again before measured", async () => {
+    const errors = windowErrors();
+    css(
+      `[data-side="top"] > .fit-set { height: 40px } [data-side="left"] > .fit-set { height: 30px }`,
+    );
+    const chart = await fixed();
+    const tag = block(50, 20);
+    tag.className = "fit-set";
+    tag.style.height = "";
+    const held = anchor(chart, tag, { at: at(300, 150), side: "top", offset: 4 });
+    await settle(chart);
+    expect(held.side).toBe("top");
+    // Two sides set and drawn at once, before either is measured.
+    held.set({ at: at(300, 150), side: "bottom", offset: 4 });
+    chart.render();
+    held.set({ at: at(300, 150), side: "left", offset: 4 });
+    chart.render();
+    await settle(chart);
+    expect(held.side).toBe("left");
+    expect(tag.parentElement!.dataset.side).toBe("left");
+    const box = boxIn(chart, tag);
+    near(box.x + 50, 300 - 4);
+    near(box.y + 15, 150);
+    expect(errors).toEqual([]);
+  });
+
+  it("show while a render listener sets them anew every frame", async () => {
+    const data = values();
+    const chart = await mount({ marks: [line(data, { x: "x", y: "y" })], y: { domain: [0, 12] } });
+    // At the plot's top, so measured above, then below.
+    const held = anchor(chart, button(), { at: { x: 3, y: 12 }, offset: 8 });
+    chart.on("render", () => held.set({ at: { x: data.length - 7, y: 12 }, offset: 8 }));
+    // What each frame painted, read as the next begins.
+    let painted = 0;
+    for (let k = 10; k < 30; k++) {
+      data.append({ x: [k], y: [k % 2 ? 6 : 1] });
+      await frame();
+      if (held.side === "bottom" && held.element.parentElement!.style.opacity === "") painted++;
+    }
+    expect(painted).toBeGreaterThan(15);
+  });
+
+  it("place as told with fit none, telling the side asked", async () => {
+    const chart = await fixed();
+    const element = button();
+    const held = anchor(chart, element, { at: at(300, 6), side: "top", offset: 4, fit: "none" });
+    await settle(chart);
+    expect(held.side).toBe("top");
+    expect(element.parentElement!.dataset.side).toBe("top");
+    // Cut by the chart's edge.
+    near(boxIn(chart, element).y, 6 - 4 - 20);
+    held.set({ at: { x: 30, y: 5 }, fit: "none" });
+    await settle(chart);
+    expect(held.shown).toBe(false);
+    expect(held.side).toBeUndefined();
+  });
+
+  it("observe only fitted anchors that show, until removed or destroyed", async () => {
+    const chart = await fixed();
+    const spy = spyOnObservers();
+    const first = anchor(chart, button(), { at: at(300, 150) });
+    const second = anchor(chart, button(), { at: at(300, 100) });
+    const none = anchor(chart, button(), { at: at(300, 50), fit: "none" });
+    await settle(chart);
+    expect(spy.made).toHaveLength(1);
+    const wrappers = [first, second, none].map(({ element }) => element.parentElement!);
+    expect(new Set(spy.observed())).toEqual(new Set(wrappers.slice(0, 2)));
+    // Hidden: not observed.
+    second.set({ at: { x: 30, y: 5 } });
+    await settle(chart);
+    expect(spy.observed()).toEqual([wrappers[0]]);
+    second.set({ at: at(300, 100) });
+    await settle(chart);
+    expect(new Set(spy.observed())).toEqual(new Set(wrappers.slice(0, 2)));
+    first.remove();
+    expect(spy.observed()).toEqual([wrappers[1]]);
+    // The last fitted anchor gone, its observer is disconnected.
+    second.set({ at: at(300, 100), fit: "none" });
+    await settle(chart);
+    expect(spy.observed()).toEqual([]);
+    second.set({ at: at(300, 100) });
+    await settle(chart);
+    expect(spy.made).toHaveLength(2);
+    expect(spy.observed()).toEqual([wrappers[1]]);
+    // Hidden, then set to none: the last fitted anchor gone, though it shows nowhere.
+    second.set({ at: { x: 30, y: 5 } });
+    await settle(chart);
+    second.set({ at: { x: 30, y: 5 }, fit: "none" });
+    await settle(chart);
+    second.set({ at: at(300, 100) });
+    await settle(chart);
+    expect(spy.made).toHaveLength(3);
+    expect(spy.observed()).toEqual([wrappers[1]]);
+    chart.destroy();
+    expect(spy.observed()).toEqual([]);
+  });
+
+  it("stop measuring as a render listener destroys the chart showing one", async () => {
+    const errors = windowErrors();
+    const chart = await fixed();
+    const spy = spyOnObservers();
+    const reported: unknown[] = [];
+    chart.on("error", (error) => reported.push(error));
+    const stop = chart.on("render", () => {
+      stop();
+      chart.destroy();
+    });
+    anchor(chart, button(), { at: at(300, 4), side: "top" });
+    chart.render();
+    await frame();
+    await frame();
+    await frame();
+    expect(spy.observed()).toEqual([]);
+    expect([errors, reported]).toEqual([[], []]);
+  });
+});
+
 describe("anchors during value transitions", () => {
   /** Frames and the clock from here on are the test's, as in animation.test.ts. */
   async function controlTime(...shown: Chart[]) {
@@ -879,8 +1497,9 @@ describe("anchors during value transitions", () => {
     const item = { item: { mark: "bars", item: ["N"] } } as const;
     const left = button("left");
     const right = button("right");
-    anchor(chart, left, { at: item, side: "left" });
-    anchor(chart, right, { at: item, side: "right" });
+    // Placed as told: beside the bar's ends, wherever the chart's edge is.
+    anchor(chart, left, { at: item, side: "left", fit: "none" });
+    anchor(chart, right, { at: item, side: "right", fit: "none" });
     await settle(chart);
     await controlTime(chart);
     const domain = chart.getPanels()[0]!.x!.domain;
@@ -1215,6 +1834,9 @@ describe("anchors' refusals", () => {
     ]);
     expect(await messages(lines(), { at: { x: 1, y: 1 }, offset: -2 })).toEqual([
       "anchor offset: expected pixels, 0 or more; received -2",
+    ]);
+    expect(await messages(lines(), { at: { x: 1, y: 1 }, fit: "auto" as never })).toEqual([
+      'anchor fit: expected "flip", "shift", or "none"; received "auto"',
     ]);
     expect(await messages(lines(), { at: { item: "downtime" } })).toEqual([
       'anchor at.item: expected an item key from an event, or a reference ({ mark, item }); received "downtime"',

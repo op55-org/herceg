@@ -632,11 +632,38 @@ on screen's drawing).
   panels and category places while values move (`ValueAnimation.drawing`),
   else the model's. Each wrapper is positioned by two translations, the
   place in pixels and the wrapper's own percentages for its side and
-  alignment, so nothing is measured and an element changing size needs no
-  frame. Its `transform` is written only when it changes, its `display`
-  only when it shows or hides. `anchor()` and `set()` ask for a frame,
-  which draws nothing new when nothing else changed: it places, and
-  reports no `render`.
+  alignment, so an element changing size keeps its side of the place
+  without a frame. Its `transform` and `data-side` are written only when
+  they change, its `display` only when it shows or hides. `anchor()` and
+  `set()` ask for a frame, which draws nothing new when nothing else
+  changed: it places, and reports no `render`.
+- **Fitting** (`fit`, "flip" by default) keeps a wrapper inside the
+  chart's box (the root's size, the scene's). One `ResizeObserver` per
+  chart observes the fitted wrappers that show, made with the first and
+  disconnected with the last. A fitted anchor keeps one size, the last
+  measured, on the side it was on, and the step it takes among its places:
+  its side, the box's other side, and the other side of the box's edge
+  (`stepOf`). So frames place it with arithmetic alone, as the callback
+  does: the step it takes while it fits across its side at that size (CSS
+  `position-try-fallbacks` keeps the last option that fitted the same
+  way), else the first step that fits, else the one crossing least, which
+  at one size is the one with the most room; then a pixel slide added to
+  the first translation. It starts on its side when it shows and when its
+  `side` or `fit` changes. A wrapper showing is laid out at `opacity: 0`
+  on its side until the observer's first size, which is delivered before
+  paint; where that size takes another side, the wrapper slides on its
+  side and waits for the next frame to write the other and observe it
+  afresh (writing `data-side` in the callback could resize an observed
+  element at the depth just delivered, which the browser reports a frame
+  late as a `ResizeObserver loop` error). The callback places by the
+  options of the frame that placed the wrapper. At a fixed place a wrapper
+  changes side at most once after a measurement. Going back would need the
+  first side's room to hold the size measured on the second, and the
+  second's room not to, though it held the larger size the first could
+  not; and a size that fits nowhere keeps the place with the most room.
+  CSS that sizes the element by `data-side` is measured only once the side
+  is taken, so it can settle where another side would have fitted at its
+  size there.
 - **Items** (`dom/anchor-items.ts`) are read with picking's code, which the
   first item anchor loads (`model/pick.ts`, passed in once loaded, so no
   chunk is made for anchors). A layout mark's item stands at its box among

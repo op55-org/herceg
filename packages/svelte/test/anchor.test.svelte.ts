@@ -1,6 +1,6 @@
 import { type Chart as HercegChart, table } from "herceg";
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import Anchors from "./Anchors.svelte";
 
 let host: HTMLDivElement;
@@ -35,10 +35,21 @@ async function anchors(initial: Omit<Props, "data">) {
   return props;
 }
 
+/** Waits for what the chart loads and the frames after it, an anchor measured on another side than it showed on among them. */
 async function settle(chart: HercegChart) {
   for (let loading = chart.loading; loading; loading = chart.loading) await loading;
   await frame();
   await frame();
+  await frame();
+}
+
+/** The guide's arrow, turned by the wrapper's side: whether it reaches `.popover` through what the adapter mounts it in. */
+function arrowTurned() {
+  const style = document.head.appendChild(document.createElement("style"));
+  style.textContent =
+    '.popover::before { content: "" } [data-side="bottom"] .popover::before { transform: rotate(180deg) }';
+  onTestFinished(() => style.remove());
+  return () => getComputedStyle(host.querySelector(".popover")!, "::before").transform !== "none";
 }
 
 /** The middle of `element`'s bottom edge, from the chart's root. */
@@ -74,7 +85,7 @@ describe("<Anchor>", () => {
     const at = (value: number) => {
       const place = bottomOf(chart, button());
       expect(Math.abs(place.x - chart.toPixel(value, { axis: "x" })!)).toBeLessThanOrEqual(1);
-      expect(Math.abs(place.y - (chart.toPixel(4, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(place.y - (chart.toPixel(2, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
     };
     at(1);
     button().click();
@@ -93,6 +104,32 @@ describe("<Anchor>", () => {
     flushSync();
     await settle(chart);
     expect(chart.root.contains(button())).toBe(true);
+  });
+
+  it("passes fit through, its wrapper's data-side telling the side used, to the element's CSS", async () => {
+    const turned = arrowTurned();
+    // At the peak, the plot's top: no room above it.
+    const props = await anchors({ shape: "peak" });
+    const { chart } = props;
+    // The wrapper the chart places, which holds the element.
+    const held = () => host.querySelector("b")!.closest<HTMLElement>("[data-side]")!;
+    const side = () => held().dataset.side;
+    const top = () => held().getBoundingClientRect().top - chart.root.getBoundingClientRect().top;
+    // Flipped below it by default.
+    expect(side()).toBe("bottom");
+    expect(top()).toBeGreaterThan(chart.toPixel(4, { axis: "y" })!);
+    expect(turned()).toBe(true);
+    props.fit = "none";
+    flushSync();
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(top()).toBeLessThan(0);
+    expect(turned()).toBe(false);
+    props.fit = "shift";
+    flushSync();
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(Math.abs(top())).toBeLessThanOrEqual(1);
   });
 
   it("anchors in the panel it is in, beside the chart's own", async () => {
