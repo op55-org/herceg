@@ -43,7 +43,8 @@ function extent(path: Polyline, axis: number, run = 0) {
 }
 
 describe("violin options", () => {
-  // Full SVGs captured from the HEAD revision recorded in the fixture, before these options.
+  // Full SVGs captured from the HEAD revision recorded in the fixture, before these options;
+  // the log boundary's again when log axes took d3's ticks (its violins drawn as before).
   it.each(legacyViolins.cases)(
     "preserves legacy SVG for $name (horizontal $horizontal)",
     (legacy) => {

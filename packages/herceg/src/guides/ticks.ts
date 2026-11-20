@@ -70,17 +70,24 @@ export function tickPlanner(
     if (values) {
       const labels = write
         ? write.ticks(values)
-        : defaultLabels(kit, values, ticker, context, generate);
+        : defaultLabels(kit, values, ticker, context, false, generate);
       return { ticks: values, labels: shown(labels) };
     }
-    // Automatic ticks: a function writing them labels each; other formats
-    // ask for fewer ticks where neighbors read alike; with duplicates
-    // shown, each is labeled as written.
-    const auto = ticker.ticks(count);
-    if (!write) return { ticks: auto, labels: shown(defaultLabels(kit, auto, ticker, context)) };
-    if (duplicates === "show") return { ticks: auto, labels: write.ticks(auto) };
-    if (write.callback) return { ticks: auto, labels: kit.blankRepeats(write.ticks(auto)) };
-    return kit.writtenTicks(ticker, count, write.ticks);
+    // Automatic ticks: formats other than functions ask for fewer ticks
+    // where neighbors read alike, unless duplicates are shown.
+    if (write && !write.callback && duplicates === "hide")
+      return kit.writtenTicks(ticker, count, write.ticks);
+    // On log axes some are labelled: written alone (a function told each
+    // one's place among them all), repeats judged among them.
+    const plan = kit.autoTicks(ticker, count);
+    const { ticks: auto, labelled } = plan;
+    const labelledValues = kit.labelledOf(auto, labelled);
+    const written = !write
+      ? defaultLabels(kit, labelledValues, ticker, context, !!labelled)
+      : write.callback
+        ? kit.labelledOf(write.ticks(auto, labelled), labelled)
+        : write.ticks(labelledValues);
+    return { ticks: auto, labels: kit.spread(plan, shown(written)) };
   };
 }
 
@@ -97,14 +104,24 @@ export function countOf(ticks: Ticks | undefined): number | undefined {
   return typeof ticks === "number" ? ticks : ticks && "count" in ticks ? ticks.count : undefined;
 }
 
-/** Writes values as `format` says, for ticks and for single values; undefined for a format of none. */
+/**
+ * Writes values as `format` says, for ticks and for single values;
+ * undefined for a format of none. A function writes the ticks `labelled`
+ * says, the others blank.
+ */
 export function writer(
   kit: GuideKit,
   format: Format | undefined,
   context: AxisContext,
   scale: string,
   path: string,
-): { ticks: (values: number[]) => string[]; value: Formatter; callback: boolean } | undefined {
+):
+  | {
+      ticks: (values: number[], labelled?: readonly boolean[]) => string[];
+      value: Formatter;
+      callback: boolean;
+    }
+  | undefined {
   if (format === undefined) return undefined;
   const { type, zone, locale } = context;
   const kind = type === "band" ? "linear" : type;
@@ -119,9 +136,12 @@ export function writer(
     };
     return {
       callback: true,
-      ticks: (values) =>
+      // Called for labelled ticks alone, each told its place among them all.
+      ticks: (values, labelled) =>
         values.map((value, index) =>
-          text(format(value, { ...base, kind: "tick", index, values }), value),
+          labelled?.[index] === false
+            ? ""
+            : text(format(value, { ...base, kind: "tick", index, values }), value),
         ),
       value: (value) => text(format(value, { ...base, kind: "value" }), value),
     };
@@ -144,15 +164,17 @@ export function writer(
 }
 
 /**
- * Labels without a format: as automatic ticks are labeled, the interval of
- * time ticks the one they step by (or the closest two are apart), and
- * numbers given one by one as single values are written.
+ * Labels without a format: as automatic ticks are labeled (`trim` for log
+ * ticks, each with the decimals it needs: "0.2", "1", "1,000"), the
+ * interval of time ticks the one they step by (or the closest two are
+ * apart), and numbers given one by one as single values are written.
  */
 function defaultLabels(
   kit: GuideKit,
   ticks: number[],
   ticker: PositionScale,
   context: AxisContext,
+  trim: boolean,
   generated?: Generate,
 ): string[] {
   const { type, zone, locale } = context;
@@ -164,7 +186,7 @@ function defaultLabels(
     return kit.timeTickLabels(ticks, interval, zone, locale, contexts);
   }
   if (generated && !generated.regular) return ticks.map((value) => kit.formatNumber(value, locale));
-  return kit.numberTickLabels(ticks, locale);
+  return kit.numberTickLabels(ticks, locale, trim);
 }
 
 /** The calendar interval nearest the closest two of `ticks`. */

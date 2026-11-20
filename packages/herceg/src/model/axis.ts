@@ -12,6 +12,7 @@ import type { Breaks } from "../lod/m4.ts";
 import type { AxisBands } from "../marks/mark.ts";
 import {
   BandScale,
+  type LabelledTicks,
   LinearScale,
   LogScale,
   niceDomain,
@@ -179,7 +180,10 @@ export function planAxis(
     const written = writtenTicks(ticker, count, (values) => values.map(write));
     return { scale, ...written, within, context, count };
   }
-  const ticks = ticker.ticks(count);
+  const auto = autoTicks(ticker, count);
+  const { ticks, labelled } = auto;
+  // Log ticks each with the decimals it needs ("0.2", "1", "1,000"), repeats
+  // judged among the labelled ones.
   const labels = time
     ? timeTickLabels(
         ticks,
@@ -188,13 +192,33 @@ export function planAxis(
         context.locale,
         time.tickContexts?.(ticks),
       )
-    : numberTickLabels(ticks, context.locale);
-  return { scale, ticks, labels: blankRepeats(labels), within, context, count };
+    : numberTickLabels(labelledOf(ticks, labelled), context.locale, !!labelled);
+  return { scale, ticks, labels: spread(auto, blankRepeats(labels)), within, context, count };
 }
 
 /**
- * About `count` ticks of `ticker` and their labels as `write` writes them.
- * Where neighbors read alike, a coarser interval the format tells apart
+ * `ticker`'s automatic ticks for about `count`, and on log scales which of
+ * them are labelled (`LogScale.labelledTicks`).
+ */
+export function autoTicks(ticker: PositionScale, count: number): LabelledTicks {
+  return ticker instanceof LogScale ? ticker.labelledTicks(count) : { ticks: ticker.ticks(count) };
+}
+
+/** The items of labelled ticks, where `labelled` says; all without it. */
+export function labelledOf<T>(items: T[], labelled: readonly boolean[] | undefined): T[] {
+  return labelled ? items.filter((_, k) => labelled[k]) : items;
+}
+
+/** `labels` of the labelled ones of `ticks`, in place among blanks for the others. */
+export function spread({ ticks, labelled }: LabelledTicks, labels: string[]): string[] {
+  let n = 0;
+  return labelled ? ticks.map((_, k) => (labelled[k] ? labels[n++]! : "")) : labels;
+}
+
+/**
+ * About `count` ticks of `ticker` and their labels as `write` writes them:
+ * the labelled ones alone, where a log scale leaves some blank. Where
+ * labelled neighbors read alike, a coarser interval the format tells apart
  * takes their place if it has ticks in view (a date-only format steps by
  * days, not hours). A tick is its value, never its text: labels still
  * repeating the one before are left blank, and their ticks and grid lines
@@ -205,15 +229,18 @@ export function writtenTicks(
   count: number,
   write: (values: number[]) => string[],
 ): { ticks: number[]; labels: string[] } {
-  let ticks = ticker.ticks(count);
-  let labels = blankRepeats(write(ticks));
+  const written = (plan: LabelledTicks) =>
+    blankRepeats(write(labelledOf(plan.ticks, plan.labelled)));
+  let plan = autoTicks(ticker, count);
+  let labels = written(plan);
   const runs = labels.filter((label, i) => !i || label).length;
-  const coarser = runs < labels.length ? ticker.ticks((count * runs) / labels.length) : [];
-  if (coarser.length) {
-    ticks = coarser;
-    labels = blankRepeats(write(ticks));
+  const coarser =
+    runs < labels.length ? autoTicks(ticker, (count * runs) / labels.length) : undefined;
+  if (coarser?.ticks.length) {
+    plan = coarser;
+    labels = written(plan);
   }
-  return { ticks, labels };
+  return { ticks: plan.ticks, labels: spread(plan, labels) };
 }
 
 /** `labels` with those equal to the one before them left blank. */

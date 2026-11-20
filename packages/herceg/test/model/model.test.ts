@@ -245,7 +245,13 @@ describe("domains", () => {
   it("supports log scales", () => {
     const growth = table({ x: [0, 1, 2, 3], y: [1, 10, 100, 1000] });
     const { scene } = sceneOf({ marks: [line(growth, { x: "x", y: "y" })], y: { type: "log" } });
-    expect(yAxis(scene).ticks.map((t) => t.label)).toEqual(["1", "10", "100", "1,000"]);
+    // Three decades, fewer than the six ticks 264 px ask for: every digit
+    // of each, labelled where the leading digit fits the count (1 and 2).
+    const ticks = yAxis(scene).ticks;
+    expect(ticks).toHaveLength(28);
+    expect(ticks.filter((t) => t.label).map((t) => t.label)).toEqual(
+      "1 2 10 20 100 200 1,000".split(" "),
+    );
     const [geometry] = lines(scene);
     const ys = Array.from(
       { length: geometry!.path.count },
