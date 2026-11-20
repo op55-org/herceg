@@ -164,12 +164,24 @@ describe("view transitions", () => {
     chart.setViewport([20_000, 40_000]);
     tick(100);
     const host = chart.root.parentElement!;
-    // Visibility arrives from an IntersectionObserver, on the real clock.
-    const observed = () => new Promise((resolve) => setTimeout(resolve, 100));
+    // Visibility arrives from the chart's IntersectionObserver. Observers
+    // are notified in one task, in no set order, so once one made here
+    // reports the host's visibility, the chart's has heard it by the next
+    // task.
+    const observed = (visible: boolean) =>
+      new Promise<void>((resolve) => {
+        const watch = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting === visible)) {
+            watch.disconnect();
+            setTimeout(resolve, 0);
+          }
+        });
+        watch.observe(host);
+      });
     host.style.top = "-2000px";
-    await observed();
+    await observed(false);
     host.style.top = "0px";
-    await observed();
+    await observed(true);
     tick(16);
     expect(x(chart)).toEqual([20_000, 40_000]);
   });
