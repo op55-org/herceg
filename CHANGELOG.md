@@ -231,15 +231,22 @@ after its draw, as before. React's `onHover`, Vue's `@hover`, and Svelte's
 `onhover` are the same listeners: what they change in a table or through
 the chart's handle draws with the move.
 
-`anchor(chart, element, { at, side, align, offset, panel })` holds an
-element of the application (a button, a popover) at a place in the
+`anchor(chart, element, { at, side, align, offset, panel, fit })` holds
+an element of the application (a button, a popover) at a place in the
 chart's data: a point (values, categories, dates, `{ data, scale }`,
 `{ fraction }`, `{ px }`) or an item by key or reference, at its box as
 each frame draws it, cut to what is in view. It moves with every frame
 the chart draws (zoom, pan, resize, streaming, value transitions) and is
 hidden while its place is out of view, its item not drawn, or its panel
 not drawn; its input, keys, and focus stay its own, and exports leave it
-out. React's, Vue's, and Svelte's `<Anchor>` render their content into it
+out. It stays inside the chart's box (`fit`, `"flip"` by default): on
+the other side of its place where its side has no room, just inside an
+item's edge where neither side has (a popover over a band as tall as the
+plot), then slid along to stay inside, a place it fits on kept while it
+fits; `"shift"` keeps its side and slides, `"none"` places it as told. The side used is `anchor.side` and
+its wrapper's `data-side`, for CSS; a `ResizeObserver` measures fitted
+elements, so frames read no layout. An empty anchor with `fit: "none"`
+is the reference for the application's own popovers. React's, Vue's, and Svelte's `<Anchor>` render their content into it
 through a portal, a teleport, and the component's children. It is a
 module of its own: applications that never anchor load none of it. See
 [Anchors](docs/guide/interaction.md#anchors).

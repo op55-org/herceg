@@ -2,7 +2,7 @@ import { type Chart as HercegChart, table } from "herceg";
 import { act, createContext, Fragment, StrictMode, useContext, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Anchor, Bar, Chart, Line } from "../src/index.ts";
 import { Columns, Panel } from "../src/layout.tsx";
 
@@ -29,13 +29,23 @@ afterEach(() => {
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const metrics = table({ t: [0, 1, 2, 3], a: [1, 4, 2, 3] });
 
-/** Waits for what the chart loads and the frames after it. */
+/** Waits for what the chart loads and the frames after it, an anchor measured on another side than it showed on among them. */
 async function settle(chart: HercegChart) {
   await act(async () => {
     for (let loading = chart.loading; loading; loading = chart.loading) await loading;
     await frame();
     await frame();
+    await frame();
   });
+}
+
+/** The guide's arrow, turned by the wrapper's side: whether it reaches `.popover` through what the adapter mounts it in. */
+function arrowTurned() {
+  const style = document.head.appendChild(document.createElement("style"));
+  style.textContent =
+    '.popover::before { content: "" } [data-side="bottom"] .popover::before { transform: rotate(180deg) }';
+  onTestFinished(() => style.remove());
+  return () => getComputedStyle(host.querySelector(".popover")!, "::before").transform !== "none";
 }
 
 /** The middle of `element`'s bottom edge, from the chart's root. */
@@ -63,7 +73,7 @@ describe("<Anchor>", () => {
           <Unit value="ms">
             <Chart ref={ref}>
               <Line data={metrics} x="t" y="a" />
-              <Anchor at={{ x, y: 4 }} side="top" offset={8}>
+              <Anchor at={{ x, y: 2 }} side="top" offset={8}>
                 <Label />
               </Anchor>
             </Chart>
@@ -79,7 +89,7 @@ describe("<Anchor>", () => {
     const at = (x: number) => {
       const place = bottomOf(chart, button);
       expect(Math.abs(place.x - chart.toPixel(x, { axis: "x" })!)).toBeLessThanOrEqual(1);
-      expect(Math.abs(place.y - (chart.toPixel(4, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(place.y - (chart.toPixel(2, { axis: "y" })! - 8))).toBeLessThanOrEqual(1);
     };
     at(1);
     // Its state is React's: a click renders it again in place.
@@ -89,6 +99,43 @@ describe("<Anchor>", () => {
     draw(2);
     await settle(chart);
     at(2);
+  });
+
+  it("passes fit through, its wrapper's data-side telling the side used, to the element's CSS", async () => {
+    const ref: { current: HercegChart | null } = { current: null };
+    // At the peak, the plot's top: no room above it.
+    const draw = (fit?: "flip" | "shift" | "none") =>
+      act(() =>
+        root.render(
+          <Chart ref={ref}>
+            <Line data={metrics} x="t" y="a" />
+            <Anchor at={{ x: 1, y: 4 }} side="top" offset={8} fit={fit}>
+              <b className="popover">peak</b>
+            </Anchor>
+          </Chart>,
+        ),
+      );
+    const turned = arrowTurned();
+    draw();
+    const chart = ref.current!;
+    await settle(chart);
+    // The wrapper the chart places, which holds the element.
+    const held = () => host.querySelector("b")!.closest<HTMLElement>("[data-side]")!;
+    const side = () => held().dataset.side;
+    const top = () => held().getBoundingClientRect().top - chart.root.getBoundingClientRect().top;
+    // Flipped below it by default.
+    expect(side()).toBe("bottom");
+    expect(top()).toBeGreaterThan(chart.toPixel(4, { axis: "y" })!);
+    expect(turned()).toBe(true);
+    draw("none");
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(top()).toBeLessThan(0);
+    expect(turned()).toBe(false);
+    draw("shift");
+    await settle(chart);
+    expect(side()).toBe("top");
+    expect(Math.abs(top())).toBeLessThanOrEqual(1);
   });
 
   it("removes what it holds once unmounted, and anchors again once mounted", async () => {
@@ -124,6 +171,7 @@ describe("<Anchor>", () => {
       return (
         <Chart
           ref={ref}
+          y={{ domain: [0, 8] }}
           onClick={({ target }) => setOpen(target?.kind === "item" ? target.item : null)}
         >
           <Bar data={sales} id="bars" x="region" y="v" itemKey="region" />

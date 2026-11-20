@@ -1,6 +1,7 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
 import type { Expression } from "../../src/data/expression.ts";
 import { table } from "../../src/data/table.ts";
+import { anchor } from "../../src/dom/anchors.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { axis } from "../../src/guides/options.ts";
 import type { ViewportEvent } from "../../src/index.ts";
@@ -8,6 +9,7 @@ import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import type { PlotRect } from "../../src/scene/scene.ts";
+import type { Side } from "../../src/spec/place.ts";
 import type { LineSpec } from "../../src/spec/spec.ts";
 
 declare const element: HTMLElement;
@@ -120,3 +122,11 @@ chart.on("select", ({ conditions }) => {
   const source: Expression | null | undefined = conditions[0]?.source?.condition;
   void source;
 });
+
+// Anchors fit one of three ways; the side they were placed on is the chart's to say.
+const held = anchor(chart, element, { at: { x: 1, y: 2 }, side: "right", fit: "shift" });
+held.side satisfies Side | "center" | undefined;
+// @ts-expect-error a fit the chart does not know
+anchor(chart, element, { at: { x: 1, y: 2 }, fit: "auto" });
+// @ts-expect-error the side used is read-only
+held.side = "top";

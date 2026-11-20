@@ -7,6 +7,8 @@
 // itself: the chart's SVG, or the pixels of a screenshot.
 
 import {
+  type Anchor,
+  anchor,
   type Chart,
   createChart,
   histogram,
@@ -33,7 +35,12 @@ export interface Fixture {
   screenshot?: boolean;
 }
 
-export type FixtureName = "hover-listener" | "pan-labels" | "cross-filter" | "crosshair-dashboard";
+export type FixtureName =
+  | "hover-listener"
+  | "pan-labels"
+  | "anchor-pan"
+  | "cross-filter"
+  | "crosshair-dashboard";
 
 declare global {
   interface Window {
@@ -262,6 +269,98 @@ async function panLabels(count: number): Promise<Fixture> {
 }
 
 /**
+ * A3's attached button twenty times: one chart of 3 series x 5,000 minutes
+ * zoomed to a fifth, with a button anchored 8 px above the highest
+ * observation of each of twenty stretches in and around the view (fitted,
+ * as anchors are by default: those at the plot's top go below their
+ * point), dragged 20 px right and back. The move's effect is a frame of the
+ * moved view, its anchors placed with it.
+ */
+async function anchorPan(count: number): Promise<Fixture> {
+  const { data, names } = walks(3, 5_000, 4);
+  const value = (name: string, row: number) => data.value(name, row) as number;
+  // The highest observation of each of 20 stretches in and around the
+  // view, on a y axis that ends at the highest: those there have no room above.
+  const places: { x: number; y: number }[] = [];
+  let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let k = 0; k < 20; k++) {
+    let best = { x: 0, y: Number.NEGATIVE_INFINITY };
+    for (let row = 1_900 + k * 63; row < 1_963 + k * 63; row++)
+      for (const name of names) {
+        const y = value(name, row);
+        [low, high] = [Math.min(low, y), Math.max(high, y)];
+        if (y > best.y) best = { x: START + row * MINUTE, y };
+      }
+    places.push(best);
+  }
+  const chart = createChart(host(800, 400), {
+    marks: [line(data, { x: "t", y: names })],
+    y: { domain: [low, high] },
+    interaction: { zoom: "x" },
+    timeZone: "UTC",
+  });
+  charts = [chart];
+  await chart.loading;
+  chart.setViewport([START + 2_000 * MINUTE, START + 3_000 * MINUTE]);
+  const held: Anchor[] = places.map((at, k) => {
+    const button = document.createElement("button");
+    button.textContent = `#${k}`;
+    button.style.cssText =
+      "margin:0;padding:0;border:0;width:44px;height:32px;font:11px sans-serif";
+    return anchor(chart, button, { at, side: "top", offset: 8 });
+  });
+  await until(chart);
+  let needed = Number.POSITIVE_INFINITY;
+  reset = () => {
+    needed = Number.POSITIVE_INFINITY;
+  };
+  stops.push(
+    chart.on("viewport", ({ cause, revision }) => {
+      if (moving() && cause === "pointer") needed = revision;
+    }),
+    chart.on("render", ({ revision }) => {
+      if (revision >= needed) drawn();
+    }),
+  );
+  verify = async () => {
+    // A side chosen as an anchor shows is measured there in the next frame.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const root = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    for (const [k, at] of places.entries()) {
+      const x = chart.toPixel(at.x, { axis: "x" })!;
+      const y = chart.toPixel(at.y, { axis: "y" })!;
+      const inView = x >= plot.x && x <= plot.x + plot.width;
+      if (held[k]!.shown !== inView)
+        return `anchor ${k} is ${held[k]!.shown ? "shown" : "hidden"} with its place ${inView ? "in" : "out of"} view`;
+      if (!inView) continue;
+      const box = held[k]!.element.getBoundingClientRect();
+      const [left, top] = [box.left - root.left, box.top - root.top];
+      const above = Math.abs(top + box.height - (y - 8)) <= 1;
+      const below = Math.abs(top - (y + 8)) <= 1;
+      if ((!above && !below) || x < left - 1 || x > left + box.width + 1)
+        return `anchor ${k} stands at ${left.toFixed(1)},${top.toFixed(1)}, not 8 px from its place ${x.toFixed(1)},${y.toFixed(1)}`;
+      // Where anchors fit (they say the side they took), inside the chart on that side.
+      const side = held[k]!.side;
+      if (side === undefined) continue;
+      if (side !== (above ? "top" : "bottom"))
+        return `anchor ${k} says it is on its ${side} side, and stands ${above ? "above" : "below"} its place`;
+      if (top < -1 || top + box.height > root.height + 1)
+        return `anchor ${k} crosses the chart's edge at ${top.toFixed(1)} px`;
+    }
+    // Where anchors fit, some at the plot's top went below their place: the fixture flips.
+    if (held.some(({ side }) => side !== undefined) && !held.some(({ side }) => side === "bottom"))
+      return "no anchor went below its place; the fixture no longer exercises fitting";
+  };
+  const press = inPlot(chart, 0.5, 0.5);
+  // Right and back by 20 px: every move moves the view.
+  return {
+    press,
+    moves: Array.from({ length: count }, (_, i) => ({ x: press.x + (i % 2 ? 0 : 20), y: press.y })),
+  };
+}
+
+/**
  * Three histograms of one 50,000-row table sharing a live row selection:
  * brushing the first highlights the brushed rows in all three. The move's
  * effect is a frame of each chart drawing the channel as the move left it.
@@ -388,6 +487,7 @@ async function crosshairDashboard(count: number): Promise<Fixture> {
 const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
   "pan-labels": panLabels,
+  "anchor-pan": anchorPan,
   "cross-filter": crossFilter,
   "crosshair-dashboard": crosshairDashboard,
 };

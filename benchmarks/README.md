@@ -324,13 +324,14 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Four fixtures, each move checked
+drawing path; it compares no libraries. Five fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
 | --- | --- | --- |
 | `hover-listener` | One chart of 8 series x 2,000 minutes, and a rule a `hover` listener moves to the hovered minute | The rule drawn there |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
+| `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
 
@@ -346,8 +347,11 @@ change made has come; a move whose effect is not drawn within 1 s is a
 miss, and misses fail the run. After the measured moves, untimed, each
 block checks what was drawn: the rule at the hovered minute and the
 labels at both ends of the view (the chart's SVG), the brushed rows
-highlighted in the other histograms (their SVG changed), and the
-crosshair in each of the nine other charts (a screenshot's pixels).
+highlighted in the other histograms (their SVG changed), the crosshair
+in each of the nine other charts (a screenshot's pixels), and each
+anchor 8 px above or below its place where it is in view and hidden
+where it is not (and, in builds whose anchors fit, inside the chart on
+the side it says).
 `work` is the main thread's task time (`TaskDuration`) between a reading
 before each move is armed and one after its latency has resolved: the
 move's work and the harness's two small evaluations. It is taken in a

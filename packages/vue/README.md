@@ -56,8 +56,10 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   node's point carries its path (`point.names`), and a mark's
   `tooltip.content` its row as written (`point.content`).
 - **Anchors**: `<Anchor :at="{ x, y }" side="top">` in the chart's slot
-  holds its slot's content at a place in the data, moving with every frame
-  and hidden out of view, teleported with your app's provides.
+  holds its slot's content at a place in the data, moving with every
+  frame, kept inside the chart (`:fit`; its wrapper's `data-side` tells
+  your CSS the side used), and hidden out of view, teleported with your
+  app's provides.
 - **Errors** show in the chart's place, or with `error-mode="throw"` are
   thrown for `onErrorCaptured` or the app's `errorHandler`.
 - **Server rendering**: `:initial="hydration(snapshot)"` adopts markup

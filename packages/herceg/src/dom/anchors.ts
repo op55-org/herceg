@@ -6,12 +6,15 @@
 // anchors to them. A point is placed through its panel's scales as drawn
 // (while values move, the frame's); an item at its box as the frame drew
 // it, cut to what its geometry shows, by code that loads with the first
-// item anchor (dom/anchor-items.ts). A transform moves each
-// wrapper, its percentages of the wrapper's own box putting the element on
-// its side of the place, so nothing is measured and an element changing
-// size needs no frame. A wrapper whose place is out of view is not
-// displayed; focus inside it moves to the chart's root first. Options the
-// chart cannot place keep their anchor hidden, and are told of once.
+// item anchor (dom/anchor-items.ts). A transform moves each wrapper, its
+// percentages of the wrapper's own box putting the element on its side of
+// the place. Anchors that fit (`fit`, "flip" by default) stay inside the
+// chart's box: one ResizeObserver per chart measures their wrappers, so a
+// frame places them by their last size, reading no layout, and a size
+// change slides one without a frame. A wrapper whose place is out of
+// view is not displayed; focus inside it moves to the chart's root first.
+// Options the chart cannot place keep their anchor hidden, and are told of
+// once.
 
 import type { DrawnPanel } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
@@ -68,7 +71,25 @@ export interface AnchorOptions {
   offset?: number | undefined;
   /** The panel: a facet value or subplot id; needed in charts of several, and for an item drawn in several. */
   panel?: string | undefined;
+  /**
+   * What the element does where it would cross the chart's box (its root,
+   * which clips it). "flip" puts it on its `side` where it fits there,
+   * else on the opposite side of the item's box (of the point), else just
+   * inside the item's edge (below a full-height band's top edge, for
+   * "top"), else where it has the most room, then slides it along to stay
+   * inside; a place it fits on is kept while it fits. "shift" keeps its
+   * side and slides. "none" places it as told, cut by the chart's edge.
+   * "center" never flips. A fitted element is measured by a
+   * ResizeObserver: as it shows, it is laid out unseen on its side until
+   * measured, before the browser paints it; where its size takes another
+   * side, it is measured there and shown in the next frame.
+   * @default "flip"
+   */
+  fit?: AnchorFit | undefined;
 }
+
+/** What an anchored element does where it would cross the chart's box (see `AnchorOptions.fit`). */
+export type AnchorFit = "flip" | "shift" | "none";
 
 /** An element a chart holds at a place in its data (see `anchor`). */
 export interface Anchor {
@@ -78,6 +99,15 @@ export interface Anchor {
    * `render` listener, it says what that frame showed.
    */
   readonly shown: boolean;
+  /**
+   * The side the element is on after fitting ("center" for a centred one),
+   * which the wrapper's `data-side` attribute also says, for the element's
+   * CSS (`[data-side="bottom"] .arrow`). Undefined while hidden, and
+   * while a fitted element that is showing waits to be measured: its side
+   * is then known before the browser paints it, after the frame's
+   * `render`.
+   */
+  readonly side: Side | "center" | undefined;
   /** Holds it at another place, from the next frame, which this asks for. */
   set(options: AnchorOptions): void;
   /**
@@ -93,8 +123,8 @@ export interface Anchor {
  * moves with every frame the chart draws (zoom, pan, resize, streaming,
  * transitions) and hides (`display: none`) while the place is out of
  * view, its item or its panel not drawn. The element moves into a wrapper
- * over the plots and under the tooltip, which the chart positions; the
- * element's own styles stay. Its pointer input and keys are its own,
+ * over the plots and under the tooltip, which the chart positions, and
+ * stays inside the chart (`fit`); the element's own styles stay. Its pointer input and keys are its own,
  * never the chart's; in the tab order it follows the chart's root;
  * exports leave it out. Focus inside it when it hides moves to the
  * chart's root. Placed from the next frame, which this asks for. Throws
@@ -130,6 +160,8 @@ const anchored = /* @__PURE__ */ new WeakMap<HTMLElement, Anchors>();
 
 const SIDES = ["top", "right", "bottom", "left", "center"] as const;
 const ALIGNS = ["start", "center", "end"] as const;
+const FITS = ["flip", "shift", "none"] as const;
+const OPPOSITE = { top: "bottom", bottom: "top", left: "right", right: "left" } as const;
 
 /** Options as checked: a point's coordinates or an item, and how the element sits there. */
 interface Checked {
@@ -139,12 +171,17 @@ interface Checked {
   align: (typeof ALIGNS)[number];
   offset: number;
   panel: string | undefined;
+  fit: AnchorFit;
 }
+
+type Placed = Checked["side"];
+type Size = readonly [width: number, height: number];
 
 /**
  * An anchor as its chart keeps it: its element and wrapper, its options
  * (checked once each), whether they were told of as refused, the transform
- * written, and what the last frame showed.
+ * and side written, what the last frame showed, and whether it waits
+ * unseen for its size.
  */
 interface Held {
   readonly element: HTMLElement;
@@ -153,7 +190,34 @@ interface Held {
   checked: Checked | undefined;
   told: boolean;
   transform: string;
+  side: Placed | undefined;
   shown: boolean;
+  unseen: boolean;
+  /** How a fitted anchor was measured and placed: kept while hidden, dropped with `fit: "none"`. */
+  fitted: Fitted | undefined;
+}
+
+/**
+ * A fitted anchor's size and place. Its `state`: "off" while hidden (not
+ * observed); "queued" where a size measured took another side, which the
+ * next frame writes and observes afresh; "on" while shown and observed.
+ */
+interface Fitted {
+  state: "off" | "on" | "queued";
+  /** The options it was last placed with, which its measurements place it by: newer ones are the next frame's. */
+  checked: Checked;
+  /**
+   * Its wrapper's size as last measured, on the side it was on: every
+   * place is judged by it, though the element's CSS may size it otherwise
+   * on another side (`data-side`), measured once there.
+   */
+  size: Size;
+  /** Which of its places it takes (see `stepOf`), kept while it fits; undefined to start on its side. */
+  step: number | undefined;
+  /** The place's box and the chart's size it was last placed at. */
+  box: Rect;
+  width: number;
+  height: number;
 }
 
 /** One chart's anchors: their wrappers, in a layer of the chart's, and their placing. */
@@ -161,7 +225,12 @@ export class Anchors {
   /** What holds the wrappers: over the plots and the legend, under the tooltip, next after the root in the tab order. */
   readonly layer: HTMLDivElement;
   readonly #host: AnchorHost;
-  readonly #held: Held[] = [];
+  /** Every anchor by its wrapper, in the order they were made. */
+  readonly #held = new Map<Element, Held>();
+  /** Measures fitted anchors' wrappers: made with the first, let go with the last. */
+  #observer: ResizeObserver | undefined;
+  /** The text's direction, read where needed, at most once per placing or measuring. */
+  #rtl: boolean | undefined;
   /** Item anchors' lookups, once picking's code has loaded; null if it failed to load. */
   #loaded: AnchorItems | null | undefined;
   /** Picking's loading, which the chart's `loading` waits for. */
@@ -182,8 +251,11 @@ export class Anchors {
   /** Anchors `element` (see `anchor`). */
   add(element: HTMLElement, options: AnchorOptions): Anchor {
     const wrapper = this.layer.ownerDocument.createElement("div");
-    // Shown once placed, as a flex box: as tall as the element, with no line box below an inline one.
-    wrapper.style.cssText = "position:absolute;left:0;top:0;display:none";
+    // Shown once placed, as a flex box: as tall as the element, with no line
+    // box below an inline one. Its box is what fitting measures: the
+    // element's margin box, with nothing of its own.
+    wrapper.style.cssText =
+      "position:absolute;left:0;top:0;display:none;margin:0;padding:0;border:0";
     wrapper.append(element);
     this.layer.append(wrapper);
     anchored.set(element, this);
@@ -194,17 +266,23 @@ export class Anchors {
       checked: undefined,
       told: false,
       transform: "",
+      side: undefined,
       shown: false,
+      unseen: false,
+      fitted: undefined,
     };
-    this.#held.push(held);
+    this.#held.set(wrapper, held);
     this.#asked(options);
     return {
       element,
       get shown() {
         return held.shown;
       },
+      get side() {
+        return held.shown && !held.unseen ? held.side : undefined;
+      },
       set: (next) => {
-        if (!this.#held.includes(held)) return;
+        if (this.#held.get(wrapper) !== held) return;
         Object.assign(held, { options: next, checked: undefined, told: false });
         this.#asked(next);
       },
@@ -227,13 +305,13 @@ export class Anchors {
     // A frame drawing the scene they were placed in (a cursor's move) moves none.
     if (!scene || this.#disposed || (scene === this.#placed && !drawing)) return;
     this.#placed = drawing ? undefined : scene;
-    let rtl: boolean | undefined;
+    this.#rtl = undefined;
     // Items' rows first, every anchor's of a table found in one pass; with
     // no item anchors left, their tables are let go.
-    const items = this.#held.some(({ options }) => options?.at?.item !== undefined)
-      ? this.#items()
-      : (this.#loaded ?? undefined);
-    for (const held of this.#held)
+    let named = false;
+    for (const { options } of this.#held.values()) named ||= options?.at?.item !== undefined;
+    const items = named ? this.#items() : (this.#loaded ?? undefined);
+    for (const held of this.#held.values())
       try {
         held.checked ??= this.#check(held.options);
         const { item } = held.checked;
@@ -246,31 +324,26 @@ export class Anchors {
     // what that runs (focus leaving a hidden anchor, listeners told of
     // refusals) may change data, set or remove anchors, place them again,
     // or destroy the chart.
-    const placed: [Held, AnchorOptions, string | undefined, unknown][] = [];
-    for (const held of this.#held) {
-      let transform: string | undefined;
+    const placed: [Held, AnchorOptions, Rect | undefined, unknown][] = [];
+    for (const held of this.#held.values()) {
+      let box: Rect | undefined;
       let refused: unknown;
       try {
         held.checked ??= this.#check(held.options);
-        const box = this.#where(held.checked, scene, drawing);
-        if (box) {
-          const { side, align, offset } = held.checked;
-          // Start and end along the top and bottom follow the text's direction.
-          if (align !== "center" && (side === "top" || side === "bottom"))
-            rtl ??= getComputedStyle(this.layer).direction === "rtl";
-          transform = placement(box, side, align, offset, rtl === true);
-        }
+        box = this.#where(held.checked, scene, drawing);
+        // The text's direction, where placing needs it, read before anything is written.
+        if (box && held.checked.align !== "center") this.#direction();
       } catch (error) {
         if (!held.told) refused = error;
       }
-      placed.push([held, held.options, transform, refused]);
+      placed.push([held, held.options, box, refused]);
     }
     const placing = ++this.#placings;
-    for (const [held, options, transform, refused] of placed) {
+    for (const [held, options, box, refused] of placed) {
       if (this.#disposed || this.#placings !== placing) return;
       // Removed or set other options since, it is the next frame's.
-      if (!this.#held.includes(held) || held.options !== options) continue;
-      if (refused === undefined) this.#show(held, transform);
+      if (this.#held.get(held.wrapper) !== held || held.options !== options) continue;
+      if (refused === undefined) this.#show(held, box, scene.width, scene.height);
       else {
         held.told = true;
         this.#show(held, undefined);
@@ -282,16 +355,18 @@ export class Anchors {
   /** Removes every anchor, and lets go of the tables it listens to: the chart is destroyed. */
   dispose(): void {
     this.#disposed = true;
-    for (const held of [...this.#held]) this.#remove(held);
+    for (const held of [...this.#held.values()]) this.#remove(held);
     this.#loaded?.dispose();
+    this.#observer?.disconnect();
+    this.#observer = undefined;
   }
 
   #remove(held: Held): void {
-    const at = this.#held.indexOf(held);
-    if (at < 0) return;
-    this.#held.splice(at, 1);
+    if (this.#held.get(held.wrapper) !== held) return;
+    this.#held.delete(held.wrapper);
     anchored.delete(held.element);
     this.#show(held, undefined);
+    this.#unfit(held);
     // What focus leaving it ran may have anchored the element again, which keeps it.
     if (held.element.parentNode === held.wrapper) held.element.remove();
     held.wrapper.remove();
@@ -300,23 +375,205 @@ export class Anchors {
     if (!this.#disposed) this.#host.schedule();
   }
 
-  /** Shows the anchor at `transform`, or hides it (undefined), focus inside it moving to the chart's root. */
-  #show(held: Held, transform: string | undefined): void {
-    const { wrapper } = held;
-    if (transform !== undefined && transform !== held.transform) {
-      wrapper.style.transform = transform;
-      held.transform = transform;
+  /**
+   * Shows the anchor at its place's `box`, fitted to the chart's `width` by
+   * `height`, or hides it (undefined), focus inside it moving to the
+   * chart's root.
+   */
+  #show(held: Held, box: Rect | undefined, width = 0, height = 0): void {
+    const { wrapper, checked } = held;
+    if (checked?.fit === "none") this.#unfit(held);
+    if (box && checked) {
+      const { side, align, offset, fit } = checked;
+      if (fit === "none") {
+        const rtl = align !== "center" && this.#direction();
+        const [x, y, sx, sy] = placement(box, side, align, offset, rtl);
+        this.#write(held, transform(x, y, sx, sy), side);
+      } else {
+        held.fitted ??= {
+          state: "off",
+          checked,
+          size: [0, 0],
+          step: undefined,
+          box,
+          width,
+          height,
+        };
+        const { fitted } = held;
+        const { state } = fitted;
+        // Showing, or told another side or fit, it starts on its side.
+        if (state === "off" || fitted.checked.side !== side || fitted.checked.fit !== fit)
+          fitted.step = undefined;
+        Object.assign(fitted, { checked, box, width, height });
+        const before = held.side;
+        if (state === "off") {
+          // Showing, it is laid out unseen (transparent: still focusable, so
+          // that an application can focus what it just anchored) on its side
+          // until measured there, before the browser paints; already shown
+          // (`fit` set on it), it stays seen.
+          if (!held.shown) {
+            held.unseen = true;
+            wrapper.style.opacity = "0";
+          }
+          this.#place(held, false);
+        } else this.#place(held);
+        // Only a frame writes a side; on another one it is measured afresh,
+        // before the browser paints.
+        if (state !== "on" || held.side !== before) {
+          fitted.state = "on";
+          this.#observe(wrapper);
+        }
+      }
     }
-    const shown = transform !== undefined;
+    const shown = box !== undefined;
     if (shown === held.shown) return;
     if (!shown && wrapper.matches(":focus-within")) {
       const placing = this.#placings;
       this.#host.root.focus({ preventScroll: true });
       // What focus leaving it ran may have placed it again (a blur listener's `set` and `render`).
-      if (this.#placings !== placing && this.#held.includes(held)) return;
+      if (this.#placings !== placing && this.#held.get(wrapper) === held) return;
     }
     held.shown = shown;
     wrapper.style.display = shown ? "flex" : "none";
+    // Hidden, it is not measured: showing again, it is measured afresh.
+    if (!shown && held.fitted) {
+      this.#observer?.unobserve(wrapper);
+      held.fitted.state = "off";
+    }
+  }
+
+  /**
+   * Places a fitted anchor at its last box by its size: where `choose`, on
+   * the place it takes while that fits across its side, else on the first
+   * of the places its options try (see `stepOf`) that fits, else on the one
+   * crossing the chart's edge least, which at one size is the one with the
+   * most room (the first of equals); else on the place it takes. Then slid
+   * to stay inside the chart. Returns the side, without writing it, where
+   * `write` is false.
+   */
+  #place(held: Held, choose = true, write = true): Placed {
+    const fitted = held.fitted!;
+    const { side, fit } = fitted.checked;
+    const last = fit === "flip" && side !== "center" ? 2 : 0;
+    let step = fitted.step ?? 0;
+    let stand = this.#stand(held, step);
+    if (choose && stand.crossing > 0)
+      for (let k = 0, least = Infinity; k <= last; k++) {
+        const other = this.#stand(held, k);
+        if (other.crossing === 0) {
+          [stand, step] = [other, k];
+          break;
+        }
+        if (other.crossing < least) [stand, step, least] = [other, k, other.crossing];
+      }
+    const { on, x, y, sx, sy, left, top, w, h } = stand;
+    if (write) {
+      const { width, height } = fitted;
+      // Wider than the chart, it starts at the chart's start: the right in right-to-left text.
+      const dx = slide(left, w, width, w > width && this.#direction()) - left;
+      const dy = slide(top, h, height, false) - top;
+      fitted.step = step;
+      this.#write(held, transform(x + dx, y + dy, sx, sy), on);
+    }
+    return on;
+  }
+
+  /**
+   * Where a fitted anchor stands on the `step`th of its places, by its
+   * size: the side, the transform's point and percentages, its box, and
+   * how far it crosses the chart's edge across its side.
+   */
+  #stand(held: Held, step: number) {
+    const { checked, box, width, height, size } = held.fitted!;
+    const { side, align, offset } = checked;
+    const [at, on] = stepOf(box, side, step);
+    const [w, h] = size;
+    const rtl = align !== "center" && this.#direction();
+    const [x, y, sx, sy] = placement(at, on, align, offset, rtl);
+    const left = x + (sx / 100) * w;
+    const top = y + (sy / 100) * h;
+    const crossing =
+      on === "center"
+        ? 0
+        : on === "top" || on === "bottom"
+          ? Math.max(0, -top) + Math.max(0, top + h - height)
+          : Math.max(0, -left) + Math.max(0, left + w - width);
+    return { on, x, y, sx, sy, left, top, w, h, crossing };
+  }
+
+  /** Writes a wrapper's transform and `data-side` where they change. */
+  #write(held: Held, transform: string, side: Placed): void {
+    if (transform !== held.transform) {
+      held.wrapper.style.transform = transform;
+      held.transform = transform;
+    }
+    if (side !== held.side) {
+      held.wrapper.dataset.side = side;
+      held.side = side;
+    }
+  }
+
+  /** Shows a wrapper that waited unseen for its size. */
+  #seen(held: Held): void {
+    if (!held.unseen) return;
+    held.unseen = false;
+    held.wrapper.style.opacity = "";
+  }
+
+  /** Observes `wrapper` afresh, which reports its size before the browser next paints, changed or not. */
+  #observe(wrapper: HTMLDivElement): void {
+    this.#observer ??= new ResizeObserver((entries) => this.#measured(entries));
+    this.#observer.unobserve(wrapper);
+    this.#observer.observe(wrapper);
+  }
+
+  /**
+   * Sizes measured, after the browser's layout and before it paints: each
+   * fitted anchor is placed again by its size and the options of the frame
+   * that placed it, from its last box, without a frame, and shown. Where
+   * that takes another side, it slides on the side it is on (unseen if it
+   * was) until the next frame writes the other and measures it there:
+   * `data-side` written now could change a size the observer would then
+   * report only a frame late, as an error.
+   */
+  #measured(entries: readonly ResizeObserverEntry[]): void {
+    this.#rtl = undefined;
+    let again = false;
+    for (const { target, contentRect } of entries) {
+      const held = this.#held.get(target);
+      const fitted = held?.fitted;
+      if (!held || fitted?.state !== "on") continue;
+      fitted.size = [contentRect.width, contentRect.height];
+      if (this.#place(held, true, false) === held.side) {
+        this.#place(held);
+        this.#seen(held);
+      } else {
+        this.#place(held, false);
+        fitted.state = "queued";
+        again = true;
+      }
+    }
+    if (again) {
+      this.#placed = undefined;
+      this.#host.schedule();
+    }
+  }
+
+  /** Stops fitting `held` (removed, or `fit: "none"`), letting the observer go with the last fitted anchor. */
+  #unfit(held: Held): void {
+    if (!held.fitted) return;
+    held.fitted = undefined;
+    this.#observer?.unobserve(held.wrapper);
+    this.#seen(held);
+    for (const other of this.#held.values()) if (other.fitted) return;
+    this.#observer?.disconnect();
+    this.#observer = undefined;
+  }
+
+  /** Whether the text runs right to left, read at most once per placing or measuring. */
+  #direction(): boolean {
+    this.#rtl ??= getComputedStyle(this.layer).direction === "rtl";
+    return this.#rtl;
   }
 
   /** A refusal of the options at `path`. */
@@ -331,7 +588,7 @@ export class Anchors {
 
   /** The options checked, or a refusal of what is wrong in them. */
   #check(options: AnchorOptions): Checked {
-    const { at, side = "top", align = "center", offset = 0, panel } = options ?? {};
+    const { at, side = "top", align = "center", offset = 0, panel, fit = "flip" } = options ?? {};
     const shown = (value: unknown) =>
       value instanceof Date ? `${value}` : (JSON.stringify(value) ?? String(value));
     const expected = (path: string, list: string, value: unknown) =>
@@ -368,6 +625,7 @@ export class Anchors {
       throw expected("offset", "pixels, 0 or more", offset);
     if (panel !== undefined && typeof panel !== "string")
       throw expected("panel", "a panel's key", panel);
+    if (!FITS.includes(fit)) throw expected("fit", `"flip", "shift", or "none"`, fit);
     return {
       point: item === undefined ? [x as AnchorCoordinate, y as AnchorCoordinate] : undefined,
       item: item as Checked["item"],
@@ -375,6 +633,7 @@ export class Anchors {
       align,
       offset,
       panel,
+      fit,
     };
   }
 
@@ -578,24 +837,59 @@ function names(keys: readonly string[]): string {
 }
 
 /**
- * The transform putting a wrapper on `side` of `box`, `offset` pixels
- * away, at `align` along that side: the box's edge's start (left, or right
- * in right-to-left text; the top beside it), middle, or end, the element's
- * own start, middle, or end there. "center" centres it on the box.
+ * The `step`th place "flip" tries on `side` of `box`: the side itself (0),
+ * the box's opposite side (1), or the other side of the box's edge on
+ * `side` (2), just inside the box (a point's is its opposite side).
+ */
+function stepOf(box: Rect, side: Placed, step: number): [Rect, Placed] {
+  if (step === 0 || side === "center") return [box, side];
+  const other = OPPOSITE[side];
+  if (step === 1) return [box, other];
+  const { x, y, width, height } = box;
+  // The edge on `side`, a box of no thickness.
+  return [
+    side === "top" || side === "bottom"
+      ? { x, y: side === "top" ? y : y + height, width, height: 0 }
+      : { x: side === "left" ? x : x + width, y, width: 0, height },
+    other,
+  ];
+}
+
+/**
+ * Where a wrapper `size` long along an axis starts, from `start`, to stay
+ * within `room`: inside it where it fits, else at its start (at its end,
+ * `fromEnd`, for right-to-left text), cut at the far edge.
+ */
+function slide(start: number, size: number, room: number, fromEnd: boolean): number {
+  if (size > room) return fromEnd ? room - size : 0;
+  return Math.min(Math.max(start, 0), room - size);
+}
+
+/** A wrapper's transform: to (x, y) in pixels, then by percentages of its own box. */
+function transform(x: number, y: number, sx: number, sy: number): string {
+  return `translate(${x}px,${y}px) translate(${sx}%,${sy}%)`;
+}
+
+/**
+ * Where a wrapper on `side` of `box`, `offset` pixels away, at `align`
+ * along that side stands: the point the transform moves it to, and the
+ * percentages of its own box it moves by from there. Along the side, the
+ * box's edge's start (left, or right in right-to-left text; the top beside
+ * it), middle, or end, the element's own start, middle, or end there.
+ * "center" centres it on the box.
  */
 function placement(
   { x, y, width, height }: Rect,
-  side: Checked["side"],
+  side: Placed,
   align: Checked["align"],
   offset: number,
   rtl: boolean,
-): string {
-  if (side === "center")
-    return `translate(${x + width / 2}px,${y + height / 2}px) translate(-50%,-50%)`;
+): [x: number, y: number, sx: number, sy: number] {
+  if (side === "center") return [x + width / 2, y + height / 2, -50, -50];
   const beside = side === "left" || side === "right";
   let along = align === "start" ? 0 : align === "end" ? 1 : 0.5;
   if (rtl && !beside) along = 1 - along;
-  const [px, py, sx, sy] = beside
+  return beside
     ? [
         side === "left" ? x - offset : x + width + offset,
         y + along * height,
@@ -608,5 +902,4 @@ function placement(
         -100 * along,
         side === "top" ? -100 : 0,
       ];
-  return `translate(${px}px,${py}px) translate(${sx}%,${sy}%)`;
 }

@@ -1324,9 +1324,9 @@ const found = chart.inspect(x, y); // what the tooltip would show there
 
 An anchor holds an element of the application (a button, a popover, a
 form) at a place in the chart's data. The chart moves it with every frame
-it draws (zoom, pan, resize, streamed rows, transitions) and hides it while
-the place is out of view. The element keeps its own styles, input, and
-focus; only where it stands is the chart's.
+it draws (zoom, pan, resize, streamed rows, transitions), keeps it inside
+the chart, and hides it while the place is out of view. The element keeps
+its own styles, input, and focus; only where it stands is the chart's.
 
 ```ts
 import { type Anchor, anchor } from "herceg";
@@ -1371,6 +1371,7 @@ unmounting it removes it.
 | `align` | Where along that side: the element's start, centre (the default), or end at the place's (an item box's start or end edge). Start is the left in left-to-right text, the right in right-to-left text, and the top beside the place. |
 | `offset` | Pixels between the place and the element. |
 | `panel` | The panel: a facet value or subplot id. Needed in charts of several panels, and for an item drawn in several. |
+| `fit` | What the element does where it would cross the chart's edge: `"flip"` (the default) goes to the other side of its place, then slides along to stay inside; `"shift"` keeps its side and slides; `"none"` places it as told, cut by the edge ([Fitting inside the chart](#fitting-inside-the-chart)). |
 
 - **Where.** A point is placed through its panel's scales as drawn; a
   `{ fraction }` or `{ px }` is never out of view. An item stands at its
@@ -1395,16 +1396,17 @@ unmounting it removes it.
   `set` ask for a frame that only places anchors; such a frame draws
   nothing and tells no `render` listener, so `set` in a `render` listener
   does not loop. An element changing size needs no frame: the chart places
-  it by its own percentages, so it keeps its side of the place.
+  it by its own percentages, so it keeps its side of the place, and a
+  fitted one slides as its new size is measured.
 - **During transitions**, a point follows the frame's scales, and an item
   the frame's own geometry: a bar turning from +10 to −10 passes through
   no height. One exception: a line's or area's observation stands at its
   destination while its trace moves.
 - **Hidden.** While the point is outside its panel's plot, the item is not
   drawn (out of view, hidden by the legend, gone), or the panel is not
-  drawn (a facet value without rows), the element is not displayed and the
-  anchor's `shown` is false; read in a `render` listener, it says what that
-  frame showed. Focus inside an element being hidden moves to the chart's
+  drawn (a facet value without rows), the element is not displayed, the
+  anchor's `shown` is false, and its `side` undefined; read in a `render`
+  listener, `shown` says what that frame showed. Focus inside an element being hidden moves to the chart's
   root; focus elsewhere is never moved.
 - **Input and focus.** Pointer input and keys inside an anchor are the
   element's: the chart neither picks, pans, nor reads keys there. A finger
@@ -1424,19 +1426,112 @@ unmounting it removes it.
   "lines"`, `anchor panel: no panel "West"; name one of "North",
   "South"`, `anchor at.item: the item is drawn in panels "eu", "us"; name
   one with panel`, `anchor at.x: "Tuesday" is a category, and the x axis
-  holds numbers; give a number`. TypeScript refuses most of these first.
-- **Limits.** The chart's root clips what it holds: an anchor reaching
-  past the chart's edge is cut there. One anchor per element holds within
-  one copy of the engine on a page.
+  holds numbers; give a number`, `anchor fit: expected "flip", "shift", or
+  "none"; received "auto"`. TypeScript refuses most of these first.
+- **Limits.** One anchor per element holds within one copy of the engine
+  on a page. The chart's root clips what it holds; for an element larger
+  than the chart, see [Floating over the page](#floating-over-the-page).
 - **Cost.** `anchor` is a module of its own: an application that imports
-  it loads about 5.2 KB (gzip) more with the engine, and charts of
+  it loads about 6.4 KB (gzip) more with the engine, and charts of
   applications that never anchor carry only the frame's call to it. The
   first item anchor loads the picking code hover also loads. Each frame
   maps a point through two scales and reads an item's drawn pieces (bars
   and points by the rows they record); an item's rows are found once per
   change of its data or its view's question, and after an append in the
-  rows appended. A wrapper's
-  `transform` is written only when its place moves.
+  rows appended. Fitting adds a few comparisons per anchor per frame and
+  one observer callback per change of an element's size. A wrapper's
+  `transform` and `data-side` are written only when they change.
 - **No spec or Python.** An anchor holds the application's DOM, which
   neither a spec nor Python has. Python's notebooks place text, rules, and
   pinned tooltips, which are portable.
+
+### Fitting inside the chart
+
+The chart's root clips what it holds, so an anchored element stays inside
+the chart's box: the root, which facet panels and subplots do not narrow.
+`fit` says how:
+
+- **`"flip"`** (the default). On its `side` where it fits there. Else on
+  the opposite side of the item's box (of the point, for a point). Else,
+  for an item too tall or wide for both, just inside the item's edge: a
+  popover over a band as tall as the plot goes below the band's top edge.
+  Where none of these fits, the one with the most room across its side
+  (the first of these on equal room). Then it slides along its side to
+  stay inside, and across it, over its place, where it still crosses the
+  edge. A place it fits on is kept while it fits, as CSS's
+  `position-try-fallbacks` keeps the last that fitted: a popover that went
+  below its place stays below as the place moves, even where room opens
+  above it, until it fits there no longer, is told another `side` or
+  `fit`, or hides and shows again.
+- **`"shift"`**. On its side, slid along it, and across it where it would
+  leave the chart (it may then cover its place).
+- **`"none"`**. Where it is told, cut by the chart's edge.
+- **`side: "center"`** never flips: it slides both ways.
+- **An element larger than the chart** starts at the chart's start edge
+  (the left, or the right in right-to-left text; the top) and is cut at
+  the far one.
+
+```ts
+// A menu at the day clicked, to its right; near the plot's right edge it opens to the left.
+const menu = anchor(chart, element, { at: { x: day, y: revenue }, side: "right", offset: 6 });
+```
+
+The side it went to is the anchor's `side` (`"center"` for a centred
+one), and the `data-side` attribute of the wrapper the chart places, for
+the element's CSS, such as an arrow that points at the place whichever
+side the popover went to:
+
+```css
+.popover::before { bottom: -6px } /* above the place, pointing down */
+[data-side="bottom"] .popover::before { top: -6px; bottom: auto; transform: rotate(180deg) }
+```
+
+- **Measuring.** A fitted element's size comes from a `ResizeObserver`,
+  one per chart, so frames place it without reading the page's layout,
+  and a change of the element's size slides it along its side without a
+  frame (where it no longer fits there, the next frame takes another
+  place). Every place is judged by the size last measured, on the side
+  the element is on.
+- **Showing.** As the element shows, it is laid out unseen (`opacity: 0`;
+  it can take focus) on its side and measured there, before the browser
+  paints that frame. Where it fits there, or no other place has more room
+  at that size, it shows in that frame. Where its size takes another
+  side, the next frame writes that side, measures it there, and shows it
+  before that frame's paint: one frame later, never more while its place
+  and the chart's size hold. `side` is undefined until it shows.
+- **CSS that sizes it by its side** is measured only on the side the
+  element is on, and the other places are judged by that size: a card
+  200 px tall above its place and 40 px below, with 152 px of room above
+  and 132 px below, stays above, slid inside over its place, since at
+  200 px neither side fits and above has more room. It never flips back
+  and forth while its place holds.
+- **What fits** is the wrapper, which holds the element with its margins.
+  Style the element, not the wrapper, whose margin, padding, and border
+  the chart sets to none.
+
+### Floating over the page
+
+An element meant to float over the page rather than the chart (a menu
+taller than a small chart, a panel larger than it) is the job of the
+application's popover system: the Popover API, Floating UI, or a
+framework's portal. Anchor an empty element with `fit: "none"`, which the
+chart moves with every frame and hides while its place is out of view,
+and let the popover system place the floating content against it:
+
+```ts
+import { autoUpdate, computePosition, flip, shift } from "@floating-ui/dom";
+
+const reference = document.createElement("span");
+const held = anchor(chart, reference, { at: { x: day, y: revenue }, side: "center", fit: "none" });
+// `menu` lives outside the chart, so the chart's edge does not clip it.
+autoUpdate(
+  reference,
+  menu,
+  async () => {
+    menu.hidden = !held.shown;
+    const { x, y } = await computePosition(reference, menu, { middleware: [flip(), shift()] });
+    Object.assign(menu.style, { left: `${x}px`, top: `${y}px` });
+  },
+  { animationFrame: true },
+);
+```

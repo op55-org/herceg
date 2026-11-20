@@ -84,6 +84,7 @@ export {
   type Anchor,
   type AnchorAt,
   type AnchorCoordinate,
+  type AnchorFit,
   type AnchorOptions,
   anchor,
 } from "./dom/anchors.ts";
