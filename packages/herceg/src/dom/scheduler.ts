@@ -27,9 +27,17 @@ const pending = new Set<Scheduled>();
 let frame = 0;
 let frames = 0;
 let lastFrame = 0;
+/** Milliseconds of one-off work `leaveOut` was told of since the running frame began. */
+let left = 0;
+/** What the last frame left out of its time. */
+let spared = 0;
 
 function run() {
   frames++;
+  // A frame after one that left work out counts all of its own. What came
+  // between frames was in neither.
+  const leaving = !spared;
+  left = 0;
   // Input: every chart reads before any listener hears of it, and charts
   // listeners change join the frame (see `Scheduled.read`): until the
   // frame draws, `schedule` asks for no other.
@@ -44,11 +52,15 @@ function run() {
     // Invisible charts stay dirty and render when they become visible.
     if (!item.visible) continue;
     const { cold } = item;
+    const kept = left;
     const started = performance.now();
     attempt(() => item.flush());
-    if (!cold) took += performance.now() - started;
+    // A first frame is left out whole, with what it left out.
+    if (cold) left = kept;
+    else took += performance.now() - started;
   }
-  lastFrame = took;
+  spared = leaving ? left : 0;
+  lastFrame = took - spared;
 }
 
 /** What `work` returns, or undefined if it throws: one failing chart must not stop the others. */
@@ -65,9 +77,24 @@ export function frameCount(): number {
   return frames;
 }
 
-/** How long every chart's input and rendering took in the last frame, in milliseconds, first frames left out. */
+/**
+ * How long every chart's input and rendering took in the last frame, in
+ * milliseconds, first frames and the one-off work of transitions starting
+ * left out (see `leaveOut`).
+ */
 export function lastFrameTime(): number {
   return lastFrame;
+}
+
+/**
+ * Leaves `ms` of a transition's one-off work (building or planning where it
+ * goes) out of the running frame's time, which transitions after it judge
+ * by their own frames. Work outside a frame is not in its time, and in a
+ * frame after one that left work out it counts: a page building every
+ * frame is judged by its builds.
+ */
+export function leaveOut(ms: number): void {
+  left += ms;
 }
 
 /** Reports an error without stopping the code that ran into it. */

@@ -328,6 +328,11 @@ export class ValueAnimation {
   #frame: { scene: Scene; elapsed: number } | undefined;
   /** The scene or frame the chart drew last, which a drill moves from. */
   #last: Scene | undefined;
+  /**
+   * Milliseconds the chart's last frame took building and planning where
+   * the change playing goes, which the next frame's step leaves out.
+   */
+  #built = 0;
   /** What was shown is copied for a drill: the pointer does not stop the change it plays. */
   #drill = false;
   /**
@@ -497,18 +502,23 @@ export class ValueAnimation {
   /**
    * The scene the chart draws next: a frame of a change playing, or else
    * the scene `build` makes, moving to it from what was shown if it can.
+   * `frameTime` is how long the chart's last frame took; a change playing
+   * leaves out what that frame spent building and planning where it goes.
    */
   frame(build: () => Scene, frameTime: number): Scene {
-    this.#last = this.step(frameTime) ?? this.start(build(), frameTime);
+    const built = this.#built;
+    this.#built = 0;
+    const started = performance.now();
+    this.#last = this.step(frameTime - built) ?? this.start(build(), frameTime, started);
     return this.#last;
   }
 
   /**
-   * The chart built `scene`: what to draw first, which moves to it from
-   * what was shown when the data changed, if it can. `frameTime` is how
-   * long the chart's last frame took.
+   * The chart built `scene`, starting at `started`: what to draw first,
+   * which moves to it from what was shown when the data changed, if it
+   * can. `frameTime` is how long the chart's last frame took.
    */
-  start(scene: Scene, frameTime: number): Scene {
+  start(scene: Scene, frameTime: number, started = performance.now()): Scene {
     const shown = this.#shown;
     const drill = this.#drill;
     this.#shown = undefined;
@@ -540,7 +550,16 @@ export class ValueAnimation {
     }
     this.#tween.drill = drill;
     this.#tween.ease = views?.easing();
-    return this.step(frameTime) ?? scene;
+    // Building and planning where it goes are done once: a change playing
+    // on leaves them out of how this frame is judged, here and in the
+    // page's frame. The first step between, and painting it, count.
+    const built = performance.now();
+    const frame = this.step(frameTime);
+    if (this.#tween) {
+      this.#built = built - started;
+      views?.spare(started, built);
+    }
+    return frame ?? scene;
   }
 
   /**

@@ -78,11 +78,17 @@ import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
 
-const clock = vi.hoisted(() => ({ frame: 0 }));
-vi.mock("../../src/dom/scheduler.ts", () => ({ lastFrameTime: () => clock.frame }));
+// The page's last frame time, and the one-off work left out of the frame running.
+const clock = vi.hoisted(() => ({ frame: 0, left: [] as number[] }));
+vi.mock("../../src/dom/scheduler.ts", () => ({
+  frameCount: () => 0,
+  lastFrameTime: () => clock.frame,
+  leaveOut: (ms: number) => clock.left.push(ms),
+}));
 
 afterEach(() => {
   clock.frame = 0;
+  clock.left = [];
 });
 
 const VALUES = { duration: 200, values: true } as const;
@@ -2790,6 +2796,67 @@ describe("value animation", () => {
     data.setColumn("sales", [10, 20, 30]);
     animation.start(scene(model), 0);
     expect(animation.playing).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it("judge a change by its own frames, leaving out its build and plan once", async () => {
+    // The clock moves only as the test says: a build takes 30 ms.
+    let time = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => time);
+    const data = table({ region: ["N", "S", "E"], sales: [10, 20, 30] });
+    const model = chart({
+      marks: [bar(data, { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+    });
+    // The page's record of what is left out is kept by view transitions: a
+    // fresh module's, whatever tests ran before.
+    vi.resetModules();
+    const { ViewAnimation: Fresh } = await import("../../src/dom/transition.ts");
+    const views = new Fresh(model, null, () => {}, ChartError);
+    const animation = new ValueAnimation(model, null, scene(model), BUILDERS, () => views);
+    const build = () => {
+      time += 30;
+      return scene(model);
+    };
+    animation.changed(scene(model), VALUES_CHANGED, 1);
+    data.setColumn("sales", [30, 20, 10]);
+    animation.frame(build, 1);
+    expect(animation.playing).toBe(true);
+    // The build is left out of the page's frame, and of the chart's own
+    // when the next step judges it: its 31 ms are 1 ms of moving.
+    expect(clock.left).toEqual([30]);
+    time += 16;
+    animation.frame(build, 31);
+    expect(animation.playing).toBe(true);
+    // Later steps judge their own frames: a slow one ends it.
+    time += 16;
+    animation.frame(build, 11);
+    expect(animation.playing).toBe(false);
+    expect(clock.left).toEqual([30]);
+
+    // A change right after a build is judged by it as it starts: a chart
+    // changing every frame is judged by its builds.
+    time += 300;
+    animation.changed(scene(model), VALUES_CHANGED, 1);
+    data.setColumn("sales", [10, 20, 30]);
+    animation.frame(build, 1);
+    expect(animation.playing).toBe(true);
+    time += 16;
+    animation.changed(animation.frame(build, 31), VALUES_CHANGED, 31);
+    data.setColumn("sales", [20, 20, 20]);
+    animation.frame(build, 31);
+    expect(animation.playing).toBe(false);
+    expect(clock.left).toEqual([30, 30]);
+
+    // A build whose change ends at once (here, after a slow page frame) is
+    // not left out.
+    time += 300;
+    animation.changed(scene(model), VALUES_CHANGED, 1);
+    data.setColumn("sales", [30, 20, 10]);
+    clock.frame = 12;
+    animation.frame(build, 1);
+    expect(animation.playing).toBe(false);
+    expect(clock.left).toEqual([30, 30]);
     vi.restoreAllMocks();
   });
 

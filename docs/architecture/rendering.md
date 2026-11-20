@@ -254,7 +254,9 @@ to the pointer draws in the pointer's frame:
    scheduled from here on, draws in the next frame. The steps never loop.
 
 The frame's time (`lastFrameTime`, which transitions read to skip frames
-on slow pages) counts reading and reporting with drawing. Each copy of the
+on slow pages) counts reading and reporting with drawing, less charts'
+first frames and the one-off work of transitions starting (see the frame
+budget below). Each copy of the
 engine on a page has its own loop: a listener's change to a chart of
 another copy draws in that copy's next frame.
 
@@ -299,7 +301,18 @@ double-click reset, a map's or network's plane) is shown gradually by
   compiles once). Transitions starting in one scheduler frame form a batch,
   which jumps when twice its charts' last frame times exceed 10 ms; a
   playing transition ends once its chart's frame, or the scheduler's whole
-  frame, takes over 10 ms.
+  frame, takes over 10 ms. A transition is judged by its own frames: the
+  plan, built once on its first frame, is left out of the scheduler's
+  frame time (`leaveOut`; the chart's own frame time starts after it).
+  The scheduler leaves such work out of a frame only when the frame before
+  left none out, so a page planning or building every frame is judged by
+  that work. Work is never left out twice: work that began before the
+  last work left out ended (a build within which a custom mark's `draw`
+  drew another chart at once) counts whole, with what that chart drew
+  (`ViewAnimation.spare`, which value transitions call too). What runs
+  within a build is part of it: another chart drawn at once there,
+  without a transition of its own, is left out with the build. Value
+  transitions follow the same rule (below).
 
 ## Animated values
 
@@ -467,6 +480,19 @@ or keyboard, off screen, linked, with a navigator, or slow; frames over
 holding a point cloud. Marks keep no records for a series over those; a
 sunburst's record holds only arrays the mark keeps anyway, and no sectors
 are made of one over them.
+
+**Slow frames.** A change starts if the chart's last frame and the
+scheduler's took at most 10 ms, with copying what was shown counted
+toward the first frame, and ends at the first frame of its own, or of the
+page's, over 10 ms. Building the new scene and planning the change are
+done once, on the change's first frame: the step after it judges that
+frame less the work (`ValueAnimation.frame`), and the scheduler leaves
+the work out of its frame time (`leaveOut`; nothing outside its frames,
+such as a synchronous draw, nothing of a chart's first frame, which counts
+as none already, and nothing in a frame after one that left work out). A
+change arriving right after such a frame judges it whole as
+it starts, so a chart rebuilding every frame is judged by its builds and
+shows its changes at once when they are slow.
 
 Marks that cannot move to changed values (box plots, boxen, violins, rugs,
 contours, dendrograms, layout marks other than pies, sunbursts, and

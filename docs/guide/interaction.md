@@ -1345,6 +1345,11 @@ frame); pages preferring reduced motion. A pointer reads a chart unless it
 has `inspection: false`, no hover listener, and no click of its own to
 show with the cursor (`select`, `tooltip.pin`, a drill, a row selection's
 clicks); drills play on under it.
+A transition ends early when its own frames take over 10 ms, or the
+page's frames do; building its destination, done once in its first
+frame, is not counted (the frame's moving and painting are), unless the
+page's frame before left such work out too: a page building every frame
+is judged by its builds.
 Charts of several panels or with `sync` do not animate their views. Only
 the drawing moves: data, tooltips, and events have the new values at once
 (during a drill, the pointer reads the sectors as drawn).
