@@ -54,6 +54,7 @@ npm run bench:grid-remote # remote grids: herceg/grid/remote vs AG Grid's infini
 npm run bench:grid-sparklines # sparkline cells over a million series rows: herceg/grid vs TanStack Table and Glide (Chrome)
 npm run bench:grid-export # grid CSV export (herceg/grid vs AG Grid Community) and copy of a 100k-row selection (Chrome)
 npm run bench:first-hover # first-hover latency while the interaction controller loads (Chrome)
+npm run bench:interaction # per-move latency and work of pointer interactions, against another tree with --baseline DIR (Chrome)
 npm run bench:report     # regenerate result tables in docs/comparison.md
 npm run bench:express    # herceg.express timings in Python (-- --out results/express.json)
 npm run build:python     # bundle herceg's JavaScript into the Python package

@@ -11,7 +11,8 @@
     "grid-remote": "node --experimental-strip-types src/grid/remote/run.ts",
     "grid-sparklines": "node --experimental-strip-types src/grid/sparklines/run.ts",
     "grid-export": "node --experimental-strip-types src/grid/export/run.ts",
-    "first-hover": "node --experimental-strip-types src/first-hover/run.ts"
+    "first-hover": "node --experimental-strip-types src/first-hover/run.ts",
+    "interaction": "node --experimental-strip-types src/interaction/run.ts"
   },
   "devDependencies": {
     "@types/d3-interpolate": "3.0.4",

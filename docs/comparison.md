@@ -248,7 +248,12 @@ ingestion rate drops below the target.
 
 Real pointer moves (Chrome DevTools Protocol input) aimed at data points, to
 the end of the next frame, with tooltips enabled. Moves are spaced 70 ms apart
-so throttled hover handlers run for each event. Zoom scenarios change the x
+so throttled hover handlers run for each event, which lets an otherwise idle
+CPU lower its clocks between them: the same build's hover rows measure
+several times higher on an idle machine than on a busy one (Herceg's
+1.9-2.7 ms idle and 0.2-0.3 ms busy, against 0.3-0.6 ms below; Apple M6,
+Chrome 157), so compare them within one run (`benchmarks/README.md`,
+"Timing"). Zoom scenarios change the x
 range through each library's documented zoom path (see
 `benchmarks/README.md`); Plotly keeps its full-data y range while zooming,
 the others rescale y to the visible points. "error" means the library's tab
