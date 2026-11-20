@@ -221,7 +221,11 @@ nothing; its web assets split it into a chunk as npm builds do.
 The controller's chunk size is in the [size
 results](../comparison.md#bundle-size); what deferring it costs a first
 hover is measured by `npm run bench:first-hover`
-([methodology](../../benchmarks/README.md#first-hover)).
+([methodology](../../benchmarks/README.md#first-hover)), and what each
+move costs (a hover listener's change, a pan with series labels, a live
+cross-filter, a crosshair across ten synced charts) by `npm run
+bench:interaction` against another tree
+([methodology](../../benchmarks/README.md#pointer-interactions)).
 
 ## Bindings
 

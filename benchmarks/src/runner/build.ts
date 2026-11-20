@@ -111,7 +111,7 @@ function page(library: string): string {
 }
 
 // Cross-origin isolation raises performance.now() resolution from 100 µs to 5 µs.
-const ISOLATION = {
+export const ISOLATION = {
   "cross-origin-opener-policy": "same-origin",
   "cross-origin-embedder-policy": "require-corp",
 };

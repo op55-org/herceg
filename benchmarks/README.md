@@ -17,6 +17,7 @@ npm run bench:grid-remote            # remote grids (see "Remote grids") -> tmp/
 npm run bench:grid-sparklines        # sparkline cells (see "Sparklines") -> tmp/benchmarks/grid-sparklines-<time>.json
 npm run bench:grid-export            # grid export and copy (see "Grid export") -> tmp/benchmarks/grid-export-<time>.json
 npm run bench:first-hover -- --out results/first-hover.json   # first hover (see "First hover")
+npm run bench:interaction -- --baseline "$PWD/../herceg-main/packages/herceg/src"   # pointer moves against another tree (see "Pointer interactions")
 npm run bench:report                 # regenerate the tables in docs/comparison.md
 npm run bench:express -- --out results/express.json   # herceg.express timings (Python)
 ```
@@ -36,6 +37,7 @@ otherwise idle while it runs.
 | `src/runner/` | Node runner: builds pages, serves them, drives Chrome, Firefox, or WebKit, records results. |
 | `src/size/` | Bundle size benchmark and its entry points. JavaScript and required CSS are reported separately. |
 | `src/grid/` | The grid suite: fixture, reference, scenarios, harness, runner, report, and one adapter per grid in `src/grid/adapters/`; the remote grid benchmark in `src/grid/remote/`, sparklines in `src/grid/sparklines/`, and export and copy in `src/grid/export/`. |
+| `src/first-hover/`, `src/interaction/` | Herceg-only benchmarks: the first hover while the interaction controller loads, and the cost of pointer moves (see "First hover" and "Pointer interactions"). |
 | `src/report.ts` | Writes Markdown tables into `docs/comparison.md`. |
 | `src/ease/` | The common-task samples of `docs/comparison.md` ("Common tasks"): a directory per task and a file per library, over the data in `data.ts` (and `data.py`). `samples.test.tsx` mounts each in Chrome (`npm run test:browser`; `vitest.config.ts` here), `python/tests/test_ease_samples.py` runs the Python ones, and `lines.ts` counts their lines. |
 | `python/express.py` | Timings of `herceg.express` (Python), with Seaborn's and statsmodels' computations beside them; run in the Python package's uv environment. |
@@ -117,6 +119,12 @@ and SVG, compositing) is not in them.
   convert the shared typed arrays inside their adapter, so timings include
   the conversion, as in an application holding columnar data. The
   conversion is also stored alone as `prepare`, as a diagnostic.
+- A pause before a short operation lets an otherwise idle CPU lower its
+  clocks, and on machines that do, the operation can take several times
+  longer than in a continuous stream of input. Herceg's hover rows here measured
+  1.9-2.7 ms on an idle machine and 0.2-0.3 ms with a busy loop running
+  beside the browser (Apple M6, Chrome 157). Compare such figures only
+  within one session; see "Pointer interactions".
 
 #### WebGL drawing finished
 
@@ -311,6 +319,83 @@ frame after it. Caches are `cold` (HTTP cache off), `warm` (chunks cached),
 and `slow` (cold, with 100 ms of latency per request). `--baseline DIR`
 builds another herceg source tree into the same page for comparison.
 Results report the median, p95, and p99 of 15 samples (`--samples`).
+
+### Pointer interactions
+
+`npm run bench:interaction` measures what Herceg's pointer moves cost
+(`src/interaction/`), to catch regressions in the engine's input and
+drawing path; it compares no libraries. Four fixtures, each move checked
+for its effect:
+
+| Fixture | Charts | A move's effect |
+| --- | --- | --- |
+| `hover-listener` | One chart of 8 series x 2,000 minutes, and a rule a `hover` listener moves to the hovered minute | The rule drawn there |
+| `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
+| `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
+| `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
+
+A block is a fresh page in headless Chrome (the frame rate limit off,
+device pixel ratio 2, cross-origin isolated) of a production build:
+mounting, 10 warmup moves, and 30 measured, real pointer moves through
+the DevTools Protocol. `latency` runs from a move's first `pointermove`
+to a `MessageChannel` message posted from the animation frame after its
+effect was drawn. An effect counts only from reports made after the
+move's input arrived (the hover at the move's position, the view, the
+channel, the cursor), and as drawn once a `render` of the revision its
+change made has come; a move whose effect is not drawn within 1 s is a
+miss, and misses fail the run. After the measured moves, untimed, each
+block checks what was drawn: the rule at the hovered minute and the
+labels at both ends of the view (the chart's SVG), the brushed rows
+highlighted in the other histograms (their SVG changed), and the
+crosshair in each of the nine other charts (a screenshot's pixels).
+`work` is the main thread's task time (`TaskDuration`) between a reading
+before each move is armed and one after its latency has resolved: the
+move's work and the harness's two small evaluations. It is taken in a
+separate pass, since the Performance domain slows the page it watches.
+Results name each build's source tree, its commit and whether it had
+changes, and a hash of its bundle.
+
+**The CPU's idle state.** On a machine that lowers its clocks while idle,
+work that starts after a pause runs slower, and the less work, the more
+so. The study's dashboard crosshair took 0.7 ms per move with a busy loop
+running beside the browser and 5.5 ms with moves 50 ms apart on the same
+build; a fixture's latency is 1.3-2.1 ms in a stream of moves and 6.3-8.4
+ms with 70 ms before each (Apple M6, Chrome 157). Figures from different
+sessions, or from a session the rest of the machine kept busy, are not
+comparable, so the benchmark runs two modes and compares builds only
+within one session:
+
+- `sustained` sends each move as soon as the last one's effect has been
+  drawn, as a hover or a drag sends them, so the input keeps the CPU
+  awake. It is the regression gate.
+- `quiet` waits 70 ms before each move, as the suite's hover rows do:
+  what a single move costs on an idle machine. Reported, not gated: the
+  idle state makes it noisier.
+
+`--baseline DIR` builds the same page against another herceg source tree
+(main's, say) and alternates the two in one Chrome session, in blocks
+ordered AB, BA, AB, ... (6 blocks by default), after an unrecorded block
+of each for every fixture and mode: a session's first pages run slower. Each comparison is the
+median, over blocks, of the candidate's block median over the
+baseline's. In runs of at least the default size (6 blocks of 30
+measured moves), a sustained `latency` or `work` comparison over 1.1 that
+is also more than 0.1 ms slower is reported as a regression, and the run
+exits with an error. Main against itself, in three sessions, stayed
+within 0.94-1.05 in sustained mode (single blocks 0.69-1.20), and 0.25 ms
+of work added to every scheduler frame gave 1.12-1.21 in every fixture.
+`results/interaction.json` is this branch's engine against main's, the
+same code: a record of the noise. Against step 8's engine
+(f316bdff), today's crosshair and cross-filter are within 0.94-1.03, and
+the hover listener's change draws in the move's frame (22 ms then, 1.4 ms
+now).
+
+```sh
+npm run bench:interaction                     # this tree alone, both modes
+git worktree add ../herceg-main main          # a checkout of the baseline
+npm run bench:interaction -- --baseline "$PWD/../herceg-main/packages/herceg/src" --baseline-label main
+npm run bench:interaction -- --fixture crosshair-dashboard --mode sustained --blocks 10
+npm run bench:interaction -- --out results/interaction.json   # relative to benchmarks/
+```
 
 ## Statistical charts
 

@@ -261,6 +261,14 @@ another copy draws in that copy's next frame.
 Charts that share an `interaction.sync` name share the cursor and viewport
 through the same loop (see [Sync](interaction.md#sync-channels)).
 
+What a frame costs for each pointer move, from the input to the frame
+after its effect, is measured by `npm run bench:interaction` against
+another source tree in one browser session
+([methodology](../../benchmarks/README.md#pointer-interactions)). On a
+machine whose CPU lowers its clocks when idle, the same build can measure
+several times slower in one session than in another, so builds are
+compared within one session.
+
 ## Animated views
 
 With `animation`, a view asked for (`setViewport`, zooming to a brush,
