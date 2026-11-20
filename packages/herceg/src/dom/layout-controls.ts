@@ -66,8 +66,9 @@ export async function mountControls(
   return new Controls({
     ...shared,
     bindings,
+    // Again where it repeats the last announcement: told apart by a space.
     announce(text) {
-      live.textContent = text;
+      live.textContent = live.textContent === text ? `${text}\u00a0` : text;
     },
     onPlot: (target) => !legend.contains(target as Node),
     focused: () => parts.chart.root.ownerDocument.activeElement === parts.chart.root,

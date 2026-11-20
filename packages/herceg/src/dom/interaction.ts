@@ -33,7 +33,7 @@ import {
 } from "../model/keyboard.ts";
 import type { ChartModel, DrawnPanel, Inspection, Viewport } from "../model/model.ts";
 import type { Picked, Picker, PickKit } from "../model/pick.ts";
-import type { RowLink } from "../model/row-selection.ts";
+import type { ClickedRows, RowLink } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
 import { padded, unpadded } from "../model/view-padding.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -1032,16 +1032,20 @@ export class Interaction {
    * for, a row in the series the inspection reads, where the pick or the
    * keyboard cursor found it drawn, else as `itemAt` finds it (the series
    * read may leave out rows drawn: a rug's off a log axis); undefined for
-   * items of no series (annotations).
+   * items of no series (annotations). In series the inspector shows, unless
+   * `any` (see `keyedPoint`).
    */
-  #cursorOf(target: ItemTarget): [KeyboardCursor, KeyedItem | undefined] | undefined {
+  #cursorOf(
+    target: ItemTarget,
+    any?: boolean,
+  ): [KeyboardCursor, KeyedItem | undefined] | undefined {
     const { panel, item } = target;
     const drawn = this.#drawnAt.get(target);
     const table = (this.#host.model.config.marks[target.mark] as Mark | undefined)?.table;
     if (drawn && table) {
       const { series, position } = drawn;
       const keyed = rowItem(table, this.#kit.rowOf(series, position));
-      const cursor = this.#itemNow({ panel, key: series.key, position }, keyed);
+      const cursor = this.#itemNow({ panel, key: series.key, position }, keyed, any);
       return cursor ? [cursor, keyed] : undefined;
     }
     const point = this.#points.get(target);
@@ -3034,12 +3038,13 @@ export class Interaction {
       const before = host.selection();
       host.select(selection, press.panel);
       const selected = host.selection();
-      // Released where it began, the brush changed nothing: its previews end as undone.
+      // Released where it began, the brush changed nothing: its previews end
+      // as undone, and nothing is said.
       if (selected === before && press.previewed !== undefined)
         host.preview(null, press.panel, "cancel", "pointer");
-      if (selected?.kind === "brush") {
+      if (!same(selected, before) && selected?.kind === "brush") {
         const format = host.model.formatsOf(undefined, press.panel.key);
-        host.live.textContent = describeSelection(selected, format);
+        this.#say(describeSelection(selected, format) + (host.rows()?.countBrushed() ?? ""));
       }
     });
     // A drag the chart makes of a press (a brush, pan, lasso, node move, or
@@ -3082,7 +3087,7 @@ export class Interaction {
       const brushed = host.selection()?.kind === "brush";
       const takes = (a: Binding["action"]) => OWN(a) && (a.type !== "clearBrush" || brushed);
       const action = this.#bindingsIn(panel).match("doubleClick", event, takes)?.action;
-      if (action?.type === "clearBrush") host.select(null);
+      if (action?.type === "clearBrush") this.#clear("pointer");
       else if (action?.type === "reset") this.#reset(panel);
       else if (action?.type === "zoom" && panel)
         this.#zoomAt(this.#shown(panel), { x, y }, 1 / (action.factor ?? 2), action.axes);
@@ -3515,6 +3520,7 @@ export class Interaction {
     // chart asks, what it picked.
     const drills = !select && this.#drills(target, x, y);
     const chosen = picks && !drills ? this.#chosen(target, event.shiftKey) : undefined;
+    const name = this.#called(chosen, target);
     // A pin is at what the click's inspection reads, as the tooltip at the pointer showed.
     const pinning = drills
       ? undefined
@@ -3535,15 +3541,18 @@ export class Interaction {
       !(settings?.edit && panel && this.#brushAt(panel, x, y));
     return () => {
       if (drills) this.#drill(target!, x, y, "pointer");
+      const before = host.selection();
       const written = select?.();
-      if (chosen !== undefined) host.select(chosen);
+      if (chosen !== undefined) host.select(chosen, undefined, "pointer");
       // A click on an item standing for none of the bound rows keeps the brush too, as a drill does.
       else if (clears && !drills && written !== null && host.selection()?.kind === "brush")
         host.select(null);
       const pin = pinning?.();
       if (pin !== undefined) this.#setPin(pin, "pointer");
       // Onto the event captured, which keeps the panels it was captured with.
-      if (payload && !this.#disposed) host.events.emit("click", Object.assign(payload, written));
+      if (payload && !this.#disposed)
+        host.events.emit("click", Object.assign(payload, written && { rows: written.rows }));
+      if (!drills && written !== null) this.#decide(before, written, chosen, target, name);
     };
   }
 
@@ -3629,14 +3638,19 @@ export class Interaction {
 
   /**
    * `keyboard` on what it was on (`item`), wherever data changes since
-   * have moved it in its series (see `itemAt`); on a layout mark's item
-   * (no `item`), where its layout drew one of its key; null once it is gone.
+   * have moved it in its series (see `itemAt`, of series the inspector
+   * shows unless `drawn`); on a layout mark's item (no `item`), where its
+   * layout drew one of its key; null once it is gone.
    */
-  #itemNow(keyboard: KeyboardCursor, item: KeyedItem | undefined): KeyboardCursor | null {
+  #itemNow(
+    keyboard: KeyboardCursor,
+    item: KeyedItem | undefined,
+    drawn?: boolean,
+  ): KeyboardCursor | null {
     const { panel, key } = keyboard;
     const { model } = this.#host;
     if (!item) return model.inspectItem(key, panel) ? keyboard : null;
-    const position = itemAt(model, panel, key, keyboard.position, item, this.#kit);
+    const position = itemAt(model, panel, key, keyboard.position, item, this.#kit, drawn);
     return position < 0 ? null : { ...keyboard, position };
   }
 
@@ -3660,44 +3674,116 @@ export class Interaction {
     // Enter on a node with nodes under it, or on a sunburst's middle, drills, and does nothing else.
     const drills = this.#drills(payload.target, Number.NaN, Number.NaN);
     const chosen = drills ? undefined : this.#chosen(payload.target, false);
+    const name = this.#called(chosen, payload.target);
     const pinning = drills ? undefined : this.#clickPin(payload.target, () => inspection);
     return () => {
       if (drills) this.#drill(payload.target!, Number.NaN, Number.NaN, "keyboard");
-      if (chosen !== undefined) {
-        host.select(chosen, undefined, "keyboard");
-        this.#saySelected(payload.target as ItemTarget, keyboard, inspection);
-      }
+      const before = host.selection();
+      if (chosen !== undefined) host.select(chosen, undefined, "keyboard");
       const pin = pinning?.();
       if (pin !== undefined) this.#setPin(pin, "keyboard");
       if (!this.#disposed && host.events.has("click")) host.events.emit("click", payload);
+      if (chosen !== undefined) this.#decide(before, undefined, chosen, payload.target, name);
     };
   }
 
   /**
-   * Announces what Enter on the keyboard cursor (`keyboard`, reading
-   * `inspection`) made of the selection, once listeners of it have run: its
-   * item or series selected or deselected, or the selection cleared.
+   * What announcements of a selection call `target` as a click or Enter
+   * finds it, where it `chosen` a change (see `#chosen`): taken before the
+   * selection's listeners run, which may drop its row. A series by its
+   * name; an item as its mark writes its point read alone, whether or not
+   * the inspection reads that mark (`inspect: false`): its heading and
+   * content where the mark has them ("C-12. rates: 21.4 – 22.8"), else its
+   * name at its place ("api at 10:42"), a layout item's by its name.
+   * Undefined where nothing names it (an annotation's row).
    */
-  #saySelected(
-    target: ItemTarget | undefined,
-    keyboard: KeyboardCursor,
-    inspection: Inspection | undefined,
-  ): void {
+  #called(
+    chosen: ChartSelection | null | undefined,
+    target: Target | undefined,
+  ): string | undefined {
+    // A clear says so, naming nothing.
+    if (!chosen || target?.kind !== "item") return undefined;
+    const { model } = this.#host;
+    const drawn = this.#drawnAt.get(target) ?? this.#points.get(target);
+    if (chosen.kind === "series") return drawn?.series.label;
+    const at = drawn && this.#cursorOf(target, true)?.[0];
+    const own = at
+      ? keyedPoint(model, at.key, at.position, at.panel, this.#kit, true)
+      : model.inspectItem(target.item, target.panel);
+    const point = own?.points[0];
+    // A series of one place (a box plot's category) is not named twice.
+    return (
+      point &&
+      headingSaid(own!) +
+        (runsText(point.content) ||
+          (own!.axis === "item" || own!.label === point.label
+            ? point.label
+            : `${point.label} at ${own!.label}`))
+    );
+  }
+
+  /**
+   * Clears the selection, as Escape (with the rows clicks select, which
+   * `rows` clears first) or a clear binding of `cause` does, and says so
+   * once its listeners have run (see `#decide`).
+   */
+  #clear(cause: ChangeCause, rows?: () => ClickedRows | undefined): void {
     const host = this.#host;
-    if (this.#disposed || target?.kind !== "item") return;
-    const selection = host.selection();
-    const series = host.options().interaction?.select === "series";
-    const held = (selection as { series?: string[]; items?: string[] } | null)?.[
-      series ? "series" : "items"
-    ];
-    // A series by its name, a point by its name and place, a layout item by its name.
-    const own = this.#keyedPoint(keyboard);
-    const [point] = (own ?? inspection)?.points ?? [];
-    if (!point) return;
-    const name = series || !own ? point.label : `${point.label} at ${own.label}`;
-    host.live.textContent = !selection
-      ? "Selection cleared"
-      : `${name} ${held?.includes((series ? target.series : target.item)!) ? "selected" : "deselected"}`;
+    const before = host.selection();
+    const written = rows?.();
+    host.select(null, undefined, cause);
+    this.#decide(before, written);
+  }
+
+  /**
+   * Says what a click, Enter, Escape, or clear binding made of the
+   * selection, at most once: when its own work and every listener it
+   * fires (select, rowSelection, pin, click) have returned, from what it
+   * asked and wrote, taken before them, and what holds now. What
+   * listeners' later writes cause (a store's reconcile, a synced chart)
+   * is theirs to say, as changes of "api" and "sync" are.
+   * - Where the selection held `before` went, that, by one rule whichever
+   *   way the gesture went: "Brush cleared." for a brush while bound rows
+   *   are still selected (`RowLink.holding`), else "Selection cleared.";
+   *   in place of the rows' clear, not of a count of them.
+   * - Else, items or series it `chosen` (none: a clear): the target, by
+   *   the `name` taken before listeners, selected or deselected, with how
+   *   many are selected where that is more than the name says ("C-12
+   *   deselected. 2 items selected."; the count alone without a name);
+   *   nothing where the selection is as it was by value, or a listener
+   *   made it of another kind.
+   * - Else what the row link says of the rows it wrote (`rows`).
+   */
+  #decide(
+    before: ChartSelection | null,
+    rows?: ClickedRows,
+    chosen?: ChartSelection | null,
+    target?: Target,
+    name?: string,
+  ): void {
+    if (this.#disposed) return;
+    const host = this.#host;
+    const now = host.selection() as { kind: string; series?: unknown[]; items?: unknown[] } | null;
+    const said = rows?.said();
+    if (before && !now && (!said || said === "Selection cleared."))
+      this.#say(
+        before.kind === "brush" && host.rows()?.holding() ? "Brush cleared." : "Selection cleared.",
+      );
+    else if (chosen === undefined) {
+      if (said) this.#say(said);
+    } else if (now && !same(now, before)) {
+      const series = now.kind === "series";
+      const held = now.series ?? now.items;
+      const n = held?.length ?? 0;
+      const on = held?.includes((target as ItemTarget | undefined)?.[series ? "series" : "item"]);
+      const count =
+        !name || !on || n > 1
+          ? ` ${n} ${series ? "series" : n > 1 ? "items" : "item"} selected.`
+          : "";
+      // A listener's selection of another kind is its own to tell.
+      if (held && (!chosen || chosen.kind === now.kind))
+        this.#say(name ? `${name} ${on ? "" : "de"}selected.${count}` : count.slice(1));
+    }
   }
 
   /**
@@ -3771,8 +3857,9 @@ export class Interaction {
       this.#setPin(null, "keyboard");
       return;
     }
-    // Controls inside the chart (legend buttons) keep their own keys.
-    if (event.target !== host.root || this.#boundKey(event)) return;
+    // Controls inside the chart (legend buttons) keep their own keys. Space
+    // selects bound rows where no binding takes it: one takes each press.
+    if (event.target !== host.root || this.#boundKey(event) || host.rows()?.key(event)) return;
     if (event.key === "i" && !event.ctrlKey && !event.altKey && !event.metaKey) {
       this.#readAll(event);
       return;
@@ -3845,7 +3932,7 @@ export class Interaction {
       this.#keyboard = this.#gone = null;
       this.#brushAnchor = null;
       live.textContent = "";
-      if (host.selection()) host.select(null, undefined, "keyboard");
+      this.#clear("keyboard", () => host.rows()?.escape());
       host.schedule();
       return;
     }
@@ -3969,7 +4056,8 @@ export class Interaction {
       const selection = host.selection();
       const zooms = selection?.kind === "brush" && this.#zooms(selection, to!);
       const hint = zooms ? " Press Enter to zoom to it." : "";
-      live.textContent = `Selected ${this.#brushAnchor.label} to ${own.label}.${hint} ${live.textContent}`;
+      const rows = host.rows()?.countBrushed() ?? "";
+      live.textContent = `Selected ${this.#brushAnchor.label} to ${own.label}.${rows}${hint} ${live.textContent}`;
     } else {
       this.#brushAnchor = null;
     }
@@ -4225,7 +4313,7 @@ export class Interaction {
     if (!action || !at) return false;
     event.preventDefault();
     if (action.type === "clearBrush") {
-      host.select(null, undefined, "keyboard");
+      this.#clear("keyboard");
       return true;
     }
     const shown = this.#shown(at);
@@ -4337,6 +4425,20 @@ const CELL_STEPS: Record<string, readonly [number, number]> = {
   PageUp: [0, Number.POSITIVE_INFINITY],
   PageDown: [0, Number.NEGATIVE_INFINITY],
 };
+
+/**
+ * Whether two selections are equal by value: items and series as sets, in
+ * any order (clicks add keys in turn, `chart.select` sorts them).
+ */
+function same(a: object | null, b: object | null): boolean {
+  const text = (selection: object | null) =>
+    JSON.stringify(selection, (key, value) =>
+      key === "items" || key === "series"
+        ? (value as unknown[]).map((k) => JSON.stringify(k)).sort()
+        : value,
+    );
+  return text(a) === text(b);
+}
 
 /** A sentence announcing a selection, with values as the axes label them. */
 function describeSelection(selection: BrushSelection, format: AxisFormat): string {

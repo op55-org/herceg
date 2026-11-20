@@ -101,8 +101,8 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
   where. Where Up or Down can go no further, the cursor names its series
   and place again ("auth, 1 of 12"), so the key is heard. `i` reads every
   series the tooltip lists ("12 series at 10:00: ..."), again when pressed
-  again. What Enter selects is announced ("api selected", "Selection
-  cleared").
+  again. What Enter selects is announced as a click's selection is
+  ([Selections](#selections)).
 - **The tooltip** stands at the cursor's point, which a ring marks, and
   shows the cursor's series in bold among those it lists. Where that point
   is out of view, it stands at the plot's middle, as in charts that follow
@@ -138,6 +138,48 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
 - The chart's description says to use the arrow keys, and `i` where it
   has series; this table is where Up and Down are explained.
   [Bindings](interaction.md#bindings) can add keys of your own.
+
+## Selections
+
+What changes the selection is announced once, through the same polite
+live region, in the same words whether the pointer or the keyboard made
+it.
+
+| Gesture | Said |
+| --- | --- |
+| A click or Enter selecting an item | The item as its mark's tooltip writes it: its `heading` and `content` where the mark has them ("C-12. rates: 21.4 – 22.8 selected."), else its series and place ("api at 10:42 selected."); a slice, node, or other layout item by its name |
+| A click or Enter selecting a series | Its name ("auth selected.") |
+| Shift with a click adding one | The count follows where several are selected ("… selected. 3 items selected.", "2 series selected.") |
+| Shift with a click taking one out | The count left, one included ("C-12 rates: 21.4 – 22.8 deselected. 1 item selected.") |
+| A click, Enter, Escape, or a clear binding emptying the selection | "Selection cleared." |
+| A click or Escape removing a brush while bound rows are still selected (a listener kept or wrote them) | "Brush cleared." |
+| A brush, or Shift with the arrow keys | Its range ("Selected x from 10:00 to 11:00.", "Selected 10:00 to 11:00."), with "Press Enter to zoom to it." where Enter zooms |
+| A lasso, on any chart, map, or network | "Selected a freehand region." |
+| A brush or lasso writing a set of rows to one [bound channel](interaction.md#selected-rows) | Its count follows ("Selected a freehand region. 214 rows.") |
+| A click or Space selecting bound rows | How many the channel holds, as grids say it ("2 rows selected", "No rows selected") |
+
+- **Once, when the gesture is done.** What is said is decided after the
+  gesture's own work and every listener it fires (`select`,
+  `rowSelection`, `pin`, and `click`) have returned, from what the
+  gesture asked for and wrote and what holds then. Where a listener put
+  the selection back as it was, nothing is said. What a listener's writes
+  cause later (a store letting the brush go once it holds something
+  else, a synced chart) is the application's to announce, as with
+  `chart.select`.
+- **Names are the target's own.** They are taken as the click or key
+  finds the item, before listeners run, so a listener that drops the row
+  does not change the name; items of marks with `inspect: false` are
+  named too. The count is read after listeners have run.
+- **Brushes along axes** write a condition, whose rows are not counted:
+  counting them would read every row as the brush is released. Lassos and
+  brushes over stacks write rows, which are.
+- **Nothing is said** for a legend entry's selection (its button's
+  pressed state says it), a drag's previews, a drag that changed nothing
+  or was cancelled, a wheel step resizing a brush, `chart.select`, and
+  what another chart, a grid, or the application writes (causes `"api"`
+  and `"sync"`).
+- An announcement repeating the last one ends in a no-break space, so it
+  is read again.
 
 ## Color and motion
 

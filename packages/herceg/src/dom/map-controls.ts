@@ -18,6 +18,7 @@ import { type Binding, shapeOf } from "../model/bindings.ts";
 import type { ItemPanel } from "../model/item-views.ts";
 import type { ChangeCause } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
+import type { BrushSelection } from "../spec/state.ts";
 import type { Theme } from "../theme.ts";
 import { Brush, type BrushPanel } from "./brush.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
@@ -549,8 +550,14 @@ export class Controls implements ChartControls {
       // A panel that went while dragging (drawn now, if an update took it) selects nothing.
       this.#host.chart.render();
       if (selection && this.#planeOf(press.panel)) {
+        const { chart } = this.#host;
+        // By value, with where it is: a listener may give back the last one.
+        const held = () => JSON.stringify([chart.selection, chart.selectionOwner]);
+        const before = held();
         this.#host.select(selection, press.panel, "pointer");
-        this.#say("Selected a freehand region.");
+        // Said where a lasso it did not hold is selected once listeners have run.
+        if (held() !== before && (chart.selection as BrushSelection | null)?.lasso)
+          this.#say(`Selected a freehand region.${this.#host.model.rowLink?.countBrushed() ?? ""}`);
       }
       this.#drawLasso();
     });
@@ -565,12 +572,21 @@ export class Controls implements ChartControls {
       const panel = this.#onPlot(event) ? this.#planeAt(at.x, at.y) : undefined;
       const action =
         panel && this.#host.bindings(panel.key).match("doubleClick", event, this.#clears)?.action;
-      if (action?.type === "clearBrush") this.#host.select(null, undefined, "pointer");
+      if (action?.type === "clearBrush") this.#clear("pointer");
       else if (action?.type === "reset") this.#reset(panel!.key, false);
       else if (action?.type === "zoom") this.#zoomBy(panel!.key, action.factor ?? 2, at, false);
     });
     // Ahead of the chart's keys, which read the map's items with the arrows.
     on("keydown", (event) => this.#key(event), { capture: true });
+  }
+
+  /**
+   * Clears the lasso by a gesture of `cause` (bindings clear only while
+   * there is one), and says so where none is selected once listeners have run.
+   */
+  #clear(cause: Press): void {
+    this.#host.select(null, undefined, cause);
+    if (!this.#host.chart.selection) this.#say("Selection cleared.");
   }
 
   /** A binding that clears applies while a lasso is selected; others always. */
@@ -585,9 +601,6 @@ export class Controls implements ChartControls {
   #key(event: KeyboardEvent): void {
     if (event.target !== this.#root) return;
     this.#cause = "keyboard";
-    // Escape clears a lasso, as it clears brushes, and goes on to the chart's keys.
-    if (event.key === "Escape" && this.#host.chart.selection)
-      this.#host.select(null, undefined, "keyboard");
     const cursor = this.#host.cursor();
     const [first] = this.#planes();
     const panel = cursor ? cursor.panel : first?.state === "" ? first.key : undefined;
@@ -605,7 +618,7 @@ export class Controls implements ChartControls {
     // Shift alone: with Ctrl, ⌘, or Alt, the arrows are the page's (or a node's, with Alt).
     const plain = !(event.altKey || event.ctrlKey || event.metaKey);
     const step = event.shiftKey && plain && pans ? steps[event.key] : undefined;
-    if (action?.type === "clearBrush") this.#host.select(null, undefined, "keyboard");
+    if (action?.type === "clearBrush") this.#clear("keyboard");
     else if (action?.type === "zoom") this.#zoomBy(panel!, action.factor ?? ZOOM);
     else if (action?.type === "reset") this.#reset(panel!, true);
     else if (action?.type === "pan") {

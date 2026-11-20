@@ -848,6 +848,30 @@ must test columns the chart sends (a binding's `fields` adds others).
   Down goes nowhere; `i` announces every point the inspection reads. Text
   equal to the last announcement ends in a no-break space, so it is read
   again. The tooltip and drawings are hidden from assistive technology.
+- Selections are announced where a gesture commits them, never where the
+  chart sets one (`api`, `sync`, previews, cancels). A click and Enter
+  take their target's name as they capture the target (`#called`: the
+  item's own point through `keyedPoint` with `drawn`, so marks with
+  `inspect: false` are named; a layout item through `inspectItem`; a
+  series' label), one lookup per click and none per move. A click, Enter,
+  Escape, and clear bindings decide what to say in one place, `#decide`,
+  after their own work and every listener they fire (select,
+  rowSelection, pin, click) have returned: from the selection before the
+  gesture, what it asked for, the name, and what it wrote to bound rows
+  (`ClickedRows`, whose `said()` the row link answers from the channels
+  it wrote and what they hold then), against what holds now, comparing
+  items and series as sets. "Brush cleared." follows one rule whichever
+  way a click goes: a brush went while a bound channel still holds rows
+  (`RowLink.holding()`, read without writing). What listeners' later
+  writes cause (a reconcile of a store a listener wrote, a synced chart)
+  is not said. Space reaches the row link through the controller's keys
+  (`RowLink.key`), after the chart's bindings, so one of them takes each
+  press; the row link says its own `said()`. Brush and lasso releases (the
+  controller's, and maps' and networks' controls) keep their range
+  wording and add `RowLink.countBrushed()` (the controller reaches the
+  link through its host, the layout controls through `ChartModel.rowLink`,
+  which `RowSelection.mount` sets): the count of a set of rows it wrote
+  to one channel that still holds it, never a count of a condition.
 - Keyboard stops are every series a panel's inspector shows
   (`keyboardStops`), so marks with `inspect: false` have none. Up and
   Down follow a run: `orderAt` orders the panel's series at the cursor's
