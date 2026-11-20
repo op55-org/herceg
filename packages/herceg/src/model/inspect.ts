@@ -53,6 +53,12 @@ export interface InspectedPoint {
    */
   content?: readonly ContentRun[];
   /**
+   * The heading its mark's `tooltip.heading` writes for it, which heads a
+   * tooltip showing this point alone: its parts' text, each with its
+   * part's style, as written when inspected.
+   */
+  heading?: readonly ContentRun[];
+  /**
    * A layout item's names from the top, as `getItems` gives them: a tree
    * node's path below the whole tree's root (drilled or not), a pie slice's
    * or a funnel stage's category. Only items of pies, funnels, treemaps,

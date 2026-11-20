@@ -2177,12 +2177,21 @@ const legended: Check = (v, path) => {
 
 /**
  * What a mark's tooltips show of its rows: fields, by name or with a label
- * and format, and a row of parts in place of each point's name and value.
+ * and format, a row of parts in place of each point's name and value, and
+ * parts heading a tooltip of one of its points.
  */
 const tooltip: Check = (v, path) => {
   object(v, path);
   properties(v as Record<string, unknown>, path, {
     content: labelContent,
+    heading: (h, at) => {
+      if (h === false)
+        throw refusal(
+          at,
+          "no heading is the chart's choice; give heading: false to the chart's tooltip",
+        );
+      labelContent(h, at);
+    },
     fields: (list, at) => {
       if (!Array.isArray(list)) fail(at, "an array of fields", list);
       list.forEach((entry, i) => {
@@ -3850,12 +3859,14 @@ const mark: Check = (v, path) => {
   // A summary's items stand for many rows, which have no one value of a
   // field, and its tooltips write the summary.
   const summary = SUMMARIES[spec.type as string];
-  const asked = spec.tooltip as { fields?: unknown; content?: unknown } | null | undefined;
+  const asked = spec.tooltip as Record<string, unknown> | null | undefined;
+  // Parts written from a row: a summary's tooltip writes the summary.
+  const parts = ["content", "heading"].find((list) => asked?.[list] !== undefined);
   if (summary && asked !== undefined)
-    throw asked?.content !== undefined && asked.fields === undefined
+    throw parts && asked?.fields === undefined
       ? refusal(
-          `${path}.tooltip.content`,
-          `${summary}, and its tooltips write each summary as it is; drop content`,
+          `${path}.tooltip.${parts}`,
+          `${summary}, and its tooltips write each summary as it is; drop ${parts}`,
           "unsupported",
         )
       : refusal(
@@ -4216,6 +4227,13 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
           axisLabels: boolean,
           pin: (v, at) => {
             if (v !== false) oneOf("click")(v, at);
+          },
+          heading: (v, at) => {
+            if (v !== false)
+              throw refusal(
+                at,
+                "the chart's tooltip takes false (no heading); give parts to a mark's tooltip",
+              );
           },
         } satisfies ChecksOf<TooltipSpec>);
         if ((t as TooltipSpec).pin && chart.inspection === false)

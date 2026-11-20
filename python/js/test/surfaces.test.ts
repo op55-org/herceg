@@ -227,81 +227,71 @@ describe("an inspected tree node's names, as each front end reports them", () =>
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
 
-  contractTest(
-    "inspection.names.widget",
-    async () => {
-      const model = new MockModel({
-        _chart: {
-          revision: 0,
-          spec: fullSpec(spec),
-          buffers: [],
-          selection: null,
-          viewport: null,
-          drill_root: null,
-          item_positions: {},
-        },
-        _listening: ["click"],
-      });
-      const widget = widgetModule();
-      const page = host();
-      const chart = made(() => {
-        cleanups.push(widget.initialize({ model }));
-        cleanups.push(widget.render({ model, el: page }));
-      });
-      await clickFrance(chart);
-      expect(model.messages("click")).toMatchObject([{ type: "click", event: { inspection } }]);
-    },
-    "names the node's path, in a notebook widget",
-  );
-
-  contractTest(
-    "inspection.names.streamlit",
-    async () => {
-      const payload = encodePayload(fullSpec(spec), [], { events: ["click"] });
-      let triggers: [string, unknown][] = [];
-      const chart = made(() => {
-        const ran = run(host(), payload);
-        cleanups.push(ran.cleanup);
-        triggers = ran.triggers;
-      });
-      await clickFrance(chart);
-      expect(triggers).toMatchObject([["click", { inspection }]]);
-    },
-    "names the node's path, in a Streamlit app",
-  );
-
-  contractTest(
-    "inspection.names.web",
-    async () => {
-      const page = host();
-      const inline = { protocol: 1, kind: "chart", spec: fullSpec(spec), buffers: [] };
-      const template = document.createElement("template");
-      template.setAttribute("data-herceg-payload", "");
-      template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      page.dataset.herceg = "";
-      page.append(template);
-      const clicks: unknown[] = [];
-      page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
-      const chart = await mountFragment(page);
-      cleanups.push(() => unmountFragment(page));
-      await clickFrance(chart as unknown as MountedChart);
-      expect(clicks).toMatchObject([{ inspection }]);
-    },
-    "names the node's path, in a web page",
-  );
-
-  // The same sector, its tooltip's row written from parts.
-  const written = sent({
-    ...spec,
-    marks: [
-      {
-        ...(spec.marks as object[])[0],
-        tooltip: {
-          content: [{ series: true, style: { fontWeight: 600 } }, " in ", { field: "region" }],
-        },
+  /** The click events a notebook widget sends of France, drawing `drawn`. */
+  async function widgetClicks(drawn: DrawnCase["spec"]) {
+    const model = new MockModel({
+      _chart: {
+        revision: 0,
+        spec: fullSpec(drawn),
+        buffers: [],
+        selection: null,
+        viewport: null,
+        drill_root: null,
+        item_positions: {},
       },
-    ],
-  } as unknown as DrawnCase["spec"]);
+      _listening: ["click"],
+    });
+    const widget = widgetModule();
+    const page = host();
+    const chart = made(() => {
+      cleanups.push(widget.initialize({ model }));
+      cleanups.push(widget.render({ model, el: page }));
+    });
+    await clickFrance(chart);
+    return model.messages("click");
+  }
+
+  /** The click events a Streamlit app triggers of France, drawing `drawn`. */
+  async function streamlitClicks(drawn: DrawnCase["spec"]) {
+    const payload = encodePayload(fullSpec(drawn), [], { events: ["click"] });
+    let triggers: [string, unknown][] = [];
+    const chart = made(() => {
+      const ran = run(host(), payload);
+      cleanups.push(ran.cleanup);
+      triggers = ran.triggers;
+    });
+    await clickFrance(chart);
+    return triggers;
+  }
+
+  /** The click events a web page dispatches of France, drawing `drawn`. */
+  async function pageClicks(drawn: DrawnCase["spec"]) {
+    const page = host();
+    const inline = { protocol: 1, kind: "chart", spec: fullSpec(drawn), buffers: [] };
+    const template = document.createElement("template");
+    template.setAttribute("data-herceg-payload", "");
+    template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    page.dataset.herceg = "";
+    page.append(template);
+    const clicks: unknown[] = [];
+    page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
+    const chart = await mountFragment(page);
+    cleanups.push(() => unmountFragment(page));
+    await clickFrance(chart as unknown as MountedChart);
+    return clicks;
+  }
+
+  /** The same sector, its tooltip's `tooltip` as given. */
+  const withTooltip = (tooltip: object) =>
+    sent({
+      ...spec,
+      marks: [{ ...(spec.marks as object[])[0], tooltip }],
+    } as unknown as DrawnCase["spec"]);
+
+  // Its tooltip's row written from parts.
+  const written = withTooltip({
+    content: [{ series: true, style: { fontWeight: 600 } }, " in ", { field: "region" }],
+  });
   const content = {
     axis: "item",
     points: [
@@ -315,69 +305,48 @@ describe("an inspected tree node's names, as each front end reports them", () =>
       },
     ],
   };
+  // Its tooltip's heading written from parts.
+  const headed = withTooltip({
+    heading: [{ field: "country", style: { fontStyle: "italic" } }, " sales"],
+  });
+  const heading = {
+    axis: "item",
+    points: [
+      {
+        label: "Europe / France",
+        heading: [{ text: "France", style: { fontStyle: "italic" } }, { text: " sales" }],
+      },
+    ],
+  };
 
-  contractTest(
-    "inspection.content.widget",
-    async () => {
-      const model = new MockModel({
-        _chart: {
-          revision: 0,
-          spec: fullSpec(written),
-          buffers: [],
-          selection: null,
-          viewport: null,
-          drill_root: null,
-          item_positions: {},
-        },
-        _listening: ["click"],
-      });
-      const widget = widgetModule();
-      const page = host();
-      const chart = made(() => {
-        cleanups.push(widget.initialize({ model }));
-        cleanups.push(widget.render({ model, el: page }));
-      });
-      await clickFrance(chart);
-      expect(model.messages("click")).toMatchObject([
-        { type: "click", event: { inspection: content } },
-      ]);
-    },
-    "carries the row its content wrote, in a notebook widget",
-  );
-
-  contractTest(
-    "inspection.content.streamlit",
-    async () => {
-      const payload = encodePayload(fullSpec(written), [], { events: ["click"] });
-      let triggers: [string, unknown][] = [];
-      const chart = made(() => {
-        const ran = run(host(), payload);
-        cleanups.push(ran.cleanup);
-        triggers = ran.triggers;
-      });
-      await clickFrance(chart);
-      expect(triggers).toMatchObject([["click", { inspection: content }]]);
-    },
-    "carries the row its content wrote, in a Streamlit app",
-  );
-
-  contractTest(
-    "inspection.content.web",
-    async () => {
-      const page = host();
-      const inline = { protocol: 1, kind: "chart", spec: fullSpec(written), buffers: [] };
-      const template = document.createElement("template");
-      template.setAttribute("data-herceg-payload", "");
-      template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      page.dataset.herceg = "";
-      page.append(template);
-      const clicks: unknown[] = [];
-      page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
-      const chart = await mountFragment(page);
-      cleanups.push(() => unmountFragment(page));
-      await clickFrance(chart as unknown as MountedChart);
-      expect(clicks).toMatchObject([{ inspection: content }]);
-    },
-    "carries the row its content wrote, in a web page",
-  );
+  const surfaces = [
+    [
+      "widget",
+      "a notebook widget",
+      async (drawn: DrawnCase["spec"]) => (await widgetClicks(drawn)).map(({ event }) => event),
+    ],
+    [
+      "streamlit",
+      "a Streamlit app",
+      async (drawn: DrawnCase["spec"]) => (await streamlitClicks(drawn)).map(([, event]) => event),
+    ],
+    ["web", "a web page", pageClicks],
+  ] as const;
+  for (const [surface, where, clicks] of surfaces) {
+    contractTest(
+      `inspection.names.${surface}`,
+      async () => expect(await clicks(spec)).toMatchObject([{ inspection }]),
+      `names the node's path, in ${where}`,
+    );
+    contractTest(
+      `inspection.content.${surface}`,
+      async () => expect(await clicks(written)).toMatchObject([{ inspection: content }]),
+      `carries the row its content wrote, in ${where}`,
+    );
+    contractTest(
+      `inspection.heading.${surface}`,
+      async () => expect(await clicks(headed)).toMatchObject([{ inspection: heading }]),
+      `carries the heading its mark wrote, in ${where}`,
+    );
+  }
 });

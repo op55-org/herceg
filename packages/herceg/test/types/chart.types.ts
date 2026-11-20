@@ -17,6 +17,14 @@ declare const maybeTitle: string | undefined;
 const data = table({ x: [0, 1], y: [1, 2] });
 const chart = createChart(element, { marks: [line(data, { x: "x", y: "y" })] });
 
+// The chart's tooltip takes no heading (false); parts head a mark's own points.
+createChart(element, { tooltip: { heading: false }, marks: [] });
+// @ts-expect-error parts belong to a mark's tooltip
+createChart(element, { tooltip: { heading: [{ field: "x" }] }, marks: [] });
+chart.update({ tooltip: { heading: false } });
+chart.inspect(0, 0)?.points[0]?.heading?.map((run) => run.text);
+chart.on("hover", ({ inspection }) => inspection?.points[0]?.heading?.[0]?.style?.fontWeight);
+
 // Undefined resets an option to its default; values replace it.
 chart.update({ title: undefined, theme: "dark" });
 chart.update({ title: maybeTitle, y: { title: "ms" } });

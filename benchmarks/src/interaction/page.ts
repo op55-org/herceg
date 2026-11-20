@@ -11,6 +11,7 @@ import {
   anchor,
   type Chart,
   createChart,
+  custom,
   histogram,
   line,
   rowSelection,
@@ -37,6 +38,8 @@ export interface Fixture {
 
 export type FixtureName =
   | "hover-listener"
+  | "hover-headings"
+  | "custom-hover"
   | "pan-labels"
   | "anchor-pan"
   | "cross-filter"
@@ -176,14 +179,17 @@ async function pixels(base64: string) {
 /**
  * One chart of 8 series x 2,000 minutes with a rule at the hovered minute,
  * which a `hover` listener writes: the move's effect is the rule drawn
- * there, in the move's frame.
+ * there, in the move's frame. With `headed`, the lines' tooltip has heading
+ * parts, which every point read writes though the tooltip of eight points
+ * shows its place (`hover-headings`).
  */
-async function hoverListener(count: number): Promise<Fixture> {
+async function hoverListener(count: number, headed = false): Promise<Fixture> {
   const { data, names } = walks(8, 2_000, 1);
   const marker = table({ t: time(Float64Array.of(START)) });
+  const heading = [{ series: true }, " at ", { field: "t", format: { time: "%H:%M" } }] as const;
   const chart = createChart(host(800, 400), {
     marks: [
-      line(data, { x: "t", y: names }),
+      line(data, { x: "t", y: names, ...(headed && { tooltip: { heading } }) }),
       rule(marker, { x: "t", stroke: MARKED, strokeWidth: 3 }),
     ],
     timeZone: "UTC",
@@ -215,6 +221,114 @@ async function hoverListener(count: number): Promise<Fixture> {
     if (x === undefined || !line) return "the rule is not drawn";
     if (Math.abs(Number(line[1]) - x) > 1)
       return `the rule is drawn at ${line[1]} px, not at the hovered minute's ${x.toFixed(1)}`;
+    if (!headed) return;
+    // Every point read carries its heading where the build writes them; the box keeps the place.
+    const read = chart.inspect(x, chart.getPanels()[0]!.plot.y + 10)!;
+    const heads = read.points.map((point) => point.heading?.map((run) => run.text).join(""));
+    if (heads.some((text) => text !== undefined && !/^s\d at \d\d:\d\d$/.test(text)))
+      return `points read carry headings ${heads.join(", ")}`;
+    const shown = tooltipBox(chart)?.firstElementChild?.textContent;
+    if (shown !== read.label) return `the tooltip is headed "${shown}", not by its place`;
+  };
+  return { moves };
+}
+
+/** The chart's tooltip box, where it shows. */
+const tooltipBox = (chart: Chart) =>
+  [...chart.root.children].find(
+    (child): child is HTMLDivElement =>
+      child instanceof HTMLDivElement &&
+      child.style.padding === "8px 10px" &&
+      child.style.display === "block",
+  );
+
+/**
+ * A2's comets: 2,000 custom range items from (x0, y0) to (x1, y1), read
+ * by the one nearest the pointer, their tooltip headed by the comet's own
+ * id and category and its row written from parts. The move's effect is the
+ * tooltip showing the comet under the pointer.
+ */
+async function customHover(count: number): Promise<Fixture> {
+  const n = 2_000;
+  const next = random(4);
+  const categories = ["rates", "fx", "credit", "equity"];
+  const x0 = Float64Array.from({ length: n }, () => next() * 100);
+  const y0 = Float64Array.from({ length: n }, () => next() * 100);
+  const comets = table({
+    id: Array.from({ length: n }, (_, i) => `C-${String(i).padStart(4, "0")}`),
+    x0,
+    y0,
+    x1: x0.map((x) => x + 2 + next() * 6),
+    y1: y0.map((y) => y + (next() - 0.5) * 6),
+    confidence: Float64Array.from({ length: n }, () => 0.5 + next() / 2),
+    category: Array.from({ length: n }, () => categories[Math.floor(next() * 4)]!),
+  });
+  const chart = createChart(host(800, 400), {
+    inspection: { mode: "nearest" },
+    marks: [
+      custom(comets, {
+        x: ["x0", "x1"],
+        y: ["y0", "y1"],
+        series: "category",
+        itemKey: "id",
+        tooltip: {
+          heading: [{ field: "id", style: { fontWeight: 600 } }, " (", { field: "category" }, ")"],
+          content: [{ field: "id" }, " ", { series: true }, ": ", { value: true }],
+          fields: ["confidence"],
+        },
+        draw({ table: t, series, x, y, item, path, circle }) {
+          const [ex, ey] = [t.numbers("x1"), t.numbers("y1")];
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              const [ax, ay, bx, by] = [x(s.x[row]!), y(s.y[row]!), x(ex[row]!), y(ey[row]!)];
+              item(s, row, () => {
+                // A tail tapering to the head's point.
+                path(`M${ax},${ay - 3}L${bx},${by}L${ax},${ay + 3}Z`, {
+                  fill: s.color,
+                  opacity: 0.7,
+                });
+                circle(ax, ay, 3, { fill: s.color });
+              });
+            }
+        },
+      }),
+    ],
+  });
+  charts = [chart];
+  await chart.loading;
+  await until(chart);
+  // Each move at a comet's start, and what the tooltip shows there: the comet read nearest.
+  const box = chart.root.getBoundingClientRect();
+  const moves: Point[] = [];
+  const expected: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const row = (i * 83) % n;
+    const px = chart.toPixel(x0[row]!, { axis: "x" })!;
+    const py = chart.toPixel(y0[row]!, { axis: "y" })!;
+    const [read] = chart.inspect(px, py)!.points;
+    moves.push({ x: box.left + px, y: box.top + py });
+    expected.push(comets.value("id", read!.row!) as string);
+  }
+  let last = -1;
+  const observer = new MutationObserver(() => {
+    if (!moving() || !tooltipBox(chart)?.textContent?.includes(expected[armed!.index]!)) return;
+    last = armed!.index;
+    drawn();
+  });
+  observer.observe(chart.root, { subtree: true, childList: true, characterData: true });
+  stops.push(() => observer.disconnect());
+  verify = async () => {
+    const shown = tooltipBox(chart);
+    const id = expected[last];
+    if (!shown || !id || !shown.textContent!.includes(id))
+      return `the tooltip does not show ${id}, the comet under the pointer`;
+    // Where the build writes headings, the comet's own heads its tooltip.
+    const move = moves[last]!;
+    const [read] = chart.inspect(move.x - box.left, move.y - box.top)!.points;
+    const heading = read?.heading?.map((run) => run.text).join("");
+    if (heading !== undefined && shown.firstElementChild!.textContent !== heading)
+      return `the tooltip is headed "${shown.firstElementChild!.textContent}", not "${heading}"`;
   };
   return { moves };
 }
@@ -486,6 +600,8 @@ async function crosshairDashboard(count: number): Promise<Fixture> {
 
 const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
+  "hover-headings": (count) => hoverListener(count, true),
+  "custom-hover": customHover,
   "pan-labels": panLabels,
   "anchor-pan": anchorPan,
   "cross-filter": crossFilter,

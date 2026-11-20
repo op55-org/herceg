@@ -1,3 +1,4 @@
+import type { ContentRun } from "../marks/tooltip-fields.ts";
 import type { InspectedPoint, Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
 
@@ -8,6 +9,39 @@ import type { Theme } from "../theme.ts";
  * place as its size changes.
  */
 export type RenderTooltip = (inspection: Inspection) => string | Node | null | undefined;
+
+/**
+ * A tooltip's heading row as runs: the place it reads, or the heading of a
+ * point it shows alone (its mark's `tooltip.heading`); undefined for none
+ * (the chart's `tooltip.heading: false`). The controller decides it
+ * (`headingOf`) and both draws of the box take it as given.
+ */
+export type TooltipHeading = readonly ContentRun[] | undefined;
+
+/**
+ * The heading of a tooltip showing `inspection`: none unless `headed`; a
+ * point shown alone, its mark's heading where it has one (`headingSaid`);
+ * else the place. Several points keep the place: a heading of one of them
+ * would change as the legend hides series.
+ */
+export function headingOf(inspection: Inspection, headed: boolean): TooltipHeading {
+  return headed ? ownHeading(inspection) || [{ text: inspection.label }] : undefined;
+}
+
+/** The heading of `inspection`'s one point (its mark's `tooltip.heading`), where it reads one. */
+function ownHeading({ points }: Inspection): readonly ContentRun[] | undefined {
+  return points.length === 1 ? points[0]!.heading : undefined;
+}
+
+/**
+ * What the keyboard says of `inspection`'s heading before its point, as
+ * "C-12. ": its one point's own, where it reads one point whose mark has
+ * one. The place is said too, as always: the heading names the point.
+ */
+export function headingSaid(inspection: Inspection): string {
+  const heading = runsText(ownHeading(inspection));
+  return heading ? `${heading}. ` : "";
+}
 
 /**
  * The tooltip's box. Charts with tooltip fields or `renderTooltip` show it
@@ -28,11 +62,12 @@ export class Tooltip {
   }
 
   /**
-   * Shows `inspection` beside `pointer`, within `bounds`; the point at
-   * index `own` (the keyboard cursor's) has its label in bold.
+   * Shows `inspection` under `heading` beside `pointer`, within `bounds`;
+   * the point at index `own` (the keyboard cursor's) has its label in bold.
    */
   show(
     inspection: Inspection,
+    heading: TooltipHeading,
     theme: Theme,
     pointer: { x: number; y: number },
     bounds: { width: number; height: number },
@@ -60,7 +95,9 @@ export class Tooltip {
       header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
       element.append(header);
     }
-    write(header, inspection.label);
+    // A heading's runs are their text alone, until what draws their styles loads.
+    header.hidden = !heading;
+    write(header, runsText(heading) ?? "");
     const { points } = inspection;
     while (element.childElementCount > points.length + 1) element.lastElementChild!.remove();
     this.#colors.length = points.length;
@@ -82,7 +119,7 @@ export class Tooltip {
       const [swatch, label, value] = row.children as unknown as HTMLSpanElement[];
       if (this.#colors[i] !== point.color) swatch!.style.background = this.#colors[i] = point.color;
       // A row of content is its text alone, until what draws its parts' styles loads.
-      const content = contentText(point);
+      const content = runsText(point.content);
       write(label!, content ?? point.label);
       label!.style.fontWeight = i === own ? "600" : "";
       write(value!, point.text);
@@ -107,19 +144,30 @@ function write(element: HTMLElement, text: string): void {
   if (element.textContent !== text) element.textContent = text;
 }
 
-/** Plain-text version of an inspection for screen reader announcements. */
+/**
+ * Plain-text version of an inspection for screen reader announcements: the
+ * place, the heading of a point read alone, and the points, leaving out
+ * those that write no text.
+ */
 export function describeInspection(inspection: Inspection): string {
   return [
     inspection.label,
+    runsText(ownHeading(inspection)),
     ...inspection.points.map(
-      (point) => `${contentText(point) ?? `${point.label}: ${point.text}`}${fieldsSpoken(point)}`,
+      (point) =>
+        `${runsText(point.content) ?? `${point.label}: ${point.text}`}${fieldsSpoken(point)}`,
     ),
-  ].join(". ");
+  ]
+    .filter(Boolean)
+    .join(". ");
 }
 
-/** A point's row as its mark's `tooltip.content` wrote it, as text; undefined without content. */
-export function contentText({ content }: InspectedPoint): string | undefined {
-  return content?.map((run) => run.text).join("");
+/**
+ * Runs as text: a point's content (its row as its mark's `tooltip.content`
+ * wrote it) or a heading; undefined without runs.
+ */
+export function runsText(runs: readonly ContentRun[] | undefined): string | undefined {
+  return runs?.map((run) => run.text).join("");
 }
 
 /** A point's tooltip fields, as announcements read them after its value. */

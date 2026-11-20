@@ -54,7 +54,9 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   `v-model:visibility`, and `v-model:drill-root`.
 - **Tooltips** of your own render in the `renderTooltip` slot; a tree
   node's point carries its path (`point.names`), and a mark's
-  `tooltip.content` its row as written (`point.content`).
+  `tooltip.content` and `tooltip.heading` its row and heading as written
+  (`point.content`, `point.heading`). The chart's `:tooltip="{ heading:
+  false }"` leaves the built-in box's heading out.
 - **Anchors**: `<Anchor :at="{ x, y }" side="top">` in the chart's slot
   holds its slot's content at a place in the data, moving with every
   frame, kept inside the chart (`:fit`; its wrapper's `data-side` tells

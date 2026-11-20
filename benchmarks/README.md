@@ -324,12 +324,14 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Five fixtures, each move checked
+drawing path; it compares no libraries. Seven fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
 | --- | --- | --- |
 | `hover-listener` | One chart of 8 series x 2,000 minutes, and a rule a `hover` listener moves to the hovered minute | The rule drawn there |
+| `hover-headings` | `hover-listener`'s chart, its lines' tooltip with heading parts, which every point read writes though the tooltip of eight keeps its place | The rule drawn there |
+| `custom-hover` | One chart of 2,000 custom range items (A2's comets) read `"nearest"`, their tooltip with `content`, `fields`, and a `heading` of the comet's id and category | The tooltip showing the comet under the pointer |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
@@ -346,7 +348,10 @@ channel, the cursor), and as drawn once a `render` of the revision its
 change made has come; a move whose effect is not drawn within 1 s is a
 miss, and misses fail the run. After the measured moves, untimed, each
 block checks what was drawn: the rule at the hovered minute and the
-labels at both ends of the view (the chart's SVG), the brushed rows
+labels at both ends of the view (the chart's SVG), the tooltip showing
+the last comet hovered, headed by its own heading in builds that write
+headings, and the shared reading headed by its place, its points carrying
+their headings in those builds, the brushed rows
 highlighted in the other histograms (their SVG changed), the crosshair
 in each of the nine other charts (a screenshot's pixels), and each
 anchor 8 px above or below its place where it is in view and hidden

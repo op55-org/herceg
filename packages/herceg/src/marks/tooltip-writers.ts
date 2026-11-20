@@ -1,7 +1,8 @@
 // What marks' tooltips write of the points they are at besides their names
 // and values, as inspections take them: the fields of their rows
-// (`tooltip.fields`) and their rows of parts (`tooltip.content`). Charts
-// whose marks have either load it as their first frame draws, and their
+// (`tooltip.fields`), their rows of parts (`tooltip.content`), and their
+// headings (`tooltip.heading`). Charts whose marks have any load it as
+// their first frame draws, and their
 // controllers and `ready` wait for it (dom/chart.ts); SVG titles import
 // it. It imports only
 // types of the chart's modules and writes with the chart's code handed in
@@ -37,7 +38,7 @@ type PartWriter = (row: number | undefined, point: PointText, names?: readonly s
  * first read, as a malformed one is.
  *
  * Content writes each part on one line, in place of the point's name and
- * value: text as it is; `{ series: true }` as the point is named (a
+ * value, and a heading its parts likewise: text as it is; `{ series: true }` as the point is named (a
  * format on it is reported, once, and not used);
  * `{ value: true }` as the tooltip writes the value, or in its format (a
  * time pattern or Intl date options write it as a time); `{ field }` as a
@@ -92,19 +93,28 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
             : (own ?? fallback(kind))(value);
     return { kind, shown, writes, text };
   };
-  /** Each mark's content as parts' writers and styles, made at its first inspection. */
-  const contents = new Map<object, [PartWriter, PartStyle | undefined][]>();
+  /** Each mark's content and heading as parts' writers and styles, made at its first inspection. */
+  const made = {
+    content: new Map<object, [PartWriter, PartStyle | undefined][]>(),
+    heading: new Map<object, [PartWriter, PartStyle | undefined][]>(),
+  };
   const partsOf = (
     mark: Parameters<ReturnType<TooltipWriters>>[0] & object,
+    list: "content" | "heading",
     content: readonly unknown[],
-    table: Table | undefined,
-    spec: { path?: readonly string[]; node?: string; parent?: string; category?: string },
   ) => {
-    let parts = contents.get(mark);
+    let parts = made[list].get(mark);
     if (parts) return parts;
+    const { table } = mark;
+    const spec = mark.spec as {
+      path?: readonly string[];
+      node?: string;
+      parent?: string;
+      category?: string;
+    };
     parts = content.map((given, i): [PartWriter, PartStyle | undefined] => {
       if (typeof given === "string") return [() => given, undefined];
-      const at = `tooltip.content[${i}]`;
+      const at = `tooltip.${list}[${i}]`;
       const part = given as {
         series?: true;
         value?: true;
@@ -174,8 +184,25 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
         style,
       ];
     });
-    contents.set(mark, parts);
+    made[list].set(mark, parts);
     return parts;
+  };
+  /** `list`'s runs for a point: each part's text, in its style. */
+  const runsOf = (
+    mark: Parameters<ReturnType<TooltipWriters>>[0] & object,
+    list: "content" | "heading",
+    row: number | undefined,
+    point: PointText,
+    names: readonly string[] | undefined,
+  ) => {
+    const given = mark.spec.tooltip![list];
+    return (
+      given &&
+      partsOf(mark, list, given).map(([part, style]): ContentRun => {
+        const text = part(row, point, names);
+        return style ? { text, style } : { text };
+      })
+    );
   };
   return (mark, row, point, names) => {
     const tooltip = mark?.spec.tooltip;
@@ -206,16 +233,10 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
             if (link) read.link = link;
             return read;
           });
-    const content =
-      tooltip.content &&
-      partsOf(mark, tooltip.content, table, mark.spec as object).map(
-        ([part, style]): ContentRun => {
-          const text = part(row, point, names);
-          return style ? { text, style } : { text };
-        },
-      );
-    return fields || content
-      ? { ...(fields && { fields }), ...(content && { content }) }
+    const content = runsOf(mark, "content", row, point, names);
+    const heading = runsOf(mark, "heading", row, point, names);
+    return fields || content || heading
+      ? { ...(fields && { fields }), ...(content && { content }), ...(heading && { heading }) }
       : undefined;
   };
 };

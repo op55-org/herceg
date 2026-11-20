@@ -85,6 +85,20 @@ bar(readings, { x: "stage", y: "cpu", tooltip: { fields: [{ label: "CPU" }] } })
 // @ts-expect-error histogram bins summarize rows, so they have no fields to show
 histogram(readings, { x: "cpu", tooltip: { fields: ["stage"] } });
 
+// A tooltip's heading: parts of the mark's fields; none is the chart's choice.
+custom(readings, {
+  x: "at",
+  y: "cpu",
+  tooltip: { heading: [{ field: "stage", style: { fontWeight: 600 } }, " ", { value: true }] },
+  draw: () => {},
+});
+// @ts-expect-error a part's field must be a field of the table
+line(readings, { x: "at", y: "cpu", tooltip: { heading: [{ field: "stg" }] } });
+// @ts-expect-error no heading is the chart's choice, not a mark's
+line(readings, { x: "at", y: "cpu", tooltip: { heading: false } });
+// @ts-expect-error histogram bins summarize rows, so they have no heading to write
+histogram(readings, { x: "cpu", tooltip: { heading: ["n"] } });
+
 // Gauges show, and funnels sum, numbers: not times or categories.
 gauge(readings, { value: "cpu" });
 // @ts-expect-error times are not numbers

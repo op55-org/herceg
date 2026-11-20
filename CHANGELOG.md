@@ -282,6 +282,26 @@ have them draws, which does not wait for it; tooltips, announcements, and
 `ready` do, so `chart.inspect()` after `ready` carries both, and no other
 chart loads it. See [Content](docs/guide/interaction.md#content).
 
+A tooltip's heading row, the place it reads, can change. The chart's
+`tooltip: { heading: false }` (`hg.Chart(tooltip=hg.Tooltip(heading=False))`)
+leaves it out of every tooltip: shared readings, items, pinned tooltips,
+the keyboard's, and other panels'. A mark's `tooltip.heading` takes label
+parts, as `content` does, and heads a tooltip showing one of its points
+alone (inspection "nearest", an item, one series read) in place of the
+place: a range item headed by its id or its ends. Tooltips of several
+points keep the place; the keyboard announces the place, and a point's
+heading where it reads one point alone. Other panels' tooltips
+(`sync.panels.tooltip`) draw fields, styled content, and headings as the
+chart's own does. Inspected
+points carry the heading their mark wrote (`point.heading`) in events,
+`renderTooltip`, `chart.inspect`, `herceg/web` pages, notebook widgets,
+Streamlit, and Python's `hg.InspectedPoint.heading`; static SVG titles
+are headed alike. Python's one-call helpers give `heading=False` to their
+chart and heading parts to their mark, and `herceg.express` takes
+`heading=False` as a chart option. Python sends the columns tooltip
+content and headings read along with the data. See
+[Headings](docs/guide/interaction.md#headings).
+
 Stacked areas take `where`. A condition on the series field alone picks
 the layers, so one table can feed lines of all its series and a stack of
 some (`where: col("series").isIn(...)`), stacked as a table of those

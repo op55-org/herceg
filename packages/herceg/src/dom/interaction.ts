@@ -46,7 +46,7 @@ import type {
   TextItem,
   tickLabelGap,
 } from "../scene/scene.ts";
-import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
+import type { BrushSpec, CursorShowSpec, Snap, TooltipSpec, ZoomSpec } from "../spec/spec.ts";
 import type {
   ChartSelection,
   ItemReference,
@@ -74,7 +74,15 @@ import type { LegendClick } from "./legend.ts";
 import { pressed, pressFocus } from "./press-focus.ts";
 import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
-import { contentText, describeInspection, fieldsSpoken, Tooltip } from "./tooltip.ts";
+import {
+  describeInspection,
+  fieldsSpoken,
+  headingOf,
+  headingSaid,
+  runsText,
+  Tooltip,
+} from "./tooltip.ts";
+import type { ownContent } from "./tooltip-content.ts";
 
 // Layout controls compile their bindings with this module's class
 // (layout-controls.ts), which keeps it in this module's chunk: in a chunk
@@ -418,7 +426,8 @@ export class Interaction {
   #crosshairLoading: Promise<void> | undefined;
   /** What draws tooltip fields and content and `renderTooltip`'s content, while it loads; and once it has. */
   #content: Promise<void> | undefined;
-  #drawsContent = false;
+  /** What draws it, once loaded: on the chart's own tooltip and on other panels'. */
+  #ownContent: typeof ownContent | undefined;
   #pointer: { x: number; y: number } | null = null;
   /** Whether the pointer is a touch, which reaches further (see `#slop`). */
   #touch = false;
@@ -2105,6 +2114,8 @@ export class Interaction {
       }
     const options = host.options();
     const showTooltip = options.tooltip ?? true;
+    // Whether tooltips have a heading row (`true` reads no `heading`).
+    const headed = (showTooltip as TooltipSpec).heading !== false;
     // The pinned tooltip, read again: a pin whose item went lets go here.
     const pinned = this.#pinned();
     if (changed()) return;
@@ -2168,7 +2179,11 @@ export class Interaction {
     }
     // Each inspected point's marker: its center, color, and clip.
     const dots: [number, number, string, string | undefined][] = [];
-    let tipped = 0;
+    // The chart's own box, which draws `renderTooltip`, is the pointer's or
+    // keyboard's: where its reading shows nothing, it hides, and other
+    // panels' readings take the next boxes.
+    let tipped = +(!!own && !this.#pin && !tips.has(active!));
+    if (tipped) this.#tooltip.hide();
     this.#outline.setAttribute("visibility", "hidden");
     this.#ring.setAttribute("visibility", "hidden");
     const bounds = { width: scene.width, height: scene.height };
@@ -2191,7 +2206,14 @@ export class Interaction {
         const [item] = inspection.points;
         const at = { x: item!.px, y: item!.py };
         const anchor = inspection === pinned ? at : (this.#pointer ?? at);
-        if (tips.has(inspection)) this.#tip(tipped++).show(inspection, theme, anchor, bounds);
+        if (tips.has(inspection))
+          this.#tip(tipped++).show(
+            inspection,
+            headingOf(inspection, headed),
+            theme,
+            anchor,
+            bounds,
+          );
         continue;
       }
       const { plot } = target!;
@@ -2252,7 +2274,8 @@ export class Interaction {
         const row = inspection.points.findIndex(
           (p) => !!own && p.key === own.key && p.px === own.px && p.py === own.py,
         );
-        this.#tip(tipped++).show(inspection, theme, anchor, bounds, row);
+        const heading = headingOf(inspection, headed);
+        this.#tip(tipped++).show(inspection, heading, theme, anchor, bounds, row);
       }
     }
     // Markers are kept from one move to the next, their attributes rewritten.
@@ -2331,6 +2354,7 @@ export class Interaction {
       tip = new Tooltip(this.#host.root.ownerDocument);
       this.#host.root.append(tip.element);
       this.#tips.push(tip);
+      if (this.#ownContent) this.#builtIn(tip);
     }
     return tip;
   }
@@ -3983,9 +4007,11 @@ export class Interaction {
       // A series of one place (a box plot's category) is not named twice.
       const where = own!.label === point.label ? "" : ` at ${own!.label}`;
       const named = from?.panel !== panel || from.key !== key;
-      // A row of content is read whole, in place of the name and value.
-      const content = contentText(point);
-      text = `${content === undefined ? `${named ? `${point.label}${rank}: ` : ""}${point.text}` : `${content}${rank}`}${where}${fieldsSpoken(point)}`;
+      // A row of content is read whole, in place of the name and value,
+      // after its point's heading, which a box of several points does not show.
+      const content = runsText(point.content);
+      const heading = (inspection ?? own)!.points.length > 1 ? "" : headingSaid(own!);
+      text = `${heading}${content === undefined ? `${named ? `${point.label}${rank}: ` : ""}${point.text}` : `${content}${rank}`}${where}${fieldsSpoken(point)}`;
     }
     // Arriving in a panel, the cursor names it and the annotations it alone draws.
     if (model.namesPanels && from?.panel !== panel)
@@ -4164,10 +4190,10 @@ export class Interaction {
     const text =
       inspection.axis === "item"
         ? describeInspection(inspection)
-        : `${inspection.points.length} series at ${inspection.label}: ${inspection.points
+        : `${inspection.points.length} series at ${inspection.label}: ${headingSaid(inspection)}${inspection.points
             .map(
               (point) =>
-                `${contentText(point) ?? `${point.label} ${point.text}`}${fieldsSpoken(point)}`,
+                `${runsText(point.content) ?? `${point.label} ${point.text}`}${fieldsSpoken(point)}`,
             )
             .join("; ")}`;
     this.#say(text);
@@ -4260,25 +4286,36 @@ export class Interaction {
   }
 
   /**
+   * Draws tooltip `tip` with what draws fields, styled content and
+   * headings; `renderTooltip`'s content and pinning are the chart's `own`
+   * tooltip's alone, other panels' boxes show the built-in content.
+   */
+  #builtIn(tip: Tooltip, own?: boolean): void {
+    const host = this.#host;
+    this.#cleanup.push(
+      this.#ownContent!(
+        tip,
+        () => (own ? host.options().renderTooltip : undefined),
+        () => host.revision(),
+        () => !!own && !!this.#pin,
+      ),
+    );
+  }
+
+  /**
    * Loads what draws the fields and content marks' tooltips show, which
    * inspections carry (written as the chart inspects), and
    * `renderTooltip`'s content, in the tooltip.
    */
   #loadContent(): void {
     const host = this.#host;
-    if (this.#content || this.#drawsContent) return;
+    if (this.#content || this.#ownContent) return;
     this.#content = import("./tooltip-content.ts")
       .then(({ ownContent }) => {
         if (this.#disposed) return;
-        this.#drawsContent = true;
-        this.#cleanup.push(
-          ownContent(
-            this.#tooltip,
-            () => host.options().renderTooltip,
-            () => host.revision(),
-            () => !!this.#pin,
-          ),
-        );
+        this.#ownContent = ownContent;
+        this.#builtIn(this.#tooltip, true);
+        for (const tip of this.#tips) this.#builtIn(tip);
       })
       // Without it, tooltips show points' names and values (or their content's text).
       .catch((error: unknown) => this.#host.report(error, "load"))

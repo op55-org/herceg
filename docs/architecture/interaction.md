@@ -488,8 +488,9 @@ the view, and the selection, each on one of the chart's scales.
   only text and colors that changed.
 - Values are written with the axis' `tooltipFormat`, else its `format`, the
   same formatter `formatValue` and the keyboard use.
-- **Fields and content.** Marks check the fields `tooltip.fields` and
-  `tooltip.content` read against their tables when made
+- **Fields, content, and headings.** Marks check the fields
+  `tooltip.fields`, `tooltip.content`, and `tooltip.heading` read against
+  their tables when made
   (`marks/tooltip-fields.ts`). What writes them
   (`marks/tooltip-writers.ts`) is a fourth lazy compiler beside the guide
   and feature compilers and the display code: a chart whose marks have a
@@ -502,12 +503,29 @@ the view, and the selection, each on one of the chart's scales.
   arrives. One that cannot load is reported as a compiler is, and `ready`
   rejects. The model hands each inspector a writer in the chart's locale
   and time zone, and inspections carry the fields and each point's content
-  (its parts' text and styles), written when inspected; layout items write
+  and heading (its parts' text and styles), written when inspected for
+  every point of such a mark, shown or not; layout items write
   them at their row, or at the one row `rowsOf` gives. A part's problem
   drawn on (a format on `{ series: true }`) is told once through the
   model's `report`, which the chart sets to its error path. Drawing
   content's styled runs in the box (`dom/tooltip-content.ts`) loads with
   the controller.
+- **The heading** is decided once per shown tooltip by the controller
+  (`headingOf` in `dom/tooltip.ts`): none with the chart's
+  `tooltip.heading: false`, else the one point's mark heading where the
+  tooltip shows one point, else the place (`inspection.label`). Both draws
+  of the box, the plain one and the content chunk's, take that decision
+  as given, so a box keeps its heading as the content chunk arrives and
+  every panel's box applies the same rule. Other panels' boxes
+  (`sync.panels.tooltip`) are drawn by the content chunk too, once it is
+  here: fields, styled content, and headings, never `renderTooltip`'s
+  content, which is the chart's own box's. That box is the pointer's or
+  keyboard's reading's (or a pin's); where that reading shows nothing it
+  hides, and other panels' readings take the boxes after it. Static SVG titles
+  (`render/titles.ts`) repeat the one-line rule rather than import it,
+  which would make a chunk shared by exports and the controller.
+  Announcements read `inspection.label`, the place, and before a point
+  read alone the heading its mark wrote (`headingSaid`).
 - **`renderTooltip`** content is asked for when what the tooltip is at
   changes (compared as JSON, with the theme and renderer) or the chart's
   revision does (data or options), and never of an inspection the data
