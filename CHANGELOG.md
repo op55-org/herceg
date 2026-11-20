@@ -158,6 +158,18 @@ lines stay. Python takes `hg.TickLabels(ends="hide")`, and
 `herceg.express` through `guides`; colorbars refuse it. The margins that
 x end labels widen now make room for their outlines and halos too.
 
+Log axes tick and label as d3's log scales do: every digit of each decade
+(1 to 9 × 10ⁿ) where the domain spans fewer decades than the axis' count,
+else powers of ten every 1, 2, 5, ... decades, where they ticked 1, 2, and
+5 and labelled every tick. Labels go on the ticks whose leading digit fits
+the count, the others keep their tick marks and grid lines, and `format`
+writes the labelled values only; `ticks: 10` labels as d3 does. Short log
+spans gain grid lines, and default labels write each value with its own
+decimals ("0.2", "1", "1,000", not "1.0" and "1,000.000"). Axes' `overlap:
+"hide"` keeps every n-th label among the labelled ticks, `"wrap"` measures
+room to the labels either side, past blank ticks, and the navigator's strip
+ticks the labelled ones.
+
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,

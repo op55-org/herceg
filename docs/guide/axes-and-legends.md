@@ -106,11 +106,41 @@ channels read by name, and position scales of a mark's own (see
 | `{ values: [15, 95] }` | Exactly these, those inside the domain. |
 | `(context) => values` | JavaScript only: from `{ scale, type, domain, pixels, count, timeZone, locale }`. |
 
-- Log axes take a count or values; category axes label the categories that
-  fit and take neither.
+- Log axes take a count or values ([below](#log-axes)); category axes label
+  the categories that fit and take neither.
 - Zoomed far out, steps closer than two pixels give way to coarser ones on
   the same boundaries.
 - Ticks inside time-axis breaks are left out.
+
+### Log axes
+
+Log axes tick and label as d3's log scales do, for the axis' count (its
+`ticks`, else one per 45 px along y and 80 px across x):
+
+- **Ticks.** Where the domain spans fewer decades than the count, every
+  digit of each decade inside it (1 to 9 × 10ⁿ); otherwise powers of ten,
+  every 1, 2, 5, 10, ... decades. A span holding fewer than half the count
+  of digits takes linear ticks.
+- **Labels.** A tick is labelled when its leading digit is at most
+  max(1, 10 × count ÷ ticks), so about `count` labels stand however many
+  ticks the decades take; the other ticks keep their tick marks and grid
+  lines. Powers of ten and linear ticks are all labelled.
+- `format` writes the labelled values only: a function is called for them,
+  told each one's `index` among all the ticks and their `values`. Without
+  a format, each value has the decimals it needs ("0.2", "1", "1,000"),
+  and from a million they are compact ("1M").
+- `{ values }` are all labelled, as on other axes.
+- d3's count is 10: `ticks: 10` labels as a d3 chart of any size does.
+
+```ts
+// 0.2× to 0.7×, 1× to 6×; 0.8 and 0.9 ticked, unlabelled.
+y: { type: "log", domain: [1 / 6.5, 6.5], nice: false, ticks: 10, format: (v) => `${v}×` }
+```
+
+```python
+hg.AxisOptions(type="log", domain=(1 / 6.5, 6.5), nice=False, ticks=10,
+               format=hg.Format(number="~g", suffix="×"))
+```
 
 ## Formats
 
@@ -226,7 +256,7 @@ beside each row's last panel needs rows that share y.
 | `labels` (Python `hg.TickLabels`) | Means |
 | --- | --- |
 | `rotation` | Degrees clockwise from -90 to 90 (`-45` reads upward to its tick), or `{ candidates: [0, -45, -90] }`: the first at which neighbors do not overlap. x axes. |
-| `overlap` | `"show"` (default), `"hide"` (every n-th kept), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). Category axes keep every n-th by default. |
+| `overlap` | `"show"` (default), `"hide"` (every n-th label kept, blank ones not counted), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). Category axes keep every n-th by default. |
 | `row` | 0 by the axis line, 1 beyond it: rows for layers. x axes. |
 | `priority` | Which labels of a row stay where they collide: the higher. |
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |

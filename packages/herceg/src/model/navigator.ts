@@ -848,10 +848,10 @@ function placeable(value: number, log: boolean): boolean {
 const LABEL_ROOM = 16;
 
 /**
- * The strip's ticks and their labels: every tick, or every second, third,
- * ..., so that each label fits well before the next tick kept, each just
- * right of its grid line near the top; the last is left out when it would
- * pass the end.
+ * The strip's ticks and their labels: every labelled tick (a log axis
+ * leaves some blank), or every second, third, ..., so that each label fits
+ * well before the next tick kept, each just right of its grid line near
+ * the top; the last is left out when it would pass the end.
  */
 function stripTicks(
   rail: AxisPlan,
@@ -864,7 +864,7 @@ function stripTicks(
   // In screen order, which reversed axes run against.
   const ticks = rail.ticks
     .map((tick, i) => ({ at: rail.scale.map(tick), label: rail.labels[i]! }))
-    .filter(({ at }) => at >= strip.x && at <= strip.x + strip.width)
+    .filter(({ at, label }) => label && at >= strip.x && at <= strip.x + strip.width)
     .sort((a, b) => a.at - b.at)
     .map((tick) => ({ ...tick, width: measure(tick.label, font) }));
   let every = 1;

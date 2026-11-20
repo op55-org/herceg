@@ -648,6 +648,42 @@ for (const [name, config, height] of [
   });
 }
 
+// Log axes, ticked and labelled as d3's: a line over three decades and one
+// over six (every digit ticked, the leading digits that fit the count
+// labelled), and study B1's axis (a fixed domain, d3's count of 10, and a
+// function format writing the labelled ticks alone).
+const decades = (n: number) =>
+  table({
+    x: Float64Array.from({ length: 200 }, (_, i) => i),
+    v: Float64Array.from({ length: 200 }, (_, i) => 10 ** ((n * i) / 199)),
+  });
+const b1Ratio = 6.54;
+for (const [name, rows, y] of [
+  ["a log line over three decades", decades(3), { type: "log" }],
+  ["a log line over six decades", decades(6), { type: "log" }],
+  [
+    "B1's log axis, ten ticks and a format",
+    decades(1),
+    {
+      type: "log",
+      domain: [1 / b1Ratio, b1Ratio],
+      nice: false,
+      ticks: 10,
+      format: (v: number) => `${v}×`,
+    },
+  ],
+] as const) {
+  measure(`axes: first scene of ${name}`, () => {
+    const model = new ChartModel(
+      { marks: [line(rows, { x: "x", y: "v" })], y },
+      undefined,
+      staticCompilers(),
+    );
+    model.setSize(600, 600, 1);
+    model.scene(estimateText);
+  });
+}
+
 // Small multiples of a layout mark: a pie of eight products per region, 50
 // regions over 100,000 rows, labeled, at 1600 x 1200. A first scene splits the
 // rows by panel and sums each panel's; a redraw reads what those kept.

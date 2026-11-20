@@ -164,10 +164,19 @@ parts).
   `model/axis.ts`): where a format writes neighbors alike, a coarser step
   it tells apart takes their place, and a label still repeating the one
   before is left blank, its tick and grid line kept.
+- **Log ticks** (`LogScale.labelledTicks` in `scale/scale.ts`) are d3's:
+  every digit of each decade where the domain spans fewer decades than the
+  count, else powers of ten at a round step of decades, else linear ticks;
+  with them, which are labelled (leading digit at most
+  max(1, 10 × count ÷ ticks)). `autoTicks` hands both to every writer, so
+  default labels, Intl options, patterns, units, and functions write the
+  labelled values alone and blank the rest; repeats are judged against the
+  labelled tick before. Given values are all labelled.
 - **Listed axes** (`guides/axes.ts`) have layers ("major" first), each with
   tick marks, labels (rows, rotation, overlap, priority, duplicates), and
   styles. Rotation tries candidates until neighbors' boxes do not overlap;
-  "hide" keeps every n-th label for the least n that clears. Labels may go
+  "hide" keeps every n-th label (blank ones not counted) for the least n
+  that clears. Labels may go
   inside the plot (`inside`), giving back the room outside. Axes whose tick
   labels align by style are drawn as listed axes. A `room` is per panel
   (a panel's own, or the chart's): a y axis shortens labels to it; an x

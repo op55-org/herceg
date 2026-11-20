@@ -446,12 +446,13 @@ export class Plot3D implements LayoutMark {
       indexOf: (key) => read().indexOf(key),
       summary: () => {
         const parts = read().layers.map((layer) => layer.summary());
-        const ranges = axes
-          .filter((axis) => axis.ticks.length > 0)
-          .map(
-            (axis) =>
-              `${axis.title || axis.name} from ${axis.labels[0]} to ${axis.labels[axis.labels.length - 1]}`,
-          );
+        const ranges = axes.flatMap((axis) => {
+          // The first and last labels written: a log axis leaves some blank.
+          const labels = axis.labels.filter((label) => label);
+          return labels.length
+            ? [`${axis.title || axis.name} from ${labels[0]} to ${labels.at(-1)}`]
+            : [];
+        });
         const { azimuth, elevation } = view.camera;
         parts.push(
           `Axes: ${ranges.join("; ")}. Seen from azimuth ${Math.round(azimuth)}°, elevation ${Math.round(elevation)}°.`,

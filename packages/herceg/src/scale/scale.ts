@@ -1,5 +1,5 @@
 import type { Breaks, Mapping } from "../lod/m4.ts";
-import { linearTicks, niceDomain } from "./ticks.ts";
+import { linearTicks, niceDomain, tickStep } from "./ticks.ts";
 
 export type ScaleType = "linear" | "log" | "time" | "band";
 
@@ -99,27 +99,65 @@ export class LogScale implements PositionScale {
     return { ...this.#linear.mapping(), log: true };
   }
 
-  /**
-   * Powers of ten, plus 2x and 5x multiples when the domain spans few
-   * decades. Domains narrower than those fall back to linear ticks.
-   */
   ticks(count: number): number[] {
-    const lo = Math.min(this.domain[0], this.domain[1]);
-    const hi = Math.max(this.domain[0], this.domain[1]);
-    const first = Math.floor(Math.log10(lo));
-    const last = Math.ceil(Math.log10(hi));
-    const decades = last - first;
-    const multiples = decades * 3 <= count ? [1, 2, 5] : [1];
-    const every = Math.max(1, Math.ceil(decades / Math.max(1, count)));
+    return this.labelledTicks(count).ticks;
+  }
+
+  /**
+   * d3's log ticks for about `count`, and which of them are labelled. Where
+   * the domain spans fewer decades than `count`, every digit of each decade
+   * inside it (1 to 9 × 10^k); with fewer than half the count of those,
+   * linear ticks instead, all labelled. Otherwise powers of ten every n-th
+   * decade, n a round step (1, 2, 5, 10, ...) and the decades its multiples.
+   * A tick is labelled when its leading digit is at most
+   * max(1, 10 × count / ticks), so labels stay about `count` however many
+   * ticks the decades take.
+   */
+  labelledTicks(count: number): LabelledTicks {
+    const [a, b] = this.domain;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    const from = Math.log10(lo);
+    const to = Math.log10(hi);
+    // Logs of subnormal numbers are inexact: whole decades past either end
+    // are tried, and values outside the domain left out.
+    const last = Math.ceil(to);
     const ticks: number[] = [];
-    for (let e = first; e <= last; e += every) {
-      for (const m of multiples) {
-        const value = Number((m * 10 ** e).toPrecision(12));
-        if (value >= lo && value <= hi) ticks.push(value);
+    const digits: number[] = [];
+    // digit × 10^e parsed, as the double nearest it: 3 × 0.1 is not 0.3, and
+    // 10^-310 has no reciprocal. Digits too close for a subnormal double are
+    // one tick, of the least of their digits.
+    const add = (digit: number, e: number) => {
+      const tick = Number(`${digit}e${e}`);
+      const k = ticks.length - 1;
+      if (tick === ticks[k]) digits[k] = Math.min(digits[k]!, digit);
+      else if (tick >= lo && tick <= hi) {
+        ticks.push(tick);
+        digits.push(digit);
+      }
+    };
+    if (to - from < count) {
+      for (let e = Math.floor(from); e <= last; e++)
+        for (let digit = 1; digit < 10; digit++) add(digit, e);
+      if (ticks.length * 2 < count) return { ticks: linearTicks(lo, hi, count) };
+    } else {
+      // d3's steps of decades for `count`, at twice it while a sparse count's
+      // step passes over every decade.
+      for (let n = count; ; n *= 2) {
+        const step = Math.max(1, tickStep(0, (to - from) / n, 1));
+        for (let e = Math.floor(from / step) * step; e <= last; e += step) add(1, e);
+        if (ticks.length || !(n >= 0.5 && n < 2)) break;
       }
     }
-    return ticks.length >= 2 ? ticks : linearTicks(lo, hi, count);
+    const most = Math.max(1, (10 * count) / ticks.length);
+    return { ticks, labelled: digits.map((digit) => digit <= most) };
   }
+}
+
+/** Automatic ticks, and which of them are labelled; all of them without `labelled`. */
+export interface LabelledTicks {
+  ticks: number[];
+  labelled?: readonly boolean[] | undefined;
 }
 
 /** Expands a log domain outward to whole powers of ten, keeping its direction. */

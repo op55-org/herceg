@@ -900,4 +900,13 @@ describe("3D charts", () => {
       "6 points at x, y, z. Axes: East from 0 to 5; y from 0 to 5; z from 0 to 10. Seen from azimuth -60°, elevation 25°.",
     );
   });
+
+  it("describe a log axis by its first and last labels, past blank ticks", () => {
+    // Five ticks asked over [0.15, 6.54]: every digit, labelled up to 3.
+    const { model } = build({
+      marks: [scatter()],
+      z: { type: "log", domain: [1 / 6.54, 6.54], nice: false },
+    });
+    expect(describeChart(model)).toContain("z from 0.2 to 3.");
+  });
 });

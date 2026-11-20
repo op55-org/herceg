@@ -226,8 +226,9 @@ function labelGeometry(
     if (length >= SHORT_EDGE) {
       axis.ticks.forEach((tick, i) => {
         const t = axis.place(tick);
-        if (!(Math.abs(t) <= 1 + 1e-9)) return;
         const text = oneLineText(axis.labels[i]!);
+        // Blank labels (a log axis' unlabelled digits) take no room.
+        if (!(Math.abs(t) <= 1 + 1e-9) || !text) return;
         const width = measure(text, font);
         const [px, py] = along(t);
         const [x, y] = pushed(px, py, width, height, GAP);

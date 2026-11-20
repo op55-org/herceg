@@ -87,9 +87,104 @@ describe("LogScale", () => {
     expect(scale.map(-1)).toBeNaN();
   });
 
-  it("ticks at powers of ten and multiples", () => {
-    expect(new LogScale([1, 1e6], [0, 1]).ticks(10)).toEqual([1, 10, 100, 1e3, 1e4, 1e5, 1e6]);
-    expect(new LogScale([1, 100], [0, 1]).ticks(10)).toEqual([1, 2, 5, 10, 20, 50, 100]);
+  // Golden values from d3-scale 4's scaleLog: ticks(count), and the ticks
+  // tickFormat(count) labels (with d3's count of 10 where they differ).
+  const digits = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i).flatMap((e) =>
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (e < 0 ? d / 10 ** -e : d * 10 ** e)),
+    );
+  const log = (domain: [number, number], count: number) => {
+    const { ticks, labelled } = new LogScale(domain, [0, 1]).labelledTicks(count);
+    return { ticks, shown: ticks.filter((_, k) => labelled?.[k] ?? true), labelled };
+  };
+
+  it("ticks every digit where the domain spans fewer decades than the count, as d3", () => {
+    // Study B1: [1/k, k] for k = 6.54 at d3's count of 10.
+    const b1 = log([1 / 6.54, 6.54], 10);
+    expect(b1.ticks).toEqual([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 3, 4, 5, 6]);
+    expect(b1.shown).toEqual([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1, 2, 3, 4, 5, 6]);
+    expect(log([1, 100], 10).ticks).toEqual(digits(0, 1).concat(100));
+    expect(log([1, 100], 10).shown).toEqual([1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100]);
+    expect(log([1, 1000], 8).shown).toEqual([1, 2, 10, 20, 100, 200, 1000]);
+    expect(log([1, 10], 10).shown).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(log([1, 10], 2).shown).toEqual([1, 2, 10]);
+    // Six decades at 10: 55 ticks, labelled at powers of ten.
+    const wide = log([1, 1e6], 10);
+    expect(wide.ticks).toEqual(digits(0, 5).concat(1e6));
+    expect(wide.shown).toEqual([1, 10, 100, 1e3, 1e4, 1e5, 1e6]);
+  });
+
+  it("labels the leading digits that fit the count, the ticks the same", () => {
+    const b1 = (count: number) => log([1 / 6.54, 6.54], count);
+    expect(b1(13).shown).toEqual(b1(13).ticks);
+    expect(b1(7).ticks).toEqual(b1(10).ticks);
+    expect(b1(7).shown).toEqual([0.2, 0.3, 0.4, 0.5, 1, 2, 3, 4, 5]);
+    expect(log([1, 100], 5).shown).toEqual([1, 2, 10, 20, 100]);
+  });
+
+  it("ticks powers of ten at a round step of decades past the count, as d3", () => {
+    const powers = log([1e-5, 1e7], 5);
+    expect(powers.ticks).toEqual([1e-4, 0.01, 1, 100, 1e4, 1e6]);
+    expect(powers.shown).toEqual(powers.ticks);
+    expect(log([1e-5, 1e7], 10).ticks).toEqual([
+      1e-5, 1e-4, 1e-3, 0.01, 0.1, 1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7,
+    ]);
+    expect(log([1, 1e20], 10).ticks).toEqual(
+      Array.from({ length: 11 }, (_, i) => Number(`1e${2 * i}`)),
+    );
+    // One power of ten, as d3 gives it, and at a count whose step passes
+    // over every decade (as writtenTicks may ask), d3's retry at twice it.
+    expect(log([2, 5000], 2).ticks).toEqual([100]);
+    expect(log([2, 5000], 1).ticks).toEqual([100]);
+    expect(log([2, 5000], 1.5).ticks).toEqual([100]);
+    expect(log([2, 5000], 0.5).ticks).toEqual([100]);
+    // Below 1, d3's step for the count itself (five decades), not for 1.
+    expect(log([0.5, 500], 0.6).ticks).toEqual([1]);
+    expect(log([1, 1e6], 0).ticks).toEqual([]);
+  });
+
+  it("ticks subnormal decades, every digit as the double nearest it", () => {
+    const tiny = log([1e-310, 1e-307], 10);
+    expect(tiny.ticks.slice(0, 3)).toEqual([1e-310, 2e-310, 3e-310]);
+    expect(tiny.ticks).toHaveLength(28);
+    expect(tiny.shown).toEqual([
+      1e-310, 2e-310, 3e-310, 1e-309, 2e-309, 3e-309, 1e-308, 2e-308, 3e-308, 1e-307,
+    ]);
+    expect(log([1e-320, 1e-300], 2).ticks).toEqual([1e-320, 1e-310, 1e-300]);
+    // Inexact logs of subnormal ends keep the decades at the ends.
+    expect(log([1e-320, 1e-319], 10).ticks.at(-1)).toBe(1e-319);
+    expect(log([1e-323, 1e-321], 2).ticks).toEqual([1e-323, 1e-322, 1e-321]);
+    // Digits too close for a subnormal double are one tick each, labelled
+    // as the least of them: 8e-324 rounds to 1e-323, a power of ten.
+    const least = log([Number.MIN_VALUE, 1e-322], 10).ticks;
+    expect(new Set(least).size).toBe(least.length);
+    const powers = log([1e-323, 1e-321], 10);
+    for (const power of [1e-323, 1e-322, 1e-321]) expect(powers.shown).toContain(power);
+  });
+
+  it("ticks reversed and sub-unit domains by the same rule, ascending", () => {
+    const reversed = log([1000, 1], 10);
+    expect(reversed.ticks).toEqual(log([1, 1000], 10).ticks);
+    expect(reversed.shown).toEqual([1, 2, 3, 10, 20, 30, 100, 200, 300, 1000]);
+    expect(log([6.54, 1 / 6.54], 10).shown).toEqual(log([1 / 6.54, 6.54], 10).shown);
+    const small = log([0.001, 0.05], 10);
+    expect(small.ticks).toEqual(digits(-3, -3).concat([0.01, 0.02, 0.03, 0.04, 0.05]));
+    expect(small.shown).not.toContain(0.008);
+    expect(small.shown).not.toContain(0.009);
+    // Ends at exact digits are ticks, as the doubles nearest them.
+    expect(log([0.3, 3], 5).ticks[0]).toBe(0.3);
+    expect(log([0.3, 3], 5).shown).toEqual([0.3, 0.4, 0.5, 1, 2, 3]);
+  });
+
+  it("falls back to linear ticks, all labelled, where digits are fewer than half the count", () => {
+    expect(log([3, 4], 5)).toEqual({
+      ticks: [3, 3.2, 3.4, 3.6, 3.8, 4],
+      shown: [3, 3.2, 3.4, 3.6, 3.8, 4],
+      labelled: undefined,
+    });
+    // d3 applies the digit rule to these too and labels none of them.
+    expect(log([7.6, 9], 10).shown).toHaveLength(15);
+    expect(log([5, 5.5], 3).shown).toEqual([5, 5.2, 5.4]);
   });
 
   it("rejects non-positive and infinite domains", () => {

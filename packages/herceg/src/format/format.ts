@@ -52,9 +52,14 @@ export function lazyFormat(format: object | undefined): boolean {
 
 /**
  * Labels for numeric ticks: enough decimals to tell neighbors apart, and
- * compact notation ("2.5M") for large magnitudes.
+ * compact notation ("2.5M") for large magnitudes. `trim` drops trailing
+ * zeros, for log ticks whose decimals differ by decade ("0.2", "1").
  */
-export function numberTickLabels(ticks: readonly number[], locale?: string): string[] {
+export function numberTickLabels(
+  ticks: readonly number[],
+  locale?: string,
+  trim = false,
+): string[] {
   if (ticks.length === 0) return [];
   const step = ticks.length > 1 ? Math.abs(ticks[1]! - ticks[0]!) : Math.abs(ticks[0]!) || 1;
   const largest = Math.max(...ticks.map(Math.abs));
@@ -71,7 +76,7 @@ export function numberTickLabels(ticks: readonly number[], locale?: string): str
   const decimals = stepDecimals(step);
   if (decimals <= 12) {
     const fixed = numberFormatter(
-      { minimumFractionDigits: decimals, maximumFractionDigits: decimals },
+      { minimumFractionDigits: trim ? 0 : decimals, maximumFractionDigits: decimals },
       locale,
     );
     const labels = ticks.map(fixed);

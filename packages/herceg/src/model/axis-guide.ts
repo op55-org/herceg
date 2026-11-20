@@ -49,25 +49,27 @@ export function axisItems(
   }
   const text = (label: string, at: TextAt, paint: TextPaint) =>
     items.push(textItem(label, at, paint, placement.surface, measure));
-  // Labels of several lines go down from below the axis, and are centered on their tick beside it.
+  // Labels of several lines go down from below the axis, and are centered
+  // on their tick beside it; blank ones draw nothing.
   for (const { position, label } of ticks)
-    text(
-      label,
-      below
-        ? { x: position, y: edge + gap, anchor: "middle", baseline: "hanging", angle: 0 }
-        : centeredLines(
-            label,
-            {
-              x: placement.edge + (side === "left" ? -gap : gap),
-              y: position,
-              anchor: side === "left" ? "end" : "start",
-              baseline: "middle",
-              angle: 0,
-            },
-            paints.label,
-          ),
-      paints.label,
-    );
+    if (label)
+      text(
+        label,
+        below
+          ? { x: position, y: edge + gap, anchor: "middle", baseline: "hanging", angle: 0 }
+          : centeredLines(
+              label,
+              {
+                x: placement.edge + (side === "left" ? -gap : gap),
+                y: position,
+                anchor: side === "left" ? "end" : "start",
+                baseline: "middle",
+                angle: 0,
+              },
+              paints.label,
+            ),
+        paints.label,
+      );
   if (title) {
     // Titles beside a plot read bottom to top on the left, top to bottom on the right.
     const angle = below ? 0 : side === "left" ? -90 : 90;

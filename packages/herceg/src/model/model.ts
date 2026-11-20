@@ -2375,14 +2375,16 @@ export class ChartModel {
         // furthest of them whichever they are (a long one inside, the
         // first on the right where the domain runs down); axes the guides
         // list say where theirs reach.
-        const ofEnds = (): [number, number] => {
+        const ofEnds = (): [number, number] | undefined => {
           let [lo, hi] = [Infinity, -Infinity];
           ticks.forEach((tick, k) => {
+            // Blank labels (a log axis' unlabelled ticks) draw nothing.
+            if (!labels[k]) return;
             const at = scale.map(tick);
-            const half = textWidth(labels[k]!, paint, measure) / 2;
+            const half = textWidth(labels[k], paint, measure) / 2;
             [lo, hi] = [Math.min(lo, at - half), Math.max(hi, at + half)];
           });
-          return [lo, hi];
+          return lo <= hi ? [lo, hi] : undefined;
         };
         ends.set(key, placing ? guided.ends(plan, placing, i) : last < 0 ? undefined : ofEnds());
       }

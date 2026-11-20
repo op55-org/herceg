@@ -1708,11 +1708,13 @@ describe("axes moving with values", () => {
     const [, ten, top] = centers(pointsOf(middle)[0]!);
     expect(ten![1]).toBeCloseTo(placed(10, from, to, HALF, true), 3);
     expect(top![1]).toBeCloseTo(placed(10 ** (2 + HALF), from, to, HALF, true), 3);
-    for (const { label, position } of axisOf(middle, "left").ticks)
-      expect(position).toBeCloseTo(
-        placed(Number(label.replace(/,/g, "")), from, to, HALF, true),
-        3,
-      );
+    // Labelled ticks stand at their values; the blank ones between too.
+    const ticks = axisOf(middle, "left").ticks;
+    expect(ticks.some(({ label }) => !label)).toBe(true);
+    for (const { label, value, position } of ticks) {
+      expect(position).toBeCloseTo(placed(value, from, to, HALF, true), 3);
+      if (label) expect(Number(label.replace(/,/g, ""))).toBe(value);
+    }
   });
 
   it("show at once what cannot move with its axes", () => {

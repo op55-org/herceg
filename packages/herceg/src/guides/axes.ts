@@ -1738,9 +1738,9 @@ function overlaps(
 }
 
 /**
- * Labels as "hide" and "stagger" keep them: every n-th, for the least n at
- * which those kept, on `lanes` lanes taken in turn, no longer overlap; and
- * the lane of each tick's label.
+ * Labels as "hide" and "stagger" keep them: every n-th label (blank ticks
+ * not counted), for the least n at which those kept, on `lanes` lanes
+ * taken in turn, no longer overlap; and the lane of each tick's label.
  */
 function kept(
   ticks: AxisTick[],
@@ -1751,18 +1751,21 @@ function kept(
   run: Run,
   align?: Align,
 ): { ticks: AxisTick[]; lane: number[] } {
-  for (let every = 1; every <= ticks.length; every++) {
-    const shown = ticks.filter((tick, k) => tick.label && k % every === 0);
+  const labelled = ticks.filter((tick) => tick.label);
+  for (let every = 1; every <= labelled.length; every++) {
+    const shown = labelled.filter((_, k) => k % every === 0);
     let fits = true;
     for (let k = lanes; k < shown.length && fits; k++)
       fits = !overlaps(shown[k - lanes]!, shown[k]!, paint, measure, angle, run, align);
     if (fits) {
       let n = 0;
-      const lane = ticks.map((tick, k) => (tick.label && k % every === 0 ? n++ % lanes : 0));
-      return {
-        ticks: ticks.map((tick, k) => (k % every === 0 ? tick : { ...tick, label: "" })),
-        lane,
-      };
+      const lane: number[] = [];
+      const out = ticks.map((tick) => {
+        const keep = tick.label !== "" && n++ % every === 0;
+        lane.push(keep ? ((n - 1) / every) % lanes : 0);
+        return keep || !tick.label ? tick : { ...tick, label: "" };
+      });
+      return { ticks: out, lane };
     }
   }
   return { ticks, lane: [] };
@@ -1783,8 +1786,13 @@ function wrapped(
   most?: number,
 ): AxisTick[] {
   const { css } = paint;
-  return ticks.map((tick, k) => {
-    const near = [ticks[k - 1], ticks[k + 1]].filter((other) => other !== undefined);
+  // Room reaches the labels either side, past blank ticks.
+  const labelled = ticks.filter((tick) => tick.label);
+  let k = -1;
+  return ticks.map((tick) => {
+    if (!tick.label) return tick;
+    k++;
+    const near = [labelled[k - 1], labelled[k + 1]].filter((other) => other !== undefined);
     const room = Math.min(...near.map((other) => Math.abs(other.position - tick.position))) - PAD;
     const lines: string[] = [];
     for (const line of tick.label.split("\n")) {
