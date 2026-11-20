@@ -4,6 +4,7 @@ import "./interactive.ts";
 import { afterEach, describe, expect } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
+import { measurer } from "../../src/dom/measurers.ts";
 import { line } from "../../src/marks/line.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { renderToSVG } from "../../src/render/static.ts";
@@ -76,9 +77,14 @@ describe("log ticks", () => {
         expect(texts).not.toContain("");
         const live = chart.toSVG();
         expect(live).not.toMatch(/>0\.9×<\/text>/);
-        // Ids apart: a chart's export names its own.
+        // Ids apart: a chart's export names its own. Static options measure
+        // with the browser's fonts, as the live chart does; built-in metrics
+        // match them on some machines only.
         const svg = (text: string) => text.replace(/herceg-(svg-)?\d+-(export-)?/g, "");
-        expect(svg(renderToSVG({ ...options, width: 928, height: 600 }))).toBe(svg(live));
+        const measureText = measurer(document);
+        expect(svg(renderToSVG({ ...options, width: 928, height: 600 }, { measureText }))).toBe(
+          svg(live),
+        );
         // Static PDF measures text with its own fonts, so margins may differ
         // by a pixel; it writes the same labels, the "×" in WinAnsi.
         for (const pdf of [
