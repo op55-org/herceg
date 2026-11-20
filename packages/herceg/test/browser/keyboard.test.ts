@@ -120,12 +120,12 @@ describe("Up and Down", () => {
       /^12 series at 1: s0 [\d.]+; s1 [\d.]+; .*; s11 [\d.]+$/,
     );
     // Enter selects the cursor's series, and says so; again, clears it.
-    expect(await press(chart, "Enter")).toBe(`${target} selected`);
+    expect(await press(chart, "Enter")).toBe(`${target} selected.`);
     const keyOf = modelOf(chart)
       .series()
       .find(({ label }) => label === target)?.key;
     expect(chart.selection).toMatchObject({ kind: "series", series: [keyOf] });
-    expect(await press(chart, "Enter")).toBe("Selection cleared");
+    expect(await press(chart, "Enter")).toBe("Selection cleared.");
   });
 
   it("keep the run's order with snap each, where series have points at different places", async () => {

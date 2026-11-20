@@ -833,7 +833,8 @@ in the listener that receives it.
 
 **Keyboard selections.** Shift with the arrow keys selects a range along
 the axis the keys step along; Enter zooms to it where zoom is on; Escape
-clears. Selections are announced. Without a selection to zoom to, Enter
+clears. Selections are announced, the keyboard's and the pointer's alike
+([Accessibility](accessibility.md#selections)). Without a selection to zoom to, Enter
 is a `click` on the keyboard cursor's point (cause `"keyboard"`, no
 `pointer`).
 
@@ -929,8 +930,10 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   or its series, alone; Shift with a click adds or removes it. A click on
   the only one selected, or off the data, clears (a brush is cleared as
   its own `clear` says). Enter on the keyboard cursor's point does what a
-  click does. An item is only its mark's: another mark's point of the
-  same row is not selected.
+  click does, and both are announced alike, by the item's tooltip line
+  with a count where several are selected
+  ([Accessibility](accessibility.md#selections)). An item is only its
+  mark's: another mark's point of the same row is not selected.
 - **Legends.** With `legend: { action: "select" }` (or a guide legend's
   `action`), a legend entry selects the series it names instead of hiding
   them: alone, or with Shift added or removed; a press on the one selected
@@ -1136,7 +1139,8 @@ before drawing: `store.set("focus", selectWhere(col("fare").gt(20)))`.
 - **Clicks** select the row under the pointer; a histogram bin's rows; a box
   or violin group; a heatmap cell's rows. Shift adds, Ctrl or Cmd toggles,
   a click off the data clears. With the keyboard cursor on a point, Space
-  acts as a click and announces the count.
+  acts as a click. Both announce the count ("2 rows selected"), and Escape
+  clears what they selected.
 - **Items and series** ([Selections](#selections)) write the rows they
   stand for: an item's rows (a layout item's, such as a slice's or a
   node's subtree's, in every panel it is drawn in), a series' condition on

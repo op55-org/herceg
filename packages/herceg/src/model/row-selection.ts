@@ -100,25 +100,20 @@ export interface Modifiers {
 /** A key press, as DOM keyboard events carry it. */
 export interface KeyPress extends Modifiers {
   readonly key: string;
-  readonly target: unknown;
+  readonly defaultPrevented: boolean;
   preventDefault(): void;
 }
 
 /**
  * What a bound chart lends its row selection: its brushed selection, which
  * `clear` lets go, as a change of the cause that replaced the rows it
- * wrote, its root element, whose keys select rows under the keyboard
- * cursor, and `render`, which draws pending changes before a key reads
+ * wrote, and `render`, which draws pending changes before a key reads
  * what the chart shows.
  */
 export interface BrushedChart {
   readonly selection: ChartSelection | null;
   clear(cause: ChangeCause): void;
   render(): void;
-  readonly root: {
-    addEventListener(type: "keydown", listener: (event: KeyPress) => void): void;
-    removeEventListener(type: "keydown", listener: (event: KeyPress) => void): void;
-  };
 }
 
 /** Where the keyboard cursor is: a panel, a series' key, and a position in the series' part there. */
@@ -327,8 +322,8 @@ export class RowSelection {
    * when it is this one's, or else a new one. `events` reports changes of
    * the channels, `invalidate` redraws the chart, `count` counts a change
    * of `cause` the chart did not count and gives its revision, `cursor`
-   * says where its keyboard cursor is, and `live` announces what the
-   * keyboard selected.
+   * says where its keyboard cursor is, and `live` announces what clicks
+   * and Space select.
    */
   mount(
     current: RowLink | undefined,
@@ -353,7 +348,9 @@ export class RowSelection {
       live,
     );
     if (current) link.adopt(current);
+    // Once the link it replaces is gone, which takes it from the model.
     current?.dispose();
+    model.rowLink = link;
     return link;
   }
 
@@ -511,10 +508,6 @@ export class RowLink {
   readonly #stops: (() => void)[] = [];
   /** How deep in writes of the chart's own selections, which leave its brush in place. */
   #writing = 0;
-  /** A gesture previews a brush: Escape is its cancel, not a clear of the channels. */
-  #previewing = false;
-  /** A key has just undone a gesture, until the key's listeners are done: no clear either. */
-  #escaped = false;
   /**
    * The chart's own write in progress: the store and the revision its
    * change takes there, by whom, and the chart's revision of it (its count
@@ -559,11 +552,20 @@ export class RowLink {
     for (const b of bound) this.#seen.set(b, b.store.get(b.channel));
     for (const store of new Set(bound.map((b) => b.store)))
       this.#stops.push(store.subscribe((change) => this.#changed(store, change)));
-    // After the chart's own key handling, which moves the cursor and clears its brush on Escape.
-    const keys = (event: KeyPress) => this.#key(event);
-    chart.root.addEventListener("keydown", keys);
-    this.#stops.push(() => chart.root.removeEventListener("keydown", keys));
     this.#stops.push(selection.highlight(model));
+  }
+
+  /**
+   * What the announcement of a brush or lasso adds: how many rows it
+   * wrote (" 214 rows."), where it wrote a set of rows to one channel,
+   * which still holds it; undefined where the count is not known (a
+   * condition), so that no announcement counts rows.
+   */
+  countBrushed(): string | undefined {
+    const [[bound, wrote] = [], other] = this.#brushed;
+    return !other && wrote?.kind === "rows" && holds(bound!, wrote)
+      ? ` ${rowsOf(wrote.rows.size)}.`
+      : undefined;
   }
 
   /**
@@ -582,7 +584,6 @@ export class RowLink {
       const same = sameAs(b);
       if (same?.live) this.#held.set(same, held);
     }
-    this.#previewing = previous.#previewing;
     // The replaced link's pending check of another writer's change is this one's now.
     if (this.#brushed.size > 0) queueMicrotask(() => this.#reconcile("sync"));
   }
@@ -611,15 +612,6 @@ export class RowLink {
     revision: number,
     phase: Phase = "commit",
   ): Written | undefined {
-    this.#previewing = phase === "preview";
-    // An Escape that undid a gesture is that key's whole work: the chart may
-    // hear it before or after this binding does (see `#key`).
-    if (phase === "cancel" && cause === "keyboard") {
-      this.#escaped = true;
-      queueMicrotask(() => {
-        this.#escaped = false;
-      });
-    }
     // A selection shown without writing (a synced chart's, another view's)
     // replaces the brush: what that wrote is no longer the chart's to clear.
     if (!write) {
@@ -725,14 +717,15 @@ export class RowLink {
    * A click at a pixel: what it selects, found now, written when the
    * returned function is called: the rows of the point under it (Shift
    * adds them, Ctrl or Cmd adds or removes them), or a clear of what clicks
-   * select when it is over none. The function returns the changes made,
-   * for the `click` event, and null on an item that stands for none of
+   * select when it is over none. The function returns what it wrote, for
+   * the `click` event, and what to say of it, which the chart asks once
+   * the click's listeners have returned; null on an item that stands for none of
    * the bound tables' rows (a map layer of another table), where nothing
    * changes, the chart's brush neither. Undefined when no binding takes
    * clicks. Rows are kept by identity meanwhile, so a listener that drops
    * rows before the write never makes it select others.
    */
-  clicked(px: number, py: number, keys: Modifiers): (() => Written | null) | undefined {
+  clicked(px: number, py: number, keys: Modifiers): (() => ClickedRows | null) | undefined {
     const clickable = this.#clickable;
     if (clickable.length === 0) return undefined;
     const found = clickedRows(this.#model, this.#clicked, px, py);
@@ -740,35 +733,87 @@ export class RowLink {
     if (found === null) return () => null;
     const kept = found && new RowSet(found.table).addAll(found.rows);
     const rows = () => found && { table: found.table, rows: kept!.positions() };
-    return () => ({ rows: this.#pick(clickable, rows(), mode, "pointer") });
+    return () => this.#picked(rows(), mode, "pointer");
   }
 
   /**
-   * Keys of the chart, after its own handling: Space selects the rows of
-   * the point the keyboard cursor is on as a click does (with Shift, Ctrl,
-   * or Cmd too) and announces how many are selected; Escape clears what
-   * clicks select.
+   * Escape, as the chart's keys take it (dom/interaction.ts) once it ends
+   * no gesture and lets no tooltip go: clears what clicks select, as a
+   * click off the data does. What it wrote, for the chart to say.
    */
-  #key(event: KeyPress) {
-    const clickable = this.#clickable;
-    if (event.target !== this.#chart.root || clickable.length === 0) return;
-    if (event.key === "Escape") {
-      if (!this.#previewing && !this.#escaped) this.#pick(clickable, undefined, "only", "keyboard");
-      return;
-    }
-    if (event.key !== " " || !this.#cursor()) return;
+  escape(): ClickedRows {
+    return this.#picked(undefined, "only", "keyboard");
+  }
+
+  /**
+   * Space, as the chart's keys hand it on (dom/interaction.ts) once none
+   * of its bindings took it: selects the rows of the point the keyboard
+   * cursor is on as a click does (with Shift, Ctrl, or Cmd too), and says
+   * them once its listeners have run. Whether it took the key; not one
+   * already taken (its default prevented: map and network controls').
+   */
+  key(event: KeyPress): boolean {
+    if (event.defaultPrevented || event.key !== " " || !this.takesClicks || !this.#cursor())
+      return false;
     // The cursor is on what the chart shows once pending changes are drawn,
     // as the arrow keys move it.
     this.#chart.render();
     const cursor = this.#cursor();
     const found = cursor && cursorRows(this.#model, this.#clicked, cursor);
-    if (!found) return;
+    if (!found) return false;
     event.preventDefault();
-    const [change] = this.#pick(clickable, found, modeOf(event), "keyboard");
-    const selected = change?.selection;
-    const count = selected?.kind === "rows" ? selected.rows.size : 0;
-    // As grids say it.
-    this.#live.textContent = `${count} ${count === 1 ? "row" : "rows"} selected`;
+    const said = this.#picked(found, modeOf(event), "keyboard").said();
+    const live = this.#live;
+    if (said) live.textContent = live.textContent === said ? `${said}\u00a0` : said;
+    return true;
+  }
+
+  /** Whether a channel the chart binds holds rows (a condition may hold any), read without writing. */
+  holding(): boolean {
+    return !this.#bound.every((b) => empty(b.store.get(b.channel)));
+  }
+
+  /**
+   * Writes what a click, Space, or Escape selects (`found`; none: off the
+   * data, a clear) as `mode` says, saying nothing: what it wrote, and what
+   * to say of it, asked once the gesture's listeners have returned.
+   */
+  #picked(found: PointRows | undefined, mode: Mode, cause: ChangeCause): ClickedRows {
+    const held = this.#holding();
+    const rows = this.#pick(found, mode, cause);
+    const at = this.#clickable.findIndex((b) => b.table === found?.table);
+    return { rows, said: () => this.#said(held, at) };
+  }
+
+  /**
+   * What to say of a write, from what each channel clicks write `held`
+   * before it, and the found point's channel (`at`; -1 for a clear), as
+   * grids say it: how many rows the point's channel holds ("2 rows
+   * selected", "No rows selected"), or "Selection cleared." where it, or
+   * for a clear a channel that held rows, holds none; nothing where it
+   * holds what it held, or a condition a listener wrote.
+   */
+  #said(held: readonly (DataSelection | null)[], at: number): string | undefined {
+    const now = this.#holding();
+    const selected = now[at];
+    const count = selected?.kind === "rows" && selected.rows.size;
+    let said: string | undefined;
+    if (at < 0) {
+      if (held.some((was, i) => !empty(was) && empty(now[i]))) said = "Selection cleared.";
+    } else if (selected !== held[at])
+      said = !selected
+        ? "Selection cleared."
+        : count
+          ? `${rowsOf(count)} selected`
+          : count === 0
+            ? "No rows selected"
+            : undefined;
+    return said;
+  }
+
+  /** What each channel clicks write holds now. */
+  #holding(): (DataSelection | null)[] {
+    return this.#clickable.map((b) => b.store.get(b.channel));
   }
 
   dispose(): undefined {
@@ -777,16 +822,13 @@ export class RowLink {
     this.#stops.length = 0;
     // The channels keep what the chart wrote: other views may be showing it.
     this.#brushed.clear();
+    if (this.#model.rowLink === this) this.#model.rowLink = undefined;
     return undefined;
   }
 
   /** Changes the channels clicks write as a click (or key) of `cause` on `found` (none: off the data) does. */
-  #pick(
-    clickable: readonly Bound[],
-    found: PointRows | undefined,
-    mode: Mode,
-    cause: ChangeCause,
-  ): RowSelectionChange[] {
+  #pick(found: PointRows | undefined, mode: Mode, cause: ChangeCause): RowSelectionChange[] {
+    const clickable = this.#clickable;
     if (!found) {
       // Off the data, a plain click clears; with a modifier, it changes nothing.
       if (mode !== "only") return [];
@@ -948,6 +990,26 @@ function chosenRows(
 /** Whether a channel still holds what was written to it. */
 function holds(bound: Bound, wrote: DataSelection | null): boolean {
   return bound.store.get(bound.channel) === wrote;
+}
+
+/** A count of rows, as announcements say it: "1 row", "214 rows". */
+function rowsOf(count: number): string {
+  return `${count} ${count === 1 ? "row" : "rows"}`;
+}
+
+/**
+ * What a click or key wrote to the channels clicks write (`rows`, as the
+ * `click` event reports them), and what to say of it, asked once the
+ * gesture's listeners have returned (see `RowLink.#said`).
+ */
+export interface ClickedRows {
+  rows: readonly RowSelectionChange[];
+  said(): string | undefined;
+}
+
+/** Whether a channel holds no rows: nothing, or no rows of a set (a condition may hold any). */
+function empty(selection: DataSelection | null | undefined): boolean {
+  return !selection || (selection.kind === "rows" && selection.rows.size === 0);
 }
 
 /** What a gesture wrote, as its event reports it: undefined when it wrote nothing. */

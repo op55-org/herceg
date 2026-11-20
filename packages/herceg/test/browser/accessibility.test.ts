@@ -453,7 +453,7 @@ describe("the accessibility tree", () => {
     expect(await heard("ArrowRight")).toMatch(/^ {4}StaticText "s0: [\d.]+ at 0"$/);
     expect(await heard("ArrowDown")).toMatch(/^ {4}StaticText "s\d+, \d+ of 12: [\d.]+ at 0"$/);
     expect(await heard("ArrowRight")).toMatch(/^ {4}StaticText "[\d.]+ at 1"$/);
-    expect(await heard("Enter")).toMatch(/^ {4}StaticText "s\d+ selected"$/);
+    expect(await heard("Enter")).toMatch(/^ {4}StaticText "s\d+ selected\."$/);
     expect(await heard("i")).toMatch(
       /^ {4}StaticText "12 series at 1: s0 [\d.]+; .*; s11 [\d.]+"$/,
     );

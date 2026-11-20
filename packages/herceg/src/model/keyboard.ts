@@ -199,7 +199,8 @@ function placeOf(
  * a mark that keeps rows in an order of its own (rugs, oriented bands,
  * union stacks). A heatmap's cell is found at its place in the mark's
  * index of cells, and gone unless the cell there is at its place. An
- * aggregate is found among its series' few.
+ * aggregate is found among its series' few. In series the inspector
+ * shows, unless `drawn` (see `keyedPoint`).
  */
 export function itemAt(
   model: ChartModel,
@@ -208,9 +209,10 @@ export function itemAt(
   position: number,
   item: KeyedItem,
   readers: SeriesReaders,
+  drawn?: boolean,
 ): number {
   const [entry, s] = entryOf(model.inspectorOf(panel), key) ?? [];
-  if (!s || !entry!.visible.includes(s)) return -1;
+  if (!s || !(drawn || entry!.visible.includes(s))) return -1;
   const { mark, frame } = entry!;
   const { rowOf } = readers;
   const n = s.length;
@@ -529,8 +531,8 @@ export function stepPoint(
  * first by default): its panel's key and inspector, the series, the axis
  * it runs along, and its own observation read alone, headed by its place
  * along that axis (no point where it is not drawn); undefined where the
- * series is not shown, or its place has none along the axis (a zero on a
- * log axis, say).
+ * series is not shown (unless `drawn`), or its place has none along the
+ * axis (a zero on a log axis, say).
  */
 function locate(
   model: ChartModel,
@@ -538,11 +540,17 @@ function locate(
   position: number,
   panel: string | undefined,
   { placeAt, rowOf }: SeriesReaders,
+  drawn?: boolean,
 ) {
   const at = panel ?? model.panels()[0]?.key;
   const inspector = at === undefined ? undefined : model.inspectorOf(at);
   const [entry, anchor] = entryOf(inspector, key) ?? [];
-  if (!entry || !anchor?.length || !entry.visible.includes(anchor) || !(position < anchor.length))
+  if (
+    !entry ||
+    !anchor?.length ||
+    !(drawn || entry.visible.includes(anchor)) ||
+    !(position < anchor.length)
+  )
     return undefined;
   const axis: "x" | "y" = entry.mark.tooltip === "y" ? "y" : "x";
   const value = placeAt(anchor, axis, rowOf(anchor, position));
@@ -558,7 +566,9 @@ function locate(
  * series keyed `key`, in panel `panel` (the first by default): read alone,
  * headed by its place along its axis, whatever the inspection reads there.
  * Enter clicks it, announcements name it, and its tooltip stands at it.
- * Undefined where it is not drawn.
+ * Undefined where it is not drawn. With `drawn`, of any series drawn, the
+ * inspector's or not (marks with `inspect: false`): clicks select those too,
+ * and announcements name what they selected.
  */
 export function keyedPoint(
   model: ChartModel,
@@ -566,8 +576,9 @@ export function keyedPoint(
   position: number,
   panel: string | undefined,
   readers: SeriesReaders,
+  drawn?: boolean,
 ): AxisInspection | undefined {
-  const own = locate(model, key, position, panel, readers)?.own;
+  const own = locate(model, key, position, panel, readers, drawn)?.own;
   return own?.points.length ? own : undefined;
 }
 

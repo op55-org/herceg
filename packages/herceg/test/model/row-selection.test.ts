@@ -480,12 +480,10 @@ describe("a mounted chart's row selection", () => {
       noKeys,
     )?.();
     expect(host.cleared).toEqual(["pointer"]);
-    // As a key does.
+    // As Escape does, which the chart's keys hand on (dom/interaction.ts).
     host.selection = brush([1.5, 3.5]);
     link.brushed(host.selection, null, true, "pointer", 0);
-    (host.root as EventTarget).dispatchEvent(
-      Object.assign(new Event("keydown"), { key: "Escape", ...noKeys }),
-    );
+    expect(link.escape().said()).toBe("Selection cleared.");
     expect(store.get("focus")).toBeNull();
     expect(host.cleared).toEqual(["pointer", "keyboard"]);
   });
@@ -625,6 +623,7 @@ describe("a mounted chart's row selection", () => {
     const { selection, link, model, host } = mounted();
     const events = { emit: () => {} };
     const live = { textContent: null };
+    expect(model.rowLink).toBe(link);
     expect(
       selection.mount(
         link,
@@ -650,6 +649,12 @@ describe("a mounted chart's row selection", () => {
     );
     expect(replaced).not.toBe(link);
     expect(replaced.selection).toBe(other);
+    // The model holds the link in place; the one replaced, gone again, leaves it.
+    expect(model.rowLink).toBe(replaced);
+    link.dispose();
+    expect(model.rowLink).toBe(replaced);
+    replaced.dispose();
+    expect(model.rowLink).toBeUndefined();
   });
 
   it("keeps what its brush wrote through a binding of the same channel that replaces it", () => {

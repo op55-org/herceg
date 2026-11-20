@@ -136,7 +136,7 @@ import type { Navigator, XPlan } from "./navigator.ts";
 import type { PanelGrid, PanelLayout, PanelPlacement, PanelSplit } from "./panel-layout.ts";
 import type { Panels } from "./panels.ts";
 import type { Picked } from "./pick.ts";
-import type { RowSelection } from "./row-selection.ts";
+import type { RowLink, RowSelection } from "./row-selection.ts";
 import { instanceType, type ScaleName } from "./scales.ts";
 import { type ChartStyles, chartStyles } from "./styles.ts";
 import { titleText } from "./titles.ts";
@@ -476,6 +476,12 @@ export class ChartModel {
    */
   declare looks: typeof geometryOf | undefined;
   declare layoutLooks: Frame["highlighted"];
+  /**
+   * The chart's link to the selection stores `rowSelection` binds, while
+   * bound: the map and network controls count the rows their lassos
+   * select with it (see row-selection.ts).
+   */
+  declare rowLink: RowLink | undefined;
   /**
    * Writes what marks' tooltips show besides points' names and values
    * (`tooltip.fields` and `tooltip.content`) into inspections: given with

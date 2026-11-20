@@ -204,7 +204,7 @@ its point, under the chart's `mode`, `snap`, and `within`. Each move
 announces the cursor's series where it changes, with its place in the
 order ("api, 2 of 12: 304 ms at 10:00"), and names it again where Up or
 Down can go no further ("auth, 1 of 12"); `i` reads every series the
-tooltip lists, and what Enter selects is announced ("api selected").
+tooltip lists.
 The cursor, its ring, and its tooltip follow the row, cell, or layout
 item it is on where data changes move it within its series; when that
 goes (dropped, filtered out, moved to another series) or the legend
@@ -301,6 +301,24 @@ chart and heading parts to their mark, and `herceg.express` takes
 `heading=False` as a chart option. Python sends the columns tooltip
 content and headings read along with the data. See
 [Headings](docs/guide/interaction.md#headings).
+
+Selections are announced once per gesture, in the same words for the
+pointer and the keyboard. A click or Enter that selects says the item as
+its mark's tooltip writes it (its heading and content line, else its
+series and place) or the series' name, with a count where several are
+selected ("C-12 rates: 21.4 – 22.8 selected. 3 items selected.", "C-12 …
+deselected. 2 items selected."), or "Selection cleared." The name is the
+target's own, taken before `select` listeners run, and items of marks
+with `inspect: false` are named too. Escape and clear bindings say
+"Selection cleared." ("Brush cleared." where a brush went and bound rows
+are still selected); brushes and lassos keep their range wording and add
+the rows they wrote where those are a set of rows ("… 214 rows."); clicks
+selecting bound rows say how many as Space does. What is said is decided
+once the gesture and every listener it fires have returned; what
+listeners' later writes cause is the application's to say. Legend entries
+keep their pressed state; `chart.select`, synced charts, grids, previews,
+and cancelled drags say nothing. See
+[Selections](docs/guide/accessibility.md#selections).
 
 Stacked areas take `where`. A condition on the series field alone picks
 the layers, so one table can feed lines of all its series and a stack of

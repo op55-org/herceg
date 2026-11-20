@@ -2280,7 +2280,6 @@ export class MountedChart implements Chart, ExportsScene {
           // The brush goes as the change that replaced its rows: a click's, another writer's.
           clear: (cause) => this.#selectAs(null, {}, cause),
           render: () => this.render(),
-          root: this.root,
         },
         this.#events,
         () => this.#invalidate(false),
