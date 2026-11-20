@@ -445,6 +445,7 @@ export class Cells {
             const down = this.#spans.y?.outer;
             return layout.places[i]?.inset && down ? [down[2 * i]!, down[2 * i + 1]!] : undefined;
           },
+          edge: (i, end) => this.edge(i, end),
         };
       },
     };

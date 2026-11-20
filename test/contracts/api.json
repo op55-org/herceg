@@ -1378,7 +1378,22 @@
         "brush": "As text."
       }
     },
-    "settings TickLabelsSpec hg.TickLabels": {
+    "chart python guides labels": {
+      "untyped": {
+        "rotation": "Python takes the angles to try as a list (`rotation=[0, -45, -90]`), where the spec writes { candidates }."
+      }
+    },
+    "chart python guides layers labels": {
+      "untyped": {
+        "rotation": "Python takes the angles to try as a list (`rotation=[0, -45, -90]`), where the spec writes { candidates }."
+      }
+    },
+    "chart update guides labels": {
+      "untyped": {
+        "rotation": "Python takes the angles to try as a list (`rotation=[0, -45, -90]`), where the spec writes { candidates }."
+      }
+    },
+    "chart update guides layers labels": {
       "untyped": {
         "rotation": "Python takes the angles to try as a list (`rotation=[0, -45, -90]`), where the spec writes { candidates }."
       }

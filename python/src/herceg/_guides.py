@@ -70,6 +70,9 @@ class PanelsScope(TypedDict):
 #: ``Scale.scope``): a name, a layout grid's rows or columns, or panels by id.
 Scope = Literal["chart", "panel", "row", "column"] | LayoutScope | PanelsScope
 TickOverlap = Literal["show", "hide", "stagger", "wrap"]
+#: What an axis' labels do where they would cross the chart's edge
+#: (``TickLabels.ends``).
+TickEnds = Literal["room", "hide"]
 Channel = Literal["series", "color", "size", "symbol"]
 
 _UNITS = ("millisecond", "second", "minute", "hour", "day", "week", "month", "year")
@@ -494,7 +497,14 @@ class TickLabels:
     ``style``'s ``tick_label`` aligns them: its ``align`` on x, its
     ``vertical_align`` on y; centered by default. ``gap``
     is the pixels between them and their tick's end on their side (the
-    axis line where the tick does not reach it). Colorbars take neither."""
+    axis line where the tick does not reach it). ``ends`` says what labels
+    whose painted extent would cross the chart's edge do (or, in panels
+    among others, the gap to a neighbour): ``"room"`` (the default) widens
+    the margin, narrowing the plots, and margins only grow while the
+    chart's size and options stay; ``"hide"`` leaves them out, keeping
+    their tick marks and grid lines, and widens nothing for them, which
+    suits axes whose domain moves. Colorbars take none of ``inside``,
+    ``gap``, and ``ends``."""
 
     rotation: float | Sequence[float] | None = None
     overlap: TickOverlap | None = None
@@ -503,6 +513,7 @@ class TickLabels:
     duplicates: Literal["hide", "show"] | None = None
     inside: bool | None = None
     gap: float | None = None
+    ends: TickEnds | None = None
 
     def __post_init__(self) -> None:
         if self.inside is not None and not isinstance(self.inside, bool):
@@ -515,6 +526,8 @@ class TickLabels:
             _choice(self.overlap, ("show", "hide", "stagger", "wrap"), "TickLabels overlap")
         if self.duplicates is not None:
             _choice(self.duplicates, ("hide", "show"), "TickLabels duplicates")
+        if self.ends is not None:
+            _choice(self.ends, ("room", "hide"), "TickLabels ends")
         if self.row is not None and (
             isinstance(self.row, bool) or not isinstance(self.row, int) or self.row < 0
         ):
@@ -1514,6 +1527,16 @@ class Colorbar:
         self.layers = built_list(self.layers, TickLayer, "colorbar layers")
 
     def _spec(self) -> dict[str, Any]:
+        # Its labels stand beside its ramp, in room of its own: none cross the chart's edge.
+        layers = Role("colorbar layers", "layers")
+        labels = [(Role("colorbar labels", "labels"), self.labels)] + [
+            (layers.index(i).field("labels"), getattr(layer, "labels", None))
+            for i, layer in enumerate(self.layers or ())
+        ]
+        for at, value in labels:
+            ends = value.get("ends") if isinstance(value, Mapping) else getattr(value, "ends", None)
+            if ends is not None:
+                raise at.field("ends").error("a colorbar's labels stand beside its ramp; drop ends")
         spec = {
             "type": "colorbar",
             "id": self.id,

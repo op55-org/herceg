@@ -148,6 +148,16 @@ now takes exactly its room. x axes keep room for their labels' outlines
 and halos, which were drawn past it, and an x axis listed in `guides` no
 longer keeps the room of category labels' extra lines twice.
 
+Listed axes' labels take `ends` (and their layers' labels): `"room"`, the
+default, widens the margin for a first or last label crossing the chart's
+edge, as before; `"hide"` leaves that label out, judged as painted (turned,
+outlined, haloed), and keeps the margin, so the plots of races, streams,
+and zoomed dashboards keep their width. Between facets and subplots a
+label crossing its plot's side counts as crossing; tick marks and grid
+lines stay. Python takes `hg.TickLabels(ends="hide")`, and
+`herceg.express` through `guides`; colorbars refuse it. The margins that
+x end labels widen now make room for their outlines and halos too.
+
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,

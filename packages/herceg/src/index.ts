@@ -138,6 +138,7 @@ export type { SymbolName } from "./draw/symbols.ts";
 export type { RowLink } from "./fields/links.ts";
 export {
   type AxisGuideOptions,
+  type AxisLayerOptions,
   type AxisOptions,
   axis,
   type ChartAxisOptions,

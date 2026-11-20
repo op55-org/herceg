@@ -84,6 +84,20 @@ edge. `model.#furniture` makes the title's and legends' requests
   ends are monotonic passes bounded by a quarter of the chart's width.
   Margins grow freely but shrink only on resizes and option changes, so
   streaming data does not move the plot back and forth.
+- An x end label crossing the chart's edge (`model.ts`'s margin rule,
+  bounded by what the margins keep beside the plots) widens its side; the
+  guide compiler reports listed axes' end labels as painted (`ends`,
+  `painted`: turned, with outline and halo). Layers whose labels' `ends`
+  are `"hide"` report none: once the panels are placed, the compiler
+  blanks their labels crossing the bounds (`placedLayers`). Along x those
+  are the margin rule's at the layout's sides (`AxesState.head`) and the
+  plot's sides between facets and subplots (`edgesOf`, `cells.edge`), in
+  insets the inset plot's; along y the chart's (or the inset's) box the
+  labels are otherwise moved into. Blanking comes after rooms, overlap
+  thinning, and priorities have placed every label, so it changes none of
+  them, and rows and lanes keep the depths their labels gave them
+  (`Placed.sized`); value transitions' frames place their labels the same
+  way.
 - Marks labelling outside their plots ask for room (`Mark.room`), the
   widest per side a track of its own, innermost (`Frame.outside`). Marks
   that measure as they place (`Mark.roomPlaced`) report after drawing; if a

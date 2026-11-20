@@ -6,6 +6,7 @@
 
 import type {
   AxisGuideSpec,
+  AxisLayerSpec,
   AxisSpec,
   ChannelScaleSpec,
   ChartAxisSpec,
@@ -97,12 +98,15 @@ export type PanelOptions = Omit<PanelSpec, "x" | "y" | "yRight"> & {
   yRight?: AxisOptions;
 };
 
-/** A layer of an axis' ticks. */
+/** A layer of a colorbar's ticks. */
 export type TickLayerOptions = Omit<TickLayerSpec, "ticks" | "format"> &
+  Pick<Functions, "ticks" | "format">;
+/** A layer of an axis' ticks, whose labels take `ends`. */
+export type AxisLayerOptions = Omit<AxisLayerSpec, "ticks" | "format"> &
   Pick<Functions, "ticks" | "format">;
 /** An axis guide. */
 export type AxisGuideOptions = Omit<AxisGuideSpec, "ticks" | "format" | "layers"> &
-  Pick<Functions, "ticks" | "format"> & { layers?: readonly TickLayerOptions[] };
+  Pick<Functions, "ticks" | "format"> & { layers?: readonly AxisLayerOptions[] };
 /** A colorbar guide. */
 export type ColorbarOptions = Omit<ColorbarSpec, "ticks" | "format" | "layers"> &
   Pick<Functions, "ticks" | "format"> & { layers?: readonly TickLayerOptions[] };

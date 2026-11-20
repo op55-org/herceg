@@ -54,3 +54,65 @@ def test_gap_sets_labels_apart_from_their_ticks():
     assert label_at(y_axis(hg.TickLabels(gap=20)), "10") == label_at(y_axis(), "10")
     with pytest.raises(ValueError, match="TickLabels gap"):
         hg.TickLabels(gap=-1)
+
+
+EDGES = {"x": [0.0, 1000.0], "v": [0.0, 1.0]}
+
+
+def edge_to_edge(ends: str | None = None) -> hg.Chart:
+    """Values from 0 to 1000 across a chart without padding or a y axis,
+    whose first and last labels cross its edges."""
+    labels = hg.TickLabels(ends=ends) if ends else None  # type: ignore[arg-type]
+    guides = [hg.axis("x", ticks=hg.Ticks(values=[0, 250, 500, 750, 1000]), labels=labels)]
+    return hg.Chart(
+        EDGES,
+        width=800,
+        height=300,
+        padding=0,
+        legend=False,
+        x=hg.AxisOptions(nice=False),
+        y=hg.AxisOptions(show=False, grid=False),
+        guides=guides,
+    ).line(x="x", y="v")
+
+
+@pytest.mark.contract("axis.tick-labels.ends.svg")
+def test_end_labels_crossing_the_edge_are_left_out_and_keep_the_plot():
+    spec, _ = edge_to_edge("hide").to_spec()
+    assert spec["guides"][0]["labels"] == {"ends": "hide"}
+    shown = re.findall(r">([\d,]+)</text>", edge_to_edge().to_svg())
+    assert shown == ["0", "250", "500", "750", "1,000"]
+    # The plot spans the chart: the end labels are left out instead.
+    assert re.findall(r">([\d,]+)</text>", edge_to_edge("hide").to_svg()) == ["250", "500", "750"]
+    assert plot_x(edge_to_edge("hide")) == 0
+    assert plot_x(edge_to_edge()) > 0
+    with pytest.raises(
+        hg.ChartError, match=r'^TickLabels ends: expected "room" or "hide"; received "drop"$'
+    ):
+        hg.TickLabels(ends="drop")  # type: ignore[arg-type]
+    for colorbar, at, path in [
+        (
+            hg.colorbar(labels=hg.TickLabels(ends="hide")),
+            "colorbar labels ends",
+            "guides[0].labels.ends",
+        ),
+        (
+            hg.colorbar(layers=[hg.TickLayer(id="m", labels={"ends": "hide"})]),
+            "colorbar layers[0] labels ends",
+            "guides[0].layers[0].labels.ends",
+        ),
+    ]:
+        with pytest.raises(hg.ChartError) as raised:
+            hg.Chart(EDGES, guides=[colorbar]).heatmap(x="x", y="v", color="v").to_spec()
+        assert str(raised.value) == f"{at}: a colorbar's labels stand beside its ramp; drop ends"
+        assert raised.value.path == path
+
+
+def test_express_charts_take_axes_leaving_out_their_end_labels():
+    import herceg.express as hx
+
+    chart = hx.lineplot(
+        EDGES, x="x", y="v", guides=[hg.axis("x", labels=hg.TickLabels(ends="hide"))]
+    )
+    spec, _ = chart.to_spec()
+    assert spec["guides"] == [{"type": "axis", "scale": "x", "labels": {"ends": "hide"}}]

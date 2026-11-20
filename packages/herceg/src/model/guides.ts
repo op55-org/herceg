@@ -40,7 +40,7 @@ import { chooseInterval, timeTicks } from "../scale/time.ts";
 import { strokeKey } from "../scene/grid.ts";
 import { type AxisGuide, type Panel, type Rect, tickLabelGap } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { Place } from "../spec/place.ts";
+import type { Place, Side } from "../spec/place.ts";
 import type { ScaleScope } from "../spec/spec.ts";
 import { dashPattern } from "../style/dash.ts";
 import { cssFont, insets, type TextPaint, textPaint } from "../style/style.ts";
@@ -376,6 +376,16 @@ export interface AxesState {
   /** The chart's size. */
   readonly width: number;
   readonly height: number;
+  /**
+   * The chart's furniture: the room beside the plots' axes (padding, side
+   * legends, marks' labels outside the plots), and whether the spacing on
+   * each side is automatic.
+   */
+  readonly head: {
+    readonly left: number;
+    readonly right: number;
+    auto(side: Side): boolean;
+  };
   /** Panels in a row, and whether panels have headers above them. */
   readonly columns: number;
   readonly headers: boolean;
@@ -395,14 +405,16 @@ export interface AxesState {
    * instance of `axis`' scale (where axes above the plots go), or the last
    * of those drawing along y and sharing it in its row (where axes on the
    * right go), among the panels `axis` is not hidden in (`off`) and as its
-   * `repeat` says; its plot's width at a first guess; and for an inset,
-   * the span down its box, which its labels along y stay inside.
+   * `repeat` says; its plot's width at a first guess; for an inset, the
+   * span down its box, which its labels along y stay inside; and whether
+   * its cell starts (or with `end`, ends) where the layout does along x.
    */
   readonly cells?: {
     top(i: number, axis: ListedPlacing): boolean;
     last(i: number, axis: ListedPlacing): boolean;
     width(i: number): number;
     within(i: number): readonly [number, number] | undefined;
+    edge(i: number, end: boolean): boolean;
   };
   /**
    * The plan of panel `panel`'s axis of `scale`: for x, one over `pixels`
