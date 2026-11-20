@@ -287,6 +287,21 @@ export function Tooltips() {
   );
 }
 
+export function TooltipHeadings() {
+  return (
+    <Chart
+      tooltip={{ heading: false }}
+      inspection={{ mode: "nearest" }}
+      renderTooltip={({ points: [point] }) => point?.heading?.map((run) => run.text).join("")}
+      onHover={({ inspection }) => inspection?.points[0]?.heading}
+    >
+      <Line data={metrics} x="time" y="p99" tooltip={{ heading: [{ field: "service" }] }} />
+      {/* @ts-expect-error no heading is the chart's choice, not a mark's */}
+      <Line data={metrics} x="time" y="p99" tooltip={{ heading: false }} />
+    </Chart>
+  );
+}
+
 // Layouts.
 const regions = table({
   time: time(timestamps),

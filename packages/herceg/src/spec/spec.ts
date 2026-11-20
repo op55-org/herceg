@@ -878,6 +878,15 @@ export interface TooltipSpec {
    * and it hides while the value is out of view. Off (`false`) by default.
    */
   pin?: "click" | false;
+  /**
+   * `false` shows no heading row in any of the chart's tooltips (shared
+   * readings, items, pinned and keyboard tooltips): the rows follow at
+   * once. Otherwise a tooltip is headed by the place it reads (the axis'
+   * value, or what an item's values measure), or by a mark's own
+   * `tooltip.heading` where it shows one point of that mark. The keyboard
+   * still announces the place.
+   */
+  heading?: false;
 }
 
 /**
@@ -1448,6 +1457,16 @@ export interface MarkTooltipSpec {
    * keyboard's announcements and hover events read the same text.
    */
   content?: LabelContent;
+  /**
+   * The tooltip's heading where it shows one point of this mark alone
+   * (inspection "nearest", an item, or one series read), in place of the
+   * place it reads: parts written from that point's row, as `content`'s
+   * are, such as a range item's id or its ends. Tooltips of several
+   * points keep the place, and the chart's `tooltip.heading: false`
+   * leaves every heading out. Hover events carry it (`point.heading`);
+   * the keyboard announces the place, and this heading before the point.
+   */
+  heading?: LabelContent;
 }
 
 /** Marks whose points are rows of their table, so that tooltips can show more of the row. */

@@ -892,6 +892,15 @@
       "only": {
         "fields": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses fields (`Chart tooltip fields: belong to the marks whose rows they show; give them to a mark`).",
         "content": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses content (`Chart tooltip content: belongs to the marks whose rows it writes; give it to a mark`)."
+      },
+      "untyped": {
+        "heading": "Python's one hg.Tooltip serves the chart and its marks: heading takes False (the chart's) or a mark's parts, which the chart's refuses (`Chart tooltip heading: parts belong to the mark whose points they head; give them to a mark`)."
+      },
+      "choices": {
+        "heading": {
+          "takes": ["*"],
+          "reason": "Python's one hg.Tooltip serves the chart and its marks: heading takes a mark's parts beside False, the chart's only choice, and the chart's refuses parts."
+        }
       }
     },
     "settings RowSelectionSpec hg.SelectionBinding": {

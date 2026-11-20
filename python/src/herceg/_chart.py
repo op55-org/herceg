@@ -815,6 +815,19 @@ class Tooltip:
                hg.LabelPart(field="time", format=hg.Format(time="%H:%M:%S.%L"))]
         chart.line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
 
+    ``heading`` is the tooltip's first row, the place it reads by default
+    (the x value, or what an item's values measure). On the chart,
+    ``heading=False`` leaves it out of every tooltip, shared, pinned, and
+    the keyboard's, so the rows follow at once. On a mark, parts as
+    ``content`` takes them head a tooltip showing one of its points alone
+    (``mode`` "nearest", an item, or one series read), such as a range's
+    id; tooltips of several points keep the place, and the keyboard
+    announces the place, and the heading before the point::
+
+        hg.Chart(observations, tooltip=hg.Tooltip(heading=False)).line(
+            x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
+        chart.custom(..., tooltip=hg.Tooltip(heading=[hg.LabelPart(field="id")]))
+
     ``pin="click"`` pins the tooltip where a click (or Enter on the keyboard
     cursor) inspects: it stays, takes the pointer and focus so its links
     work, and goes on Escape, a click outside, or another click. Pinned at
@@ -827,6 +840,7 @@ class Tooltip:
     fields: Sequence[str | TooltipField] | None = None
     pin: Literal["click"] | None = None
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
+    heading: Literal[False] | Sequence[str | LabelPart | Mapping[str, Any]] | None = None
 
     def _spec(self) -> dict[str, Any]:
         if self.fields is not None:
@@ -844,19 +858,40 @@ class Tooltip:
             spec["axisLabels"] = True
         if self.pin is not None:
             spec["pin"] = choice_option(self.pin, ("click",), "Tooltip pin")
+        if self.heading is False:
+            spec["heading"] = False
+        elif listlike(self.heading) and not isinstance(self.heading, str):
+            raise ChartError(
+                "Chart tooltip heading: parts belong to the mark whose points they head; give "
+                "them to a mark, as in chart.line(..., tooltip=hg.Tooltip(heading=[...]))"
+            )
+        elif self.heading is not None:
+            raise ChartError(
+                "Chart tooltip heading: expected False (no heading), or nothing for the "
+                f"place; received {shown(self.heading)}"
+            )
         return spec
 
     def _mark_spec(self, mark: str) -> dict[str, Any]:
-        """The tooltip of mark ``mark``: its fields and content."""
+        """The tooltip of mark ``mark``: its fields, content, and heading."""
         role = Role(mark).field("tooltip")
         for name in ("axis_labels", "pin"):
             if getattr(self, name):
                 raise role.field(name).error("is the chart's; give it to the chart's tooltip")
+        if self.heading is False:
+            raise role.field("heading").error(
+                "False is the chart's; give it to the chart's tooltip"
+            )
         spec: dict[str, Any] = {}
         if self.content is not None:
             spec["content"] = located(
                 role.field("content"),
                 lambda: content_spec(self.content, f"{mark} tooltip content"),
+            )
+        if self.heading is not None:
+            spec["heading"] = located(
+                role.field("heading"),
+                lambda: content_spec(self.heading, f"{mark} tooltip heading"),
             )
         if self.fields is None:
             return spec
@@ -6714,15 +6749,20 @@ class Chart:
             return None
         if not isinstance(tooltip, Tooltip):
             raise ChartError(
-                f"{mark} tooltip: expected an hg.Tooltip with fields or content; "
+                f"{mark} tooltip: expected an hg.Tooltip with fields, content, or a heading; "
                 f"received {shown(tooltip)}"
             )
         spec = tooltip._mark_spec(mark)
-        for i, part in enumerate(spec.get("content", ())):
+        parts = [
+            (name, i, part)
+            for name in ("content", "heading")
+            for i, part in enumerate(spec.get(name, ()))
+        ]
+        for name, i, part in parts:
             column = part.get("field", part.get("label")) if isinstance(part, dict) else None
             if column is None:
                 continue
-            at = f"{mark} tooltip content[{i}] {'field' if 'field' in part else 'label'}"
+            at = f"{mark} tooltip {name}[{i}] {'field' if 'field' in part else 'label'}"
             self._require(table, column, ("number", "time", "category"), at)
             kind = self._kind(table, column)
             if "field" in part and "format" in part and kind is not None:
@@ -6733,7 +6773,7 @@ class Chart:
                         "number": "give a number format",
                     }[kind]
                     raise ChartError(
-                        f"{mark} tooltip content[{i}] format: {shown(column)} holds "
+                        f"{mark} tooltip {name}[{i}] format: {shown(column)} holds "
                         f"{'categories' if kind == 'category' else kind + 's'}; {fix}"
                     )
         for i, entry in enumerate(spec.get("fields", ())):
@@ -8780,9 +8820,15 @@ def _fields(spec: dict[str, Any]) -> set[str]:
         refs.append(anchor)
     for ref in refs:
         fields.update(name["field"] for name in ref["item"] if isinstance(name, dict))
-    # Columns only tooltips show travel too.
-    for entry in (spec.get("tooltip") or {}).get("fields", ()):
+    # Columns only tooltips show travel too: their fields, and what their
+    # content's and heading's parts read (a ``label`` part, the column's display).
+    tooltip = spec.get("tooltip") or {}
+    for entry in tooltip.get("fields", ()):
         fields.add(entry if isinstance(entry, str) else entry["field"])
+    for part in [*tooltip.get("content", ()), *tooltip.get("heading", ())]:
+        for name in ("field", "label"):
+            if isinstance(part, dict) and isinstance(part.get(name), str):
+                fields.add(part[name])
     fields |= _feature_fields(spec)
     return fields
 
@@ -9686,17 +9732,21 @@ def helper(function: Callable[_P, _R]) -> Callable[_P, _R]:
                         "drop fields"
                     )
                 )
-            if not rows and isinstance(tooltip, Tooltip) and tooltip.content is not None:
+            # Parts written from a row; a heading of False is the chart's, which they keep.
+            for name in ("content", "heading"):
+                parts = getattr(tooltip, name, None) if isinstance(tooltip, Tooltip) else None
+                if rows or parts is None or parts is False:
+                    continue
                 raise (
                     Role(function.__name__)
                     .field("tooltip")
-                    .field("content")
+                    .field(name)
                     .error(
                         "express charts write their own statistics in their tooltips; draw the "
-                        "chart with hg.Chart and give content to its marks"
+                        f"chart with hg.Chart and give {name} to its marks"
                         if express
                         else "its points summarize rows, and its tooltips write each summary as "
-                        "it is; drop content"
+                        f"it is; drop {name}"
                     )
                 )
             try:
@@ -9781,21 +9831,23 @@ def _unknown_option(function: Callable[..., Any], name: str, known: set[str]) ->
 
 def _rows_chart_of(data: Any, options: RadarOptions) -> tuple[Chart, Tooltip | None]:
     """The chart of a helper whose mark's points are rows, and the mark's
-    tooltip: the ``fields`` and ``content`` of the helper's ``tooltip``,
-    which are the mark's."""
+    tooltip: the ``fields``, ``content``, and heading parts of the helper's
+    ``tooltip``, which are the mark's; ``heading=False`` is the chart's."""
     tooltip = options.get("tooltip")
-    if not (
-        isinstance(tooltip, Tooltip) and (tooltip.fields is not None or tooltip.content is not None)
-    ):
+    if not isinstance(tooltip, Tooltip):
+        return _chart_of(data, options), None
+    parts = None if tooltip.heading is False else tooltip.heading
+    if tooltip.fields is None and tooltip.content is None and parts is None:
         return _chart_of(data, options), None
     # The chart keeps the rest, or its default tooltip without any.
+    heading: Literal[False] | None = False if tooltip.heading is False else None
     shared = (
-        Tooltip(axis_labels=tooltip.axis_labels, pin=tooltip.pin)
-        if tooltip.axis_labels or tooltip.pin is not None
+        Tooltip(axis_labels=tooltip.axis_labels, pin=tooltip.pin, heading=heading)
+        if tooltip.axis_labels or tooltip.pin is not None or heading is False
         else None
     )
     chart = _chart_of(data, {**options, "tooltip": shared})
-    return chart, Tooltip(fields=tooltip.fields, content=tooltip.content)
+    return chart, Tooltip(fields=tooltip.fields, content=tooltip.content, heading=parts)
 
 
 def _chart_of(data: Any, options: RadarOptions) -> Chart:

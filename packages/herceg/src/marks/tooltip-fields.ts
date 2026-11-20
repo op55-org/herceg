@@ -1,7 +1,8 @@
 // What marks' tooltips show of the rows they are at besides their values:
-// fields of the row (a mark's `tooltip.fields`) and a row of parts in place
-// of the name and value (`tooltip.content`), checked against the mark's
-// table when the mark is made; charts write them for inspections with
+// fields of the row (a mark's `tooltip.fields`), a row of parts in place
+// of the name and value (`tooltip.content`), and parts heading a tooltip of
+// one point (`tooltip.heading`), checked against the mark's table when the
+// mark is made; charts write them for inspections with
 // marks/tooltip-writers.ts.
 
 import type { PositionField, Schema, Table } from "../data/table.ts";
@@ -18,8 +19,9 @@ import { ANY_KIND, requireField } from "./mark.ts";
 
 /**
  * What a mark's tooltips show of the rows they are at: fields of its
- * table besides its values, by name or with a label and a format, and a
- * row of parts in place of each point's name and value.
+ * table besides its values, by name or with a label and a format, a row
+ * of parts in place of each point's name and value, and parts heading a
+ * tooltip of one of its points.
  */
 export interface MarkTooltip<S extends Schema> {
   /**
@@ -45,6 +47,18 @@ export interface MarkTooltip<S extends Schema> {
    * @minItems 1
    */
   content?: readonly LabelPartOf<keyof S & string>[];
+  /**
+   * The tooltip's heading where it shows one point of this mark alone
+   * (inspection "nearest", an item, or one series read), in place of the
+   * place it reads: parts written from that point's row, as `content`'s
+   * are, such as a range item's id or ends (`[{ field: "start" }, "–",
+   * { field: "end" }]`). Tooltips of several points keep the place, and
+   * the chart's `tooltip: { heading: false }` leaves every heading out.
+   * Inspected points carry it (`point.heading`); the keyboard announces
+   * the place, and this heading before the point.
+   * @minItems 1
+   */
+  heading?: readonly LabelPartOf<keyof S & string>[];
 }
 
 /** A tooltip field with a label and a format of its kind's forms. */
@@ -101,13 +115,14 @@ export interface PointText {
 export interface TooltipText {
   fields?: InspectedField[];
   content?: ContentRun[];
+  heading?: ContentRun[];
 }
 
 /**
  * What `mark`'s tooltip writes of `point`: the fields of `row` (its table's
- * row the point is; undefined where no one row is) and its content, a
- * layout item's `names` (from the top) naming it by the fields of its
- * path or category; undefined for a mark that writes neither.
+ * row the point is; undefined where no one row is), its content, and its
+ * heading, a layout item's `names` (from the top) naming it by the fields
+ * of its path or category; undefined for a mark that writes none.
  */
 export type TooltipWriter = (
   mark:
@@ -139,8 +154,9 @@ export type TooltipWriters = (
 ) => TooltipWriter;
 
 /**
- * Refuses fields a mark's tooltip shows, and fields its content's parts
- * read, that its table does not have, naming them as `mark` does.
+ * Refuses fields a mark's tooltip shows, and fields its content's and
+ * heading's parts read, that its table does not have, naming them as
+ * `mark` does.
  */
 export function checkTooltip(
   table: Table | undefined,
@@ -155,16 +171,17 @@ export function checkTooltip(
       `${mark} tooltip.fields[${i}]`,
     );
   });
-  tooltip?.content?.forEach((part, i) => {
-    // Literal text reads no field.
-    const { field, label } = part as { field?: string; label?: string };
-    const read = field ?? label;
-    if (read !== undefined)
-      requireField(
-        table!,
-        read,
-        ANY_KIND,
-        `${mark} tooltip.content[${i}].${field ? "field" : "label"}`,
-      );
-  });
+  for (const list of ["content", "heading"] as const)
+    tooltip?.[list]?.forEach((part, i) => {
+      // Literal text reads no field.
+      const { field, label } = part as { field?: string; label?: string };
+      const read = field ?? label;
+      if (read !== undefined)
+        requireField(
+          table!,
+          read,
+          ANY_KIND,
+          `${mark} tooltip.${list}[${i}].${field ? "field" : "label"}`,
+        );
+    });
 }

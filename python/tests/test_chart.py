@@ -2578,6 +2578,138 @@ def test_tooltip_content_decodes_with_its_points():
     assert plain is not None and plain.points[0].content is None
 
 
+@pytest.mark.contract("tooltip.heading.python")
+def test_tooltip_heading_is_the_charts_false_or_a_marks_parts():
+    data = {
+        "id": ["C-12", "C-13"],
+        "start": [10.0, 30.0],
+        "end": [25.0, 45.0],
+        "category": ["rates", "fx"],
+    }
+    parts = [
+        hg.LabelPart(field="id", style=hg.TextStyle(font_weight=600)),
+        " (",
+        {"field": "category"},
+        ")",
+    ]
+    heading = [{"field": "id", "style": {"fontWeight": 600}}, " (", {"field": "category"}, ")"]
+    # The chart's False; a mark's parts, beside its content.
+    spec, buffers = (
+        hg.Chart(data, tooltip=hg.Tooltip(heading=False))
+        .point(
+            "start",
+            "end",
+            tooltip=hg.Tooltip(heading=parts, content=[hg.LabelPart(value=True)]),
+        )
+        .to_spec()
+    )
+    assert spec["tooltip"] == {"heading": False}
+    assert spec["marks"][0]["tooltip"] == {"content": [{"value": True}], "heading": heading}
+    # The columns only the parts read travel with the data, as fields' do.
+    assert {"id", "category"} <= set(next(iter(spec["data"].values()))["columns"])
+    hg_render.svg(spec, buffers)
+    # A one-call helper splits one hg.Tooltip: False to the chart, parts to its mark.
+    for given, chart, mark in [
+        (hg.Tooltip(heading=parts), None, {"heading": heading}),
+        (
+            hg.Tooltip(heading=parts, content=["v"], pin="click"),
+            {"pin": "click"},
+            {"content": ["v"], "heading": heading},
+        ),
+        (hg.Tooltip(heading=False), {"heading": False}, None),
+        (
+            hg.Tooltip(heading=False, content=["v"]),
+            {"heading": False},
+            {"content": ["v"]},
+        ),
+    ]:
+        spec, _ = hg.scatter(data, "start", "end", tooltip=given).to_spec()
+        assert spec.get("tooltip") == chart
+        assert spec["marks"][0].get("tooltip") == mark
+    # Express takes False as a chart option.
+    spec, _ = hx.lineplot(
+        {"x": [1.0, 2.0], "y": [3.0, 4.0]}, x="x", y="y", tooltip=hg.Tooltip(heading=False)
+    ).to_spec()
+    assert spec["tooltip"] == {"heading": False}
+
+
+def test_tooltip_heading_refusals_say_whose_it_is():
+    data = {"id": ["C-12", "C-13"], "start": [10.0, 30.0], "end": [25.0, 45.0]}
+    with pytest.raises(
+        ValueError,
+        match=r"^Chart tooltip heading: parts belong to the mark whose points they head; give "
+        r"them to a mark, as in chart\.line\(\.\.\., tooltip=hg\.Tooltip\(heading=\[\.\.\.\]\)\)$",
+    ):
+        hg.Chart(data, tooltip=hg.Tooltip(heading=["x"])).point("start", "end").to_spec()
+    with pytest.raises(ValueError, match=r"^Chart tooltip heading: expected False \(no heading\)"):
+        hg.Chart(data, tooltip=hg.Tooltip(heading=True)).point("start", "end").to_spec()  # type: ignore[arg-type]
+    with pytest.raises(
+        ValueError,
+        match=r"^point tooltip heading: False is the chart's; give it to the chart's tooltip$",
+    ):
+        hg.Chart(data).point("start", "end", tooltip=hg.Tooltip(heading=False))
+    with pytest.raises(ValueError, match=r"^point tooltip heading: expected a list of parts"):
+        hg.Chart(data).point("start", "end", tooltip=hg.Tooltip(heading=True))  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match=r"^point tooltip heading\[0\] field: no column 'name'"):
+        hg.Chart(data).point(
+            "start", "end", tooltip=hg.Tooltip(heading=[hg.LabelPart(field="name")])
+        )
+    with pytest.raises(
+        ValueError, match=r'^point tooltip heading\[0\] format: "id" holds categories'
+    ):
+        hg.Chart(data).point(
+            "start",
+            "end",
+            tooltip=hg.Tooltip(heading=[hg.LabelPart(field="id", format=hg.Format(number=".1f"))]),
+        )
+    with pytest.raises(ValueError, match=r"^histogram tooltip heading: its points summarize rows"):
+        hg.histogram(data, "start", tooltip=hg.Tooltip(heading=["n"]))
+    with pytest.raises(ValueError, match=r"^histplot tooltip heading: express charts write"):
+        hx.histplot(data, x="start", tooltip=hg.Tooltip(heading=["n"]))
+    # A histogram's chart takes False, as express charts do.
+    spec, _ = hg.histogram(data, "start", tooltip=hg.Tooltip(heading=False)).to_spec()
+    assert spec["tooltip"] == {"heading": False}
+
+
+@pytest.mark.contract("inspection.heading.python")
+def test_tooltip_heading_decodes_with_its_points():
+    from herceg._events import _checked_inspection, decode_inspection
+
+    point = {"mark": 0, "markId": None, "key": "0:v", "label": "v", "row": 0, "value": 2}
+    runs = [{"text": "C-12", "style": {"fontWeight": 600}}, {"text": " rates"}]
+    inspection = decode_inspection(
+        {
+            "axis": "x",
+            "value": 1,
+            "time": False,
+            "label": "1",
+            "points": [{**point, "text": "2", "heading": runs}],
+        }
+    )
+    assert inspection is not None
+    assert inspection.points[0].heading == (
+        hg.ContentRun("C-12", hg.ContentStyle(font_weight=600)),
+        hg.ContentRun(" rates"),
+    )
+    assert inspection.points[0].content is None
+    plain = decode_inspection(
+        {"axis": "x", "value": 1, "time": False, "label": "1", "points": [{**point, "text": "2"}]}
+    )
+    assert plain is not None and plain.points[0].heading is None
+    with pytest.raises(
+        hg.ChartError, match=r"points\[0\]\.heading\[0\]: expected text and a style"
+    ):
+        _checked_inspection(
+            {
+                "axis": "x",
+                "value": 1,
+                "time": False,
+                "label": "1",
+                "points": [{**point, "text": "2", "heading": [{"text": 1}]}],
+            }
+        )
+
+
 def test_layout_marks_tooltips_show_more_of_their_items_rows():
     data = {
         "host": ["a", "b", "c"],

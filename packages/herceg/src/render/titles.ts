@@ -84,6 +84,8 @@ export function titlesOf(
   const markup = (element: string, attributes: string, title: string, inside = "") =>
     `<${element}${attributes} fill="none" pointer-events="all"><title>${escapeXml(title)}</title>${inside}</${element}>`;
   const chart = { x: 0, y: 0, width: scene.width, height: scene.height };
+  const { tooltip } = model.config;
+  const headed = !(typeof tooltip === "object" && tooltip.heading === false);
   for (const panel of scene.panels) {
     const inspector = model.inspectorOf(panel.key);
     if (!inspector) continue;
@@ -144,7 +146,7 @@ export function titlesOf(
         out += markup(
           element,
           attributes,
-          titleOf(titleAt(owner, positionOf.get(items.rows![i]!)!)),
+          titleOf(titleAt(owner, positionOf.get(items.rows![i]!)!), headed),
           inside,
         );
       }
@@ -167,7 +169,7 @@ export function titlesOf(
         out[owner.lit?.[rowOf(owner.s, k)] ?? 0] += markup(
           "circle",
           ` cx="${n(at.px)}" cy="${n(at.py)}" r="${TARGET}"`,
-          titleOf(point),
+          titleOf(point, headed),
         );
       }
       after.set(last, (after.get(last) ?? "") + out[0]);
@@ -204,20 +206,29 @@ function positionsOf(s: Series, wanted: ReadonlySet<number>): Map<number, number
 }
 
 /**
- * What the tooltip says of an inspection, a line each: its heading, then
- * each point (its name and value, or its content) and its fields.
+ * What the tooltip says of an inspection, a line each: its heading (none
+ * unless `headed`, as the chart's `tooltip.heading` says), then each point
+ * (its name and value, or its content) and its fields. The heading is the
+ * tooltip's (`headingOf` in dom/tooltip.ts, not imported: exports would
+ * share a chunk with the interaction controller for it): a point shown
+ * alone is headed by its mark's heading where it has one.
  */
-function titleOf(inspection: AxisInspection): string {
+function titleOf(inspection: AxisInspection, headed: boolean): string {
+  const { points } = inspection;
+  const heading = points.length === 1 && points[0]!.heading;
   return [
-    inspection.label,
-    ...inspection.points.map(({ label, text, content, fields = [] }) =>
+    ...(headed ? [heading ? textOf(heading) : inspection.label] : []),
+    ...points.map(({ label, text, content, fields = [] }) =>
       [
-        content ? content.map((run) => run.text).join("") : `${label}: ${text}`,
+        content ? textOf(content) : `${label}: ${text}`,
         ...fields.map((field) => `${field.label}: ${field.link?.text ?? field.text}`),
       ].join(", "),
     ),
   ].join("\n");
 }
+
+/** Runs of content or a heading as text. */
+const textOf = (runs: readonly { text: string }[]) => runs.map((run) => run.text).join("");
 
 /** Whether a pixel is in `box`, as observations drawn are. */
 function inside(x: number, y: number, box: Rect): boolean {

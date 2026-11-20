@@ -17,6 +17,7 @@ import type {
   Target,
 } from "../dom/events.ts";
 import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../dom/handle.ts";
+import type { ContentRun } from "../marks/tooltip-fields.ts";
 import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -260,6 +261,8 @@ export interface InspectionPayload {
     }[];
     /** The row its mark's `tooltip.content` wrote: each part's text, with its style. */
     content?: { text: string; style?: PartStyle }[];
+    /** The heading its mark's `tooltip.heading` wrote, as `content`. */
+    heading?: { text: string; style?: PartStyle }[];
   }[];
   /** An item's data by field (a 3D chart's point): numbers, times in epoch ms, and categories. */
   values?: Readonly<Record<string, number | string>>;
@@ -766,15 +769,16 @@ export function inspectionPayload(
       text: point.text,
       ...(point.names && { names: [...point.names] }),
       ...(point.fields && { fields: point.fields.map((field) => ({ ...field })) }),
-      ...(point.content && {
-        content: point.content.map(({ text, style }) =>
-          style ? { text, style: { ...style } } : { text },
-        ),
-      }),
+      ...(point.content && { content: runs(point.content) }),
+      ...(point.heading && { heading: runs(point.heading) }),
     })),
     ...(inspection.axis === "item" && inspection.values && { values: inspection.values }),
   };
 }
+
+/** Runs of a point's content or heading as JSON: each part's text, with a copy of its style. */
+const runs = (given: readonly ContentRun[]) =>
+  given.map(({ text, style }) => (style ? { text, style: { ...style } } : { text }));
 
 /**
  * Where the chart's controller keeps the panels drawn as it captured an

@@ -206,8 +206,9 @@ class ContentStyle:
 
 @dataclass(frozen=True)
 class ContentRun:
-    """A run of a tooltip's row as its mark's ``hg.Tooltip(content=...)``
-    wrote it: a part's text, in its part's style."""
+    """A run of a tooltip's row or heading as its mark's
+    ``hg.Tooltip(content=...)`` or ``(heading=...)`` wrote it: a part's text,
+    in its part's style."""
 
     text: str
     style: ContentStyle | None = None
@@ -248,6 +249,10 @@ class InspectedPoint:
     #: place of ``label`` and ``text``: each part's text and style, as
     #: inspected. None for marks without content.
     content: tuple[ContentRun, ...] | None = None
+    #: The heading its mark's ``hg.Tooltip(heading=...)`` wrote for it, which
+    #: heads a tooltip showing this point alone: each part's text and style,
+    #: as inspected. None for marks without a heading.
+    heading: tuple[ContentRun, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1477,6 +1482,7 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
             and number(point.get("value"))
             and isinstance(point.get("fields", []), list)
             and isinstance(point.get("content", []), list)
+            and isinstance(point.get("heading", []), list)
         ):
             raise ChartError(
                 f"points[{i}]: expected mark, key, label, text, and value as the browser "
@@ -1493,16 +1499,17 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
                     f"points[{i}].fields[{j}]: expected field, label, kind, text, and value, "
                     f"not {field!r}"
                 )
-        for j, run in enumerate(point.get("content", [])):
-            if not (
-                isinstance(run, dict)
-                and text(run.get("text"))
-                and (run.get("style") is None or isinstance(run["style"], dict))
-                and set(run.get("style") or {}) <= set(_CONTENT_STYLE)
-            ):
-                raise ChartError(
-                    f"points[{i}].content[{j}]: expected text and a style, not {run!r}"
-                )
+        for runs in ("content", "heading"):
+            for j, run in enumerate(point.get(runs, [])):
+                if not (
+                    isinstance(run, dict)
+                    and text(run.get("text"))
+                    and (run.get("style") is None or isinstance(run["style"], dict))
+                    and set(run.get("style") or {}) <= set(_CONTENT_STYLE)
+                ):
+                    raise ChartError(
+                        f"points[{i}].{runs}[{j}]: expected text and a style, not {run!r}"
+                    )
     values = payload.get("values")
     if values is not None and not (
         isinstance(values, dict)
@@ -1510,6 +1517,23 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError(f"values map columns to numbers or labels, not {values!r}")
     return payload
+
+
+def _runs(runs: list[dict[str, Any]] | None) -> tuple[ContentRun, ...] | None:
+    """A point's content or heading as the browser wrote it, checked: its runs."""
+    if runs is None:
+        return None
+    return tuple(
+        ContentRun(
+            text=run["text"],
+            style=ContentStyle(
+                **{_CONTENT_STYLE[key]: value for key, value in run["style"].items()}
+            )
+            if run.get("style")
+            else None,
+        )
+        for run in runs
+    )
 
 
 def _checked_range(ends: Any) -> list[Any] | None:
@@ -1587,19 +1611,8 @@ def decode_inspection(payload: Any) -> Inspection | None:
                     for field in point.get("fields", ())
                 ),
                 names=tuple(point["names"]) if "names" in point else None,
-                content=tuple(
-                    ContentRun(
-                        text=run["text"],
-                        style=ContentStyle(
-                            **{_CONTENT_STYLE[key]: value for key, value in run["style"].items()}
-                        )
-                        if run.get("style")
-                        else None,
-                    )
-                    for run in point["content"]
-                )
-                if "content" in point
-                else None,
+                content=_runs(point.get("content")),
+                heading=_runs(point.get("heading")),
             )
             for point in payload.get("points", ())
         ),

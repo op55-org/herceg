@@ -1,5 +1,5 @@
 // Pointer-interaction regression benchmark: Herceg's per-move latency and
-// main-thread work in five fixtures (page.ts), each move checked for its
+// main-thread work in seven fixtures (page.ts), each move checked for its
 // effect. With `--baseline DIR` (another herceg source tree, main's say) it
 // builds the page against both and alternates them in one Chrome session,
 // in blocks ordered AB, BA, AB, ..., and compares them block by block.
@@ -42,6 +42,8 @@ import type { FixtureName } from "./page.ts";
 
 const FIXTURES: FixtureName[] = [
   "hover-listener",
+  "hover-headings",
+  "custom-hover",
   "pan-labels",
   "anchor-pan",
   "cross-filter",

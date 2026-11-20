@@ -222,7 +222,8 @@ export function loadSpec(
 
 /**
  * Refuses a format of a mark's tooltip field (`tooltip.fields`), or of a
- * field its content writes (`tooltip.content`), that its field's kind does
+ * field its content or heading writes (`tooltip.content`,
+ * `tooltip.heading`), that its field's kind does
  * not take: a number form on a time field, a time pattern on a number
  * field, or any on a category field, as the chart's tooltips would when
  * they first write it (marks/tooltip-writers.ts).
@@ -236,7 +237,9 @@ function tooltipKinds(mark: Mark | LayoutMark, index: number): void {
   };
   const formatted = [
     ...(tooltip?.fields ?? []).map((entry, i) => [entry, `tooltip.fields[${i}].format`] as const),
-    ...(tooltip?.content ?? []).map((part, i) => [part, `tooltip.content[${i}].format`] as const),
+    ...(["content", "heading"] as const).flatMap((list) =>
+      (tooltip?.[list] ?? []).map((part, i) => [part, `tooltip.${list}[${i}].format`] as const),
+    ),
   ];
   formatted.forEach(([entry, at]) => {
     if (typeof entry !== "object" || entry.format === undefined || !entry.field || !table) return;

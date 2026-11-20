@@ -315,8 +315,10 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 
 ## Tooltips
 
-The tooltip shows what is at the pointer or keyboard cursor: the position
-(the x value, or y, or an item's name), then a row per series or item,
+The tooltip shows what is at the pointer or keyboard cursor: a heading,
+the position (the x value, or y, or what an item's values measure) unless
+the chart or a mark says otherwise ([Headings](#headings)), then a row per
+series or item,
 written as the axis' `format` writes it, or as the series' value field's
 [display](fields.md#charts) does. It stands beside the pointer, or beside
 the keyboard cursor's point, ringed, with the cursor's series in bold;
@@ -325,12 +327,14 @@ where that point is out of view, and in charts following a cursor through
 
 | Option | Does |
 | --- | --- |
-| `tooltip` | `true` (default), `false`, or `{ axisLabels, pin }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
+| `tooltip` | `true` (default), `false`, or `{ axisLabels, pin, heading }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
 | `tooltip.axisLabels` | Labels the crosshair on the axes. |
 | `tooltip.pin` | `"click"`: a click or Enter pins the tooltip ([Pinned tooltips](#pinned-tooltips)). |
+| `tooltip.heading` | `false`: no heading row in any of the chart's tooltips ([Headings](#headings)). |
 | axis `tooltipFormat` | How tooltips, the keyboard, and crosshair labels write values, without changing ticks. |
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
 | mark `tooltip: { content }` | Each point's row as one line of parts, in place of its name and value ([Content](#content)). |
+| mark `tooltip: { heading }` | Parts heading a tooltip that shows one of the mark's points alone ([Headings](#headings)). |
 | `renderTooltip` | JavaScript only: content of your own, text or a node. |
 
 ```ts
@@ -428,6 +432,72 @@ chart.line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row)
   its marks `fields` or `content` on a page where no chart had them draws
   at once, and a tooltip shown before the code arrives shows names and
   values until it does. Charts without them never load it.
+
+### Headings
+
+A tooltip's first row is its heading: the place it reads, the x value or
+what an item's values measure. The chart and its marks change it:
+
+- **The chart's `tooltip: { heading: false }`** leaves the heading out of
+  every tooltip of the chart: shared readings, items, pinned tooltips, the
+  keyboard's, and those of other panels and of charts following its
+  cursor. The rows follow at once: a dashboard's rows without a time, or
+  rows whose content already says when.
+- **A mark's `tooltip.heading`** heads a tooltip that shows one of its
+  points alone, in place of the place: with `inspection: { mode:
+  "nearest" }`, an item (a slice, a node), a pinned item, or a reading of
+  one series. It takes the parts `content` takes, written from that
+  point's row: a range item's id, its category, or its ends
+  (`[{ field: "start" }, " – ", { field: "end" }]`).
+
+Whose heading shows: the chart's `false`, else the heading of the one
+point a tooltip shows, else the place. A tooltip of several points keeps
+the place, though their marks have headings: one taken from the first
+would change as the legend hides series.
+
+```ts
+// A range item headed by its own id where it is read alone.
+custom(forecasts, {
+  itemKey: "id", x: ["start", "end"], y: "id",
+  tooltip: { heading: [{ field: "id", style: { fontWeight: 600 } }], content: [{ series: true }, ": ", { value: true }] },
+  draw,
+});
+// Rows without a heading.
+createChart(element, { tooltip: { heading: false }, marks: [line(observations, { x: "time", y: "value", series: "series", tooltip: { content: row } })] });
+```
+
+```python
+hg.Chart(observations, tooltip=hg.Tooltip(heading=False)).line(
+    x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
+chart.point(x="start", y="end", tooltip=hg.Tooltip(heading=[hg.LabelPart(field="id")]))
+hg.scatter(df, x="start", y="end", tooltip=hg.Tooltip(heading=False, content=row))
+```
+
+- **Announcements keep the place.** The keyboard still says where the
+  reading is, and `inspection.label` stays the place; where it reads one
+  point whose mark has a heading, it says that heading first ("C-12.
+  rates: 21.4 – 22.8 at 21.4"), so what names the point in the box is
+  heard too. Inspected points carry their mark's heading whether or not
+  the box shows it (`point.heading`: each part's text and style, as
+  `point.content`), in hover, click, and context-menu events,
+  `renderTooltip`, `chart.inspect()`, `herceg/web` pages, notebook widgets,
+  Streamlit, and Python (`hg.InspectedPoint.heading`). Titles in static
+  SVG, which read one point each, are headed the same way.
+- **Checks.** Parts are typed and checked by the mark's table, as
+  `content`'s are (`custom tooltip.heading[0].field: no field "name"; the
+  table has "id", "start", "end"`). One place says there is no heading,
+  the chart: a mark's `heading: false` is a compile error, in specs
+  `marks[0].tooltip.heading: no heading is the chart's choice; give
+  heading: false to the chart's tooltip`, in Python `line tooltip
+  heading: False is the chart's; give it to the chart's tooltip`; parts
+  on the chart's tooltip are refused the other way round. Marks whose
+  points summarize rows take no `tooltip`, so no heading.
+- **Python's one `hg.Tooltip`** serves both: a one-call helper gives
+  `heading=False` to its chart and heading parts to its mark, beside
+  `content`; `herceg.express` takes `tooltip=hg.Tooltip(heading=False)` as
+  a chart option (its marks write their statistics).
+- **Loading.** Headings are written by the code that writes `content`,
+  loaded the same way.
 
 ## Pinned tooltips
 

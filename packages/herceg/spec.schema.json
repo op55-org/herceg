@@ -5665,6 +5665,11 @@
           "title": "Content",
           "description": "Each point's row as one line of parts, in place of its name and value (`LabelPart`): text, `{ series: true }` (what the tooltip names the point by), `{ value: true }` (its value as the tooltip writes it, or in `format`, a time where it is a time pattern or Intl date options), `{ field }` of its row (as `fields` write it, or in `format`; \"–\" where no one row is the point), or `{ label }`, each in its `style`. The swatch stays and `fields` follow under it; the keyboard's announcements and hover events read the same text.",
           "$ref": "#/$defs/LabelContent"
+        },
+        "heading": {
+          "title": "Heading",
+          "description": "The tooltip's heading where it shows one point of this mark alone (inspection \"nearest\", an item, or one series read), in place of the place it reads: parts written from that point's row, as `content`'s are, such as a range item's id or its ends. Tooltips of several points keep the place, and the chart's `tooltip.heading: false` leaves every heading out. Hover events carry it (`point.heading`); the keyboard announces the place, and this heading before the point.",
+          "$ref": "#/$defs/LabelContent"
         }
       },
       "additionalProperties": false
@@ -9186,6 +9191,11 @@
           "title": "Pin",
           "description": "\"click\": a click (or Enter) on what the tooltip shows pins it there; its content then takes the pointer and the keyboard's focus, so links and buttons in it work. Escape, a click outside it, a click off the data, or a second click on what it shows lets it go. Pinned to an item (inspection \"nearest\", or layout items) it follows the item and closes once the item is gone; pinned to a value along the inspection's axis, every series is read there again as data changes, and it hides while the value is out of view. Off (`false`) by default.",
           "anyOf": [{ "const": "click" }, { "const": false }]
+        },
+        "heading": {
+          "title": "Heading",
+          "description": "`false` shows no heading row in any of the chart's tooltips (shared readings, items, pinned and keyboard tooltips): the rows follow at once. Otherwise a tooltip is headed by the place it reads (the axis' value, or what an item's values measure), or by a mark's own `tooltip.heading` where it shows one point of that mark. The keyboard still announces the place.",
+          "const": false
         }
       },
       "additionalProperties": false

@@ -1,14 +1,15 @@
 // What charts load for tooltips that show more than their marks' names and
-// values: the fields of rows marks' tooltips show (`tooltip.fields`) and
-// their rows of parts (`tooltip.content`), which inspections carry, drawn
-// in the tooltip's box, and content of the application's own
-// (`renderTooltip`) in it. It imports only types of the chart's modules.
+// values: the fields of rows marks' tooltips show (`tooltip.fields`),
+// their rows of parts (`tooltip.content`), and their headings
+// (`tooltip.heading`), which inspections carry, drawn in the tooltip's box,
+// and content of the application's own (`renderTooltip`) in it. It imports
+// only types of the chart's modules.
 
 import type { RowLink } from "../fields/links.ts";
 import type { ContentRun } from "../marks/tooltip-fields.ts";
 import type { Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
-import type { RenderTooltip, Tooltip } from "./tooltip.ts";
+import type { RenderTooltip, Tooltip, TooltipHeading } from "./tooltip.ts";
 
 /**
  * Makes the chart's tooltip, `tooltip`, show the fields of the rows its
@@ -44,19 +45,46 @@ export function ownContent(
   };
   const resized = new ResizeObserver(place);
   resized.observe(element);
+  /** `runs` in `element`, each a span in its part's style. */
+  const styled = (element: HTMLElement, runs: readonly ContentRun[]) => {
+    for (const { text, style } of runs) {
+      const run = document.createElement("span");
+      run.textContent = text;
+      if (style) {
+        const { fontSize, fontWeight, fontStyle, color, opacity } = style;
+        Object.assign(run.style, {
+          fontSize: fontSize === undefined ? "" : `${fontSize}px`,
+          fontWeight: fontWeight ?? "",
+          fontStyle: fontStyle ?? "",
+          color: color ?? "",
+          opacity: opacity ?? "",
+        });
+      }
+      element.append(run);
+    }
+  };
   /**
-   * The built-in content, each point's row (its name and value, or its
+   * The built-in content: its heading (as the controller decided it, none
+   * without one), then each point's row (its name and value, or its
    * content's runs, each in its part's style) followed by its fields',
    * which line up under its label; a field's link is written as its text,
    * and is a link once the tooltip is pinned (`linked`), when it takes the
    * pointer.
    */
-  const builtIn = (inspection: Inspection, theme: Theme, linked: boolean, own: number) => {
-    const header = document.createElement("div");
-    header.textContent = inspection.label;
-    // Line breaks in labels break the tooltip's lines too.
-    header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
-    element.append(header);
+  const builtIn = (
+    inspection: Inspection,
+    heading: TooltipHeading,
+    theme: Theme,
+    linked: boolean,
+    own: number,
+  ) => {
+    if (heading) {
+      const header = document.createElement("div");
+      styled(header, heading);
+      // Line breaks in labels break the tooltip's lines too.
+      header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
+      element.append(header);
+    }
     // A point's swatch is its series', and its label reads as its name; a field's is its value's.
     const row = (
       name: string,
@@ -77,21 +105,7 @@ export function ownContent(
       if (runs) {
         // The content's runs in place of the name and value, each part in its style.
         label.textContent = "";
-        for (const { text, style } of runs) {
-          const run = document.createElement("span");
-          run.textContent = text;
-          if (style) {
-            const { fontSize, fontWeight, fontStyle, color, opacity } = style;
-            Object.assign(run.style, {
-              fontSize: fontSize === undefined ? "" : `${fontSize}px`,
-              fontWeight: fontWeight ?? "",
-              fontStyle: fontStyle ?? "",
-              color: color ?? "",
-              opacity: opacity ?? "",
-            });
-          }
-          label.append(run);
-        }
+        styled(label, runs);
         line.append(swatch, label);
         element.append(line);
         return;
@@ -117,10 +131,10 @@ export function ownContent(
         row(field.label, field.text, field.color, true, field.link);
     }
   };
-  tooltip.show = (inspection, theme, pointer, bounds, ownRow = -1) => {
+  tooltip.show = (inspection, heading, theme, pointer, bounds, ownRow = -1) => {
     const own = render();
     const linked = pinned();
-    const key = JSON.stringify([inspection, ownRow]);
+    const key = JSON.stringify([inspection, ownRow, heading]);
     const revised = revision();
     // A framework may have taken its content out of the box (a snippet removed and given again).
     const kept = !(shown[5] instanceof Node) || element.contains(shown[5]);
@@ -145,7 +159,7 @@ export function ownContent(
       const content = changed ? own?.(inspection) : null;
       // Text is shown as text, never parsed as markup.
       if (content != null) element.append(content);
-      else builtIn(inspection, theme, linked, ownRow);
+      else builtIn(inspection, heading, theme, linked, ownRow);
       // Whether the built-in content was drawn pinned; a fragment leaves its
       // children in the box, not itself.
       shown = [
