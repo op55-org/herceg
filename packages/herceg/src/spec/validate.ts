@@ -72,6 +72,8 @@ import type { ItemAnchor, ItemCoordinate, ItemRef } from "./place.ts";
 import {
   type AnimationSpec,
   type AxisGuideSpec,
+  type AxisLabelsSpec,
+  type AxisLayerSpec,
   type AxisSpec,
   type BinaryColumnSpec,
   type BrushOptions,
@@ -122,8 +124,6 @@ import {
   type ThemeSpec,
   type ThemeTokens,
   type ThresholdPlace,
-  type TickLabelsSpec,
-  type TickLayerSpec,
   type TickMarkSpec,
   type TimeColumnSpec,
   type TitleSpec,
@@ -1211,11 +1211,15 @@ const angle: Check = (v, path) => {
   if (typeof v !== "number" || !(v >= -90 && v <= 90)) fail(path, "degrees from -90 to 90", v);
 };
 
-/** Tick labels: rotation, overlap policy, row, priority, and repeats. */
+/**
+ * Tick labels: rotation, overlap policy, row, priority, repeats, and ends
+ * (a colorbar's are refused as its guide is compiled, with inside and gap).
+ */
 const tickLabels: Check = (v, path) => {
   if (v === false) return;
   object(v, path);
   properties(v as Record<string, unknown>, path, {
+    ends: oneOf("room", "hide"),
     rotation: (r, at) => {
       if (typeof r === "number") return angle(r, at);
       object(r, at);
@@ -1234,7 +1238,7 @@ const tickLabels: Check = (v, path) => {
     duplicates: oneOf("hide", "show"),
     inside: boolean,
     gap: width,
-  } satisfies ChecksOf<TickLabelsSpec>);
+  } satisfies ChecksOf<AxisLabelsSpec>);
 };
 
 /**
@@ -1934,7 +1938,7 @@ function tickLayers(type: unknown): Check {
         tick: tickMark,
         labels: tickLabels,
         style: rolesOf(["tick", "tickLabel"]),
-      } satisfies ChecksOf<TickLayerSpec>);
+      } satisfies ChecksOf<AxisLayerSpec>);
       const id = (layer as { id: unknown }).id;
       if (ids.has(id))
         fail(

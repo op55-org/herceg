@@ -1,6 +1,7 @@
 // Axes' room and the short forms' place in a browser: the guide compiler
 // loads only for them, a horizon chart's strips sit under a short form's
-// axis on top exactly, and a bar race's value axis on top moves with it.
+// axis on top exactly, and a bar race's value axis on top moves with it,
+// keeping its plot's width where its end labels are left out.
 import "./interactive.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
@@ -11,7 +12,10 @@ import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
+import { renderToPDF } from "../../src/pdf.ts";
+import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, Scene } from "../../src/scene/scene.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { modelOf } from "./helpers.ts";
 
 // The guide compiler as it is, counting the charts that make one.
@@ -183,4 +187,117 @@ describe("short forms' place and room", () => {
     expect(middle).not.toEqual(before);
     expect(middle).not.toEqual(after);
   });
+});
+
+describe("end labels", () => {
+  /** Bars of a race: brands' values, by rank. */
+  const ranked = (values: number[]) =>
+    table({
+      brand: values.map((_, i) => `brand ${i}`),
+      value: values,
+      rank: values.map((_, i) => i),
+    });
+  /** A bar race's chart as B6 draws it: its value axis on top in 16 px, without line or tick marks. */
+  const race = (data: ReturnType<typeof ranked>, ends?: "room" | "hide"): ChartOptions => ({
+    animation: { values: true, duration: 250, easing: "linear" },
+    padding: { top: 0, right: 6, bottom: 0, left: 0 },
+    legend: false,
+    marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "rank" })],
+    x: { nice: false },
+    y: { domain: [11.5, -0.5], show: false, grid: false },
+    guides: [
+      axis({
+        scale: "x",
+        place: { side: "top" },
+        room: 16,
+        line: false,
+        tick: false,
+        labels: { gap: 0, ...(ends && { ends }) },
+        style: { tickLabel: { font: "sans-serif", fontSize: 10 } },
+      }),
+    ],
+  });
+  /** The lead's value at each keyframe of a race: rising unevenly, as a race's leader does. */
+  const leads = Array.from({ length: 120 }, (_, k) => Math.round(900 * 1.035 ** k + 211 * (k % 9)));
+
+  contractTest(
+    "axis.tick-labels.ends.race",
+    async () => {
+      for (const ends of ["room", "hide"] as const) {
+        const data = ranked([leads[0]!]);
+        const chart = await mount(race(data, ends), 928, 598);
+        const widths = new Set<number>();
+        for (const lead of leads) {
+          data.reset({ brand: ["brand 0"], value: [lead], rank: [0] });
+          chart.render();
+          widths.add(chart.getPanels()[0]!.plot.width);
+        }
+        if (ends === "room") expect(widths.size).toBeGreaterThan(1);
+        else expect([...widths]).toEqual([922]);
+      }
+    },
+    "keep a race's plot width across its keyframes, where room narrows it for good",
+  );
+
+  contractTest(
+    "axis.tick-labels.ends.transitions",
+    async () => {
+      const data = ranked([3300, 1000]);
+      const chart = await mount(race(data, "hide"), 600, 300);
+      const scenes: Scene[] = [];
+      const render = SvgLayer.prototype.render;
+      vi.spyOn(SvgLayer.prototype, "render").mockImplementation(function (this: SvgLayer, ...args) {
+        if (chart.root.contains(this.svg)) scenes.push(args[0]);
+        return render.apply(this, args);
+      });
+      const top = (scene: Scene) => scene.panels[0]!.axes.find(({ side }) => side === "top")!;
+      const ticks = (scene: Scene) =>
+        top(scene).ticks.map(({ label, position }) => `${label}@${position.toFixed(1)}`);
+      await frame();
+      await frame();
+      vi.useFakeTimers({
+        toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
+      });
+      chart.render();
+      chart.root.dispatchEvent(new PointerEvent("pointerleave"));
+      vi.advanceTimersByTime(16);
+      const before = ticks(scenes.at(-1)!);
+      // At 4,000 the last label stands at the chart's right edge.
+      data.set("value", 0, 4000);
+      vi.advanceTimersByTime(16);
+      vi.advanceTimersByTime(110);
+      const middle = scenes.at(-1)!;
+      vi.advanceTimersByTime(400);
+      const after = scenes.at(-1)!;
+      expect(ticks(middle)).not.toEqual(before);
+      expect(ticks(middle)).not.toEqual(ticks(after));
+      expect(top(after).ticks.at(-1)!.label).toBe("");
+      for (const scene of [middle, after]) {
+        expect(scene.panels[0]!.plot.width).toBe(594);
+        for (const { box } of top(scene).labelBoxes ?? []) {
+          expect(box.x).toBeGreaterThanOrEqual(-0.5);
+          expect(box.x + box.width).toBeLessThanOrEqual(594.5);
+        }
+      }
+    },
+    "play a race's transitions with its end labels left out, inside the chart",
+  );
+
+  contractTest(
+    "axis.tick-labels.ends.export",
+    async () => {
+      const data = ranked([4000, 1000]);
+      const options = { ...race(data, "hide"), animation: false } as ChartOptions;
+      const chart = await mount(options, 600, 300);
+      const live = chart.toSVG();
+      expect(live).not.toMatch(/>0<\/text>/);
+      expect(live).not.toMatch(/>4,000<\/text>/);
+      expect(live).toMatch(/>2,000<\/text>/);
+      // Ids apart: a chart's export names its own.
+      const svg = (text: string) => text.replace(/herceg-(svg-)?\d+-(export-)?/g, "");
+      expect(svg(renderToSVG({ ...options, width: 600, height: 300 }))).toBe(svg(live));
+      expect(renderToPDF({ ...options, width: 600, height: 300 })).toEqual(renderToPDF(chart));
+    },
+    "draw static SVG and PDF as the live chart leaves its end labels out",
+  );
 });

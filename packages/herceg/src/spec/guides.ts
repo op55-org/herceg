@@ -234,6 +234,26 @@ export interface TickLabelsSpec {
 }
 
 /**
+ * What an axis' labels do where they would cross the chart's edge: widen
+ * the margin, narrowing the plots ("room"), or be left out ("hide").
+ */
+export type TickEnds = "room" | "hide";
+
+/** An axis' tick labels: as colorbars' are, and what labels at the axis' ends do. */
+export interface AxisLabelsSpec extends TickLabelsSpec {
+  /**
+   * Labels whose painted extent would cross the chart's edge, or in panels
+   * among others the gap to a neighbour: "room" (the default) widens the
+   * margin, narrowing the plots, and margins only grow while the chart's
+   * size and options stay; "hide" leaves those labels out, keeping their
+   * tick marks and grid lines, and widens nothing for them. "hide" suits
+   * axes whose domain moves (races, streams, zooming).
+   * @default "room"
+   */
+  ends?: TickEnds;
+}
+
+/**
  * A layer of an axis' ticks: its own ticks, format, tick marks, and labels,
  * such as minor ticks or a row of day boundaries under hourly labels.
  * `false` leaves out its tick marks or labels.
@@ -247,6 +267,11 @@ export interface TickLayerSpec {
   labels?: TickLabelsSpec | false;
   /** How its tick marks and labels look, over the axis'. */
   style?: Pick<AxisStyles, "tick" | "tickLabel">;
+}
+
+/** A layer of an axis' ticks, whose labels take `ends` (a colorbar's layers are `TickLayerSpec`). */
+export interface AxisLayerSpec extends Omit<TickLayerSpec, "labels"> {
+  labels?: AxisLabelsSpec | false;
 }
 
 /**
@@ -353,12 +378,12 @@ export interface AxisGuideSpec {
   ticks?: TicksSpec;
   format?: FormatSpec;
   tick?: TickMarkSpec | false;
-  labels?: TickLabelsSpec | false;
+  labels?: AxisLabelsSpec | false;
   /** The axis' line along the plot: x axes draw it, y axes do not, by default. */
   line?: boolean;
   /** Grid lines at its major ticks across the plot; the scale's default axis draws them by default. */
   grid?: boolean | GridLinesSpec;
-  layers?: readonly TickLayerSpec[];
+  layers?: readonly AxisLayerSpec[];
   /** Draw the axis; true by default. @default true */
   show?: boolean;
   /**

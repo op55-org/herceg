@@ -232,10 +232,50 @@ beside each row's last panel needs rows that share y.
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |
 | `inside` | Labels inside the plot beside their ticks, taking no room outside. Not on colorbars. |
 | `gap` | Pixels from the labels to their tick's end. |
+| `ends` | What the first and last labels do where they would cross the chart's edge: `"room"` (default) widens the margin for them, `"hide"` leaves them out ([Labels at the chart's edge](#labels-at-the-charts-edge)). Axes and their layers; not on colorbars. |
 
 Flat labels stand at their ticks as `style.tickLabel` aligns them (`align`
 on x, `verticalAlign` on y). Category labels longer than 30% of the
 chart's width are shortened with an ellipsis.
+
+### Labels at the chart's edge
+
+An x axis' first or last label that would cross the chart's left or right
+edge widens that side's margin, by up to a quarter of the chart's width,
+and the plots narrow for it. y labels at the plots' top and bottom are
+moved inside the chart instead. Margins grow as labels need and shrink
+only when the chart is resized or its options change, so streamed data,
+zooming, and value transitions do not move the plots back and forth: a
+margin a label once needed stays.
+
+`labels: { ends: "hide" }` leaves out an end label that would cross the
+chart's edge, and does not widen the margin for it:
+
+- The label is judged as painted: turned, with its box's outline or its
+  text's halo past the box's padding on each side.
+- A label that fits in the room the chart has anyway (the y labels'
+  margin, `padding`) stays.
+- Its tick mark and grid line stay, and its row of labels keeps its depth.
+- Between facets and subplots, a label crossing its plot's side into the
+  gap beside it counts as crossing.
+- y labels that would cross the chart's top or bottom (an inset's box,
+  in an inset) are left out rather than moved inside, as are those too
+  tall to fit, which `"room"` refuses.
+- A row of labels a [room](#axes) leaves out stays out.
+
+A label that fits only because the margin grew for it is left out too: a
+static time axis whose last label sits at the right edge loses that label.
+Use `"hide"` for axes whose domain moves (races, streams, zoomed
+dashboards), so the plots keep their width; keep the default where every
+label should show.
+
+```ts
+axis({ scale: "x", labels: { ends: "hide" } })
+// Python: hg.axis("x", labels=hg.TickLabels(ends="hide"))
+// Spec:   { "type": "axis", "scale": "x", "labels": { "ends": "hide" } }
+```
+
+Short forms (`x: { ... }`) take no `labels`; list the axis in `guides`.
 
 ## A second y axis
 

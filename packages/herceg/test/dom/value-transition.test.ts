@@ -1530,6 +1530,55 @@ describe("axes moving with values", () => {
     for (const t of [50, 100, 150]) expect(written(frameAt(tween!, t))).toEqual([]);
   });
 
+  contractTest(
+    "axis.tick-labels.ends.frames",
+    () => {
+      // b6.05: a race's value axis on top; at 40 its last label reaches the chart's edge.
+      const race = (ends: "room" | "hide") => {
+        const data = table({ brand: ["a", "b", "c"], value: [10, 20, 33] });
+        const model = new ChartModel(
+          {
+            locale: "en-US",
+            animation: { values: true },
+            padding: { top: 0, right: 6, bottom: 0, left: 0 },
+            marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "brand" })],
+            x: { nice: false },
+            y: { show: false },
+            guides: [
+              axis({
+                scale: "x",
+                place: { side: "top" },
+                room: 16,
+                line: false,
+                tick: false,
+                labels: { gap: 0, ends },
+              }),
+            ],
+          },
+          undefined,
+          [guideCompiler(GUIDE_KIT)],
+        );
+        model.setSize(600, 300, 1);
+        return { model, ...change(model, () => data.set("value", 2, 40)) };
+      };
+      // Room for the last label narrows the plot, so the change shows at once.
+      expect(race("room").tween).toBeUndefined();
+      const { tween } = race("hide");
+      expect(tween).toBeDefined();
+      expect(tween!.scene.panels[0]!.plot.width).toBe(594);
+      expect(labels(axisOf(tween!.scene, "top")).at(-1)).toBe("");
+      for (const t of [0, 50, 100, 150, 200]) {
+        const top = axisOf(frameAt(tween!, t), "top");
+        expect(labels(top).filter((label) => label).length).toBeGreaterThan(3);
+        for (const { box } of top.labelBoxes ?? []) {
+          expect(box.x).toBeGreaterThanOrEqual(-0.5);
+          expect(box.x + box.width).toBeLessThanOrEqual(594.5);
+        }
+      }
+    },
+    "keep a race's plot with its end labels left out, and leave them out between",
+  );
+
   it("move axes the guides list with their scales, their layers laid out between", () => {
     // b6.05: a bar race's x axis on top, without tick marks, moving with the bars.
     const data = table({ x: [1, 2, 3], y: [10, 20, 30] });

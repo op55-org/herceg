@@ -3,14 +3,14 @@ import type { Expression } from "../../src/data/expression.ts";
 import { table } from "../../src/data/table.ts";
 import { anchor } from "../../src/dom/anchors.ts";
 import { createChart } from "../../src/dom/chart.ts";
-import { axis } from "../../src/guides/options.ts";
+import { axis, colorbar } from "../../src/guides/options.ts";
 import type { ViewportEvent } from "../../src/index.ts";
 import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import type { PlotRect } from "../../src/scene/scene.ts";
 import type { Side } from "../../src/spec/place.ts";
-import type { LineSpec } from "../../src/spec/spec.ts";
+import type { ChartSpec, LineSpec } from "../../src/spec/spec.ts";
 
 declare const element: HTMLElement;
 declare const maybeTitle: string | undefined;
@@ -110,6 +110,19 @@ axis({ scale: "x", format: { maximumFractionDigits: 0, fiscal } });
 axis({ scale: "x", ticks: { count: 4, fiscal } });
 // @ts-expect-error nor ticks by values
 axis({ scale: "x", ticks: { values: [0, 1], fiscal } });
+
+// End labels: an axis' labels and its layers' take `ends`; a colorbar's do not.
+axis({ scale: "x", labels: { ends: "hide" }, layers: [{ id: "days", labels: { ends: "room" } }] });
+// @ts-expect-error an end policy the axis does not know
+axis({ scale: "x", labels: { ends: "drop" } });
+// @ts-expect-error a colorbar's labels stand beside its ramp
+colorbar({ labels: { ends: "hide" } });
+// @ts-expect-error and its layers' too
+colorbar({ layers: [{ id: "minor", labels: { ends: "hide" } }] });
+({
+  marks: [],
+  guides: [{ type: "axis", scale: "x", labels: { ends: "hide" } }],
+}) satisfies ChartSpec;
 
 // Clicks say what their items stand for: groups, conditions here and at the
 // source, and rows read when asked; every part typed, none cast.

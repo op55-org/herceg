@@ -2003,6 +2003,7 @@ export class ChartModel {
       surface: surface(theme),
       width,
       height,
+      head,
       columns,
       headers: header + columnHeader > 0,
       labeled: { x: xLabeled, y, yRight },

@@ -588,8 +588,9 @@ measure(
 );
 
 // A first scene's axes: a line's default axes, a listed axis of hours over
-// days laid out at its own depth or in a room the day row does not fit, and
-// twenty horizon strips under an axis on top in a fixed room (study B4).
+// days laid out at its own depth (giving its end labels room or leaving them
+// out) or in a room the day row does not fit, and twenty horizon strips
+// under an axis on top in a fixed room (study B4).
 const DAY_START = Date.UTC(2026, 8, 28);
 const hourly = table({
   t: time(Array.from({ length: 49 }, (_, i) => DAY_START + i * 3_600_000)),
@@ -599,6 +600,19 @@ const days = axis({
   scale: "x",
   layers: [{ id: "day", ticks: { every: "day" }, format: { time: "%b %d" }, labels: { row: 1 } }],
 });
+// The same axis leaving out its end labels where they cross the chart's edge.
+const daysInside = axis({
+  scale: "x",
+  labels: { ends: "hide" },
+  layers: [
+    {
+      id: "day",
+      ticks: { every: "day" },
+      format: { time: "%b %d" },
+      labels: { row: 1, ends: "hide" },
+    },
+  ],
+});
 const strips = table({
   site: Array.from({ length: 20 * 49 }, (_, i) => `site ${Math.floor(i / 49)}`),
   t: time(Array.from({ length: 20 * 49 }, (_, i) => DAY_START + (i % 49) * 3_600_000)),
@@ -607,6 +621,7 @@ const strips = table({
 for (const [name, config, height] of [
   ["a line, default axes", {}, 300],
   ["hours over days", { guides: [days] }, 300],
+  ["hours over days, end labels left out", { guides: [daysInside] }, 300],
   ["hours over days, in a room for one row", { x: { room: 18 }, guides: [days] }, 300],
   [
     "20 strips under an axis on top in 30 px",

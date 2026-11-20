@@ -1491,6 +1491,159 @@
       "python": "guides[0].labels.gap: expected a number of at least 0; received -2"
     },
     {
+      "contract": "axis.tick-labels.ends",
+      "name": "end labels left out at the chart's edge",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "x",
+            "labels": {
+              "ends": "hide"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "x",
+                "labels": {
+                  "hg": "TickLabels",
+                  "args": {
+                    "ends": "hide"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "axis.tick-labels.ends.malformed",
+      "name": "end labels told to do what they cannot",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "x",
+            "labels": {
+              "ends": "drop"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "x",
+                "labels": {
+                  "ends": "drop"
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].labels.ends",
+      "message": "guides[0].labels.ends: expected \"room\" or \"hide\"; received \"drop\"",
+      "python": "TickLabels ends: expected \"room\" or \"hide\"; received \"drop\"",
+      "builder_spec": false
+    },
+    {
+      "contract": "colorbar.labels.ends",
+      "name": "a colorbar's labels told what to do at the chart's edge",
+      "spec": {
+        "guides": [
+          {
+            "type": "colorbar",
+            "labels": {
+              "ends": "hide"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "colorbar",
+              "args": {
+                "labels": {
+                  "ends": "hide"
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "draw",
+      "python_path": "guides[0].labels.ends",
+      "message": "guides[0].labels.ends: a colorbar's labels stand beside its ramp; drop ends",
+      "python": "colorbar labels ends: a colorbar's labels stand beside its ramp; drop ends",
+      "builder_spec": false
+    },
+    {
       "contract": "position.fraction.field",
       "name": "a rule at shares a field gives",
       "spec": {

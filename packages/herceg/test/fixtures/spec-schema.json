@@ -1365,7 +1365,7 @@
         "text: marks\\[\\]\\.(from|label\\.place)(\\..*)?",
         "chart: facet(\\..*)?",
         "chart: x\\.ticks\\.anchor",
-        "chart: guides\\[\\]\\.(format|ticks)"
+        "chart: guides\\[\\]\\.(layers\\[\\]\\.)?(format|ticks)"
       ]
     },
     {

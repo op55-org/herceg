@@ -59,7 +59,9 @@ def test_spec_contracts(case):
         with pytest.raises(hg.ChartError) as raised:
             made(case)
         error = raised.value
-        assert (error.code, error.path) == (case["code"], case.get("python_path", case["path"]))
+        # Python refuses at its own path what the engine may refuse without one.
+        path = case["python_path"] if "python_path" in case else case["path"]
+        assert (error.code, error.path) == (case["code"], path)
         assert case["python"] in str(error)
         return
     spec = made(case)
