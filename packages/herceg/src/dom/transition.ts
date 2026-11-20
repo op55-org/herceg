@@ -8,7 +8,7 @@ import type { ChartModel, DrawnPanel, ViewDomains } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { ChartError } from "../spec/errors.ts";
 import type { AnimationSpec, Easing } from "../spec/spec.ts";
-import { frameCount, lastFrameTime } from "./scheduler.ts";
+import { frameCount, lastFrameTime, leaveOut } from "./scheduler.ts";
 
 /** How long `animation: true` takes, in milliseconds. */
 const DURATION = 250;
@@ -73,6 +73,9 @@ function costOf(batch: Batch): number {
   for (const each of batch.costs.values()) cost += each;
   return cost;
 }
+
+/** When the last one-off work left out of the page's frames ended (see `spare`). */
+let spared = 0;
 
 /**
  * Moves one chart's axes, or its planes, to the views asked for. The chart
@@ -169,12 +172,15 @@ export class ViewAnimation {
     const transition = this.#transition;
     if (!transition) return false;
     const model = this.#model;
+    let started = 0;
+    let planned = 0;
     if (!transition.to) {
       // Charts whose first frame together would be slow jump instead,
       // before planning where they would go.
       const { batch } = transition;
       batch.jump ??= costOf(batch) > SLOW_FRAME;
       if (batch.jump) return this.settle();
+      started = performance.now();
       model.setTransitionDomains(null);
       this.#setViews(undefined);
       const panel = plan();
@@ -182,6 +188,7 @@ export class ViewAnimation {
       const domains = transition.axes && panel && domainsOf(panel);
       if (!domains && !planes) return this.settle();
       transition.to = { domains, planes };
+      planned = performance.now();
     }
     const elapsed = performance.now() - transition.start;
     // Slow frames, of this chart or of every chart together, and a page
@@ -196,7 +203,25 @@ export class ViewAnimation {
     const { domains, planes } = transition.to;
     if (domains) model.setTransitionDomains(domainsAt(transition, domains, elapsed));
     if (planes) this.#setViews(planesAt(transition, planes, elapsed));
+    // Planning is done once: the page's frame leaves it out (the chart's
+    // own frame time never counted it), and its first frame between counts.
+    // Times are 0 for frames after the first, which plan nothing.
+    if (planned) this.spare(started, planned);
     return true;
+  }
+
+  /**
+   * Leaves the one-off work of a transition starting, from `from` to `to`
+   * (building or planning where it goes), out of the page's frame time,
+   * unless it began before the last work left out ended: a build within
+   * which another chart drew at once (a custom mark's `draw` asking it for
+   * its panels) counts whole, with that chart's painting, and only the
+   * other's build is left out. Work is never left out twice. Value
+   * transitions call it too: the record is the page's.
+   */
+  spare(from: number, to: number): void {
+    if (from >= spared) leaveOut(to - from);
+    spared = Math.max(spared, to);
   }
 
   /** Ends a transition playing, so the next scene shows the view asked for; false. */

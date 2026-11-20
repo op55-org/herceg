@@ -31,7 +31,11 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import type { Scene, ShapesGeometry } from "../../src/scene/scene.ts";
 
 const clock = vi.hoisted(() => ({ frame: 0 }));
-vi.mock("../../src/dom/scheduler.ts", () => ({ lastFrameTime: () => clock.frame }));
+vi.mock("../../src/dom/scheduler.ts", () => ({
+  frameCount: () => 0,
+  lastFrameTime: () => clock.frame,
+  leaveOut() {},
+}));
 
 afterEach(() => {
   clock.frame = 0;

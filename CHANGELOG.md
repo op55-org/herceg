@@ -214,6 +214,16 @@ its table's write showed every change at once. They move as marks over
 tables do; a view's own query or restriction changing still shows at
 once.
 
+Transitions are judged by their own frames. A change of values or of view
+still ends early when its frames take over 10 ms, or the page's frames do,
+but building its destination, done once in its first frame (a value
+transition's new scene and its plan, a view transition's plan of the view
+asked for), no longer counts; that frame's moving and painting do. A large
+chart that takes 12 ms to build its new scene and 2 ms a frame to move
+plays its transition, where it ended after one frame. A page's frame after
+one that left such work out counts it in full, so a page rebuilding every
+frame is still judged by its builds.
+
 The keyboard does what the pointer does. Every series shown is a stop,
 whatever the inspection reads (marks with `inspect: false` have none), so
 twelve lines of one table no longer need `inspection: { mode: "nearest" }`
