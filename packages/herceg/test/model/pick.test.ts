@@ -28,6 +28,7 @@ import type {
   LabelsGeometry,
   LineGeometry,
   PointGeometry,
+  Rect,
   RectGeometry,
   RuleGeometry,
 } from "../../src/scene/scene.ts";
@@ -496,6 +497,476 @@ describe("the rule", () => {
     expect(at(dots, px, py + 1)?.mark).toBe(1);
   });
 
+  describe("inside several strokes", () => {
+    // Lines are 2 px wide: a point within a pixel of a line's centre is
+    // inside its stroke, at distance 0 from it.
+
+    it("takes the stroke whose centre line is nearest, painted over or under (pick-band's case)", () => {
+      // The point 0.016 px from one line's centre, 0.809 px from the line painted over it.
+      const [near, over] = [below(0.016), below(-0.809)];
+      expect(at(chart([flat(near), flat(over)]), px, py)?.mark).toBe(0);
+      expect(at(chart([flat(over), flat(near)]), px, py)?.mark).toBe(1);
+      // Of one mark's series.
+      const both = table({ x: [0, 10], near: [near, near], over: [over, over] });
+      const lines = chart([line(both, { x: "x", y: ["near", "over"] })]);
+      expect(at(lines, px, py)?.series).toBe(JSON.stringify([0, "near"]));
+      // Nearer the other's centre, the other.
+      expect(at(lines, px, py - 0.8)?.series).toBe(JSON.stringify([0, "over"]));
+    });
+
+    it("takes each of a crowd of lines inside each other at its centre, of one mark or many", () => {
+      // Twelve lines half a pixel apart: a point on one is inside up to four others.
+      const names = Array.from({ length: 12 }, (_, k) => `s${k}`);
+      const crowd = table({
+        x: [0, 10],
+        ...Object.fromEntries(names.map((name, k) => [name, [below(-0.5 * k), below(-0.5 * k)]])),
+      });
+      const one = chart([line(crowd, { x: "x", y: names as never })]);
+      const many = chart(names.map((name) => line(crowd, { x: "x", y: name as never })));
+      for (const [k, name] of names.entries()) {
+        expect(at(one, px, py - 0.5 * k)?.series, name).toBe(JSON.stringify([0, name]));
+        expect(at(many, px, py - 0.5 * k + 0.1)?.mark, name).toBe(k);
+      }
+      // Midway between two centres, they tie: the one painted over.
+      expect(at(many, px, py - 0.25)?.mark).toBe(1);
+    });
+
+    it("compares centres within a thousandth of a pixel as equal, walking from the top", () => {
+      // Centres 0.4992, 0.4996, and 0.5 px off, the last on top: the top.
+      const close = [0.4992, 0.4996, 0.5].map((d) => flat(below(d)));
+      expect(at(chart(close), px, py)?.mark).toBe(2);
+      // The middle one nearer than the top by more than that, the lowest
+      // not nearer than the middle by as much: the middle.
+      const apart = [0.4978, 0.4985, 0.5].map((d) => flat(below(d)));
+      expect(at(chart(apart), px, py)?.mark).toBe(1);
+    });
+
+    it("takes a rule inside a thick line where its centre is nearer, and the line past the rule's stroke", () => {
+      // A line 10 px wide, a rule a pixel wide 3 px under the line's centre.
+      const thick = line(table({ x: [0, 10], y: [5, 5] }), { x: "x", y: "y", strokeWidth: 10 });
+      const ruled = rule({ y: below(3), strokeWidth: 1 });
+      for (const marks of [
+        [thick, ruled],
+        [ruled, thick],
+      ]) {
+        const model = chart(marks);
+        const r = marks.indexOf(ruled);
+        expect(at(model, px, py + 3)?.mark).toBe(r);
+        expect(at(model, px, py + 3.4)?.mark).toBe(r);
+        // Outside the rule's stroke, inside the line's: the line.
+        expect(at(model, px, py + 1.5)?.mark).toBe(1 - r);
+        expect(at(model, px, py + 4.5)?.mark).toBe(1 - r);
+      }
+    });
+
+    it("measures square ends as drawn: a rule ending short of the point does not hold it", () => {
+      // A rule 2 px wide along y = 5 ending 0.2 px short of the point, under a line 0.8 px above.
+      const end = { data: xScale(probe)!.invert(px - 0.2) };
+      const short = rule({ y: 5, span: [{ data: 0 }, end], strokeWidth: 2 });
+      const model = chart([short, flat(below(-0.8))]);
+      expect(at(model, px, py)?.mark).toBe(1);
+      // A pixel back, inside it: the rule, its centre nearer.
+      expect(at(model, px - 1, py)?.mark).toBe(0);
+      // An area's outline ends square too, where it has no isolated points.
+      const ending = area(table({ x: [0, end.data], y: [5, 5] }), {
+        x: "x",
+        y: "y",
+        stroke: "#000000",
+        strokeWidth: 2,
+      });
+      const outlined = chart([ending, flat(below(-0.8))]);
+      expect(at(outlined, px, py)?.mark).toBe(1);
+      expect(at(outlined, px - 1, py)?.mark).toBe(0);
+    });
+
+    it("measures past a square end from its corners", () => {
+      // A rule 10 px wide ending 3 px short of the point: 8 px across, 4.24
+      // px from its corner, out of reach; 7.5 px across, 3.9 px.
+      const end = { data: xScale(probe)!.invert(px - 3) };
+      const model = chart([rule({ y: 5, span: [{ data: 0 }, end], strokeWidth: 10 })]);
+      expect(at(model, px, py - 8)).toBeUndefined();
+      const reached = picker.pick(model, { x: px, y: py - 7.5, slop: 4 });
+      expect(reached?.item.distance).toBeCloseTo(Math.hypot(3, 2.5), 3);
+    });
+
+    it("leaves out a rule or segment of no length, which square ends paint nothing of", () => {
+      const none = rule({ y: 5, span: [{ data: 4 }, { data: 4 }], strokeWidth: 2 });
+      expect(at(chart([none, flat(below(-0.8))]), px, py)?.mark).toBe(1);
+    });
+
+    it("measures a curved area's square end across the way its outline leaves it", () => {
+      // A curved outline 10 px wide rising from (2, 2): the point 3.4 px
+      // before its first vertex and 2.5 px above, inside the stroke there; a
+      // line 10 px wide under it, its centre 4.8 px off.
+      const rising = area(table({ x: [2, 5, 8], y: [2, 8, 2] }), {
+        x: "x",
+        y: "y",
+        curve: "monotone",
+        stroke: "#000000",
+        strokeWidth: 10,
+      });
+      const [vx, vy] = pixel(chart([rising]), 2, 2);
+      const [qx, qy] = [vx - 3.4, vy - 2.5];
+      const under = line(
+        table({ x: [0, 10], y: [0, 0].map(() => yScale(probe)!.invert(qy + 4.8)) }),
+        { x: "x", y: "y", strokeWidth: 10 },
+      );
+      expect(at(chart([under, rising]), qx, qy)?.mark).toBe(1);
+    });
+
+    it("measures a rounded bar's outline round at its corners", () => {
+      // A bar rounded by 20 px at its top, outlined 2 px wide; a rule 2 px wide painted over it.
+      const options = {
+        legend: false,
+        y: { domain: [0, 10] as [number, number], nice: false },
+        theme: { style: { bar: { radius: 20 } } },
+      };
+      const outlined = bar(table({ c: ["a"], v: [5] }), {
+        x: "c",
+        y: "v",
+        strokeWidth: 2,
+        stroke: "#000000",
+      });
+      const alone = build({ marks: [outlined], ...options });
+      const { rects } = alone.drawnMarks()[0]!.geometry[0] as RectGeometry;
+      const [left, top] = [rects[0]!, rects[1]!];
+      // A pixel in from its left edge and 0.1 px over its top, where the corner leaves nothing.
+      const [x, y] = [left + 1, top - 0.1];
+      expect(at(alone, x, y)).toBeUndefined();
+      const ruled = build({
+        marks: [outlined, rule({ y: yScale(alone)!.invert(y - 0.8), strokeWidth: 2 })],
+        ...options,
+      });
+      expect(at(ruled, x, y)?.mark).toBe(1);
+      // On the corner's arc, the bar.
+      const [ox, oy] = [left + 20, top + 20];
+      expect(at(alone, ox - 20 * Math.SQRT1_2, oy - 20 * Math.SQRT1_2)?.mark).toBe(0);
+    });
+
+    it("measures a square bar's outline mitered at its corners", () => {
+      // Outlined 6 px wide, unrounded: 2.8 px past its top right corner both
+      // ways is inside the mitered corner, outside a round one.
+      const square = build({
+        marks: [
+          bar(table({ c: ["a"], v: [5] }), { x: "c", y: "v", strokeWidth: 6, stroke: "#000000" }),
+        ],
+        legend: false,
+        y: { domain: [0, 10], nice: false },
+        theme: { style: { bar: { radius: 0 } } },
+      });
+      const { rects } = square.drawnMarks()[0]!.geometry[0] as RectGeometry;
+      const [right, top] = [rects[0]! + rects[2]!, rects[1]!];
+      expect(picker.pick(square, { x: right + 2.8, y: top - 2.8, slop: 4 })?.item.distance).toBe(0);
+    });
+
+    it("measures a mitered corner's centre from its sides' centre lines, not past their ends", () => {
+      // Outlined 8 px wide: 2.8 px past its top right corner both ways, 3.96
+      // px from the corner; a rule 8 px wide painted over it, its centre 3.2
+      // px off: the rule.
+      const options = {
+        legend: false,
+        y: { domain: [0, 10] as [number, number], nice: false },
+        theme: { style: { bar: { radius: 0 } } },
+      };
+      const outlined = bar(table({ c: ["a"], v: [5] }), {
+        x: "c",
+        y: "v",
+        strokeWidth: 8,
+        stroke: "#000000",
+      });
+      const alone = build({ marks: [outlined], ...options });
+      const { rects } = alone.drawnMarks()[0]!.geometry[0] as RectGeometry;
+      const [x, y] = [rects[0]! + rects[2]! + 2.8, rects[1]! - 2.8];
+      const ruled = build({
+        marks: [outlined, rule({ y: yScale(alone)!.invert(y - 3.2), strokeWidth: 8 })],
+        ...options,
+      });
+      expect(at(ruled, x, y)?.mark).toBe(1);
+    });
+
+    it("measures a mitered corner the plot shows only the miter of", () => {
+      // An outline 8 px wide whose bar ends 3 px left of and above the plot:
+      // its bottom right miter reaches into the plot, its sides' round
+      // footprints do not.
+      const options = {
+        legend: false,
+        x: { domain: [0, 10] as [number, number], nice: false },
+        y: { domain: [-10, -30 / 267] as [number, number], nice: false },
+        theme: { style: { bar: { radius: 0 } } },
+      };
+      const outlined = bar(table({ x: [(-35 / 552) * 10], v: [1] }), {
+        x: "x",
+        y: "v",
+        strokeWidth: 8,
+        stroke: "#000000",
+      });
+      const alone = build({ marks: [outlined], ...options });
+      const drawn = alone.drawnMarks()[0]!;
+      const { rects } = drawn.geometry[0] as RectGeometry;
+      const { plot } = drawn.frame!;
+      expect(plot.x - rects[0]! - rects[2]!).toBeCloseTo(3, 4);
+      expect(plot.y - rects[1]! - rects[3]!).toBeCloseTo(3, 4);
+      const [x, y] = [plot.x + 0.5, plot.y + 0.5];
+      expect(picker.pick(alone, { x, y, slop: 4 })?.item.distance).toBe(0);
+      // Its sides' centre lines, unextended, are not shown there: a rule 10 px
+      // wide under it, holding the point 4.2 px from its centre, is taken.
+      const ruled = build({
+        marks: [rule({ y: yScale(alone)!.invert(y + 4.2), strokeWidth: 10 }), outlined],
+        ...options,
+      });
+      expect(at(ruled, x, y)?.mark).toBe(0);
+    });
+
+    it("measures a short rounded bar's corners as arcs past its middle", () => {
+      // A bar 10 px tall rounded by up to 20 px at its top: its arcs reach
+      // below its middle. A rule 2 px wide painted over it.
+      const options = {
+        legend: false,
+        y: { domain: [0, 10] as [number, number], nice: false },
+        theme: { style: { bar: { radius: 20 } } },
+      };
+      const probeBar = build({
+        marks: [bar(table({ c: ["a"], v: [1] }), { x: "c", y: "v" })],
+        ...options,
+      });
+      const v = yScale(probeBar)!.invert(yScale(probeBar)!.map(0) - 10);
+      const outlined = bar(table({ c: ["a"], v: [v] }), {
+        x: "c",
+        y: "v",
+        strokeWidth: 2,
+        stroke: "#000000",
+      });
+      const alone = build({ marks: [outlined], ...options });
+      const { rects } = alone.drawnMarks()[0]!.geometry[0] as RectGeometry;
+      // 0.1 px left of it, 55% of the way down, where its corner leaves nothing.
+      const [x, y] = [rects[0]! - 0.1, rects[1]! + 0.55 * rects[3]!];
+      const ruled = build({
+        marks: [outlined, rule({ y: yScale(alone)!.invert(y - 0.8), strokeWidth: 2 })],
+        ...options,
+      });
+      expect(at(ruled, x, y)?.mark).toBe(1);
+      // 5 px in from its left edge and 2 px above its bottom, inside the
+      // outline's bottom side (6 px wide), outside its arc: a rule 6 px wide
+      // painted over it, its centre 2.5 px off, comes second.
+      const thick = bar(table({ c: ["a"], v: [v] }), {
+        x: "c",
+        y: "v",
+        strokeWidth: 6,
+        stroke: "#000000",
+      });
+      const [bx, by] = [rects[0]! + 5, rects[1]! + rects[3]! - 2];
+      const over = build({
+        marks: [thick, rule({ y: yScale(alone)!.invert(by - 2.5), strokeWidth: 6 })],
+        ...options,
+      });
+      expect(at(over, bx, by)?.mark).toBe(0);
+    });
+
+    it("measures an area outline's square ends behind repeated points and short pieces", () => {
+      const ending = (xs: number[], ys: number[], strokeWidth: number) =>
+        area(table({ x: xs, y: ys }), {
+          x: "x",
+          y: "y",
+          curve: "monotone",
+          stroke: "#000000",
+          strokeWidth,
+        });
+      // Starting at (2, 5) twice, 2 px wide: 0.2 px before its start, under a line 0.8 px off.
+      const [sx, sy] = pixel(probe, 2, 5);
+      const repeated = ending([2, 2, 8], [5, 5, 5], 2);
+      expect(at(chart([repeated, flat(below(-0.8))]), sx - 0.2, sy)?.mark).toBe(1);
+      // Curving sharply within a few pixels of its start, 10 px wide: 0.2 px
+      // before its start, under a line 10 px wide 4.8 px off.
+      const sharp = ending([2, 2.05, 2.1], [5, 5.1, 5], 10);
+      const thick = line(
+        table({ x: [0, 10], y: [0, 0].map(() => yScale(probe)!.invert(sy + 4.8)) }),
+        {
+          x: "x",
+          y: "y",
+          strokeWidth: 10,
+        },
+      );
+      expect(at(chart([sharp, thick]), sx - 0.2, sy)?.mark).toBe(1);
+    });
+
+    it("measures an area outline's pieces and joins where each paints, whatever its ends", () => {
+      // A V pointing down, its pieces 1.5 px long, 10 px wide: 0.6 px over
+      // its start and 0.2 px before it, its second piece paints the point;
+      // level with its start, nothing does. A line 10 px wide painted over
+      // it, its centre 4.8 px off.
+      const vee = area(table({ x: [2, 2.02, 2.04], y: [5, 4.96, 5] }), {
+        x: "x",
+        y: "y",
+        stroke: "#000000",
+        strokeWidth: 10,
+      });
+      const [sx, sy] = pixel(probe, 2, 5);
+      const over = (y: number) =>
+        line(table({ x: [0, 10], y: [5, 5].map(() => yScale(probe)!.invert(y - 4.8)) }), {
+          x: "x",
+          y: "y",
+          strokeWidth: 10,
+        });
+      expect(at(chart([vee, over(sy - 0.6)]), sx - 0.2, sy - 0.6)?.mark).toBe(0);
+      expect(at(chart([vee, over(sy)]), sx - 0.2, sy)?.mark).toBe(1);
+    });
+
+    it("measures an area outline through many repeated points in time linear in them", () => {
+      // 40,000 points at one place, drawn unsorted: the piece after them looks
+      // back past them once, and pieces of no length are not measured.
+      const n = 40_000;
+      const model = chart([
+        area(
+          table({
+            x: [1, ...new Array<number>(n).fill(5), 0],
+            y: new Array<number>(n + 2).fill(5),
+          }),
+          {
+            x: "x",
+            y: "y",
+            stroke: "#000000",
+            strokeWidth: 2,
+          },
+        ),
+      ]);
+      const [x, y] = pixel(model, 5, 5);
+      // 4 px above it, outside its stroke and its fill.
+      const query = { x, y: y - 4, slop: 4 };
+      picker.pick(model, query);
+      const start = performance.now();
+      const picked = picker.pick(model, query);
+      expect(performance.now() - start).toBeLessThan(100);
+      expect(picked?.item.distance).toBeCloseTo(3, 4);
+    });
+
+    it("lets a rule's label cover its own stroke", () => {
+      // A rule 4 px wide with a label, and a line 6 px wide painted over it.
+      const labelled = rule({ y: 5, strokeWidth: 4, label: "limit" });
+      const alone = chart([labelled]);
+      const drawn = alone.drawnMarks()[0]!;
+      const geometry = drawn.geometry[0] as RuleGeometry;
+      const draw = geometry.draw as unknown as {
+        labelBox(rule: RuleGeometry, size: number): Rect | undefined;
+      };
+      const box = draw.labelBox(geometry, drawn.frame!.theme.fontSize)!;
+      // In the label, 1.5 px over the rule's centre: inside its stroke too.
+      const [x, y] = [box.x + box.width / 2, geometry.y1 - 1.5];
+      expect(y >= box.y && y <= box.y + box.height).toBe(true);
+      expect(at(alone, x, y)?.mark).toBe(0);
+      const thick = line(table({ x: [0, 10], y: [5, 5].map(() => yScale(alone)!.invert(y - 2)) }), {
+        x: "x",
+        y: "y",
+        strokeWidth: 6,
+      });
+      // The line's centre 2 px off, the rule's 1.5 px under its label: the line.
+      expect(at(chart([labelled, thick]), x, y)?.mark).toBe(1);
+    });
+
+    it("leaves a glyph or fill covering the strokes under it, and a stroke over it taken", () => {
+      // The point 0.2 px from a lower line's centre, 0.6 px from an upper one's.
+      const [lower, upper] = [flat(below(0.2)), flat(below(-0.6))];
+      expect(at(chart([lower, upper]), px, py)?.mark).toBe(0);
+      const glyph = point(table({ x: [4], y: [5] }), { x: "x", y: "y", radius: 6 });
+      const band = region({ x1: 2, x2: 6 });
+      const filled = area(table({ x: [0, 10], y: [below(-4), below(-4)] }), { x: "x", y: "y" });
+      for (const cover of [glyph, band, filled]) {
+        // Under the upper line, over the lower: the upper line, the cover hiding the lower.
+        expect(at(chart([lower, cover, upper]), px, py)?.mark).toBe(2);
+        // Over both lines: the cover.
+        expect(at(chart([lower, upper, cover]), px, py)?.mark).toBe(2);
+      }
+      // An area's outline is a stroke over its fill: the lower line under the fill stays covered.
+      const outlined = area(table({ x: [0, 10], y: [below(-0.6), below(-0.6)] }), {
+        x: "x",
+        y: "y",
+        stroke: "#000000",
+        strokeWidth: 2,
+      });
+      expect(at(chart([lower, outlined]), px, py)?.mark).toBe(1);
+    });
+
+    it("measures a bar's outline as a stroke", () => {
+      // A bar outlined 6 px wide, and a rule 2 px wide a pixel over its top, painted under it.
+      const bars = table({ c: ["a"], v: [5] });
+      const outlined = bar(bars, { x: "c", y: "v", strokeWidth: 6, stroke: "#000000" });
+      const options = { legend: false, y: { domain: [0, 10] as [number, number], nice: false } };
+      const [middle, top] = barAt(build({ marks: [outlined], ...options }), 0);
+      const value = yScale(build({ marks: [outlined], ...options }))!.invert(top - 1);
+      const model = build({ marks: [rule({ y: value, strokeWidth: 2 }), outlined], ...options });
+      // Above the bar, inside both strokes: the rule nearer its centre, the bar nearer its outline's.
+      expect(at(model, middle, top - 0.75)?.mark).toBe(0);
+      expect(at(model, middle, top - 0.25)?.mark).toBe(1);
+    });
+
+    it("takes the segment of a folded path whose centre is nearer, as its own row", () => {
+      // From (0, 5) to (10, 5) and back to (0, 5) a pixel and a half above:
+      // at x = 4 the way back runs 0.9 px above the way out.
+      const folded = chart([
+        line(table({ x: [0, 10, 0], y: [5, 5, below(-1.5)] }), { x: "x", y: "y" }),
+      ]);
+      expect(at(folded, px, py)?.row).toBe(0);
+      expect(at(folded, px, py - 0.9)?.row).toBe(2);
+    });
+
+    it("takes the custom stroke whose centre is nearest, of one mark or across marks", () => {
+      // Each row a horizontal stroke 2 px wide through its point.
+      const strokes = (ys: number[]) =>
+        custom(table({ x: ys.map(() => 4), y: ys }), {
+          x: "x",
+          y: "y",
+          draw({ series, x, y, item, line: stroke }) {
+            for (const s of series)
+              for (let k = 0; k < s.length; k++) {
+                const row = s.rowAt(k);
+                const [cx, cy] = [x(s.x[row]!), y(s.y[row]!)];
+                item(s, row, () => stroke(cx - 20, cy, cx + 20, cy, { strokeWidth: 2 }));
+              }
+          },
+        });
+      // Row 0 0.2 px under the point, row 1 painted over it 0.6 px above.
+      const two = chart([strokes([below(0.2), below(-0.6)])]);
+      expect(at(two, px, py)).toMatchObject({ mark: 0, row: 0 });
+      expect(at(two, px, py - 0.6)).toMatchObject({ mark: 0, row: 1 });
+      // A line under a custom stroke, nearer: the line.
+      expect(at(chart([flat(below(0.2)), strokes([below(-0.6)])]), px, py)?.mark).toBe(0);
+      expect(at(chart([flat(below(-0.6)), strokes([below(0.2)])]), px, py)?.mark).toBe(1);
+    });
+
+    it("measures a custom stroke's centre where its stroke paints the point, not past a butt end", () => {
+      // Row 1, over: a path whose first piece ends half a pixel short of the
+      // point along its centre line, and whose second, 8 px wide, has its
+      // centre 3 px under it; row 0, under: a stroke 4 px wide a pixel above.
+      const shapes = custom(table({ x: [4, 4], y: [5, 5] }), {
+        x: "x",
+        y: "y",
+        draw({ series, x, y, item, path }) {
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              const [cx, cy] = [x(s.x[row]!), y(s.y[row]!)];
+              item(s, row, () =>
+                row === 1
+                  ? path(
+                      `M${cx - 20} ${cy}L${cx - 0.5} ${cy}M${cx - 20} ${cy + 3}L${cx + 20} ${cy + 3}`,
+                      {
+                        stroke: "#000000",
+                        strokeWidth: 8,
+                        fill: "none",
+                      },
+                    )
+                  : path(`M${cx - 20} ${cy - 1}L${cx + 20} ${cy - 1}`, {
+                      stroke: "#000000",
+                      strokeWidth: 4,
+                      fill: "none",
+                    }),
+              );
+            }
+        },
+      });
+      expect(at(chart([shapes]), px, py)).toMatchObject({ mark: 0, row: 0 });
+    });
+  });
+
   it("takes the nearer of two marks' points, whichever is painted later", () => {
     // Glyphs of radius 3, their edges 2 px and 3 px from the point.
     const dots = chart([
@@ -569,7 +1040,7 @@ describe("the rule", () => {
     expect(at(chart([flat(below(1))]), px, py)?.mark).toBe(0);
   });
 
-  it("takes a filled custom path on its thick outline's outer half, before a line under it", () => {
+  it("takes a filled custom path on its thick outline's outer half, before a line under it the point is beside", () => {
     // A square whose top edge is 10 px under the point, its outline 8 px wide.
     const outlined = (lineAt: number) =>
       chart([
@@ -589,8 +1060,12 @@ describe("the rule", () => {
           },
         }),
       ]);
-    // On the outline's outer half, a line a pixel off: the path.
-    expect(at(outlined(7), px, py + 8)?.mark).toBe(1);
+    // On the outline's outer half (its centre line 2 px off), a line 2 px
+    // off, its stroke a pixel off: the path.
+    expect(at(outlined(6), px, py + 8)?.mark).toBe(1);
+    // The point inside that line's stroke too, its centre a pixel off: the
+    // line, whose centre line is nearer.
+    expect(at(outlined(7), px, py + 8)?.mark).toBe(0);
     // 3 px past the outline, the line a pixel off: the line.
     expect(at(outlined(4), px, py + 3)?.mark).toBe(0);
     // Inside its fill, the line a pixel off under it: the path.

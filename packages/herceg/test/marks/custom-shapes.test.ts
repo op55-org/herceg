@@ -114,6 +114,13 @@ describe("the shapes index", () => {
     const line = indexOf([stroked("M0 50L0 50L10 50", 4)]);
     expect(line.find(-1, 50, 0)).toBeUndefined();
     expect(at(line.find(1, 51, 0))?.distance).toBe(0);
+    // Round joins paint only outside the turn, past the segment before:
+    // none where a path goes straight on.
+    const straight = indexOf([stroked("M100 100L101 100L102 100", 10)]);
+    expect(straight.find(99.8, 100, 0)).toBeUndefined();
+    const turning = indexOf([stroked("M100 100L110 100L110 110", 10)]);
+    expect(at(turning.find(113, 97, 0))?.distance).toBe(0);
+    expect(turning.find(116, 94, 0)).toBeUndefined();
   });
 
   it("find shapes at the grid's edges, and leave those far past its bounds out of it", () => {

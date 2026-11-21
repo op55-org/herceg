@@ -324,7 +324,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Eight fixtures, each move checked
+drawing path; it compares no libraries. Nine fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -337,6 +337,7 @@ for its effect:
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
+| `pick-crowd` | One chart of 12 crossing lines x 2,160 minutes (A1's crowd) with `select: "series"`, so every move picks for the cursor, and a `hover` listener; each move lands where two lines cross, inside both strokes | The hover reported there, naming the line picked |
 
 A block is a fresh page in headless Chrome (the frame rate limit off,
 device pixel ratio 2, cross-origin isolated) of a production build:
@@ -380,6 +381,15 @@ the SVG export:
   outside the tooltip and its shadow and the first chart's brush shading.
 - `crosshair-dashboard`: the crosshair in a screenshot of each of the nine
   other charts, at the first chart's minute and nowhere else.
+- `pick-crowd`: three crossings no move went near, each where one line's
+  centre line is the nearest by 0.2 px or more and lines drawn over it
+  hold the pointer too. The fixture's `hover` listener selects the series
+  the hover names, which the chart draws in a marked color; in a
+  screenshot, the line drawn so (in every column where it is 4 px or more
+  from the others) is the one whose centre line, through its
+  observations on the chart's scales, is nearest the pointer, and the
+  pointer cursor shows. Both builds are held to it, so a baseline needs
+  strokes ranked by their centre lines.
 
 The checks fail on engines changed to draw these wrong: the rule not
 drawn on the canvas, or left where first drawn; the crosshair 5 px off;
@@ -388,7 +398,8 @@ selected bars drawn as plain ones, or 5% too tall; bars not drawn, moved
 that overlap and leave a gap, or at 65% opacity; labels at the plot's
 middle, 3 px off, at another series' points, left at their first view,
 drawn twice, or kept apart by half their height; anchors left where first
-placed, or 3 px off. `checks.test.ts` tests the label and bar models.
+placed, or 3 px off; lines picked by paint order (the topmost stroke
+holding the pointer). `checks.test.ts` tests the label and bar models.
 
 `work` is the main thread's task time (`TaskDuration`) between a reading
 before each move is armed and one after its latency has resolved: the

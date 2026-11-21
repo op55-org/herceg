@@ -1762,6 +1762,31 @@ const pickCrowdColumns = (order: (i: number) => number) =>
 const pickCrowd = pickCrowdColumns((i) => i);
 const pickCrowdChart = () => picking([line(pickCrowd, { x: "t", y: pickNames as never })]);
 measure("pick: 12 lines × 2,160, under 100 places", pickUnder(pickCrowdChart()));
+// The same lines picked at 100 places where two of them cross, inside both
+// strokes (2 px wide, the lines within 1.2 px): picking goes on below the
+// first line found for one whose centre line is nearer.
+const pickCrossings = (chart: ChartModel) => {
+  chart.scene(estimateText);
+  const { frame } = chart.drawnMarks()[0]!;
+  const found: (readonly [number, number])[] = [];
+  for (let i = 0; i < PICK_CROWD; i++) {
+    const ys = pickNames.map((name) => frame!.y.map(pickCrowd.numbers(name as never)[i]!));
+    let [a, b] = [0, 1];
+    for (let j = 0; j < ys.length; j++)
+      for (let k = j + 1; k < ys.length; k++)
+        if (Math.abs(ys[j]! - ys[k]!) < Math.abs(ys[a]! - ys[b]!)) [a, b] = [j, k];
+    if (Math.abs(ys[a]! - ys[b]!) < 1.2)
+      found.push([frame!.x.map(i * 60_000), ys[a]! + (ys[b]! - ys[a]!) / 3]);
+  }
+  const places = Array.from(
+    { length: 100 },
+    (_, i) => found[Math.floor((i * found.length) / 100)]!,
+  );
+  return () => {
+    for (const [px, py] of places) chart.picker!(px, py);
+  };
+};
+measure("pick: 12 lines × 2,160, at 100 crossings", pickCrossings(pickCrowdChart()));
 // The same lines unordered along x (a shuffled table), traced as listed.
 const pickShuffled = pickCrowdColumns((i) => (i * 1201) % PICK_CROWD);
 measure(

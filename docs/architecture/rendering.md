@@ -122,7 +122,9 @@ mode visits marks in paint order and series in theirs; of equally near
 points, the one painted last wins (opaque points paint color by color; `Mark.paintsOver` says which
 paints over the other). Targets within a thousandth of a pixel of the
 nearest count as equally near (`model/nearest.ts`), since points are placed
-in 32-bit floats and lines in doubles. With a selection highlighted, its
+in 32-bit floats and lines in doubles. Where the pointer is inside several
+strokes, the one whose centre line is nearest is picked before paint order
+decides. With a selection highlighted, its
 rows paint over the rest and win ties: a line mark's selected parts over
 every series' dimmed ones, as marks of a glyph per row draw theirs
 (`litOverSeries`); an area's over its own layer, a stack keeping its

@@ -89,10 +89,30 @@ never geometry made again from current data.
   across the axis it runs along, curves on the curve, the outline itself
   inside), which ends the walk and is picked unless a candidate was found
   above it (a fill naming no item ends it with nothing); and a fill reached from `beside` it within reach (a cell, a
-  custom shape), which counts only where no fill holds the point. Of
-  candidates the nearest wins; within a thousandth of a pixel
-  (`TIE`), the topmost. Once one is found, marks below are asked only
-  within its distance.
+  custom shape), which counts only where no fill holds the point.
+  Candidates compare by their distance to the edge; where the point is
+  inside both of two strokes (both at 0), by their distance to the centre
+  line (`PickedItem.centre`, which lines, step lines, rules, segments,
+  rectangles' and areas' outlines, and custom strokes report); within a
+  thousandth of a pixel (`TIE`) each, the topmost (`before`). Once one is
+  found, marks below are asked only within its distance; under a stroke
+  the point is inside, with no reach, for a stroke whose centre line is
+  nearer, and a glyph the point is inside ends the walk as a fill does.
+  Strokes that marks' own lookups find (error bars, rugs, contour lines,
+  violins' strokes) report no centre: they rank by paint order where the
+  point is inside them, and one holding the point ends the walk. Within a
+  geometry, primitives are compared the last painted first by the same
+  rule; a custom stroke's centre is that of the segments painting the
+  point (not one whose butt end it is past). Strokes are measured as
+  drawn, piece by piece: square ends paint nothing past them, so a point
+  there is not inside (rules, segments, an outline's sides where the
+  sides beside them are not drawn, and an area outline's runs without
+  isolated points); a stroke of no length is not reached; lines' ends and
+  joins are round; an area outline's and a custom path's joins are round,
+  painting only outside the turn (custom paths are drawn mitered, so
+  picking leaves out the tip of a sharp corner); a rectangle's outline is
+  mitered at its corners and follows its arcs where a bar's end is
+  rounded. A rule's label covers its own stroke.
   Lookup marks' items report fills through `HitReading.fills` (cells,
   bins, contour bands); a violin holding the point is a fill, the
   strokes and glyphs painted over its fills (outline, whisker, median dot;

@@ -178,9 +178,10 @@ function filled({ points, starts }: Flat, x: number, y: number): boolean {
 }
 
 /**
- * Pixels from (x, y) to the stroke of width `width` along `flat`: 0 on it.
- * A subpath's open ends are butt, its joins round; with `whole`, every
- * subpath is closed, as a fill's outline is.
+ * Pixels from (x, y) to the stroke of width `width` along `flat` (0 on
+ * it), and where (x, y) is on it, to the centre line of the segments
+ * painting it there. A subpath's open ends are butt, its joins round; with
+ * `whole`, every subpath is closed, as a fill's outline is.
  */
 function toStroke(
   { points, starts, closed }: Flat,
@@ -188,17 +189,22 @@ function toStroke(
   x: number,
   y: number,
   whole = false,
-): number {
+): { distance: number; centre: number | undefined } {
   const half = width / 2;
   let best = Infinity;
+  let centre: number | undefined;
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]!;
     const to = s + 1 < starts.length ? starts[s + 1]! : points.length;
     // A subpath of one point paints nothing: its butt ends meet.
     if (to - from < 4) continue;
     const shut = whole || closed[s]!;
-    const last = shut ? to : to - 2;
-    for (let i = from; i < last; i += 2) {
+    // Shut, around it and along its first segment again, after its last.
+    const last = shut ? to + 2 : to - 2;
+    // Whether the point is past the end of the segment before (of some length).
+    let past = false;
+    for (let k = from; k < last; k += 2) {
+      const i = k < to ? k : from;
       const j = i + 2 < to ? i + 2 : from;
       const [x0, y0, x1, y1] = [points[i]!, points[i + 1]!, points[j]!, points[j + 1]!];
       const length = Math.hypot(x1 - x0, y1 - y0);
@@ -208,18 +214,21 @@ function toStroke(
       const across = Math.abs(-(x - x0) * uy + (y - y0) * ux);
       const side = Math.max(0, across - half);
       let distance: number;
-      if (along >= 0 && along <= length) distance = side;
-      else {
-        // Past an end: a butt end at the subpath's open ends, a round join elsewhere.
-        const start = along < 0;
-        const open = !shut && (start ? i === from : j === to - 2);
-        const over = start ? -along : along - length;
-        distance = open ? Math.hypot(over, side) : Math.max(0, Math.hypot(over, across) - half);
-      }
+      let middle = across;
+      if (along < 0 || along > length) {
+        // Past an end, square, but past its start and the end of the
+        // segment before, round: their join, painted only there.
+        const over = along < 0 ? -along : along - length;
+        middle = Math.hypot(over, across);
+        distance = along < 0 && past ? Math.max(0, middle - half) : Math.hypot(over, side);
+      } else distance = side;
+      past = along >= length;
       if (distance < best) best = distance;
+      // On the stroke: the centre line of the segments painting it there.
+      if (distance === 0 && (centre === undefined || middle < centre)) centre = middle;
     }
   }
-  return best;
+  return { distance: best, centre };
 }
 
 /** Pixels from (x, y) to `box`: 0 inside it. */
@@ -243,10 +252,11 @@ function textBox(shape: TextShape, font: string, size: number, measure: MeasureT
   return { x, y: shape.y - height / 2, width, height };
 }
 
-/** A group found near a point, and how far it is. */
+/** A group found near a point, how far it is, and for a stroke, how far its centre line is. */
 interface Found {
   readonly group: number;
   readonly distance: number;
+  readonly centre?: number | undefined;
 }
 
 /** One item's shapes: shapes [start, end) of the geometry. */
@@ -329,8 +339,9 @@ export class ShapeIndex {
    * distance within `reach` pixels (0 on it): the stroke nearest the point
    * over the topmost fill holding it (`near`); that fill's group (`fill`),
    * which covers every shape painted under it; and where no fill holds it,
-   * the fill or text nearest it from outside (`beside`). Ties go to the
-   * shape painted later.
+   * the fill or text nearest it from outside (`beside`). Of strokes the
+   * point is inside, the one whose centre line is nearest wins; ties go to
+   * the shape painted later.
    */
   find(
     x: number,
@@ -362,9 +373,18 @@ export class ShapeIndex {
     }
     let near: Found | undefined;
     let beside: Found | undefined;
-    const nearer = (found: Found | undefined, group: number, distance: number) =>
-      distance <= reach && !(found && distance >= found.distance - TIE)
-        ? { group, distance }
+    // Shapes come the last painted first: one found later wins only if it
+    // is nearer, by its edge or, inside both strokes, by its centre line.
+    const nearer = (found: Found | undefined, group: number, distance: number, centre?: number) =>
+      distance <= reach &&
+      (!found ||
+        distance < found.distance - TIE ||
+        (distance === 0 &&
+          found.distance === 0 &&
+          centre !== undefined &&
+          found.centre !== undefined &&
+          centre < found.centre - TIE))
+        ? { group, distance, centre }
         : found;
     for (const group of groups) {
       if (accept && !accept(group)) continue;
@@ -383,10 +403,13 @@ export class ShapeIndex {
         }
         const width = shape.stroke !== undefined ? shape.strokeWidth : 0;
         const flat = flatten(shape.d, x, y, reach + width / 2);
-        if (width > 0) near = nearer(near, group, toStroke(flat, width, x, y));
+        if (width > 0) {
+          const { distance, centre } = toStroke(flat, width, x, y);
+          near = nearer(near, group, distance, centre);
+        }
         if (shape.fill === "none") continue;
         if (filled(flat, x, y)) return { ...(near && { near }), fill: group };
-        beside = nearer(beside, group, toStroke(flat, 0, x, y, true));
+        beside = nearer(beside, group, toStroke(flat, 0, x, y, true).distance);
       }
     }
     return near || beside ? { ...(near && { near }), ...(beside && { beside }) } : undefined;
