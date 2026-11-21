@@ -264,7 +264,9 @@ describe("<Custom>", () => {
     }
     expect(reads.at(-1)!.past).toBe(3);
     vi.useRealTimers();
-    for (let i = 0; i < 3; i++) {
+    // A collection may leave some for the next one, under load especially;
+    // nothing derefs them in between, which would keep them a while.
+    for (let i = 0; i < 10; i++) {
       await frame();
       await collectGarbage();
     }
@@ -302,7 +304,7 @@ describe("<Custom>", () => {
     mounted = undefined;
     flushSync();
     props.chart = null;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 10; i++) {
       await frame();
       await collectGarbage();
     }

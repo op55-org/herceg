@@ -275,8 +275,10 @@ describe("<Custom>", () => {
     data.replace(0, { end: [50] });
     await frame();
     expect(reads.at(-1)!.past).toBe(3);
-    // What the marks called is let go of, the computed's last aside.
-    for (let i = 0; i < 3; i++) {
+    // What the marks called is let go of, the computed's last aside. A
+    // collection may leave some for the next one, under load especially;
+    // nothing derefs them in between, which would keep them a while.
+    for (let i = 0; i < 10; i++) {
       await frame();
       await collectGarbage();
     }
