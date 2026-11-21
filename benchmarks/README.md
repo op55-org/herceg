@@ -347,16 +347,47 @@ move's input arrived (the hover at the move's position, the view, the
 channel, the cursor), and as drawn once a `render` of the revision its
 change made has come; a move whose effect is not drawn within 1 s is a
 miss, and misses fail the run. After the measured moves, untimed, each
-block checks what was drawn: the rule at the hovered minute and the
-labels at both ends of the view (the chart's SVG), the tooltip showing
-the last comet hovered, headed by its own heading in builds that write
-headings, and the shared reading headed by its place, its points carrying
-their headings in those builds, the brushed rows
-highlighted in the other histograms (their SVG changed), the crosshair
-in each of the nine other charts (a screenshot's pixels), and each
-anchor 8 px above or below its place where it is in view and hidden
-where it is not (and, in builds whose anchors fit, inside the chart on
-the side it says).
+block makes three check moves to places no move went (other minutes,
+comets no move read, views, and brushes), waits for each one's effect,
+and checks what the page then shows against the fixture's data, never
+the SVG export:
+
+- `hover-listener`, `hover-headings`: the rule in a screenshot, at the
+  pointer's minute and nowhere else; with headings, the shared reading
+  headed by its place, its points carrying their headings in builds that
+  write them.
+- `custom-hover`: the tooltip showing the comet under the pointer, headed
+  by its own heading in builds that write headings.
+- `pan-labels`: the labels the canvas painted since it was last cleared
+  (its `fillText` and halo `strokeText` calls, recorded during check moves
+  only) and shown in a screenshot: one naming each series at the view's
+  end and one "start" in its color at the view's start. Every label in a
+  column, other labels following the series included, stands where the
+  layout keeps labels apart (`checks.ts`): from its series' point (its
+  first or last minute in view), each a line of the theme's height and its
+  halo below the one before, the sum of squared moves least, within the
+  plot.
+- `anchor-pan`: each anchor 8 px above or below its place where it is in
+  view and hidden where it is not (and, in builds whose anchors fit,
+  inside the chart on the side it says, some below their place).
+- `cross-filter`: the bars of all three histograms. In the live SVG, each
+  across its bin's edges on the x axis and from the y axis' 0 to the bin's
+  rows, its parts meeting without gaps or overlaps, opaque to the rows the
+  brush holds (counted from the data) and faint above. In a screenshot,
+  each part in its fill composited over the plot's white, within rounding,
+  outside the tooltip and its shadow and the first chart's brush shading.
+- `crosshair-dashboard`: the crosshair in a screenshot of each of the nine
+  other charts, at the first chart's minute and nowhere else.
+
+The checks fail on engines changed to draw these wrong: the rule not
+drawn on the canvas, or left where first drawn; the crosshair 5 px off;
+selected bars drawn as plain ones, or 5% too tall; bars not drawn, moved
+(in their path or by a transform), invisible, 1 px wide, split into parts
+that overlap and leave a gap, or at 65% opacity; labels at the plot's
+middle, 3 px off, at another series' points, left at their first view,
+drawn twice, or kept apart by half their height; anchors left where first
+placed, or 3 px off. `checks.test.ts` tests the label and bar models.
+
 `work` is the main thread's task time (`TaskDuration`) between a reading
 before each move is armed and one after its latency has resolved: the
 move's work and the harness's two small evaluations. It is taken in a
@@ -389,11 +420,17 @@ median, over blocks, of the candidate's block median over the
 baseline's. In runs of at least the default size (6 blocks of 30
 measured moves), a sustained `latency` or `work` comparison over 1.1 that
 is also more than 0.1 ms slower is reported as a regression, and the run
-exits with an error. Main against itself, in three sessions, stayed
-within 0.94-1.05 in sustained mode (single blocks 0.69-1.20), and 0.25 ms
-of work added to every scheduler frame gave 1.12-1.21 in every fixture.
-`results/interaction.json` is this branch's engine against main's, the
-same code: a record of the noise. Against step 8's engine
+exits with an error. Main against itself, in five sessions, stayed
+within 0.93-1.07 in sustained mode (single blocks 0.69-1.30). 0.25 ms of
+work added to every scheduler frame gave 1.09-1.27 (latency) and
+1.05-1.19 (work) in two sessions of all seven fixtures: the gate flagged
+every fixture in one and all but the cross-filter (1.09 and 1.05) in the
+other, so a cost that small is at the gate's edge there. The gate's
+millisecond test compares the two builds' medians, not paired blocks: the
+crosshair's latency, 1.13 by its paired blocks, was 0.04 ms slower by its
+medians and not flagged (its work was). `results/interaction.json` is the
+last of those sessions, main's engine in both builds: a record of the
+noise. Against step 8's engine
 (f316bdff), today's crosshair and cross-filter are within 0.94-1.03, and
 the hover listener's change draws in the move's frame (22 ms then, 1.4 ms
 now).
