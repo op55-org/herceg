@@ -54,9 +54,10 @@ const QUIET_GAP_MS = 70;
 /**
  * A gated figure regressed when the median of its paired blocks' ratios
  * (candidate over baseline) and the difference of its medians both pass
- * these. Main against itself stayed within 0.94-1.05 in sustained mode,
- * and 0.25 ms of work added to every frame passed 1.1 in every fixture
- * (benchmarks/README.md, "Pointer interactions").
+ * these. Main against itself stayed within 0.93-1.07 in sustained mode,
+ * and 0.25 ms of work added to every frame passed 1.1 in every fixture but
+ * the cross-filter in one of two sessions (benchmarks/README.md, "Pointer
+ * interactions").
  */
 const GATE = { ratio: 1.1, ms: 0.1 };
 
@@ -197,7 +198,7 @@ async function runBlock(
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}/${name}/`);
     await page.waitForFunction(() => window.interaction !== undefined);
-    const { press, moves, screenshot } = await page.evaluate(
+    const { press, moves, checks, screenshot } = await page.evaluate(
       ([fixture, count]) => window.interaction.mount(fixture, count),
       [fixture, WARMUP + MOVES] as const,
     );
@@ -221,9 +222,27 @@ async function runBlock(
       const sample = work && ms !== null ? (await taskTime()) - before : ms;
       if (i >= WARMUP) samples.push(sample);
     }
-    // Untimed: the drawn result of the moves, from the chart or a screenshot.
-    const shot = screenshot ? (await page.screenshot({ scale: "css" })).toString("base64") : "";
-    const wrong = await page.evaluate((shot) => window.interaction.verify(shot), shot);
+    // Untimed: moves to places no measured move went, each one's result
+    // checked as the page shows it (the live DOM, or a screenshot).
+    let wrong: string | undefined;
+    for (const [j, move] of checks.entries()) {
+      const index = moves.length + j;
+      await page.evaluate((index) => window.interaction.arm(index), index);
+      await page.mouse.move(move.x, move.y);
+      if ((await page.evaluate(() => window.interaction.result())) === null) {
+        wrong = `check move ${j + 1} drew no effect within 1 s`;
+        break;
+      }
+      const shot = screenshot ? (await page.screenshot({ scale: "css" })).toString("base64") : "";
+      wrong = await page.evaluate(([index, shot]) => window.interaction.verify(index, shot), [
+        index,
+        shot,
+      ] as const);
+      if (wrong) {
+        wrong = `after check move ${j + 1} of ${checks.length}, ${wrong}`;
+        break;
+      }
+    }
     if (press) await page.mouse.up();
     await page.evaluate(() => window.interaction.unmount());
     if (errors.length) throw new Error(`interaction: ${fixture} (${name}): ${errors[0]}`);

@@ -38,7 +38,8 @@ export default defineConfig({
     ],
   },
   test: {
-    // The common-task samples (src/ease): each one mounts and draws.
+    // The common-task samples (src/ease): each one mounts and draws; and
+    // the interaction benchmark's checks (src/interaction/checks.ts).
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     browser: {
       enabled: true,
