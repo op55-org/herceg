@@ -324,7 +324,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Nine fixtures, each move checked
+drawing path; it compares no libraries. Ten fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -338,6 +338,7 @@ for its effect:
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
 | `pick-crowd` | One chart of 12 crossing lines x 2,160 minutes (A1's crowd) with `select: "series"`, so every move picks for the cursor, and a `hover` listener; each move lands where two lines cross, inside both strokes | The hover reported there, naming the line picked |
+| `rule-drag` | `pick-crowd`'s lines, each named at its last minute in view outside the plot, and a rule at a value with `drag` (A1's threshold), pressed and dragged 6 px up and back; an `itemMove` listener gives each preview's value back with `update` in a task of its own, as a React application holding the value in its state does, so each move draws the preview and then the options | A frame of the options with the rule where the move put it |
 
 A block is a fresh page in headless Chrome (the frame rate limit off,
 device pixel ratio 2, cross-origin isolated) of a production build:
@@ -390,6 +391,9 @@ the SVG export:
   observations on the chart's scales, is nearest the pointer, and the
   pointer cursor shows. Both builds are held to it, so a baseline needs
   strokes ranked by their centre lines.
+- `rule-drag`: the rule in a screenshot at the pointer's height, within
+  2 px, in two thirds or more of the plot's columns clear of the tooltip,
+  and nowhere else in the plot.
 
 The checks fail on engines changed to draw these wrong: the rule not
 drawn on the canvas, or left where first drawn; the crosshair 5 px off;
@@ -398,8 +402,9 @@ selected bars drawn as plain ones, or 5% too tall; bars not drawn, moved
 that overlap and leave a gap, or at 65% opacity; labels at the plot's
 middle, 3 px off, at another series' points, left at their first view,
 drawn twice, or kept apart by half their height; anchors left where first
-placed, or 3 px off; lines picked by paint order (the topmost stroke
-holding the pointer). `checks.test.ts` tests the label and bar models.
+placed, or 3 px off; a dragged rule 3 px off the pointer; lines picked by
+paint order (the topmost stroke holding the pointer). `checks.test.ts`
+tests the label and bar models.
 
 `work` is the main thread's task time (`TaskDuration`) between a reading
 before each move is armed and one after its latency has resolved: the

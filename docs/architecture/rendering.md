@@ -81,8 +81,11 @@ Bottom to top: an optional canvas for marks; the SVG layer (grid and marks
 when not on canvas, guides, axes, title, pointer overlay); the HTML legend;
 the tooltip; visually hidden text for assistive technology.
 
-- Pointer feedback touches only the overlay, so hovering never repaints
-  data.
+- Pointer feedback changes the overlay and the tooltip, never the marks'
+  nodes. Where marks share the SVG with the overlay, the browser can
+  repaint that SVG on each move, so a hover's paint can grow with the
+  marks drawn in it (in Chrome, a chart of 4,000 paths painted several
+  times longer per move than the same chart on a canvas).
 - Scheduled frames read no layout (which would force layout of the previous
   frame's DOM writes). The container is measured when a `ResizeObserver`
   reports a change, for the first frame (not at all when `width` and
