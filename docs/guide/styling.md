@@ -338,6 +338,7 @@ createChart(element, {
 - The order is the panel's own (insets paint over their parents), and
   separate from the order the keyboard, descriptions, and tooltips read.
 - Hovering and clicking take the nearest stroke or point within reach,
-  down to the first fill under the pointer; of equally near ones, the mark
-  painted last ([Interaction](interaction.md#events)).
+  down to the first fill under the pointer; where the pointer is inside
+  several strokes, the one whose centre line is nearest; of equally near
+  ones, the mark painted last ([Interaction](interaction.md#events)).
 - 3D marks refuse `zIndex`; a 3D box draws by depth.

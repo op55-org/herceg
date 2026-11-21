@@ -190,7 +190,8 @@ export interface PickQuery {
 
 /**
  * What a mark has at a query (model/pick.ts), each within reach: its
- * nearest stroke or point (`candidate`); the fill the query is inside
+ * nearest stroke or point (`candidate`; of strokes the query is inside,
+ * the one whose centre line is nearest); the fill the query is inside
  * (`fill`; null for one standing for no item), which covers what is
  * painted under the mark; and for marks reaching fills from beside them
  * (cells, custom shapes), the one nearest the query outside it (`beside`),
@@ -214,6 +215,12 @@ export interface PickedItem {
   readonly box: Readonly<Rect>;
   /** Pixels from the pointer to the drawn shape; 0 on or inside it. */
   readonly distance: number;
+  /**
+   * For strokes: pixels from the pointer to the stroke's centre line, which
+   * ranks strokes the pointer is inside together (model/pick.ts); undefined
+   * for points and fills.
+   */
+  readonly centre?: number | undefined;
 }
 
 /**

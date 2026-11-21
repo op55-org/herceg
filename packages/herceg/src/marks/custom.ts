@@ -983,7 +983,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     const found = items.shapes.find(query.x, query.y, query.slop, (group) =>
       wanted(items.series[group]!),
     );
-    const itemOf = (group: number, distance: number): PickedItem | undefined => {
+    const itemOf = (group: number, distance: number, centre?: number): PickedItem | undefined => {
       const series = items.series[group]!;
       const position = items.positions[group]!;
       const box = this.#boxOf(items, series, position);
@@ -998,13 +998,14 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
           names: undefined,
           box,
           distance,
+          centre,
         }
       );
     };
     const { near, beside, fill } = found ?? {};
     return (
       found && {
-        candidate: near && itemOf(near.group, near.distance),
+        candidate: near && itemOf(near.group, near.distance, near.centre),
         beside: beside && itemOf(beside.group, beside.distance),
         fill: fill === undefined ? undefined : (itemOf(fill, 0) ?? null),
       }

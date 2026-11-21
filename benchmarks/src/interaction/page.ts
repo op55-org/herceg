@@ -57,7 +57,8 @@ export type FixtureName =
   | "pan-view-labels"
   | "anchor-pan"
   | "cross-filter"
-  | "crosshair-dashboard";
+  | "crosshair-dashboard"
+  | "pick-crowd";
 
 declare global {
   interface Window {
@@ -964,6 +965,193 @@ async function crosshairDashboard(count: number): Promise<Fixture> {
   return { moves, checks, screenshot: true };
 }
 
+/** A point's distance, in pixels, from the segment from a to b. */
+function toSegment(p: Point, a: Point, b: Point): number {
+  const [dx, dy] = [b.x - a.x, b.y - a.y];
+  const length = dx * dx + dy * dy;
+  const t =
+    length > 0 ? Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length)) : 0;
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+/**
+ * A1's crowd: one chart of 12 lines x 2,160 minutes crossing each other,
+ * with `select: "series"`, so that every move picks what the pointer is on
+ * (for the cursor, and for the hover listener, whose pick the cursor
+ * shares). Each move lands where two lines cross, inside both strokes, so
+ * picking goes on below the first line for one whose centre is nearer. The
+ * move's effect is the hover reported there. On check moves the listener
+ * selects the series the hover names, which the chart draws `MARKED`, and
+ * `verify` finds in a screenshot the line drawn so: the one whose centre
+ * line, from the data on the chart's scales, is nearest the pointer.
+ */
+async function pickCrowd(count: number): Promise<Fixture> {
+  const n = 2_160;
+  const names = Array.from({ length: 12 }, (_, k) => `s${k}`);
+  const value = (k: number, i: number) => 200 + 6 * k + 10 * Math.sin(i / 90 + k);
+  const columns: Record<string, Float64Array | ReturnType<typeof time>> = {
+    t: time(Float64Array.from({ length: n }, (_, i) => START + i * MINUTE)),
+  };
+  for (const [k, name] of names.entries())
+    columns[name] = Float64Array.from({ length: n }, (_, i) => value(k, i));
+  const data = table(columns);
+  const chart = createChart(host(800, 400), {
+    marks: [line(data, { id: "lines", x: "t", y: names, selected: { stroke: MARKED } })],
+    interaction: { select: "series" },
+    timeZone: "UTC",
+  });
+  charts = [chart];
+  await chart.loading;
+  await until(chart);
+  const box = chart.root.getBoundingClientRect();
+  // Each line's observations in page pixels, on the chart's scales.
+  const xs = Float64Array.from(
+    { length: n },
+    (_, i) => box.left + chart.toPixel(START + i * MINUTE, { axis: "x" })!,
+  );
+  const ys = names.map((_, k) =>
+    Float64Array.from(
+      { length: n },
+      (_, i) => box.top + chart.toPixel(value(k, i), { axis: "y" })!,
+    ),
+  );
+  /** The first observation at or right of page x `x`. */
+  const after = (x: number) => {
+    let [lo, hi] = [0, n - 1];
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid]! < x) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  /** Line k's y at page x `x`, between the observations around it. */
+  const lineAt = (k: number, x: number) => {
+    const i = Math.max(1, after(x));
+    const f = (x - xs[i - 1]!) / (xs[i]! - xs[i - 1]!);
+    return ys[k]![i - 1]! + f * (ys[k]![i]! - ys[k]![i - 1]!);
+  };
+  /** How far each line's centre line is from a page point, as drawn through its observations. */
+  const centres = (p: Point) => {
+    const [from, to] = [Math.max(0, after(p.x - 6) - 1), Math.min(n - 1, after(p.x + 6))];
+    return names.map((_, k) => {
+      let d = Number.POSITIVE_INFINITY;
+      for (let i = from; i < to; i++)
+        d = Math.min(
+          d,
+          toSegment(p, { x: xs[i]!, y: ys[k]![i]! }, { x: xs[i + 1]!, y: ys[k]![i + 1]! }),
+        );
+      return d;
+    });
+  };
+  // Where two lines are within 1.2 px of each other at an observation (both
+  // 2 px wide): a third of the way from one to the other, inside both.
+  const crossings: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    let [a, b] = [0, 1];
+    for (let j = 0; j < names.length; j++)
+      for (let k = j + 1; k < names.length; k++)
+        if (Math.abs(ys[j]![i]! - ys[k]![i]!) < Math.abs(ys[a]![i]! - ys[b]![i]!)) [a, b] = [j, k];
+    const gap = ys[b]![i]! - ys[a]![i]!;
+    if (Math.abs(gap) < 1.2) crossings.push({ x: xs[i]!, y: ys[a]![i]! + gap / 3 });
+  }
+  // Timed moves: crossings 12 px apart or more, each far from the last.
+  const timed: Point[] = [];
+  for (const c of crossings) if (!timed.length || c.x - timed.at(-1)!.x >= 12) timed.push(c);
+  if (timed.length < 20) throw new Error(`pick-crowd: ${timed.length} crossings, not 20`);
+  const moves = Array.from({ length: count }, (_, i) => timed[(i * 7) % timed.length]!);
+  // Check moves: crossings no move went near, where one centre line is the
+  // nearest by 0.2 px or more and the pointer is inside other strokes
+  // drawn over it (later in `names`): each the nearest of a line of its own,
+  // in each third of the plot.
+  const thirds: ({ at: Point; nearest: number; inside: number[] } | undefined)[] = [];
+  const { plot } = chart.getPanels()[0]!;
+  for (const at of crossings) {
+    if (moves.some((move) => Math.abs(move.x - at.x) < 4)) continue;
+    const third = Math.min(2, Math.floor((3 * (at.x - box.left - plot.x)) / plot.width));
+    if (thirds[third]) continue;
+    const d = centres(at);
+    const order = d.map((_, k) => k).sort((j, k) => d[j]! - d[k]!);
+    const nearest = order[0]!;
+    // Strokes are 2 px wide: inside within 1 px of a centre line, clear of the edge.
+    const inside = order.filter((k) => d[k]! < 0.9);
+    if (
+      d[order[1]!]! - d[nearest]! < 0.2 ||
+      d.some((v) => v >= 0.9 && v <= 1.1) ||
+      !inside.some((k) => k > nearest) ||
+      thirds.some((place) => place?.nearest === nearest)
+    )
+      continue;
+    thirds[third] = { at, nearest, inside };
+  }
+  const places = thirds.filter((place) => place !== undefined);
+  if (places.length < 3) throw new Error(`pick-crowd: ${places.length} check places, not 3`);
+  const checks = places.map(({ at }) => at);
+  const all = [...moves, ...checks];
+  /** The check move's pick: undefined until its hover, null where it named no line. */
+  let picked: string | null | undefined;
+  let needed = Number.POSITIVE_INFINITY;
+  reset = () => {
+    picked = undefined;
+    needed = Number.POSITIVE_INFINITY;
+  };
+  stops.push(
+    chart.on("hover", ({ cause, pointer, target }) => {
+      if (!moving() || cause !== "pointer" || !at(chart, pointer, all[armed!.index])) return;
+      if (armed!.index < moves.length) return drawn();
+      if (picked !== undefined) return;
+      // A check move: the series picked, drawn as the selection.
+      picked = target?.kind === "item" ? (target.series ?? null) : null;
+      const selected = chart.selection;
+      if (
+        picked === null ||
+        (selected?.kind === "series" &&
+          selected.series.length === 1 &&
+          selected.series[0] === picked)
+      )
+        return drawn();
+      chart.select({ kind: "series", series: [picked] });
+      needed = chart.revision;
+    }),
+    chart.on("render", ({ revision }) => {
+      if (revision >= needed) drawn();
+    }),
+  );
+  verify = async (index, screenshot) => {
+    const { at: pointer, nearest, inside } = places[index - moves.length]!;
+    const pixel = await pixels(screenshot!);
+    const tip = tooltipBox(chart)?.getBoundingClientRect();
+    // Columns of the plot clear of the pointer and the tooltip, where line
+    // k is 4 px or more from every other: there the MARKED pixels show
+    // whether it is drawn selected.
+    const shows = (k: number) => {
+      let clear = 0;
+      for (let x = box.left + plot.x + 3; x < box.left + plot.x + plot.width - 3; x += 5) {
+        if (Math.abs(x - pointer.x) < 16) continue;
+        if (tip && x > tip.left - SHADOW && x < tip.right + SHADOW) continue;
+        const y = lineAt(k, x);
+        if (names.some((_, j) => j !== k && Math.abs(lineAt(j, x) - y) < 4)) continue;
+        clear++;
+        let near = false;
+        for (let row = Math.ceil(box.top + plot.y); row < box.top + plot.y + plot.height; row++) {
+          if (!isMarked(pixel(x, row))) continue;
+          if (Math.abs(row - y) > 3) return false;
+          near ||= Math.abs(row - y) <= 1.5;
+        }
+        if (!near) return false;
+      }
+      return clear >= 20;
+    };
+    const drawnSelected = names.findIndex((_, k) => shows(k));
+    if (drawnSelected !== nearest) {
+      const where = `at ${(pointer.x - box.left).toFixed(1)}, ${(pointer.y - box.top).toFixed(1)} px, inside ${inside.map((k) => names[k]).join(", ")}`;
+      return `${drawnSelected < 0 ? "no line" : names[drawnSelected]} is drawn selected after a hover ${where}, not ${names[nearest]}, whose centre line is nearest`;
+    }
+    if (chart.root.style.cursor !== "pointer") return "no pointer cursor over the lines";
+  };
+  return { moves, checks, screenshot: true };
+}
+
 const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
   "hover-headings": (count) => hoverListener(count, true),
@@ -973,6 +1161,7 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "anchor-pan": anchorPan,
   "cross-filter": crossFilter,
   "crosshair-dashboard": crosshairDashboard,
+  "pick-crowd": pickCrowd,
 };
 
 window.interaction = {

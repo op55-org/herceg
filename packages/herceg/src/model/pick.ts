@@ -5,8 +5,10 @@
 // points within reach are candidates (a stroke's half width plus `slop` of
 // lines, outlines, rules, and segments; a point's radius plus `slop`), and
 // the first fill the point is inside (bars, bins, cells, regions, areas,
-// text, layout items) ends the walk, covering what is painted under it. The
-// nearest candidate wins, ties to the topmost; with none, that fill. Nothing
+// text, layout items) ends the walk, covering what is painted under it, as
+// a glyph the point is inside does. The nearest candidate by its edge wins;
+// of strokes the point is inside, the one whose centre line is nearest;
+// then the topmost. With none, that fill. Nothing
 // outside a geometry's clip is picked. A line's or area's path is resolved
 // to the observation it draws nearest the point (level of detail, steps, and
 // stacks draw vertices that are no rows). Marks with lookups of their own
@@ -154,14 +156,27 @@ export class Picker {
       let beside: Picked | undefined;
       let fill: Picked | null | undefined;
       for (let k = painted.length - 1; k >= 0 && fill === undefined; k--) {
-        // Under a candidate, only a nearer one counts: it is looked for that near.
-        const reach = best ? best.item.distance - TIE : slop;
-        if (reach < 0) break;
+        // Under a candidate, only a nearer one counts: it is looked for that
+        // near. Under a stroke the point is inside, only a stroke whose
+        // centre line is nearer: looked for with no reach.
+        let reach = slop;
+        if (best) {
+          const { distance, centre } = best.item;
+          reach = distance - TIE;
+          if (reach < 0) {
+            if (!(distance === 0 && centre !== undefined && centre > TIE)) break;
+            reach = 0;
+          }
+        }
         const query: PickQuery = { x, y, slop: reach, series, lookups: this.#lookups };
         const found = this.#pickPainted(painted[k]!, query, model.items);
-        if (nearer(found?.candidate, best)) best = found!.candidate;
+        const candidate = found?.candidate;
+        if (nearer(candidate, best)) best = candidate;
         if (nearer(found?.beside, beside)) beside = found!.beside;
         fill = found?.fill;
+        // A glyph (or an item of a lookup) the point is inside covers what is under it.
+        if (candidate && candidate.item.distance === 0 && candidate.item.centre === undefined)
+          break;
       }
       // A fill holding the point outranks those beside it; without one,
       // a fill beside it nearer than any candidate.
@@ -274,7 +289,7 @@ export class Picker {
       return {
         drawn,
         key: drawn.mark,
-        item: { part: row, names: undefined, box, distance: hit.distance },
+        item: { part: row, names: undefined, box, distance: hit.distance, centre: hit.centre },
         series,
       };
     };
@@ -305,7 +320,7 @@ export class Picker {
       item && {
         drawn,
         key: item.mark ?? drawn.mark,
-        item: { ...item, distance: hit.distance },
+        item: { ...item, distance: hit.distance, centre: hit.centre },
         series: item.part.kind === "row" ? item.part.series?.series : item.part.point?.series,
       }
     );
@@ -387,7 +402,7 @@ export class Picker {
   ): Hits | undefined {
     switch (geometry.kind) {
       case "rect": {
-        const { rects, count, edge } = geometry as RectGeometry;
+        const { rects, count, edge, rounded } = geometry as RectGeometry;
         const half = edge ? edge.width / 2 : 0;
         const box = (i: number) => ({
           x: rects[i * 4]!,
@@ -403,8 +418,9 @@ export class Picker {
         for (let i = count - 1; i >= 0; i--) {
           const w = rects[i * 4 + 2]! / 2;
           const h = rects[i * 4 + 3]! / 2;
-          const dx = Math.abs(x - rects[i * 4]! - w);
-          const dy = Math.abs(y - rects[i * 4 + 1]! - h);
+          // From its middle.
+          const [sx, sy] = [x - rects[i * 4]! - w, y - rects[i * 4 + 1]! - h];
+          const [dx, dy] = [Math.abs(sx), Math.abs(sy)];
           if (!held && dx <= w + TIE && dy <= h + TIE)
             held = { index: i, distance: 0, box: box(i) };
           if (!(half > 0)) {
@@ -414,21 +430,59 @@ export class Picker {
           // Outlines beyond reach of the query are not measured.
           if (dx > w + half + slop || dy > h + half + slop) continue;
           const r = box(i);
-          const mask =
-            edge!.sides === undefined
-              ? 15
-              : typeof edge!.sides === "number"
-                ? edge!.sides
-                : edge!.sides[i]!;
-          // Side k runs from corner k to corner k + 1, clockwise from the top left (draw/rect.ts).
-          const cx = (k: number) => (k === 1 || k === 2 ? r.x + r.width : r.x);
-          const cy = (k: number) => (k & 2 ? r.y + r.height : r.y);
+          const { sides } = edge!;
+          const mask = sides === undefined ? 15 : typeof sides === "number" ? sides : sides[i]!;
+          // An outline of every side is the fill's, its rounded end's corners
+          // rounded by `c` as draw/rect.ts traces them (ends 1 to 4: top,
+          // bottom, left, right, rounding corners 0 and 1, 2 and 3, 0 and 3,
+          // 1 and 2).
+          const end = sides === undefined && rounded ? rounded.ends[i]! : 0;
+          const c = end ? Math.min(rounded!.radius, end < 3 ? w : h, end < 3 ? 2 * h : 2 * w) : 0;
+          const bends = c > 0.5 ? [0, 3, 12, 9, 6][end]! : 0;
+          // Corner k, clockwise from the top left (draw/rect.ts), moved `inset` into it.
+          const cx = (k: number, inset = 0) =>
+            k === 1 || k === 2 ? r.x + r.width - inset : r.x + inset;
+          const cy = (k: number, inset = 0) => (k & 2 ? r.y + r.height - inset : r.y + inset);
+          const take = (distance: number, centre: number) => {
+            if (distance <= slop && (!near || before(distance, centre, near)))
+              near = { index: i, distance, centre, box: r };
+          };
           for (let k = 0; k < 4; k++) {
             if (!(mask & (1 << k))) continue;
-            const d = shownDistance(x, y, cx(k), cy(k), cx(k + 1), cy(k + 1), clip, half);
-            const distance = Math.max(0, d - half);
-            if (distance <= slop && !(near && near.distance <= distance))
-              near = { index: i, distance, box: r };
+            // Side k, from corner k to k + 1, less the arcs rounding them.
+            const s = bends & (1 << k) ? c : 0;
+            const e = bends & (1 << ((k + 1) % 4)) ? c : 0;
+            const [ax, ay] = k & 1 ? [cx(k), cy(k, s)] : [cx(k, s), cy(k)];
+            const [bx, by] = k & 1 ? [cx(k + 1), cy(k + 1, e)] : [cx(k + 1, e), cy(k + 1)];
+            // Mitered where the side beside it is drawn: squared off half its
+            // width past the corner (else square, and where an arc goes on).
+            const [ux, uy] = [k === 0 ? 1 : k === 2 ? -1 : 0, k === 1 ? 1 : k === 3 ? -1 : 0];
+            const m0 = !s && mask & (1 << ((k + 3) % 4)) ? half : 0;
+            const m1 = !e && mask & (1 << ((k + 1) % 4)) ? half : 0;
+            const [fx, fy, tx, ty] = [ax - ux * m0, ay - uy * m0, bx + ux * m1, by + uy * m1];
+            // Shown as the clip shows it, miters and all; its centre line, the side's own.
+            take(
+              edgeOf(
+                x,
+                y,
+                fx,
+                fy,
+                tx,
+                ty,
+                half,
+                shownDistance(x, y, fx, fy, tx, ty, clip, half),
+                true,
+                true,
+              ),
+              shownDistance(x, y, ax, ay, bx, by, clip, half),
+            );
+            // The arc rounding corner k, toward the corner from the arc's centre.
+            if (!s) continue;
+            const [ox, oy] = [cx(k, c), cy(k, c)];
+            if ((x - ox) * (cx(k) - ox) >= 0 && (y - oy) * (cy(k) - oy) >= 0) {
+              const bent = Math.abs(Math.hypot(x - ox, y - oy) - c);
+              take(Math.max(0, bent - half), bent);
+            }
           }
         }
         return held || near ? { near, inside: held } : undefined;
@@ -464,15 +518,16 @@ export class Picker {
       case "rule": {
         const rule = geometry as RuleGeometry;
         const { x1, y1, x2, y2, strokeWidth } = rule;
+        // Its label, drawn whatever the line's width and over it: text, which covers.
+        const box = (rule.draw as typeof ruleDrawing).labelBox?.(rule, frame.theme.fontSize);
+        if (box && inside(box, x, y)) return { inside: { index: 0, distance: 0, box } };
         const half = strokeWidth / 2;
         const shown = half > 0 ? shownDistance(x, y, x1, y1, x2, y2, clip, half) : Infinity;
-        const distance = Math.max(0, shown - half);
-        const near =
-          distance <= slop ? { index: 0, distance, box: boxOf(x1, y1, x2, y2) } : undefined;
-        // Its label, drawn whatever the line's width: text, which covers.
-        const box = (rule.draw as typeof ruleDrawing).labelBox?.(rule, frame.theme.fontSize);
-        const label = box && inside(box, x, y) ? { index: 0, distance: 0, box } : undefined;
-        return near || label ? { near, inside: label } : undefined;
+        // Its ends are square.
+        const distance = edgeOf(x, y, x1, y1, x2, y2, half, shown, true, true);
+        return distance <= slop
+          ? { near: { index: 0, distance, centre: shown, box: boxOf(x1, y1, x2, y2) } }
+          : undefined;
       }
       case "segments": {
         const { coords, count, strokeWidth } = geometry as SegmentGeometry;
@@ -480,7 +535,8 @@ export class Picker {
         if (!(half > 0)) return undefined;
         let best: Hit | undefined;
         const reach = half + slop;
-        for (let i = 0; i < count; i++) {
+        // The last painted first, so that ties go to it.
+        for (let i = count - 1; i >= 0; i--) {
           const x1 = coords[i * 4]!;
           const x2 = coords[i * 4 + 2]!;
           // Segments beyond reach of the query along either axis are not measured.
@@ -488,9 +544,11 @@ export class Picker {
           const y1 = coords[i * 4 + 1]!;
           const y2 = coords[i * 4 + 3]!;
           if (y < Math.min(y1, y2) - reach || y > Math.max(y1, y2) + reach) continue;
-          const distance = Math.max(0, shownDistance(x, y, x1, y1, x2, y2, clip, half) - half);
-          if (distance <= slop && !(best && best.distance < distance))
-            best = { index: i, distance, box: boxOf(x1, y1, x2, y2) };
+          const d = shownDistance(x, y, x1, y1, x2, y2, clip, half);
+          // Their ends are square.
+          const distance = edgeOf(x, y, x1, y1, x2, y2, half, d, true, true);
+          if (distance <= slop && (!best || before(distance, d, best)))
+            best = { index: i, distance, centre: d, box: boxOf(x1, y1, x2, y2) };
         }
         return best && { near: best };
       }
@@ -646,10 +704,14 @@ export type TextLike = Pick<
   readonly box?: Rect | undefined;
 };
 
-/** A primitive of a geometry at the query: its index, its distance, its box, and a path's segment. */
+/**
+ * A primitive of a geometry at the query: its index, its distance, for a
+ * stroke its centre line's (see `PickedItem`), its box, and a path's segment.
+ */
 interface Hit {
   index: number;
   distance: number;
+  centre?: number | undefined;
   box?: Rect | undefined;
   /** For paths: the segment hit, its ends' pixels (index to index + 1). */
   segment?: readonly [number, number, number, number];
@@ -661,9 +723,30 @@ interface Hits {
   inside?: Hit | undefined;
 }
 
-/** Whether `found` is nearer than `best` by more than `TIE` (or there is no `best`). */
+/** Whether `found`, painted under `best`, is picked before it (see `before`), or there is no `best`. */
 function nearer(found: Picked | undefined, best: Picked | undefined): boolean {
-  return !!found && !(best && found.item.distance >= best.item.distance - TIE);
+  return !!found && (!best || before(found.item.distance, found.item.centre, best.item));
+}
+
+/**
+ * Whether a stroke or point `distance` from the query (`centre` from a
+ * stroke's centre line), painted under `over`, is picked before it: nearer
+ * by its edge, or where the query is inside both strokes, by its centre
+ * line, each by more than `TIE`. Otherwise what is painted over is.
+ */
+function before(
+  distance: number,
+  centre: number | undefined,
+  over: { readonly distance: number; readonly centre?: number | undefined },
+): boolean {
+  return (
+    distance < over.distance - TIE ||
+    (distance === 0 &&
+      over.distance === 0 &&
+      centre !== undefined &&
+      over.centre !== undefined &&
+      centre < over.centre - TIE)
+  );
 }
 
 /** Of positions `ks` (-1 for none), the one whose value `at` gives is nearest `target`; the earlier on ties. */
@@ -712,9 +795,13 @@ export function pointBox(
 
 /**
  * The segment of `path` nearest (x, y) within `reach`: curves flattened to
- * within 0.25 px, segments painted later winning ties; with `dots`, only
- * its runs of one point, which are drawn as dots. A path drawn in order
- * along `along` is searched only where it reaches the query there.
+ * within 0.25 px, ranked as the picker ranks strokes (`before`); with
+ * `dots`, only its runs of one point, which are drawn as dots; with
+ * `square`, as an area's outline is drawn: its pieces square-ended, joined
+ * round where they turn (the join paints only outside the turn, past the
+ * one piece and before the other), its runs' ends square. Otherwise its
+ * ends and joins are round. A path drawn in order along `along` is
+ * searched only where it reaches the query there.
  */
 function nearestSegment(
   path: LineGeometry["path"],
@@ -725,12 +812,14 @@ function nearestSegment(
   along: "x" | "y" | undefined,
   clip: Readonly<Rect>,
   dots = false,
+  square = false,
 ): Hit | undefined {
   const { coords, count, starts, curved, controls } = path;
   const a = along === "y" ? 1 : 0;
   const at = a ? y : x;
   let best: Hit | undefined;
-  for (let r = 0; r < starts.length; r++) {
+  // The last painted first, so that ties go to it.
+  for (let r = starts.length - 1; r >= 0; r--) {
     const start = starts[r]!;
     const end = r + 1 < starts.length ? starts[r + 1]! : count;
     let [from, to] = [start, end - 1];
@@ -742,27 +831,47 @@ function nearestSegment(
       to = Math.min(end - 1, seek(coords, a, start, end, up ? hi : lo, up));
     }
     if (dots) to = from;
-    for (let i = from; i < to; i++) {
+    for (let i = to - 1; i >= from; i--) {
       const [ax, ay, bx, by] = [
         coords[i * 2]!,
         coords[i * 2 + 1]!,
         coords[i * 2 + 2]!,
         coords[i * 2 + 3]!,
       ];
-      const d =
-        curved && !Number.isNaN(controls[(i + 1) * 4]!)
-          ? distanceToCurve(controls, i + 1, ax, ay, bx, by, x, y, clip, half)
-          : shownDistance(x, y, ax, ay, bx, by, clip, half);
-      const distance = Math.max(0, d - half);
-      if (d <= reach && !(best && best.distance < distance))
-        best = { index: i, distance, segment: [ax, ay, bx, by] };
+      const bent = curved && !Number.isNaN(controls[(i + 1) * 4]!);
+      // Straight pieces beyond reach of the query along either axis are not measured.
+      if (
+        !bent &&
+        (x < Math.min(ax, bx) - reach ||
+          x > Math.max(ax, bx) + reach ||
+          y < Math.min(ay, by) - reach ||
+          y > Math.max(ay, by) + reach)
+      )
+        continue;
+      let d: number;
+      let distance: number;
+      if (bent) [d, distance] = distanceToCurve(i, path, start, x, y, clip, half, square);
+      else {
+        d = shownDistance(x, y, ax, ay, bx, by, clip, half);
+        distance = Math.max(0, d - half);
+        if (square) {
+          // Of no length, it paints nothing, and is not looked back from:
+          // that would be once per repeat of a point.
+          if (ax === bx && ay === by) continue;
+          const [px, py] = cameFrom(path, start, i);
+          distance = pieceEdge(x, y, px, py, ax, ay, bx, by, half, d);
+        }
+      }
+      if (distance <= reach - half && (!best || before(distance, d, best)))
+        best = { index: i, distance, centre: d, segment: [ax, ay, bx, by] };
     }
     // A run of one point is a dot.
     if (end - start === 1) {
       const [ax, ay] = [coords[start * 2]!, coords[start * 2 + 1]!];
       const d = shownDistance(x, y, ax, ay, ax, ay, clip, half);
-      if (d <= reach && !(best && best.distance < d - half))
-        best = { index: start, distance: Math.max(0, d - half), segment: [ax, ay, ax, ay] };
+      const distance = Math.max(0, d - half);
+      if (d <= reach && (!best || before(distance, d, best)))
+        best = { index: start, distance, centre: d, segment: [ax, ay, ax, ay] };
     }
   }
   return best;
@@ -804,6 +913,38 @@ function shownDistance(
   let at = nearest(grown);
   if (at && outside(clip, at[0], at[1]) >= half) at = nearest(clip);
   return at ? Math.hypot(x - at[0], y - at[1]) : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * How far (x, y) is from the painted edge of a stroke `half` wide from a to
+ * b, whose centre line is `shown` from it as the clip shows the stroke
+ * (`shownDistance`): beside it, or past a round end, as the centre line
+ * says; past a square end (`start`, `end`), from what that end paints,
+ * where the clip shows it. Of no length with square ends, it paints nothing.
+ */
+function edgeOf(
+  x: number,
+  y: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  half: number,
+  shown: number,
+  start: boolean,
+  end: boolean,
+): number {
+  const round = Math.max(0, shown - half);
+  const [dx, dy] = [bx - ax, by - ay];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return start && end ? Infinity : round;
+  const along = ((x - ax) * dx + (y - ay) * dy) / length;
+  if (!(along < 0 ? start : along > length && end)) return round;
+  const across = Math.abs((x - ax) * dy - (y - ay) * dx) / length;
+  return Math.max(
+    round,
+    Math.hypot(Math.max(0, -along, along - length), Math.max(0, across - half)),
+  );
 }
 
 /**
@@ -869,45 +1010,116 @@ function seek(
 }
 
 /**
- * How far (x, y) is from what `clip` shows of a stroke `half` wide along
- * the cubic curve from a to b through point `i`'s control points.
+ * The cubic curve from point `i` of `path` to the next, through the next's
+ * control points, flattened into pieces within 0.25 px of it: how many,
+ * and the point ending the kth.
  */
-function distanceToCurve(
-  controls: Float32Array,
+function cubic(
+  { coords, controls }: LineGeometry["path"],
   i: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  x: number,
-  y: number,
-  clip: Readonly<Rect>,
-  half: number,
-): number {
-  const [c1x, c1y, c2x, c2y] = [
-    controls[i * 4]!,
-    controls[i * 4 + 1]!,
-    controls[i * 4 + 2]!,
-    controls[i * 4 + 3]!,
+): [number, (k: number) => [number, number]] {
+  const [ax, ay, bx, by] = [
+    coords[i * 2]!,
+    coords[i * 2 + 1]!,
+    coords[i * 2 + 2]!,
+    coords[i * 2 + 3]!,
   ];
-  // Flattened into pieces within 0.25 px of the curve: a chord of n strays
-  // at most 3d / 4n² from it, d the larger of its second differences.
+  const [c1x, c1y, c2x, c2y] = [
+    controls[i * 4 + 4]!,
+    controls[i * 4 + 5]!,
+    controls[i * 4 + 6]!,
+    controls[i * 4 + 7]!,
+  ];
+  // A chord of n strays at most 3d / 4n² from it, d the larger of its
+  // second differences.
   const d = Math.max(
     Math.hypot(ax - 2 * c1x + c2x, ay - 2 * c1y + c2y),
     Math.hypot(c1x - 2 * c2x + bx, c1y - 2 * c2y + by),
   );
-  const pieces = Math.max(1, Math.ceil(Math.sqrt(3 * d)));
-  let distance = Number.POSITIVE_INFINITY;
-  let [px, py] = [ax, ay];
-  for (let k = 1; k <= pieces; k++) {
-    const t = k / pieces;
-    const u = 1 - t;
-    const qx = u * u * u * ax + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * bx;
-    const qy = u * u * u * ay + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * by;
-    distance = Math.min(distance, shownDistance(x, y, px, py, qx, qy, clip, half));
-    [px, py] = [qx, qy];
+  const n = Math.max(1, Math.ceil(Math.sqrt(3 * d)));
+  return [
+    n,
+    (k) => {
+      const t = k / n;
+      const u = 1 - t;
+      return [
+        u * u * u * ax + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * bx,
+        u * u * u * ay + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * by,
+      ];
+    },
+  ];
+}
+
+/**
+ * How far (x, y) is from the centre line of what `clip` shows of a stroke
+ * `half` wide along the curve from point `i` of `path` (in its run from
+ * `start`) to the next, and from its edge: with `square`, as an area's
+ * outline pieces (`pieceEdge`).
+ */
+function distanceToCurve(
+  i: number,
+  path: LineGeometry["path"],
+  start: number,
+  x: number,
+  y: number,
+  clip: Readonly<Rect>,
+  half: number,
+  square: boolean,
+): [number, number] {
+  const [n, at] = cubic(path, i);
+  let [px, py] = square ? cameFrom(path, start, i) : [0, 0];
+  let [centre, edge] = [Infinity, Infinity];
+  let [ax, ay] = at(0);
+  for (let k = 1; k <= n; k++) {
+    const [bx, by] = at(k);
+    const d = shownDistance(x, y, ax, ay, bx, by, clip, half);
+    centre = Math.min(centre, d);
+    edge = Math.min(
+      edge,
+      square ? pieceEdge(x, y, px, py, ax, ay, bx, by, half, d) : Math.max(0, d - half),
+    );
+    [px, py, ax, ay] = [ax, ay, bx, by];
   }
-  return distance;
+  return [centre, edge];
+}
+
+/**
+ * Where an area's outline comes from into point `i` of `path`, in its run
+ * from `start`: the point before it, of a straight piece, or of a curve's
+ * last piece as flattened; NaN at the run's start.
+ */
+function cameFrom(path: LineGeometry["path"], start: number, i: number): [number, number] {
+  const { coords, curved, controls } = path;
+  let p = i - 1;
+  while (p >= start && coords[p * 2] === coords[i * 2] && coords[p * 2 + 1] === coords[i * 2 + 1])
+    p--;
+  if (p < start) return [NaN, NaN];
+  if (curved && !Number.isNaN(controls[(p + 1) * 4]!)) {
+    const [n, at] = cubic(path, p);
+    return at(n - 1);
+  }
+  return [coords[p * 2]!, coords[p * 2 + 1]!];
+}
+
+/**
+ * `edgeOf` for a piece of an area's outline from a to b, coming from p (NaN
+ * at its run's start): square-ended, but where it turns from p, round past
+ * the piece before; the round join paints only there, and before this one.
+ */
+function pieceEdge(
+  x: number,
+  y: number,
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  half: number,
+  d: number,
+): number {
+  const turn = (ax !== bx || ay !== by) && (x - ax) * (ax - px) + (y - ay) * (ay - py) >= 0;
+  return edgeOf(x, y, ax, ay, bx, by, half, d, !turn, true);
 }
 
 /**
@@ -1006,11 +1218,16 @@ function areaHit(
       box: a ? boxOf(w, p, w, p) : boxOf(p, w, p, w),
     };
   }
-  // Its outline is painted over its fill.
+  // Its outline is painted over its fill, its runs ending square unless
+  // it has isolated points, whose dots round every end (draw/area.ts).
   const half = strokeWidth / 2;
+  let isolated = false;
+  for (let r = 0; r < upper.starts.length && !isolated; r++)
+    isolated =
+      (r + 1 < upper.starts.length ? upper.starts[r + 1]! : upper.count) - upper.starts[r]! === 1;
   const near =
     strokeWidth > 0
-      ? nearestSegment(upper, half + slop, x, y, half, along, clip, !stroke)
+      ? nearestSegment(upper, half + slop, x, y, half, along, clip, !stroke, !isolated)
       : undefined;
   return held || near ? { near, inside: held } : undefined;
 }

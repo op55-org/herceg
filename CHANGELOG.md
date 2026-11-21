@@ -120,8 +120,13 @@ legend entries and toggles, and scales read in a list show their key.
 Custom marks read lists through `encoded(channel, row, series)`. Heatmaps
 take no `encode`.
 
-Picking takes the nearest stroke or point within reach, down to the first
-fill the pointer is inside, in every chart family: a click among lines a
+Picking takes the nearest stroke or point within reach, measured to its
+edge, down to the first fill the pointer is inside, in every chart family;
+where the pointer is inside several strokes, the one whose centre line is
+nearest, so a click where crossing lines overlap takes the line aimed at,
+not the one drawn over it; pieces of lines and areas out of reach are not
+measured, so picking among many lines takes about a third of the time it
+did. A click among lines a
 pixel apart takes the one under it, a line over a band is reached inside
 the band, an area's outline over its own fill, a box plot's whisker as a
 stroke, and draggable rules are grabbed first. A hollow candle's body is

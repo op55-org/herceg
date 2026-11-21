@@ -799,20 +799,26 @@ table is derived. `herceg/web` pages and Python receive the same
 expressions (`event.target.provenance`); `rows()` stays in the browser.
 
 Items are picked as the frame on screen drew them, by one rule: the
-nearest stroke or point within reach, down to the first fill the pointer
-is inside. Marks are searched from the top of the paint order (`zIndex`,
-then as listed, the last painted first). Lines, rules, outlines, error
-bars, and points within reach are candidates: within a point's radius
-plus 4 px (8 px for touch), within half a line's stroke plus 4 px of a
-segment drawn, within 4 px of a rule. The first fill holding the pointer
-(a bar, bin, box, cell, filled candle body, region, area, slice, or
-text; a hollow candle body is reached at its outline) ends the search
-and is picked unless a candidate above it was found; a fill's edge near
-the pointer counts as a candidate only where no fill holds it.
-Of candidates, the nearest wins, ties going to the topmost. So a click
-among lines a pixel apart takes the one under the pointer, a line over a
-band is reached from inside the band, and an area's outline is reached
-over its own fill. A draggable rule within reach is taken before anything else. Nothing outside a mark's clip is
+nearest stroke or point within reach wins, measured to its edge; where
+the pointer is inside several strokes, the one whose centre line is
+nearest. The search goes down to the first fill the pointer is inside.
+Marks are searched from the top of the paint order (`zIndex`, then as
+listed, the last painted first). Lines, rules, outlines, error bars, and
+points within reach are candidates: within a point's radius plus 4 px
+(8 px for touch), within half a line's stroke plus 4 px of a segment
+drawn, within 4 px of a rule. The first fill holding the pointer (a bar,
+bin, box, cell, filled candle body, region, area, slice, or text; a
+hollow candle body is reached at its outline) ends the search and is
+picked unless a candidate above it was found; a fill's edge near the
+pointer counts as a candidate only where no fill holds it. A point's
+glyph the pointer is inside covers what is under it as a fill does, and
+of candidates as near, the topmost wins. So a click where crossing lines
+overlap takes the line whose centre is nearest, whichever is drawn over
+the other; a rule inside a thick line is taken on its own stroke and the
+line around it; a line over a band is reached from inside the band; and
+an area's outline is reached over its own fill. Error bars, rugs, contour
+lines, and violins' outlines are found by their marks' own lookups, and
+where the pointer is inside one of them, paint order decides. A draggable rule within reach is taken before anything else. Nothing outside a mark's clip is
 picked, and strokes are reached only where the clip shows them; lines
 and rules of no width draw nothing and are not reached, though a rule's
 label is. A line's item is the observation it draws nearest the pointer
