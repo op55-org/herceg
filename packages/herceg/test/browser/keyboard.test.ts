@@ -547,9 +547,10 @@ describe("Up and Down", () => {
     await press(chart, "ArrowRight");
     expect(await press(chart, "ArrowDown")).toBe("b, 2 of 2: 40 at 0");
     for (let i = 0; i < 5; i++) await press(chart, "ArrowRight");
-    // At x 5, a's gap: of its points 2 away, the one nearer b's height, below it.
-    expect(await press(chart, "ArrowUp")).toBe("b, 1 of 2");
-    expect(await press(chart, "ArrowDown")).toBe("a, 2 of 2: 30 at 7");
+    // At x 5, a's gap: of its points 2 away, the earlier, above b, as the
+    // pointer reads a there.
+    expect(await press(chart, "ArrowDown")).toBe("b, 2 of 2");
+    expect(await press(chart, "ArrowUp")).toBe("a, 1 of 2: 60 at 3");
   });
 
   it("place a path's jump at a repeated position, or a step's, at the cursor's height", async () => {

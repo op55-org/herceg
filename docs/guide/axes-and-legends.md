@@ -269,9 +269,9 @@ What does not fit a room is left out, never drawn past it:
   not tried (the labels thin instead), and wrapped labels keep the lines
   that fit, the last ending with an ellipsis. Hours over days in a room
   for one row lose the days, so give such axes a room their rows fit.
-- **A row's depth** on an x axis is its deepest label: a line of the
+- **A row's depth** on an x axis is its deepest label: its lines of the
   labels' `lineHeight` (1.25 × the font size by default, rounded), a
-  turned label's turned height, or for staggered labels
+  turned label's turned block, or for staggered labels
   (`overlap: "stagger"`) two lanes 2 px apart. Before the first row comes
   how far labels stand from the axis line:
   - by default 8 px (0.65 × the font size above 12 px), and the length of
@@ -521,6 +521,12 @@ are boxes between their levels, ticked at them.
 - **Lines.** `"\n"` breaks any label into lines, laid out as a block, in
   every output. Names that layout marks fit to one line (pie slices,
   nodes, funnel stages, radar spokes) are shortened rather than broken.
+  Tick labels a format writes in lines (`format: { time: "%b %-d\n%Y" }`)
+  are blocks on every axis, the short form's or listed, in every
+  `overlap` mode: rows are as deep as their deepest block, turned labels
+  turn as blocks, labels kept apart are kept apart as blocks, y labels
+  are as wide as their widest line, and a room leaves out a row of blocks
+  that does not fit whole.
 - **Padding.** Without `padding`, spacing is automatic. With it (pixels, or
   `{ top, right, bottom, left }`; `0` included), it is the whitespace around
   everything the chart draws on its sides; sides `{ ... }` leaves out keep

@@ -877,14 +877,63 @@ describe("tick labels", () => {
     expect(texts(sideOf(mixed, "left")).length).toBeLessThan(4);
   });
 
-  it("write labels that may turn on one line", () => {
+  it("turn labels of several lines as blocks, below the line and in the room they take", () => {
     const data = table({ x: [0, 1], v: [0, 1] });
-    const { scene } = build({
-      marks: [line(data, { x: "x", y: "v" })],
-      guides: [axis({ scale: "x", format: (v) => `${v}\none`, labels: { rotation: -45 } })],
-    });
-    for (const label of texts(sideOf(scene, "bottom"))) expect(label.text).not.toContain("\n");
-    expect(texts(sideOf(scene, "bottom"))[0]!.text).toMatch(/ one$/);
+    const turned = (format: (v: number) => string, rotation: number) =>
+      build({
+        marks: [line(data, { x: "x", y: "v" })],
+        guides: [axis({ scale: "x", format, labels: { rotation } })],
+      }).scene;
+    for (const rotation of [-45, 30]) {
+      const one = turned((v) => `${v}`, rotation);
+      const two = turned((v) => `${v}\none`, rotation);
+      const bottom = sideOf(two, "bottom")!;
+      const items = bottom.items.filter((item): item is TextItem => item.type === "text");
+      const labels = items.filter(({ angle }) => angle === rotation);
+      expect(labels.map(({ text }) => text)).toContain("0\none");
+      expect(two.panels[0]!.plot.height).toBeLessThan(one.panels[0]!.plot.height);
+      // Each block's corners, turned about its first line's point, lie
+      // below the axis line and inside the chart.
+      for (const { y, text, paint, anchor } of labels) {
+        const width = Math.max(...text.split("\n").map((t) => estimateText(t, paint.css)));
+        const height = lineCount(text) * paint.lineHeight;
+        const from = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
+        const turn = (rotation * Math.PI) / 180;
+        for (const [dx, dy] of [
+          [from, -paint.lineHeight / 2],
+          [from + width, -paint.lineHeight / 2],
+          [from, height - paint.lineHeight / 2],
+          [from + width, height - paint.lineHeight / 2],
+        ] as const) {
+          const cy = y + dx * Math.sin(turn) + dy * Math.cos(turn);
+          expect(cy).toBeGreaterThanOrEqual(bottom.edge);
+          expect(cy).toBeLessThanOrEqual(320);
+        }
+      }
+    }
+  });
+
+  it("keep turned blocks of different line counts apart where they are drawn", () => {
+    const data = table({ x: [0, 100], v: [0, 1] });
+    const shown = (values: number[]) =>
+      sideOf(
+        build({
+          marks: [line(data, { x: "x", y: "v" })],
+          x: { domain: [0, 100], nice: false },
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { values },
+              format: (v) => (v === 40 ? "0\n0\n0" : "0"),
+              labels: { rotation: 45, overlap: "hide" },
+            }),
+          ],
+        }).scene,
+        "bottom",
+      )!.items.filter((item) => item.type === "text" && item.angle === 45).length;
+    // The taller block's middle stands farther off the line, across the shorter one's.
+    expect(shown([40, 43])).toBe(1);
+    expect(shown([40, 60])).toBe(2);
   });
 
   it("refuse turns beyond a quarter", () => {

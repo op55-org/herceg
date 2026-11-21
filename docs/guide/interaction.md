@@ -286,6 +286,15 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 
 - **`within`** is measured from the pointer's value: with `"shared"` the
   shared value must be within it, with the others each series' point.
+- **Ties.** Points are as near as they look: their distances from the
+  pointer are compared on screen (on log axes 10 is midway between 1 and
+  100; breaks leave their time out; bands go by their middles), and
+  distances within a thousandth of a pixel of the nearest tie. Of ties,
+  the earliest is read, the least value along the axis, and of points at
+  one value the first row. `"shared"` snaps to the earliest value tied,
+  whichever series has it. The keyboard's Up and Down land on a series'
+  point the same way; of its points at one value, on the one nearer the
+  cursor.
 - **Gaps.** A series reads nothing at a value inside a gap its
   `continuity` leaves, under every `snap`.
 - **Unsorted series** are read by a scan; `"previous"` and `"next"` leave

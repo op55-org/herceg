@@ -1979,8 +1979,9 @@ export class ChartModel {
         yBoxed || paint.background ? yReachAll + 2 + (paint.lineHeight - paint.size) / 2 : 0,
       );
     const xLabels = TICK + GAP + Math.max(...xLabelPaints.map(xGap)) - tickLabelGap(0);
-    // Category labels of several lines take their lines' room; number and
-    // time labels are planned after it is kept, and keep to one line.
+    // Category labels of several lines take their lines' room. Number and
+    // time labels are planned after it is kept: the guides lay out those a
+    // format writes in lines (see `CompiledAxes`).
     let xLines = 1;
     for (const i of xShown)
       if (xContexts[xGroupAt[i]!]!.type === "band")
@@ -2242,11 +2243,8 @@ export class ChartModel {
         if (!l) return 0;
         const paint = tickPaint(axis, i);
         const boxed = paint.background ? paint.padding[1] + paint.padding[3] : 0;
-        // As drawn: automatic axes write number and time labels on one line.
-        const widest = Math.max(
-          0,
-          ...labelsOf(i).map((label) => measure(oneLine(side!.plans[i]!, label), paint.css)),
-        );
+        // As drawn: labels of several lines as wide as their widest.
+        const widest = Math.max(0, ...labelsOf(i).map((label) => measure(label, paint.css)));
         return Math.ceil(widest + (widest && boxed)) + GAP + 2;
       });
       const room = Math.max(0, ...reach);
@@ -2541,7 +2539,7 @@ export class ChartModel {
       const ticks = labels.map((label, k) => ({
         position: plan.scale.map(plan.ticks[k]!),
         value: plan.ticks[k]!,
-        label: oneLine(plan, label),
+        label,
       }));
       // Along its span from its bottom on the left (the title reads upward)
       // and its top on the right.
@@ -2656,7 +2654,9 @@ export class ChartModel {
     const relegend = rewrapped < 2 && !!placement?.again?.();
     const reaxis =
       !again.axes && !!placing && !guided.fits(placing, (i) => xPlanOf(xGroupAt[i]!, i));
-    if (relegend || reaxis)
+    // Labels planned in lines have the guides lay out their axes from now on.
+    const woke = !guided && !!this.#compiled?.axes;
+    if (relegend || reaxis || woke)
       return this.#sceneOf(measure, clouds, {
         ...again,
         axes: again.axes || reaxis,
@@ -2736,7 +2736,7 @@ export class ChartModel {
           ? xAt.ticks.map((t, k) => ({
               position: x.map(t),
               value: t,
-              label: oneLine(xAt, xAt.labels[k]!),
+              label: xAt.labels[k]!,
             }))
           : [];
         axes.push(axisGuide(`x|${i}`, "x", placement, ticks, title, measure));
@@ -3893,13 +3893,4 @@ interface SlotField {
   of?: readonly string[];
   count: number;
   revision?: number;
-}
-
-/**
- * A tick label as the automatic axes draw it: categories in their lines,
- * numbers and times a format writes in lines on one, as their room is kept
- * before they are planned (listed axes lay them out in rows).
- */
-function oneLine(plan: AxisPlan, label: string): string {
-  return plan.within ? label.replaceAll("\n", " ") : label;
 }

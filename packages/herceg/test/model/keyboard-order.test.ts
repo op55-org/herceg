@@ -10,6 +10,7 @@ import { point } from "../../src/marks/point.ts";
 import { placeAt, rowOf } from "../../src/marks/series.ts";
 import { orderAt } from "../../src/model/keyboard.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { earliest } from "../../src/model/nearest.ts";
 import { readKeys } from "../helpers/keyboard.ts";
 
 const table = (columns: Record<string, ColumnInput>): Table => typed(columns) as unknown as Table;
@@ -82,6 +83,7 @@ describe("Up and Down", () => {
     const visits = orderAt(model, panel.key, "x", panel.x.map(x), panel.y.map(y), {
       placeAt,
       rowOf,
+      earliest,
     });
     return visits.map(({ key, position }) => {
       const s = model.series().find((part) => part.key === key)!;
@@ -113,6 +115,66 @@ describe("Up and Down", () => {
     expect(order(model, 0, 0)).toEqual(["B 20", "A 0"]);
     // As near one crossing as the other: the first drawn.
     expect(order(model, 0, 15)).toEqual(["A 30", "B 20"]);
+  });
+
+  it("land on the observation nearest the place, of ties the nearer across, then the earlier", () => {
+    // Midway between two points as high, 500 times about 100 apart moved by
+    // whole numbers (study A7's repro), where rounding on screen used to
+    // send a third of the ties to the later point.
+    const x = Array.from({ length: 500 }, (_, i) => i * 100 + ((i * 37) % 71) - 35);
+    const flat = drawn({ marks: [point(table({ x, y: x.map(() => 10) }), { x: "x", y: "y" })] });
+    const panel = flat.panels()[0]!;
+    const later: number[] = [];
+    for (let k = 0; k + 1 < x.length; k++) {
+      if ((x[k]! + x[k + 1]!) % 2) continue;
+      const place = panel.x.map((x[k]! + x[k + 1]!) / 2);
+      const [visit] = orderAt(flat, panel.key, "x", place, panel.y.map(10), {
+        placeAt,
+        rowOf,
+        earliest,
+      });
+      if (visit?.position !== k) later.push(k);
+    }
+    expect(later).toEqual([]);
+    // Midway between two points: the earlier, as the pointer reads there,
+    // however near the cursor the later is across; at one value, the nearer.
+    for (const [y, landed] of [
+      [[10, 30], "y 10"],
+      [[30, 10], "y 30"],
+    ] as const) {
+      const model = drawn({ marks: [point(table({ x: [1, 3], y: [...y] }), { x: "x", y: "y" })] });
+      expect(order(model, 2, 30)).toEqual([landed]);
+    }
+    // At one value (a jump), the nearest the cursor across, the first of ties.
+    const jump = drawn({
+      marks: [point(table({ x: [1, 1, 1], y: [30, 10, 30] }), { x: "x", y: "y" })],
+    });
+    expect(order(jump, 1, 28)).toEqual(["y 30"]);
+    expect(order(jump, 1, 12)).toEqual(["y 10"]);
+    const jumpPanel = jump.panels()[0]!;
+    const [first] = orderAt(jump, jumpPanel.key, "x", jumpPanel.x.map(1), jumpPanel.y.map(28), {
+      placeAt,
+      rowOf,
+      earliest,
+    });
+    expect(first?.position).toBe(0);
+    // As near across, the first row, reached from after them too.
+    const same = drawn({
+      marks: [point(table({ x: [1, 1, 1, 3], y: [5, 5, 5, 5] }), { x: "x", y: "y" })],
+    });
+    const samePanel = same.panels()[0]!;
+    const [reached] = orderAt(same, samePanel.key, "x", samePanel.x.map(1.1), samePanel.y.map(5), {
+      placeAt,
+      rowOf,
+      earliest,
+    });
+    expect(reached?.position).toBe(0);
+    // Unsorted rows, too.
+    const unsorted = drawn({
+      marks: [point(table({ x: [2, 1, 3, 1], y: [5, 10, 5, 30] }), { x: "x", y: "y" })],
+    });
+    expect(order(unsorted, 1, 28)).toEqual(["y 30"]);
+    expect(order(unsorted, 1, 12)).toEqual(["y 10"]);
   });
 
   it("keep series at one height in series order", () => {

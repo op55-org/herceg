@@ -374,7 +374,7 @@ describe("insets", () => {
     expect(refused!.message).toMatch(
       /^chart guides\[0\]\.layers\[0\]: a label 9\d px tall does not fit the \d+ px down it stays inside; make the chart or inset taller/,
     );
-    // Default labels are a line each, a line break a space, their boxes too.
+    // Default labels keep their lines, every one inside the box, their boxes too.
     const boxedLines = { fontSize: 24, background: { fill: "#eeeeee" }, padding: 4 };
     const defaults = new ChartModel(
       {
@@ -389,7 +389,7 @@ describe("insets", () => {
                 x: { format: { time: "%d\n%b" }, style: { tickLabel: boxedLines } },
                 y: { format: { time: "%d\n%b\n%Y" }, style: { tickLabel: boxedLines } },
               },
-              { width: { px: 350 }, height: { px: 160 } },
+              { width: { px: 350 }, height: { px: 300 } },
             ),
           ]),
         ),
@@ -400,7 +400,9 @@ describe("insets", () => {
     defaults.setSize(800, 600, 1);
     const plain = drawnIn(defaults.scene(estimateText), "plain");
     expect(plain.filter(({ box }) => box).length).toBeGreaterThan(2);
-    expect(plain.every(({ text }) => !text.includes("\n"))).toBe(true);
+    // Months and years on lines of their own.
+    expect(plain.some(({ text }) => /^[A-Z][a-z]{2}$/.test(text))).toBe(true);
+    expect(plain.some(({ text }) => /^19\d\d$/.test(text))).toBe(true);
     // Layers that label nothing take no room.
     const none = {
       id: "none",

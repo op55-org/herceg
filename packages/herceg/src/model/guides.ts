@@ -174,7 +174,11 @@ export interface CompiledGuides {
    * scene/paint.ts), keeping a panel's order while its values stay.
    */
   paint(panels: readonly Panel[]): void;
-  /** The axes `guides` lists, where they change the default ones. */
+  /**
+   * The axes `guides` lists, where they change the default ones; and from
+   * when a scale's tick labels are first planned in lines (a format's
+   * "\n"), its axis on its default side, which the model lays out again for.
+   */
   readonly axes?: CompiledAxes | undefined;
   /**
    * The texts of the bands of the band axis along `axis`, from their keys

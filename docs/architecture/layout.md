@@ -178,7 +178,11 @@ parts).
   "hide" keeps every n-th label (blank ones not counted) for the least n
   that clears. Labels may go
   inside the plot (`inside`), giving back the room outside. Axes whose tick
-  labels align by style are drawn as listed axes. A `room` is per panel
+  labels align by style are drawn as listed axes, and so are the plain
+  axes of a scale once the tick planner writes its labels in lines (a
+  format's `"\n"`): the compiled axes keep a plain axis on each scale's
+  default side, which takes over from the model's automatic one for the
+  rest of the configuration, and the model lays that scene out again. A `room` is per panel
   (a panel's own, or the chart's): a y axis shortens labels to it; an x
   axis keeps rows from the plot outward while their depth, with the gap
   the axis draws, fits, tries only rotations that fit, and cuts wrapped

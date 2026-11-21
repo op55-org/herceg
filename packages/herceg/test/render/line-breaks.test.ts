@@ -265,22 +265,45 @@ describe("labels of several lines", () => {
   });
 });
 
-describe("number labels on the automatic axes", () => {
-  it("keep room for the one line they are written on", () => {
+describe("number and time labels a format writes in lines", () => {
+  it("draw a line at a time on the automatic axes, in the room their blocks take", () => {
     const svg = renderToSVG({
       width: 500,
       height: 300,
       y: { format: (v: number) => `${v}MMMMMMMM\nMMMMMMMM` },
       marks: [line(samples, { x: "x", y: "y" })],
     });
-    const starts = [
-      ...svg.matchAll(/<text x="([\d.-]+)"[^>]*text-anchor="end"[^>]*>[^<]*MMMMMMMM MMMMMMMM/g),
-    ];
-    expect(starts.length).toBeGreaterThan(0);
-    // Drawn from the label's end at its tick, the whole line fits in the chart.
-    for (const [, x] of starts)
-      expect(
-        Number(x) - estimateText("40MMMMMMMM MMMMMMMM", "12px sans-serif"),
-      ).toBeGreaterThanOrEqual(0);
+    const drawn = lines(svg).filter(({ line }) => line?.endsWith("MMMMMMMM"));
+    expect(drawn.length).toBeGreaterThan(4);
+    // Drawn from their ends at their ticks, their widest lines fit in the chart.
+    for (const { x } of drawn)
+      expect(x - estimateText("40MMMMMMMM", "12px sans-serif")).toBeGreaterThanOrEqual(0);
+    // Below the plot, a line more than labels of one take, inside the chart.
+    const plotOf = (format: (v: number) => string) => {
+      const model = new ChartModel(
+        { marks: [line(samples, { x: "x", y: "y" })], x: { format } },
+        NO_PAGE,
+        staticCompilers(),
+      );
+      model.setSize(500, 300, 1);
+      const scene = model.scene(estimateText);
+      const bottom = scene.panels[0]!.axes.find(({ side }) => side === "bottom")!;
+      return { plot: scene.panels[0]!.plot, labels: bottom.ticks.map(({ label }) => label) };
+    };
+    const one = plotOf((v) => `${v}`);
+    const two = plotOf((v) => `${v}\nunits`);
+    expect(two.labels[0]).toBe("0\nunits");
+    const { lineHeight } = new ChartModel({ marks: [] }).theme.style.tickLabel;
+    expect(one.plot.height - two.plot.height).toBe(lineHeight);
+    const last = lines(
+      renderToSVG({
+        width: 500,
+        height: 300,
+        x: { format: (v: number) => `${v}\nunits` },
+        marks: [line(samples, { x: "x", y: "y" })],
+      }),
+    ).filter(({ line }) => line === "units");
+    expect(last.length).toBeGreaterThan(2);
+    for (const { y } of last) expect(y + lineHeight / 2).toBeLessThanOrEqual(300);
   });
 });
