@@ -263,7 +263,8 @@ describe("Streamlit component", () => {
       );
     const first = run(parent, bound("Before", "e1"));
     await brush(parent, 0.3, 0.7);
-    await frame();
+    // Once the brush's code has loaded and the gesture has ended.
+    await expect.poll(() => first.state.at(-1)?.[0]).toBe("rows");
     const [name, value] = first.state.at(-1)!;
     expect(name).toBe("rows");
     expect(value).toMatchObject({ table: "data", channel: "focus", epoch: "e1" });
@@ -479,8 +480,11 @@ describe("Streamlit component", () => {
     run(parent, bound([], "e2", [2, 1, 3]));
     await frame();
     const again = run(parent, bound(["rowSelection"], "e2", [2, 1, 3]));
-    await frame();
-    expect(again.state.at(-1)).toMatchObject(["rows", { epoch: "e2", channel: "focus" }]);
+    // The kept brush's rows are reported once the chart has drawn the new
+    // payload, which a slow runner may take more than one frame to do.
+    await expect
+      .poll(() => again.state.at(-1))
+      .toMatchObject(["rows", { epoch: "e2", channel: "focus" }]);
   });
 
   it("redraws new bytes in place, keeping a rectangle and the y zoom", async () => {
