@@ -168,9 +168,9 @@ describe("series labels where lines meet the view's edge", () => {
     async () => {
       for (const renderer of ["svg", "canvas"] as const) {
         if (renderer === "canvas") recordCanvasText();
-        // Twelve lines streaming a minute at a time, their ends one pixel
-        // closer together than a name is tall: the names spread about their
-        // middle, moved 0.5 to 5.5 pixels each way.
+        // Twelve lines streaming a minute at a time, their ends closer
+        // together than a name is tall: the names spread about their middle,
+        // the outermost moved just under 6 pixels each way.
         const names = COLORS.map((_, k) => `line ${String.fromCharCode(97 + k)}`);
         const window = 30;
         const columns: Record<string, number[]> = {
@@ -189,11 +189,19 @@ describe("series labels where lines meet the view's edge", () => {
         });
         const chart = await mount(options([START, START + (window - 1) * MINUTE]));
         const { plot } = chart.getPanels()[0]!;
-        const lineHeight = sceneOf(chart).panels[0]!.marks.flatMap((g) =>
+        const label = sceneOf(chart).panels[0]!.marks.flatMap((g) =>
           g.kind === "labels" ? (g as LabelsGeometry).items : [],
-        )[0]!.paint.lineHeight;
+        )[0]!;
+        const { lineHeight } = label.paint;
+        // How far a name's text is drawn from its box's middle: the font's
+        // ascent and descent about the baseline, which differ by platform.
+        // The outermost names move 6 less half of that, so the one whose
+        // text is drawn further out has its box within 6 pixels of its end
+        // and its text beyond them.
+        const drop = Math.abs(drawnMiddles(chart, renderer).get(label.text)! - label.y);
+        const move = 6 - drop / 2;
         // The next minute arrives, the view following the window.
-        const step = ((lineHeight - 1) * 1000) / plot.height;
+        const step = ((lineHeight - (2 * move) / (names.length - 1)) * 1000) / plot.height;
         const t = START + window * MINUTE;
         rows.append({
           t: [t],
@@ -222,7 +230,8 @@ describe("series labels where lines meet the view's edge", () => {
           // Its box moved no more than 6 pixels, its text drawn further.
           if (away > 6 && Math.abs(boxes.get(name)! - end) <= 6) fixed++;
         });
-        expect(fixed).toBeGreaterThan(0);
+        // A font drawn about its box's middle has no such name.
+        if (drop > 0.1) expect(fixed).toBeGreaterThan(0);
         // Static SVG, measured with the browser's fonts, and the chart's
         // PDF, draw the leaders the live chart draws.
         const svg = (text: string) => text.replace(/herceg-(svg-)?\d+-(export-)?/g, "");
