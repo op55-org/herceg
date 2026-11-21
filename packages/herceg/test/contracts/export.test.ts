@@ -7,10 +7,10 @@
 // draws them.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect } from "vitest";
+import { afterAll, describe, expect } from "vitest";
 import { renderToPDF } from "../../src/pdf.ts";
 import { measurePdfText } from "../../src/render/pdf-fonts.ts";
 import { renderToSVG } from "../../src/render/static.ts";
@@ -18,7 +18,9 @@ import { contractTest } from "../helpers/contracts.ts";
 import { expectDrawn, textBoxesIn } from "./drawn.ts";
 import { build, cellsOf, configOf, expectRefused, markOf, type Region } from "./matrix.ts";
 
+// Each run's PDFs and their pages drawn at 288 dpi, about 240 MB, removed after it.
 const directory = mkdtempSync(join(tmpdir(), "herceg-contracts-"));
+afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 

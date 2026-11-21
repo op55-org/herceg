@@ -4,7 +4,7 @@
 // python/tests/test_spec_schema.py, which has the JSON Schema validator.
 
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -26,9 +26,10 @@ test("the published schema is the one the spec's types make, the same each time"
   assert.equal(schemaText(), text);
 });
 
-test("a change of the spec's types changes the schema, with no edit of its own", () => {
+test("a change of the spec's types changes the schema, with no edit of its own", (t) => {
   // A copy of the package's sources, with an option the spec does not have.
   const copy = mkdtempSync(join(tmpdir(), "herceg-schema-"));
+  t.after(() => rmSync(copy, { recursive: true, force: true }));
   const pkg = join(copy, "packages/herceg");
   cpSync(join(root, "packages/herceg/src"), join(pkg, "src"), { recursive: true });
   cpSync(join(root, "packages/herceg/tsconfig.build.json"), join(pkg, "tsconfig.build.json"));
