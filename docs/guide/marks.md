@@ -321,7 +321,10 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
 | `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. |
 | `overlap` | `"show"` (default) or `"hide"`: a label that would cover an earlier one goes inside its bar, or is left out where it does not fit there. |
 
-Labels that do not fit are left out.
+Labels that do not fit are left out. With `animation: { values: true }`,
+labels writing the value, alone or as a `{ value: true }` part, count
+through the values between ([counting
+labels](interaction.md#counting-labels)).
 
 ## Points
 

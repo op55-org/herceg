@@ -35,7 +35,7 @@ import { fromWall } from "../src/format/zone.ts";
 import { createGridModel } from "../src/grid/model.ts";
 import { axis } from "../src/guides/options.ts";
 import { type AttachedLabel, placeAttached } from "../src/layout/attached.ts";
-import { estimateText } from "../src/layout/text.ts";
+import { canvasMeasurer, estimateText, type MeasureText } from "../src/layout/text.ts";
 import { grid } from "../src/layout.ts";
 import { m4 } from "../src/lod/m4.ts";
 import { MinMaxIndex } from "../src/lod/minmax-index.ts";
@@ -2706,19 +2706,21 @@ for (const rows of [100_000, 1_000_000]) {
 
 // Value transitions (`animation.values`): copying what a scene shows, planning
 // the change to the next scene, and a frame half way, for 2,000 bars, 10,000
-// keyed points, and A2's comets (custom marks, which keep their declared
-// fields and draw again each frame): 300 on a band y and 2,000 on two
-// number axes, a fifth of their ends moving.
+// keyed points, A2's comets (custom marks, which keep their declared fields
+// and draw again each frame): 300 on a band y and 2,000 on two number axes,
+// a fifth of their ends moving, and B6's 12 bars whose labels of parts count.
 {
-  const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
   const transition = (
     name: string,
     model: ChartModel,
     edit: (forth: boolean) => void,
     height = 640,
+    measureText: MeasureText = estimateText,
+    across = false,
   ) => {
+    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: measureText };
     model.setSize(960, height, 1);
-    const drawn = model.scene(estimateText);
+    const drawn = model.scene(measureText);
     const copy = () => {
       const shown = snapshot(drawn, model.panels(), 0)!;
       shown.custom = keepCustom(drawn, undefined, MOVING_ITEMS);
@@ -2727,7 +2729,7 @@ for (const rows of [100_000, 1_000_000]) {
     measure(`value transition, ${name}: copy what is shown`, copy);
     const shown = copy();
     edit(true);
-    const next = model.scene(estimateText);
+    const next = model.scene(measureText);
     const { config } = model;
     const planned = () =>
       plan(
@@ -2742,11 +2744,13 @@ for (const rows of [100_000, 1_000_000]) {
       );
     measure(`value transition, ${name}: plan`, planned, { warmup: 10, samples: 40 });
     const tween = planned()!;
-    // Each sample a frame at another time, as frames are: their values are written anew.
+    // Each sample a frame at another time, as frames are: their values are
+    // written anew; `across` the change, each at a time of its own, so that
+    // every frame writes numbers none wrote before.
     let frames = 0;
     measure(
-      `value transition, ${name}: frame half way`,
-      () => frameAt(tween, 124 + (frames++ % 3)),
+      `value transition, ${name}: ${across ? "frames across it" : "frame half way"}`,
+      () => frameAt(tween, across ? 2 + ((frames++ * 37) % 246) : 124 + (frames++ % 3)),
       {
         warmup: 10,
         samples: 40,
@@ -2845,4 +2849,53 @@ for (const rows of [100_000, 1_000_000]) {
       scatter ? 640 : 3100,
     );
   }
+  // B6's race: 12 bars keyed by brand on ranks, each labeled by its brand
+  // above its value, which counts. Text is measured as a page's canvas
+  // measurer does, each string once (here by the estimate, which costs far
+  // less than a canvas), so frames pay for what they measure anew.
+  const brands = table({
+    brand: category(Array.from({ length: 12 }, (_, i) => `Brand ${String.fromCharCode(65 + i)}`)),
+    rank: Float64Array.from({ length: 12 }, (_, i) => i),
+    v: Float64Array.from({ length: 12 }, (_, i) => 60_000 - i * 3_917.3),
+  });
+  const page = canvasMeasurer({
+    font: "",
+    measureText(text: string) {
+      const width = estimateText(text, this.font);
+      return {
+        width,
+        actualBoundingBoxAscent: 0,
+        fontBoundingBoxAscent: 0,
+        fontBoundingBoxDescent: 0,
+      };
+    },
+  });
+  transition(
+    "12 bars' counting labels of parts",
+    animating({
+      marks: [
+        bar(brands, {
+          itemKey: "brand",
+          orient: "y",
+          x: "v",
+          y: "rank",
+          labels: {
+            content: [
+              { field: "brand", style: { fontWeight: 700 } },
+              "\n",
+              { value: true, format: { number: ",.0f" }, style: { opacity: 0.7 } },
+            ],
+            place: { outside: false },
+            style: { fontSize: 12, align: "end", halo: false },
+          },
+        }),
+      ],
+      x: { nice: false },
+      y: { domain: [11.5, -0.5], show: false },
+    }),
+    swapped(brands as unknown as Table, (v) => v * 1.37 + 2_711),
+    600,
+    page,
+    true,
+  );
 }

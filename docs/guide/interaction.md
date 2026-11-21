@@ -1333,7 +1333,7 @@ chart from drawing or failing `chart.ready`.
 | Mark | Moves |
 | --- | --- |
 | Bars (stacked, labeled, histograms') | Matched within their series by `itemKey`, else by position (a category's name, a number, a time). Bars move between places on a category axis whose categories change order (its labels move with them) and along a continuous position axis. Bars keyed by `itemKey` come in and go out past the end of the position axis (below the last rank above); others grow from and shrink to their base. A bar changing sign passes through the baseline. |
-| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing a number count through the values between, in their format. |
+| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing a number count through the values between, in their format ([counting labels](#counting-labels)). |
 | Pie slices, gauges | Slices turn to new sizes, always making a whole pie; a gauge turns its dial. |
 | Sunbursts | Sectors matched by path move their angles and rings, new ones growing out of their parent; drilling moves the rings to the new root ([drilling](hierarchy-and-flow.md#drilling-into-trees)). Labels fade in and out where they are drawn at one end only. |
 | Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). |
@@ -1381,6 +1381,35 @@ is judged by its builds.
 Charts of several panels or with `sync` do not animate their views. Only
 the drawing moves: data, tooltips, and events have the new values at once
 (during a drill, the pointer reads the sectors as drawn).
+
+### Counting labels
+
+A label counts where it writes a number at both ends: bars' value labels,
+and their labels of parts with a `{ value: true }` part, styled or not;
+text marks' labels of one number field. Text labels of parts show each new
+value at once, as do bars' labels of a `field` and labels whose number is
+missing at either end.
+
+- **The number is exact** in every frame, in its format: signs, digits,
+  units, prefixes, and mapped text as a still chart writes them.
+- **Frames measure nothing new.** Between the ends, a counting number is
+  laid out by its shape, its digits written as zeros of their own digits
+  ("59,268" as "00,000"; Arabic-Indic digits as "٠"); text without digits,
+  such as a mapping's words, is measured as it is. A format writes few
+  shapes, so a race measures its keyframes' text and a few shapes, however
+  long it runs.
+- **The number meets the edge its line aligns to.** Mid-transition, lines
+  aligned to their end are drawn from it, and a centered line of one part
+  from its middle, so a race's value stays under its brand's right edge.
+- **Off by the shape until the transition ends:** with proportional
+  digits, a run after the number on a line aligned to its start (a unit),
+  a box behind the number (`style.background`), and the block's width
+  where the number's line is its widest are off by the number's width less
+  its shape's, about a pixel per narrow digit ("1" against "0" in system
+  fonts). With tabular digits, nothing is.
+- **The ends are laid out exactly,** as a chart without animation lays
+  them out, and so is the far end of a change that interrupts another.
+  Where a label fits (inside its bar or not) is decided at the ends.
 
 ## Hiding series
 

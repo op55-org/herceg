@@ -8,6 +8,7 @@ import type { Table } from "../../data/table.ts";
 import type { ChartFields, ShownField } from "../../fields/chart.ts";
 import type { Formatter } from "../../format/format.ts";
 import { formatWriter } from "../../format/patterns.ts";
+import type { MeasureText } from "../../layout/text.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { LabelContent, LabelPart, PartStyle } from "../../spec/encoding.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
@@ -20,7 +21,9 @@ import { type PartText, partText } from "./part-text.ts";
  * value drawn is `value`, a time where `time` says; with parts in looks of
  * their own, `styled` writes it in `paint`, each part in its look, its
  * colors read as `frame` reads styles (without `read`, for measuring only;
- * see `PartText`).
+ * see `PartText`), and in a value transition's frames the value's parts
+ * measured with `count` (dom/value-labels.ts `byShape`). `counts`: a part
+ * writes the value, which labels count through in value transitions.
  */
 export type ContentWriter = ((
   row: number,
@@ -29,6 +32,7 @@ export type ContentWriter = ((
   time?: boolean,
   field?: string,
 ) => string) & {
+  readonly counts?: boolean;
   readonly styled?: (
     row: number,
     series: string,
@@ -37,6 +41,7 @@ export type ContentWriter = ((
     paint: TextPaint,
     frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
     field?: string,
+    count?: MeasureText,
   ) => PartText;
 };
 
@@ -79,6 +84,8 @@ export function writeContent(
     return time ? kit.timeFormatter(TIME, zone, locale) : (v) => kit.formatNumber(v, locale);
   };
   const styles: (PartStyle | undefined)[] = [];
+  /** The parts writing the value. */
+  const values: boolean[] = [];
   const writers = content.map((part: LabelPart, i): ContentWriter => {
     const at = path(i);
     if (typeof part === "string") return () => part;
@@ -111,6 +118,7 @@ export function writeContent(
           at,
           "writes the value at the label's place, and these labels have none; give text or a field",
         );
+      values[i] = true;
       // Each value field's display of its kind writes its series' values,
       // mappings whatever the format; times are written as a field of
       // times is. Missing values are left blank.
@@ -162,8 +170,11 @@ export function writeContent(
         read === null ? "" : typeof read === "number" ? (own || fallback)(read) : String(read));
     return (row) => write(table.value(field as never, row));
   });
-  const write: ContentWriter = (row, series, v, time, field) =>
-    writers.map((part) => part(row, series, v, time, field)).join("");
+  const write: ContentWriter = Object.assign(
+    (row: number, series: string, v: number, time?: boolean, field?: string) =>
+      writers.map((part) => part(row, series, v, time, field)).join(""),
+    { counts: values.length > 0 },
+  );
   if (styles.length === 0) return write;
   // Parts' styles as the last frame read them: a frame is a panel's in one scene.
   let readIn: object | undefined;
@@ -177,6 +188,7 @@ export function writeContent(
       paint: TextPaint,
       frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
       field?: string,
+      count?: MeasureText,
     ) => {
       if (frame.read && readIn !== frame) {
         readIn = frame;
@@ -187,9 +199,11 @@ export function writeContent(
         writers.map((part, i) => ({
           text: part(row, series, v, time, field),
           style: frame.read ? read[i] : styles[i],
+          counts: values[i],
         })),
         paint,
         frame.measure,
+        count,
       );
     },
   });

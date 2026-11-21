@@ -5,7 +5,13 @@ import { labelHalo } from "../draw/label-halo.ts";
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { ALL_SIDES, BOTTOM, LEFT, RIGHT, rectDrawing, sideMask, TOP } from "../draw/rect.ts";
 import { type Formatter, lazyFormat, numberFormatter } from "../format/format.ts";
-import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
+import {
+  centeredLines,
+  estimateText,
+  lineCount,
+  type MeasureText,
+  textItem,
+} from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { clearDomain } from "../model/clearance.ts";
 import type { LabelBoxSet, MarkFeatures } from "../model/features.ts";
@@ -1244,9 +1250,7 @@ class ValueLabels {
   readonly #plain: boolean;
   readonly #minLength: number;
   /** Each row's text of a `field` or of parts (`content`), instead of its value. */
-  readonly #field:
-    | ((row: number, series: string, value: number, time?: boolean, field?: string) => string)
-    | undefined;
+  readonly #field: ContentWriter | undefined;
   /** Each row's parts, where they have looks of their own. */
   readonly #styled: ContentWriter["styled"];
   readonly #size: number;
@@ -1311,14 +1315,22 @@ class ValueLabels {
 
   /**
    * A label's text: the value written, the row's `field`, or its parts, of
-   * the series `series` names; written only once its bar can show it.
+   * the series `series` names; written only once its bar can show it. In a
+   * value transition's frames, parts writing the value measure with `count`.
    */
-  text(value: number, row: number, series: string, field?: string): () => Written {
+  text(
+    value: number,
+    row: number,
+    series: string,
+    field?: string,
+    count?: MeasureText,
+  ): () => Written {
     const styled = this.#styled;
     // Values of a field of times are written as times; shares are numbers.
     const time =
       !this.#shares && field !== undefined && this.#table.kind(field as never) === "time";
-    if (styled) return () => styled(row, series, value, time, this.#paint, this.#frame, field);
+    if (styled)
+      return () => styled(row, series, value, time, this.#paint, this.#frame, field, count);
     return this.#field
       ? () => this.#field!(row, series, value, time, field)
       : () => this.#format(value);
@@ -1494,8 +1506,12 @@ class ValueLabels {
         ? labelHalo(this.#halo, box ? { ...frame, surface: box.fill } : frame)
         : undefined;
       // Labels named for value transitions, which count through the values
-      // between, unless they write a field; their text written for another.
+      // between where they write the value (alone, or a part of their
+      // content); their text written for another. In frames, the number
+      // is measured with `count`, by its shape.
       const { named } = group;
+      const write = (i: number, value: number, count?: MeasureText) =>
+        this.text(value, named!.rows[i]!, named!.series, named!.field, count)();
       const record = named && {
         names: named.names,
         table: this.#table,
@@ -1503,22 +1519,24 @@ class ValueLabels {
         of: key,
         starts: named.starts,
         anchor: group.anchor,
-        values: !this.#field || this.#styled ? named.values : undefined,
+        values: !this.#field || this.#field.counts ? named.values : undefined,
+        // As frames lay it out: by its number's shape, but in plain text, which renderers lay out.
+        offset: (i: number, value: number, count: MeasureText) =>
+          SHARES[group.anchor] *
+          this.#width(write(i, value, count), this.#plain ? undefined : count),
       };
-      const write = (i: number, value: number) =>
-        this.text(value, named!.rows[i]!, named!.series, named!.field)();
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
         // The block stands where its place anchors it; its lines align in it as its style says.
         const lines = paint.align === undefined ? group.anchor : ANCHORS[paint.align];
-        const itemsAt = (text: Written, x: number, y: number) => {
+        const itemsAt = (text: Written, x: number, y: number, count?: MeasureText) => {
           // Parts are drawn in their block, its middle at the label's place.
           if (typeof text !== "string")
             return text.items(text.box(x, y, group.anchor, paint), lines, paint, halo);
           // Moved from the block's anchor to its lines', across the block's width.
           const along = SHARES[lines] - SHARES[group.anchor];
           const at = {
-            x: along ? x + along * this.#width(text) : x,
+            x: along ? x + along * this.#width(text, count) : x,
             y,
             anchor: lines,
             baseline: "middle",
@@ -1530,7 +1548,7 @@ class ValueLabels {
             centeredLines(text, at, paint),
             paint,
             frame.surface ?? surface(frame.theme),
-            frame.measure,
+            count ?? frame.measure,
           );
           return [halo ? { ...made, halo } : made];
         };
@@ -1552,7 +1570,7 @@ class ValueLabels {
             ...record,
             at: group.items.flatMap(({ x, y }) => [x, y]),
             owners,
-            write: (i, value, x, y) => itemsAt(write(i, value), x, y),
+            write: (i, value, x, y, count) => itemsAt(write(i, value, count), x, y, count),
           };
         out.push(labels);
         continue;
@@ -1582,10 +1600,10 @@ class ValueLabels {
     return out;
   }
 
-  #width(text: Written): number {
+  /** A label's width, its text measured with `measure` (`count` in a value transition's frames). */
+  #width(text: Written, measure = this.#frame.measure): number {
     return (
-      (typeof text === "string" ? this.#frame.measure(text, this.#paint.css) : text.lines.width) +
-      this.#padding
+      (typeof text === "string" ? measure(text, this.#paint.css) : text.lines.width) + this.#padding
     );
   }
 

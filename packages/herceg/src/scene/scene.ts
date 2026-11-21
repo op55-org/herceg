@@ -10,6 +10,7 @@ import type { NumericArray } from "../data/column.ts";
 import type { ReadonlyTable, Table } from "../data/table.ts";
 import type { ArcPath, inSector, sectorInfo, traceSector } from "../draw/arc.ts";
 import type { SymbolName } from "../draw/symbols.ts";
+import type { MeasureText } from "../layout/text.ts";
 import type { Mapping } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
@@ -309,6 +310,12 @@ export interface LabelItems {
    * it moves inside or outside its bar keeps its place.
    */
   starts?: ArrayLike<number> | undefined;
+  /**
+   * For bars' labels: how far a label's place is past where its text
+   * starts, written for `value` as a value transition's frames write it
+   * (its number measured with `count`).
+   */
+  offset?: ((label: number, value: number, count: MeasureText) => number) | undefined;
   /** For bars' labels: how their text is anchored at their places, which the runs of parts do not say. */
   anchor?: "start" | "middle" | "end" | undefined;
   /** For labels geometry: each label's place (x, y), and the label each of its items draws. */
@@ -316,12 +323,25 @@ export interface LabelItems {
   owners?: ArrayLike<number> | undefined;
   /**
    * Per label, the number it writes (NaN, or none: other text), and its
-   * text, or its items placed at (x, y), writing `value`.
+   * text, or its items placed at (x, y), writing `value`: in a value
+   * transition's frames, which measure the number with `count` (by its
+   * shape: dom/value-labels.ts `shapeOf`) and other text as scenes do.
    */
   values?: ArrayLike<number> | undefined;
   write?:
-    | ((label: number, value: number, x: number, y: number) => string | readonly TextItem[])
+    | ((
+        label: number,
+        value: number,
+        x: number,
+        y: number,
+        count: MeasureText,
+      ) => string | readonly TextItem[])
     | undefined;
+  /**
+   * In a value transition's frames, per label, whether it is laid out by
+   * its number's shape: a transition interrupting goes on laying it out so.
+   */
+  shaped?: readonly boolean[] | undefined;
 }
 
 /** Line segments of one series, such as error bars: x1, y1, x2, y2 per segment. */

@@ -67,6 +67,7 @@ import {
   moveLabels,
   named,
   type ShownLabels,
+  shapeOf,
 } from "./value-labels.ts";
 import {
   type AxesMotion,
@@ -257,6 +258,8 @@ export interface Tween {
   drill?: boolean;
   /** What frames place axes with. */
   builders: Builders;
+  /** How frames measure counting labels' numbers: by their shapes, with the chart's measurer. */
+  count: MeasureText;
   /** The scene of the new values, which the last frame shows as it is. */
   scene: Scene;
   /** How each panel's marks and axes move, in the scene's order. */
@@ -981,17 +984,36 @@ export function plan(
     ),
   };
   const custom = shown.custom?.plan(scene, panels, sides, MOVING_ITEMS);
+  // Counting labels' numbers are measured by their shapes in frames.
+  const count: MeasureText = (text, font) => builders.measure(shapeOf(text), font);
   const tweens: PanelTween[] = [];
   let moves = false;
   for (const [i, drawn] of scene.panels.entries()) {
     const panel = panelOf(panels, drawn);
-    const planned = planPanel(shown.panels[i]!, drawn, panel, builders, roles, budget, custom);
+    const planned = planPanel(
+      shown.panels[i]!,
+      drawn,
+      panel,
+      builders,
+      roles,
+      budget,
+      custom,
+      count,
+    );
     if (!planned) return undefined;
     tweens.push(planned.tween);
     moves ||= planned.moves;
   }
   return moves
-    ? { start: shown.time, duration, builders, scene, panels: tweens, custom }
+    ? {
+        start: shown.time,
+        duration,
+        builders,
+        count,
+        scene,
+        panels: tweens,
+        custom,
+      }
     : undefined;
 }
 
@@ -1007,6 +1029,7 @@ function planPanel(
   { sides, followed, positions }: Roles,
   budget: { bars: number; points: number },
   custom: CustomMotion | undefined,
+  count: MeasureText,
 ): { tween: PanelTween; moves: boolean } | undefined {
   // A panel of another facet value, or drawn elsewhere or otherwise, is another picture.
   const same = drawn.key === shown.key;
@@ -1292,6 +1315,7 @@ function planPanel(
       motions[side],
       side,
       bars,
+      count,
     );
     tween.labels.push(...moved.moving);
     moves ||= moved.moves;
@@ -1495,7 +1519,7 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
   const t = progress(tween, elapsed);
   const { scene } = tween;
   const panels = scene.panels.map((panel, i) =>
-    panelAt(panel, tween.panels[i]!, t, tween.builders, tween.redrawn),
+    panelAt(panel, tween.panels[i]!, t, tween.builders, tween.count, tween.redrawn),
   );
   // Insets paint panels in an order of their own.
   const moved = new Map(scene.panels.map((panel, i) => [panel, panels[i]!]));
@@ -1504,14 +1528,16 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
 }
 
 /**
- * A panel at eased progress `t` of its tween, `builders` placing its axes;
- * `redrawn` while a custom mark's `draw` changed since it began.
+ * A panel at eased progress `t` of its tween, `builders` placing its axes,
+ * `count` measuring counting labels' numbers; `redrawn` while a custom
+ * mark's `draw` changed since it began.
  */
 function panelAt(
   panel: Panel,
   tween: PanelTween,
   t: number,
   builders: Builders,
+  count: MeasureText,
   redrawn?: boolean,
 ): Panel {
   const { x, y, yRight } = tween.motions;
@@ -1542,7 +1568,7 @@ function panelAt(
   for (const bars of tween.bars)
     put(bars.index, barsAt(bars, blends[bars.along], blends[bars.place]));
   for (const labels of tween.labels)
-    put(labels.index, labelsAt(labels, t, blends.x, blends[labels.side]));
+    put(labels.index, labelsAt(labels, t, blends.x, blends[labels.side], count));
   for (const points of tween.points)
     marks[points.index] = pointsAt(points, t, blends.x, blends[points.side]);
   for (const trace of tween.traces)
