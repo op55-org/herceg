@@ -58,7 +58,8 @@ export type FixtureName =
   | "anchor-pan"
   | "cross-filter"
   | "crosshair-dashboard"
-  | "pick-crowd";
+  | "pick-crowd"
+  | "rule-drag";
 
 declare global {
   interface Window {
@@ -974,6 +975,19 @@ function toSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 }
 
+/** A1's crowd: 12 lines x 2,160 minutes crossing each other, line k's value at minute i. */
+function crowd() {
+  const n = 2_160;
+  const names = Array.from({ length: 12 }, (_, k) => `s${k}`);
+  const value = (k: number, i: number) => 200 + 6 * k + 10 * Math.sin(i / 90 + k);
+  const columns: Record<string, Float64Array | ReturnType<typeof time>> = {
+    t: time(Float64Array.from({ length: n }, (_, i) => START + i * MINUTE)),
+  };
+  for (const [k, name] of names.entries())
+    columns[name] = Float64Array.from({ length: n }, (_, i) => value(k, i));
+  return { n, names, value, data: table(columns) };
+}
+
 /**
  * A1's crowd: one chart of 12 lines x 2,160 minutes crossing each other,
  * with `select: "series"`, so that every move picks what the pointer is on
@@ -986,15 +1000,7 @@ function toSegment(p: Point, a: Point, b: Point): number {
  * line, from the data on the chart's scales, is nearest the pointer.
  */
 async function pickCrowd(count: number): Promise<Fixture> {
-  const n = 2_160;
-  const names = Array.from({ length: 12 }, (_, k) => `s${k}`);
-  const value = (k: number, i: number) => 200 + 6 * k + 10 * Math.sin(i / 90 + k);
-  const columns: Record<string, Float64Array | ReturnType<typeof time>> = {
-    t: time(Float64Array.from({ length: n }, (_, i) => START + i * MINUTE)),
-  };
-  for (const [k, name] of names.entries())
-    columns[name] = Float64Array.from({ length: n }, (_, i) => value(k, i));
-  const data = table(columns);
+  const { n, names, value, data } = crowd();
   const chart = createChart(host(800, 400), {
     marks: [line(data, { id: "lines", x: "t", y: names, selected: { stroke: MARKED } })],
     interaction: { select: "series" },
@@ -1152,6 +1158,99 @@ async function pickCrowd(count: number): Promise<Fixture> {
   return { moves, checks, screenshot: true };
 }
 
+/**
+ * A1's threshold: A1's crowd, each line named at its last observation in
+ * view outside the plot, and a rule at a value with `drag`, pressed and
+ * moved 6 px up and back. The value is the application's: an `itemMove`
+ * listener keeps every preview and gives it back with `update` in a task
+ * of its own, as a React application holding it in its state does (React
+ * renders in a task its scheduler posts), so each move draws the chart for
+ * the preview and again for the options. The move's effect is a frame of
+ * the options with the rule where the move put it.
+ * On check moves, the rule in a screenshot is at the pointer's height, and
+ * nowhere else.
+ */
+async function ruleDrag(count: number): Promise<Fixture> {
+  const { names, data } = crowd();
+  let threshold = 240;
+  const marks = () => [
+    line(data, {
+      id: "lines",
+      x: "t",
+      y: names,
+      labels: { at: "visible-end", place: { outside: true }, leader: true },
+    }),
+    rule({ id: "threshold", y: threshold, drag: true, stroke: MARKED, strokeWidth: 2, dash: "-" }),
+  ];
+  const chart = createChart(host(800, 400), { marks: marks(), timeZone: "UTC" });
+  charts = [chart];
+  await chart.loading;
+  await until(chart);
+  const box = chart.root.getBoundingClientRect();
+  const { plot } = chart.getPanels()[0]!;
+  const press = {
+    x: box.left + plot.x + plot.width / 2,
+    y: box.top + chart.toPixel(threshold, { axis: "y" })!,
+  };
+  // Up by 6 px and back: every move moves the rule.
+  const moves = Array.from({ length: count }, (_, i) => ({
+    x: press.x,
+    y: press.y - (i % 2 ? 0 : 6),
+  }));
+  const checks = [-30, 25, -55].map((dy) => ({ x: press.x, y: press.y + dy }));
+  const all = [...moves, ...checks];
+  let needed = Number.POSITIVE_INFINITY;
+  reset = () => {
+    needed = Number.POSITIVE_INFINITY;
+  };
+  // The application's state: the value where the rule was dragged, given
+  // back to the chart in the next task.
+  let kept: number | undefined;
+  const task = new MessageChannel();
+  task.port1.onmessage = () => {
+    threshold = kept!;
+    kept = undefined;
+    chart.update({ marks: marks() });
+    const y = box.top + chart.toPixel(threshold, { axis: "y" })!;
+    if (moving() && Math.abs(y - all[armed!.index]!.y) < 1) needed = chart.revision;
+  };
+  stops.push(
+    () => task.port1.close(),
+    chart.on("itemMove", ({ markId, phase, position }) => {
+      if (markId !== "threshold" || phase === "cancel" || position?.y === undefined) return;
+      if (kept === undefined) task.port2.postMessage(null);
+      kept = position.y;
+    }),
+    chart.on("render", ({ revision }) => {
+      if (revision >= needed) drawn();
+    }),
+  );
+  verify = async (index, screenshot) => {
+    const { y } = all[index]!;
+    const pixel = await pixels(screenshot!);
+    const tip = tooltipBox(chart)?.getBoundingClientRect();
+    // Columns of the plot clear of the tooltip and its shadow: MARKED shows
+    // within 2 px of the pointer's height in most, and nowhere else.
+    let columns = 0;
+    let shown = 0;
+    for (let x = box.left + plot.x + 2; x < box.left + plot.x + plot.width - 2; x += 4) {
+      if (tip && x > tip.left - SHADOW && x < tip.right + SHADOW) continue;
+      columns++;
+      let near = false;
+      for (let row = Math.ceil(box.top + plot.y); row < box.top + plot.y + plot.height; row++) {
+        if (!isMarked(pixel(x, row))) continue;
+        if (Math.abs(row - y) > 2)
+          return `the rule is drawn at ${(row - box.top).toFixed(0)} px, not only at the pointer's ${(y - box.top).toFixed(1)}`;
+        near = true;
+      }
+      if (near) shown++;
+    }
+    if (shown < (2 * columns) / 3)
+      return `the rule is not drawn at the pointer's ${(y - box.top).toFixed(1)} px (${shown} of ${columns} columns)`;
+  };
+  return { press, moves, checks, screenshot: true };
+}
+
 const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
   "hover-headings": (count) => hoverListener(count, true),
@@ -1162,6 +1261,7 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "cross-filter": crossFilter,
   "crosshair-dashboard": crosshairDashboard,
   "pick-crowd": pickCrowd,
+  "rule-drag": ruleDrag,
 };
 
 window.interaction = {
