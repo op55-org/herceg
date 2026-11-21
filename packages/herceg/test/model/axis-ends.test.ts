@@ -446,7 +446,7 @@ describe("end labels on y", () => {
           400,
           200,
         ).scene.panels[0]!;
-      expect(labels(axisOn(tall(), "left"))).toEqual(["0.5", "most of all"]);
+      expect(labels(axisOn(tall(), "left"))).toEqual(["0.5", "most\nof all"]);
       expect(labels(axisOn(tall("hide"), "left"))).toEqual(["0.5"]);
       expect(tall("hide").plot).toEqual(tall().plot);
       // A block aligned at its tick paints its outline past the tick too: the

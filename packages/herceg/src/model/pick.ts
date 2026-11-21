@@ -590,8 +590,9 @@ export class Picker {
   /**
    * The row a line's or area's path draws nearest the query along its axis,
    * from the segment hit (see `Hit.segment`): of a path in the order of its
-   * series, the eligible observations inside the segment's span and the two
-   * bracketing it, in the segment's run; of one drawn in another order, the
+   * series, of the eligible observations inside the segment's span and the
+   * two bracketing it, in the segment's run, the nearest on screen (the
+   * earliest of ties, see `closest`); of one drawn in another order, the
    * nearer of the segment's two ends' observations, or where those are not
    * known, the eligible observation nearest the query on screen.
    */
@@ -675,7 +676,10 @@ export class Picker {
     const t = Math.min(Math.max(first(target, false), k0), k1);
     const right = walk(t, 1, k1);
     const left = walk(t - 1, -1, k0 - 1);
-    const within = closest([left, right], at, target);
+    // Measured on screen, where an axis with breaks shows no break.
+    const from = scale.map(target);
+    const far = (k: number) => Math.abs(scale.map(at(k)) - from);
+    const [within] = closest([left, right], far);
     // And the two bracketing the span.
     const before = walk(k0 - 1, -1, -1);
     const after = walk(k1, 1, length);
@@ -691,7 +695,11 @@ export class Picker {
       // A segment between two runs is one of theirs: the one whose end it is nearer.
       candidates = [Math.abs(at(before) - lo) <= Math.abs(at(after) - hi) ? before : after];
     else candidates = [before, after];
-    const k = closest(candidates, at, target);
+    let [k, limit] = closest(candidates, far);
+    // As inspections read them, the first eligible of those as near before it
+    // in its run: at its value, or within TIE.
+    for (let j = k - 1; j >= 0 && far(j) <= limit && sameRun(rowAt(j), rowAt(k)); j--)
+      if (eligible(rowAt(j))) k = j;
     return k < 0 ? undefined : found(k);
   }
 }
@@ -749,16 +757,18 @@ function before(
   );
 }
 
-/** Of positions `ks` (-1 for none), the one whose value `at` gives is nearest `target`; the earlier on ties. */
-function closest(ks: readonly number[], at: (k: number) => number, target: number): number {
+/**
+ * Of positions `ks` (-1 for none) of a series sorted along its axis, the
+ * one nearest the query on screen (`far` measures it), the earliest of
+ * those within `TIE` of the nearest, as inspections read them; and how far
+ * those may be.
+ */
+function closest(ks: readonly number[], far: (k: number) => number): [number, number] {
+  let limit = Number.POSITIVE_INFINITY;
+  for (const k of ks) if (k >= 0) limit = Math.min(limit, far(k) + TIE);
   let best = -1;
-  for (const k of ks) {
-    if (k < 0) continue;
-    const d = Math.abs(at(k) - target);
-    const b = best < 0 ? Number.POSITIVE_INFINITY : Math.abs(at(best) - target);
-    if (d < b || (d === b && k < best)) best = k;
-  }
-  return best;
+  for (const k of ks) if (k >= 0 && (best < 0 || k < best) && far(k) <= limit) best = k;
+  return [best, limit];
 }
 
 /** Where table row `row` is in `s`: by a scan, for rows a trace's order gives; -1 for none. */

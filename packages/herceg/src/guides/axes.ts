@@ -111,11 +111,16 @@ export interface ListedAxis {
 /** The least and most pixels an axis' ticks and labels take beside the plot. */
 type Room = { min: number; max: number };
 
-/** A guide, and where it is set, for messages: in `guides`, or by a short form (`short`). */
+/**
+ * A guide, and where it is set, for messages: in `guides`, or by a short
+ * form (`short`); `spare` for an axis on a scale's default side the guides
+ * list no axis of, the model's until its labels are written in lines.
+ */
 interface Listed {
   guide: GuideOptions;
   path: string;
   short?: boolean;
+  spare?: boolean;
 }
 
 /**
@@ -123,14 +128,16 @@ interface Listed {
  * `room` stand for; and the short forms as the model reads them: each
  * scale's settings with those of its listed axis on its default side, or
  * with the automatic axis hidden when the scale's axes are all elsewhere.
- * With tick labels `aligned` at their ticks, which listed axes draw, a
- * scale the guides list no axis of has one on its default side. Undefined
- * when there are no axes to list.
+ * A scale the guides list no axis of has a plain one on its default side,
+ * which the model draws until its labels are written in lines (see
+ * `compiledAxes`), or with tick labels `aligned` at their ticks, which
+ * listed axes draw, one the guides draw. `listed` says whether there are
+ * axes to list.
  */
 export function listedAxes(
   config: ChartConfig,
   aligned = false,
-): { read: Partial<Record<ScaleName, ChartAxisOptions>>; axes: ListedAxis[] } | undefined {
+): { read: Partial<Record<ScaleName, ChartAxisOptions>>; axes: ListedAxis[]; listed: boolean } {
   const right = config.marks.some((mark) => mark.spec.axis === "right");
   const guides: Listed[] = (config.guides ?? []).map((guide, i) => ({
     guide,
@@ -142,10 +149,10 @@ export function listedAxes(
     const guide = shortGuide(config, scale, guides);
     if (guide) guides.push({ guide, path: `chart ${scale}`, short: true });
   }
-  if (aligned)
-    for (const scale of ["x", "y", ...(right ? ["yRight" as const] : [])] as const)
-      if (!lists(scale)) guides.push({ guide: { type: "axis", scale }, path: `chart ${scale}` });
-  if (!guides.some(({ guide }) => guide.type === "axis")) return undefined;
+  const listed = guides.some(({ guide }) => guide.type === "axis") || aligned;
+  for (const scale of ["x", "y", ...(right ? ["yRight" as const] : [])] as const)
+    if (!lists(scale))
+      guides.push({ guide: { type: "axis", scale }, path: `chart ${scale}`, spare: !aligned });
   const read: Partial<Record<ScaleName, ChartAxisOptions>> = {};
   const axes: ListedAxis[] = [];
   const yScope = config.y?.scope ?? (config.panels ? "panel" : "chart");
@@ -162,8 +169,18 @@ export function listedAxes(
       room: panel[scale]?.room,
       path: `chart panels[${config.panels!.declared.indexOf(panel)}].${scale}`,
     }));
-    for (const { guide, path: at, short: synthesized } of guides) {
+    for (const { guide, path: at, short: synthesized, spare } of guides) {
       if (guide.type !== "axis" || guide.scale !== scale) continue;
+      // A spare axis leaves the short form as it is.
+      if (spare) {
+        axes.push({
+          ...resolve(guide, scale, HOME[scale], short, at),
+          rows,
+          columns,
+          repeat: short?.repeat,
+        });
+        continue;
+      }
       const side = guide.place?.side ?? HOME[scale];
       const path = `${at}.place.side`;
       const along =
@@ -257,7 +274,7 @@ export function listedAxes(
       repeat: guide.repeat,
     });
   }
-  return { read, axes };
+  return { read, axes, listed };
 }
 
 /**
@@ -567,10 +584,17 @@ type Align = "start" | "center" | "end";
 type Span = readonly [number, number];
 
 /** The compiled axes of `listed`, planned and drawn with the chart's code `kit`. */
-export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): CompiledAxes {
+export function compiledAxes(
+  kit: GuideKit,
+  listed: readonly ListedAxis[],
+  lined: ReadonlySet<string>,
+): CompiledAxes {
   const elsewhere = listed.filter((axis) => !axis.home && axis.show);
+  // A plain axis is the model's until its scale's labels are written in
+  // lines (`lined`), which the model lays out on one; then it is laid out
+  // here, as listed axes are, for the rest of the configuration's life.
   const changed = (scale: string) =>
-    listed.find((axis) => axis.scale === scale && axis.home && !axis.plain);
+    listed.find((axis) => axis.scale === scale && axis.home && (!axis.plain || lined.has(scale)));
   // Room above and below the plots is kept before x is planned, from a plan
   // over a column's share of the width. Where the panels' own plans need
   // more (turned labels choosing a steeper angle in narrower plots), the
@@ -1283,11 +1307,6 @@ export function layered(
       // Shortened to a y axis' room first: what is left out hides and reaches nothing.
       const fit = roomFit(kit, axis, labels, label, measure);
       if (fit) ticks = ticks.map((t) => ({ ...t, label: fit(t.label) }));
-      // Labels that may turn are written on one line.
-      if (labels.rotation !== undefined)
-        ticks = ticks.map((t) =>
-          t.label.includes("\n") ? { ...t, label: t.label.replaceAll("\n", " ") } : t,
-        );
       // Flat labels stand at their ticks as their style aligns them: inside
       // the plot centered by default, outside it where the style says.
       const aligned = (axis.across ? label.align : label.verticalAlign) !== undefined;
@@ -1732,9 +1751,14 @@ function overlaps(
   // One above the other, blocks meet within half of each one's height.
   if (run === "along") return d < (tall + wb.height) / 2;
   const { anchor, cos, sin } = turned(angle, run === "above");
-  if (d * sin >= Math.max(tall, wb.height)) return false;
+  // As drawn, turned blocks of more lines stand farther off the line, their
+  // middles half their height off it (see `drawn`); flat ones, which hang
+  // from it, meet across it whatever their heights.
+  const dy = ((run === "above" ? -1 : 1) * (wb.height - tall) * cos) / 2;
+  const rise = Math.sign(angle) * sin;
+  if (Math.abs(dy * cos - d * rise) >= (tall + wb.height) / 2) return false;
   const reach = anchor === "middle" ? (wa + wb.width) / 2 : anchor === "start" ? wa : wb.width;
-  return d * cos < reach + PAD;
+  return d * cos + dy * rise < reach + PAD;
 }
 
 /**
@@ -1836,15 +1860,15 @@ function laneDepth(kit: GuideKit, placed: RowLabels, measure: MeasureText): numb
   return deepest;
 }
 
-/** How far `text`, a label of `placed` on an x axis, reaches from its row's start, as turned. */
+/** How far `text`, a label of `placed` on an x axis, reaches from its row's start, as turned: its lines' block. */
 function labelDepth(
   kit: GuideKit,
   { angle, label }: Pick<Placed, "angle" | "label">,
   text: string,
   measure: MeasureText,
 ): number {
-  const height = kit.textHeight(label);
-  if (!angle) return height + (text.split("\n").length - 1) * label.lineHeight;
+  const height = kit.textHeight(label, text);
+  if (!angle) return height;
   const { cos, sin } = turned(angle);
   return kit.textWidth(text, label, measure) * sin + height * cos;
 }
@@ -2251,13 +2275,18 @@ export function drawn(
           angle: 0,
         };
       } else if (angle)
-        at = {
-          x: position,
-          y: edge + dir * (distance + (kit.textHeight(paint) / 2) * cos),
-          anchor,
-          baseline: "middle",
-          angle,
-        };
+        // A turned block of lines, its middle where a line's would be.
+        at = kit.centeredLines(
+          label,
+          {
+            x: position,
+            y: edge + dir * (distance + (kit.textHeight(paint, label) / 2) * cos),
+            anchor,
+            baseline: "middle",
+            angle,
+          },
+          paint,
+        );
       else
         at =
           dir > 0

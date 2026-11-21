@@ -32,6 +32,7 @@ import {
   type Visit,
 } from "../model/keyboard.ts";
 import type { ChartModel, DrawnPanel, Inspection, Viewport } from "../model/model.ts";
+import type { earliest } from "../model/nearest.ts";
 import type { Picked, Picker, PickKit } from "../model/pick.ts";
 import type { ClickedRows, RowLink } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
@@ -125,6 +126,7 @@ const FRAME = Symbol.for("herceg.inputFrame");
  */
 export interface InteractionKit extends PickKit {
   svgElement: typeof svgElement;
+  earliest: typeof earliest;
   xAt: typeof xAt;
   surface: typeof surface;
   tickLabelGap: typeof tickLabelGap;

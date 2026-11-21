@@ -38,6 +38,7 @@ import {
   viewKey,
 } from "../model/model.ts";
 import type { NavigatorControls } from "../model/navigator.ts";
+import { earliest } from "../model/nearest.ts";
 import type { RowLink, RowSelectionChange } from "../model/row-selection.ts";
 import type { ScaleName } from "../model/scales.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
@@ -237,6 +238,7 @@ export const KIT: InteractionKit = {
   svgElement,
   placeAt,
   rowOf,
+  earliest,
   lowerPosition,
   xAt,
   surface,

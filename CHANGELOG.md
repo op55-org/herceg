@@ -437,3 +437,26 @@ be a pixel off until the transition ends. Bars' labels of parts with a
 and so do bars' value labels written through the chart's field displays,
 which showed each new value at once. See [Counting
 labels](docs/guide/interaction.md#counting-labels).
+
+Fixed: inspection could read the later of two observations midway between
+them, as `snap: "each"` should not ("ties to the earlier"): distances on
+screen differ by rounding, so 31 of 260 exact midpoints between 500
+jittered times read the later. Distances within a thousandth of a pixel of
+the nearest now tie, and the earliest is read, by the pointer, hover
+events, `chart.inspect`, cursors shown or synced at a value, and the
+keyboard (its tooltip, announcements, and Up and Down), on every axis:
+`"shared"` snaps to the earliest value tied, whichever series has it, and
+`"each"` reads the first row of points at one value on either side of it.
+See [Inspection](docs/guide/interaction.md#inspection).
+
+Fixed: a format's line break in tick labels (`format: { time: "%b %-d\n%Y"
+}`) was written as a space unless a listed axis' labels were `overlap:
+"show"`, against "`\n` breaks any label into lines". Tick labels a format
+writes in lines are now blocks on every axis, the short form's or listed,
+in every overlap mode and every output: rows of x labels are as deep as
+their blocks, turned labels turn as blocks, labels kept apart are kept
+apart as blocks, y labels take their widest line's width and stay inside
+the chart, and a room leaves out a row of blocks that does not fit. A
+plain axis whose labels are written in lines is laid out by the guide
+compiler from then on, as listed axes are. See [Titles and
+padding](docs/guide/axes-and-legends.md#titles-and-padding).

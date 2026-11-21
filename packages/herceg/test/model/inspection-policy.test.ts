@@ -13,7 +13,9 @@ import { point } from "../../src/marks/point.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel, type Inspection } from "../../src/model/model.ts";
+import { earliest, TIE } from "../../src/model/nearest.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
+import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { Snap } from "../../src/spec/spec.ts";
 
 const SECOND = 1000;
@@ -141,6 +143,173 @@ describe("within", () => {
   });
 });
 
+describe("ties", () => {
+  // 500 times about 100 ms apart, each moved by a whole number of
+  // milliseconds (study A7's repro): their midpoints in whole milliseconds
+  // are ties, which rounding on screen used to send to the later point.
+  const T0 = Date.UTC(2026, 9, 1, 11, 30);
+  const times = Array.from({ length: 500 }, (_, i) => T0 + i * 100 + ((i * 37) % 71) - 35);
+  const jittered = (x: readonly number[]) =>
+    table({ x: x === times ? time(times) : [...x], v: x.map((_, i) => 100 + (i % 7)) });
+
+  /** Of each pair of neighbors with a midpoint in whole units, those whose midpoint reads the later. */
+  function later(x: readonly number[], snap: Snap) {
+    const model = build({
+      marks: [line(jittered(x), { x: "x", y: "v" })],
+      inspection: { mode: "nearest-x", snap },
+    });
+    const wrong: number[] = [];
+    let ties = 0;
+    for (let k = 0; k + 1 < x.length; k++) {
+      if ((x[k]! + x[k + 1]!) % 2) continue;
+      ties++;
+      if (at(model, (x[k]! + x[k + 1]!) / 2, snap)?.points[0]?.row !== k) wrong.push(k);
+    }
+    return { ties, wrong };
+  }
+
+  it("go to the earlier observation on time and number axes, under each snap", () => {
+    for (const x of [times, times.map((t) => t - T0)])
+      for (const snap of ["each", "shared"] as const) {
+        const { ties, wrong } = later(x, snap);
+        expect(ties).toBeGreaterThan(200);
+        expect(wrong).toEqual([]);
+      }
+  });
+
+  it("are ties on screen: on a log axis, at the midpoint of the decades", () => {
+    const data = table({ x: [1, 100], v: [1, 2] });
+    const model = build({
+      marks: [line(data, { x: "x", y: "v" })],
+      x: { type: "log", nice: false, domain: [1, 100] },
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    expect(at(model, 10)?.points.map((p) => p.row)).toEqual([0]);
+    // Past it, the nearer on screen, whatever the values' difference says.
+    expect(at(model, 12)?.points.map((p) => p.row)).toEqual([1]);
+  });
+
+  it("are ties on screen across a break", () => {
+    // 0 to 10 s shown, 10 to 90 s left out, 90 to 100 s shown: 5 s and 95 s
+    // are as far on screen from the seam.
+    const data = table({ x: seconds(5, 95), v: [1, 2] });
+    const model = build({
+      marks: [line(data, { x: "x", y: "v" })],
+      x: {
+        domain: [0, 100 * SECOND],
+        nice: false,
+        breaks: timeBreaks([{ from: 10 * SECOND, to: 90 * SECOND }]),
+      },
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    const { x, plot } = frameOf(model);
+    const seam = (x.map(5 * SECOND) + x.map(95 * SECOND)) / 2;
+    const rows = (px: number) =>
+      model.inspect(px, plot.y + plot.height / 2)?.points.map((p) => p.row);
+    expect(rows(seam)).toEqual([0]);
+    expect(rows(seam + 1)).toEqual([1]);
+  });
+
+  it("go to the earlier category between two bands", () => {
+    const data = table({ c: ["a", "b", "c"], v: [1, 2, 3] });
+    const model = build({
+      marks: [line(data, { x: "c", y: "v" })],
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    const { x, plot } = frameOf(model);
+    for (const k of [0, 1]) {
+      const between = (x.map(k) + x.map(k + 1)) / 2;
+      expect(model.inspect(between, plot.y + 10)?.points.map((p) => p.row)).toEqual([k]);
+    }
+  });
+
+  it("go to the earlier value in unsorted series, whatever their rows' order", () => {
+    const data = table({ x: [20, 0, 10], y: [1, 2, 3] });
+    const model = build({
+      marks: [point(data, { x: "x", y: "y" })],
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    expect(at(model, 15)?.points.map((p) => p.row)).toEqual([2]);
+    expect(at(model, 5)?.points.map((p) => p.row)).toEqual([1]);
+  });
+
+  it('give "shared" the earlier value, whichever series has it', () => {
+    // Values whose midpoint rounding on screen puts nearer the later one.
+    for (const [early, late, end] of [
+      [3, 7, 10],
+      [0.1, 0.3, 1],
+      [10, 20, 30],
+    ] as const) {
+      const model = build({
+        marks: [
+          line(table({ t: [late], v: [1] }), { x: "t", y: "v", label: "late" }),
+          line(table({ t: [early], v: [2] }), { x: "t", y: "v", label: "early" }),
+        ],
+        x: { domain: [0, end], nice: false },
+        inspection: { mode: "nearest-x" },
+      });
+      const found = at(model, (early + late) / 2);
+      expect(found?.value).toBe(early);
+      expect(found?.points.map((p) => p.label)).toEqual(["early"]);
+    }
+  });
+
+  it("go to the earlier of points within reach of the pointer's value", () => {
+    const data = table({ x: [0, 10], v: [1, 2] });
+    const model = build({
+      marks: [line(data, { x: "x", y: "v" })],
+      inspection: { mode: "nearest-x", snap: "each", within: 5 },
+    });
+    expect(at(model, 5)?.points.map((p) => p.row)).toEqual([0]);
+  });
+
+  it("are distances within TIE of the least, the earliest of them read, then the first found", () => {
+    const read = (candidates: [distance: number, value: number][]) =>
+      earliest((take) => {
+        candidates.forEach(([distance, value], k) => {
+          take(k, distance, value);
+        });
+      });
+    // Within TIE of the least: the least value.
+    expect(
+      read([
+        [1, 5],
+        [1 + TIE / 2, 3],
+      ]),
+    ).toBe(1);
+    // Of values alike, the first.
+    expect(
+      read([
+        [1, 3],
+        [1, 3],
+      ]),
+    ).toBe(0);
+    // Measured from the least, not from one another: 1.0016 does not tie with 1.
+    expect(
+      read([
+        [1, 3],
+        [1 + 0.8 * TIE, 2],
+        [1 + 1.6 * TIE, 1],
+      ]),
+    ).toBe(1);
+    expect(
+      read([
+        [1 + 1.6 * TIE, 1],
+        [1 + 0.8 * TIE, 2],
+        [1, 3],
+      ]),
+    ).toBe(1);
+    // A nearer one leaving the winner behind, where one passed over still ties: searched again.
+    expect(
+      read([
+        [1 + 1.9 * TIE, 1],
+        [1 + 1.5 * TIE, 2],
+        [1 + 0.8 * TIE, 3],
+      ]),
+    ).toBe(1);
+  });
+});
+
 describe("points at one value", () => {
   it('read the last of them with "previous", the first otherwise', () => {
     const data = table({ x: [0, 5, 5, 10], y: [1, 2, 3, 4] });
@@ -154,6 +323,27 @@ describe("points at one value", () => {
     expect(rowAt("previous")).toEqual([2]);
     expect(rowAt("next")).toEqual([1]);
     expect(rowAt("each")).toEqual([1]);
+  });
+
+  it("read the drawn one where a longer run of them is not drawn", () => {
+    // 1,026 rows at 5, the first 1,025 missing: more than a gap's walk.
+    const x = [0, ...Array.from({ length: 1026 }, () => 5), 10];
+    const y = x.map((_, k) => (k >= 1 && k <= 1025 ? Number.NaN : k));
+    const model = build({
+      marks: [line(table({ x, y }), { x: "x", y: "y" })],
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    expect(at(model, 5.1)?.points.map((p) => p.row)).toEqual([1026]);
+  });
+
+  it('read the first of them nearest the pointer with "each", either side of the value', () => {
+    const data = table({ x: [0, 5, 5, 10], y: [1, 2, 3, 4] });
+    const model = build({
+      marks: [line(data, { x: "x", y: "y" })],
+      inspection: { mode: "nearest-x", snap: "each" },
+    });
+    expect(at(model, 4)?.points.map((p) => p.row)).toEqual([1]);
+    expect(at(model, 6)?.points.map((p) => p.row)).toEqual([1]);
   });
 });
 

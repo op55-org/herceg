@@ -14,6 +14,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import type { AreaGeometry, LineGeometry } from "../scene/scene.ts";
 import type { AxisInspection, Inspector } from "./inspect.ts";
 import type { ChartModel } from "./model.ts";
+import type { earliest } from "./nearest.ts";
 
 /**
  * The series of a panel the keyboard stops at, in series order: every
@@ -65,7 +66,7 @@ export function orderAt(
   axis: "x" | "y",
   place: number,
   height: number,
-  readers: SeriesReaders,
+  readers: OrderReaders,
 ): Visit[] {
   const inspector = model.inspectorOf(panel);
   if (!inspector) return [];
@@ -366,8 +367,9 @@ function crossing(
 
 /**
  * The drawn observation of `s` nearest `place` along `axis` (on `scale`,
- * before marks spread rows across their bands), the nearest `near` across
- * among ties, and its height across; -1 for none drawn.
+ * before marks spread rows across their bands), of ties the earliest (see
+ * `earliest`), of those at its value (a jump) the nearest `near` across,
+ * and its height across; -1 for none drawn.
  */
 function nearest(
   inspector: Inspector,
@@ -377,30 +379,44 @@ function nearest(
   place: number,
   near: number,
   sorted: boolean,
-  { placeAt, rowOf }: SeriesReaders,
+  { placeAt, rowOf, earliest }: OrderReaders,
 ): [number, number] {
   const c = axis === "x" ? 1 : 0;
-  const at = (k: number) => scale.map(placeAt(s, axis, rowOf(s, k))) - place;
+  const value = (k: number) => placeAt(s, axis, rowOf(s, k));
+  const at = (k: number) => scale.map(value(k)) - place;
   let best = -1;
   let height = Number.NaN;
-  let [along, across] = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
-  const far = (k: number) => Math.abs(at(k)) > along;
-  const consider = (k: number) => {
-    const d = Math.abs(at(k));
-    const pixels = d > along ? undefined : inspector.drawn(s, rowOf(s, k));
-    if (!pixels) return;
-    const h = Math.abs(pixels[c] - near);
-    if (d < along || h < across) [best, height, along, across] = [k, pixels[c], d, h];
-  };
-  // Sorted rows outward from where the place falls, either way, until they
-  // are farther than the best; other rows, every one.
-  let k = 0;
-  if (sorted) {
-    const way = at(s.length - 1) >= at(0) ? 1 : -1;
-    k = firstPast(0, s.length, (j) => way * at(j) >= 0);
-    for (let j = k - 1; j >= 0 && !far(j); j--) consider(j);
-  }
-  for (; k < s.length && !(sorted && far(k)); k++) consider(k);
+  earliest((take, limit) => {
+    // The winner's value, and how far across of it the nearest is.
+    let won = Number.NaN;
+    let across = Number.POSITIVE_INFINITY;
+    // The limit changes only as rows are taken.
+    let bound = limit();
+    [best, height] = [-1, Number.NaN];
+    const far = (k: number) => Math.abs(at(k)) > bound;
+    const consider = (k: number) => {
+      const d = Math.abs(at(k));
+      const pixels = d > bound ? undefined : inspector.drawn(s, rowOf(s, k));
+      if (!pixels) return;
+      const v = value(k);
+      const h = Math.abs(pixels[c] - near);
+      const wins = take(k, d, v);
+      bound = limit();
+      // At the winner's value, the nearer across, then the first row.
+      if (wins) won = v;
+      else if (v !== won || h > across || (h === across && k > best)) return;
+      [best, height, across] = [k, pixels[c], h];
+    };
+    // Sorted rows outward from where the place falls, either way, until they
+    // are farther than the best; other rows, every one.
+    let k = 0;
+    if (sorted) {
+      const way = at(s.length - 1) >= at(0) ? 1 : -1;
+      k = firstPast(0, s.length, (j) => way * at(j) >= 0);
+      for (let j = k - 1; j >= 0 && !far(j); j--) consider(j);
+    }
+    for (; k < s.length && !(sorted && far(k)); k++) consider(k);
+  });
   return [best, height];
 }
 
@@ -437,6 +453,11 @@ export function cursorAxis(inspectors: readonly (Inspector | undefined)[]): "x" 
 export interface SeriesReaders {
   placeAt: typeof placeAt;
   rowOf: typeof rowOf;
+}
+
+/** What `orderAt` reads series with: those, and what reads ties (see `earliest`). */
+export interface OrderReaders extends SeriesReaders {
+  earliest: typeof earliest;
 }
 
 /**

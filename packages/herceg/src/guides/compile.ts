@@ -6,7 +6,7 @@
 
 import { formed, intlOptions } from "../format/patterns.ts";
 import type { AxisContext } from "../model/axis.ts";
-import type { CompiledGuides, GuideCompiler, GuideKit } from "../model/guides.ts";
+import type { CompiledAxes, CompiledGuides, GuideCompiler, GuideKit } from "../model/guides.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { ScaleName } from "../model/scales.ts";
 import type { AxisTitleSpec } from "../spec/encoding.ts";
@@ -186,12 +186,15 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     note(guide, `guides[${i}]`);
   });
   const listed = listedAxes(read, kit.alignsTickLabels(read));
-  if (listed) read = { ...read, ...listed.read };
+  read = { ...read, ...listed.read };
+  // The scales whose tick labels have been written in lines, which plain axes lay out as listed ones.
+  const lined = new Set<string>();
+  let axes: CompiledAxes | undefined;
   // The duplicates policy of the axis whose ticks the model plans for the
   // scale: an axis moved off the default side leaves out repeats, as its
   // other layers do, unless it says otherwise.
   const repeats = (scale: string) => {
-    const axis = listed?.axes.find((one) => one.scale === scale && one.layers[0]!.planned);
+    const axis = listed.axes.find((one) => one.scale === scale && one.layers[0]!.planned);
     const labels = axis?.layers[0]?.labels;
     return labels ? (labels.duplicates ?? (axis.home ? undefined : "hide")) : undefined;
   };
@@ -238,7 +241,7 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
           ? `${at(ticks, "ticks")}: a category axis labels the categories that fit; drop ticks, or give a count`
           : `${at(format, "format")}: a category axis writes its categories as they are; drop format`,
       );
-    const plan =
+    const planner =
       plannedTicks || plannedFormat || policy
         ? tickPlanner(
             kit,
@@ -250,6 +253,13 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
             repeats(scale),
           )
         : undefined;
+    const plan: AxisContext["plan"] =
+      planner &&
+      ((ticker, count) => {
+        const planned = planner(ticker, count);
+        if (planned.labels.some((label) => label.includes("\n"))) lined.add(scale);
+        return planned;
+      });
     const shown = tooltipFormat ?? format;
     const written =
       plannedValue || owned
@@ -272,7 +282,11 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
   const plans = new Map<string, PaintPlan>();
   return {
     paint: (panels) => planPanels(panels, plans),
-    axes: listed && compiledAxes(kit, listed.axes),
+    // Before any are listed or written in lines, the model's axes are all there are.
+    get axes() {
+      if (listed.listed || lined.size > 0) axes ??= compiledAxes(kit, listed.axes, lined);
+      return axes;
+    },
     legends: legends && compiledLegends(kit, legends),
     scales: ownScales(kit, read, context, scalePath),
     config: read,

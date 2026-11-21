@@ -492,6 +492,34 @@ def test_labels_break_lines_in_every_format_with_supplied_fonts(tmp_path):
     assert path.read_bytes().startswith(b"%PDF")
 
 
+def test_tick_labels_a_format_writes_in_lines_break_on_both_axes():
+    days = {
+        "t": np.arange("2026-10-20", "2026-11-04", dtype="datetime64[D]").astype("datetime64[ms]"),
+        "v": np.arange(15.0),
+    }
+
+    def svg(**axes: object) -> str:
+        return (
+            hg.Chart(days, width=720, height=300, locale="en-US", time_zone="UTC", **axes)  # type: ignore[arg-type]
+            .line(x="t", y="v")
+            .to_svg()
+        )
+
+    lines = svg(
+        x=hg.AxisOptions(format=hg.Format(time="%b %-d\n%Y")),
+        y=hg.AxisOptions(format=hg.Format(number=",.0f", suffix="\nms")),
+    )
+    assert re.search(r">Oct 21</tspan><tspan[^>]*>2026<", lines)
+    assert re.search(r">10</tspan><tspan[^>]*>ms<", lines)
+    # Listed, with labels kept apart, the same.
+    listed = svg(
+        guides=[
+            hg.axis("x", format=hg.Format(time="%b %-d\n%Y"), labels=hg.TickLabels(overlap="hide"))
+        ]
+    )
+    assert re.search(r">Oct 21</tspan><tspan[^>]*>2026<", listed)
+
+
 def test_a_categorical_color_field_gives_values_their_dictionary_slots():
     pd = pytest.importorskip("pandas")
     import herceg.express as hx

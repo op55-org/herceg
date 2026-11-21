@@ -1,10 +1,11 @@
-// Which of the targets near the pointer is on top. Distances that should
+// Which of the targets near the pointer is read. Distances that should
 // tie differ by rounding: points are placed in 32-bit floats, lines'
 // observations in doubles, and points placed alike about the pointer
 // round apart. So targets within `TIE` of the least distance found are at
-// one distance, and of those the one painted last is on top. Searches hand
-// every target within `limit` to one `Nearest`, in paint order; `settle`
-// runs a search, and again where the first could not tell.
+// one distance: of those the one painted last is on top (`Nearest`), and
+// along an axis the earliest is read (`earliest`). Searches hand every
+// target within `limit` to them; `settle` and `earliest` run a search,
+// and again where the first could not tell.
 
 import type { Hit, Mark } from "../marks/mark.ts";
 import { litOverSeries } from "../marks/mark.ts";
@@ -84,4 +85,54 @@ export function settle(search: (found: Nearest) => void): Hit | undefined {
   const settled = new Nearest(found.least);
   search(settled);
   return settled.best;
+}
+
+/**
+ * Hands a position found along an axis to `earliest`: its distance from
+ * the pointer on screen, and its value along the axis. Says whether it is
+ * the winner so far. The winner is always the first taken at its value
+ * (those after it there are as near), so a search can choose among those
+ * itself (the keyboard does, by the distance across).
+ */
+export type TakeEarliest = (position: number, distance: number, value: number) => boolean;
+
+/**
+ * Of the positions `search` hands `take`, the one an inspection reads; -1
+ * for none. The nearest on screen, those within `TIE` of the least
+ * distance tied, and of ties the earliest (the least value along the
+ * axis), the first taken of those at one value. Ties are settled as
+ * positions come; `limit` says how far a position may be and still tie.
+ * As `settle` does, the search runs again, knowing the least distance,
+ * only where positions passed over before the winner was left behind may
+ * tie with it.
+ */
+export function earliest(search: (take: TakeEarliest, limit: () => number) => void): number {
+  let least = Infinity;
+  const limit = () => least + TIE;
+  for (let again = false; ; again = true) {
+    // The winner, its distance, and its value.
+    let best = -1;
+    let passed = Infinity;
+    let near = Infinity;
+    let early = Infinity;
+    search((position, distance, value) => {
+      if (distance > least + TIE) return false;
+      // A nearer one leaving the winner behind wins; else the earlier of ties.
+      let wins = value < early;
+      if (distance < least) {
+        if (near > distance + TIE) {
+          wins = true;
+          passed = least;
+        }
+        least = distance;
+      }
+      if (wins) {
+        best = position;
+        near = distance;
+        early = value;
+      }
+      return wins;
+    }, limit);
+    if (again || passed > least + TIE) return best;
+  }
 }

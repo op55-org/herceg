@@ -1605,6 +1605,53 @@ describe("notebook widget", () => {
     expect(pointer).toMatchObject({ panel: "", inPlot: true, time: [] });
   });
 
+  it("sends Python the earlier observation midway between two (A7's ties)", async () => {
+    // 500 times about 100 ms apart, each moved by a whole number of milliseconds.
+    const T0 = Date.UTC(2026, 9, 1, 11, 30);
+    const times = Array.from({ length: 500 }, (_, i) => T0 + i * 100 + ((i * 37) % 71) - 35);
+    const chart = snapshot({ inspection: { mode: "nearest-x", snap: "each" }, width: 1000 });
+    chart.spec.data = {
+      data: { columns: { t: { type: "time", dtype: "float64", buffer: 0 }, v: number(1) } },
+    };
+    chart.buffers = [
+      new DataView(new Float64Array(times).buffer),
+      new DataView(new Float64Array(times.map((_, k) => k)).buffer),
+    ];
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const model = new MockModel({ _chart: chart, _listening: ["hover"] });
+    const [host] = mount(model);
+    const mounted = listener.mock.instances[0] as MountedChart;
+    for (let loading = mounted.loading; loading; loading = mounted.loading) await loading;
+    mounted.render();
+    const rect = figure(host!).getBoundingClientRect();
+    const { plot } = mounted.getPanels()[0]!;
+    // Python hears the latest hover once the throttle lets it through.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const later: number[] = [];
+    let ties = 0;
+    for (let k = 0; k + 1 < times.length; k++) {
+      if ((times[k]! + times[k + 1]!) % 2) continue;
+      ties++;
+      const px = mounted.toPixel((times[k]! + times[k + 1]!) / 2, { axis: "x" })!;
+      figure(host!).dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: rect.left + px,
+          clientY: rect.top + plot.y + plot.height / 2,
+          pointerId: MOUSE,
+        }),
+      );
+      mounted.render();
+      vi.runOnlyPendingTimers();
+      const sent = model.messages("hover").at(-1) as
+        | { event: { inspection?: { points: { row: number }[] } } }
+        | undefined;
+      if (sent?.event.inspection?.points[0]?.row !== k) later.push(k);
+    }
+    expect(ties).toBeGreaterThan(200);
+    expect(later).toEqual([]);
+  });
+
   it("sends a 3D chart's camera and its points' values when Python listens", async () => {
     const chart = snapshot();
     chart.spec.marks = [{ type: "point3d", x: "t", y: "v", z: "v", data: "data" }];

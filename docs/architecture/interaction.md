@@ -42,7 +42,15 @@ the model's `inspect()`.
   read each series' own nearest point, last at or before, or first at or
   after, by the same binary search, and the crosshair stands at the
   pointer, the latest, or the earliest read. `within` narrows each search
-  to the pointer's value plus or minus it (pixels for `nearest`). A sorted
+  to the pointer's value plus or minus it (pixels for `nearest`). Along an
+  axis, distances are compared on screen, and those within `TIE` (a
+  thousandth of a pixel, `model/nearest.ts`) of the least tie, as rounding
+  sets them apart: of ties the earliest is read (`earliest`, the least
+  value along the axis, then the first row), by each series' search, the
+  shared value across series, scans of unsorted series, the keyboard's Up
+  and Down (which, of points at one value, then land on the one nearest
+  the cursor across, in `model/keyboard.ts`), and picking's rows of paths;
+  the `nearest` mode gives its ties to the target painted on top. A sorted
   series reads nothing between two drawn points its path ends between
   (`SeriesFeatures.pathEnds`: continuity gaps, `where`); unsorted series
   are scanned, and left out by `previous` and `next`. Marks with
@@ -135,9 +143,9 @@ never geometry made again from current data.
   Marks with `pick: false` are passed over.
 - **Paths to rows.** A line's or area's hit segment is resolved in its
   logical series (`drawn-parts.ts` builds the trace part): for sorted
-  series, the eligible observation nearest the pointer along the axis
-  among those inside the segment's span and the two bracketing it, in the
-  run the segment draws (on a panel's own categories, by their places);
+  series, the eligible observation nearest the pointer along the axis on
+  screen (the earliest of ties) among those inside the segment's span and
+  the two bracketing it, in the run the segment draws (on a panel's own categories, by their places);
   for unsorted lines and areas, the path point's own position, which `drawn-parts.ts` finds by walking the series as it was
   traced (rows the trace cannot draw end a run, rows a break hides are
   left out, steps add their corners) when first asked.

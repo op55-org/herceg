@@ -88,6 +88,7 @@ import {
 import { membership } from "../src/model/memberships.ts";
 import { type ChartConfig, ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
+import { earliest } from "../src/model/nearest.ts";
 import { panels } from "../src/model/panels.ts";
 import { Picker } from "../src/model/pick.ts";
 import { rowSelection } from "../src/model/row-selection.ts";
@@ -1798,7 +1799,7 @@ measure(
 // it, the costliest), then what the press reads: the next series' point
 // alone and the inspection there. Each case presses at 100 places of s0.
 const upDown = (chart: ChartModel) => {
-  const readers = { placeAt, rowOf };
+  const readers = { placeAt, rowOf, earliest };
   const { key: panel } = chart.panels()[0]!;
   const { key } = chart.series()[0]!;
   const positions = Array.from({ length: 100 }, (_, i) => (i * 97) % PICK_CROWD);

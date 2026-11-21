@@ -898,6 +898,13 @@ describe("the rule", () => {
       expect(at(model, middle, top - 0.25)?.mark).toBe(1);
     });
 
+    it("takes the first row of those at one value, as inspections read them", () => {
+      const model = build({
+        marks: [line(table({ x: [1, 1, 1, 3], y: [5, 5, 5, 5] }), { x: "x", y: "y" })],
+      });
+      expect(pickAt(model, ...pixel(model, 1.1, 5))?.row).toBe(0);
+    });
+
     it("takes the segment of a folded path whose centre is nearer, as its own row", () => {
       // From (0, 5) to (10, 5) and back to (0, 5) a pixel and a half above:
       // at x = 4 the way back runs 0.9 px above the way out.
