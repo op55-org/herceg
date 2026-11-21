@@ -3,7 +3,9 @@
 // per line, each line as tall as its tallest part, and lowered to the text
 // items painters draw already, one per part, halos before any part's fill
 // so no part's halo covers its neighbor. The block's halo, box, and
-// alignment stay the label's. Loaded with the feature compiler, which
+// alignment stay the label's. In a value transition's frames, the parts
+// writing a counting number are measured by its shape, and lines are
+// drawn from the edge they align to. Loaded with the feature compiler, which
 // writes labels of parts; marks only call what it hands them (`PartText`).
 
 import type { MeasureText, TextLines } from "../../layout/text.ts";
@@ -69,23 +71,29 @@ interface Line {
  */
 const DROP = 0.27;
 
-/** `parts` in `paint`, each in its style over it, measured with `measure`. */
+/**
+ * `parts` in `paint`, each in its style over it, measured with `measure`;
+ * with `count` (a value transition's frames), the parts that write the
+ * value (`counts`) are measured with it.
+ */
 export function partText(
   kit: FeatureKit,
-  parts: readonly { text: string; style: PartStyle | undefined }[],
+  parts: readonly { text: string; style: PartStyle | undefined; counts?: boolean | undefined }[],
   paint: TextPaint,
   measure: MeasureText,
+  count?: MeasureText,
 ): PartText {
   const rows: Piece[][] = [[]];
-  for (const { text, style } of parts) {
+  for (const { text, style, counts } of parts) {
     const look = style ? restyled(kit, paint, style) : { ...paint, background: undefined };
+    const by = (counts && count) || measure;
     text.split("\n").forEach((piece, k) => {
       if (k > 0) rows.push([]);
       rows.at(-1)!.push({
         text: piece,
         paint: look,
         color: style?.color,
-        width: piece ? measure(piece, look.css) : 0,
+        width: piece ? by(piece, look.css) : 0,
       });
     });
   }
@@ -94,6 +102,7 @@ export function partText(
     measure,
     paint,
     rows.map((pieces) => line(pieces, paint)),
+    !!count,
   );
 }
 
@@ -116,12 +125,16 @@ function line(pieces: readonly Piece[], paint: TextPaint): Line {
     : { pieces, width, height: paint.lineHeight, size: paint.size };
 }
 
-/** Lines of parts, as `PartText`. */
+/**
+ * Lines of parts, as `PartText`; `framed` in a value transition's frames,
+ * where a counting part's width is its shape's.
+ */
 function set(
   kit: FeatureKit,
   measure: MeasureText,
   paint: TextPaint,
   rows: readonly Line[],
+  framed?: boolean,
 ): PartText {
   const widths = rows.map(({ width }) => width);
   return {
@@ -154,12 +167,18 @@ function set(
         const baseline = y + row.height / 2 + row.size * DROP;
         for (const piece of row.pieces) {
           if (piece.text) {
+            // In frames, parts of a line aligned to its end are drawn from
+            // their ends, and a centered line's only part from its middle:
+            // so the part at the line's edge meets it, as do those after a
+            // counting part, whatever its shape's width.
+            const from =
+              framed && (anchor === "end" || piece.width === row.width) ? anchor : "start";
             const item: TextItem = {
               type: "text",
               text: piece.text,
-              x,
+              x: from === "start" ? x : x + piece.width * (anchor === "end" ? 1 : 0.5),
               y: baseline,
-              anchor: "start",
+              anchor: from,
               baseline: "alphabetic",
               angle: 0,
               paint: piece.color ? piece.paint : { ...piece.paint, color: label.color },
@@ -188,7 +207,7 @@ function set(
         if (!pieces) return undefined;
         fitted.push(line(pieces, paint));
       }
-      return set(kit, measure, paint, fitted);
+      return set(kit, measure, paint, fitted, framed);
     },
   };
 }

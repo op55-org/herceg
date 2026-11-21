@@ -424,3 +424,16 @@ and with `tooltip: false`, where it draws its outline or ring and
 nothing else. See [Role
 styles](docs/guide/styling.md#role-styles) and
 [Keyboard](docs/guide/accessibility.md#keyboard).
+
+Counting labels measure nothing new mid-transition. A label counting
+through a value transition writes its number exactly every frame and lays
+it out by its shape (its digits as zeros), so a bar race's frames measure
+a few shapes instead of every number they write, and Chrome's text cache
+no longer grows with them. Lines aligned to their end are drawn from it
+mid-transition, so a value under its brand meets the label's edge however
+its digits' widths differ; a unit after a number, or a box behind it, can
+be a pixel off until the transition ends. Bars' labels of parts with a
+`{ value: true }` part count whether or not a part has a style of its own,
+and so do bars' value labels written through the chart's field displays,
+which showed each new value at once. See [Counting
+labels](docs/guide/interaction.md#counting-labels).

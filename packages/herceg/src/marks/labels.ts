@@ -119,8 +119,9 @@ export function movedLabel(label: PlacedLabel, [dx, dy]: readonly [number, numbe
 /**
  * The geometry of labels in `paint`: text items, each with `halo` (the
  * label style's, else the mark's; "auto" by default) against what it is
- * drawn on. A label of parts takes an item per part; `owners`, when
- * given, gets each item's label (its index in `labels`).
+ * drawn on, boxes measured with `measure`. A label of parts takes an item
+ * per part; `owners`, when given, gets each item's label (its index in
+ * `labels`).
  */
 export function labelsGeometry(
   key: string,
@@ -129,6 +130,7 @@ export function labelsGeometry(
   halo: Halo | undefined,
   frame: Frame,
   owners?: number[],
+  measure = frame.measure,
 ): LabelsGeometry {
   // Text in a box is drawn on the box.
   const ring = labelHalo(
@@ -140,10 +142,10 @@ export function labelsGeometry(
   labels.forEach((label, k) => {
     const { text, x, y, anchor, baseline, box, parts } = label;
     let made: TextItem[];
-    if (parts) made = parts.items(labelBox(label, paint, frame.measure), anchor, paint, ring);
+    if (parts) made = parts.items(labelBox(label, paint, measure), anchor, paint, ring);
     else {
       const at: TextAt = { x, y, anchor, baseline, angle: 0 };
-      const item = textItem(text, at, paint, under, frame.measure, box);
+      const item = textItem(text, at, paint, under, measure, box);
       made = [ring ? { ...item, halo: ring } : item];
     }
     for (const item of made) {

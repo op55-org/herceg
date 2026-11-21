@@ -160,7 +160,9 @@ describe("the document's measuring canvas", () => {
       return { frames, renewed };
     };
     // A canvas replaced while the labels count, and one canvas throughout.
-    const replaced = await race(850);
+    // Frames measure only their numbers' shapes, so the race measures little
+    // more than its keyframes' values.
+    const replaced = await race(970);
     const one = await race(0);
     expect(replaced.renewed).toBe(true);
     expect(one.renewed).toBe(false);

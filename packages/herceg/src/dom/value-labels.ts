@@ -5,8 +5,11 @@
 // its bar. A matched label moves its place on the frame's scales and counts
 // the number it writes through the values between. A label without a match
 // comes or goes with its bar, keeping its place on it (between its root and
-// tip, or past its tip), or else shows or goes at once.
+// tip, or past its tip), or else shows or goes at once. Between the two
+// scenes, a counting number is laid out by its shape (`shapeOf`), so frames
+// measure only the few shapes a format writes.
 
+import type { MeasureText } from "../layout/text.ts";
 import type { LabelItems, LabelsGeometry, TextGeometry, TextItem } from "../scene/scene.ts";
 import type { MovingBars } from "./value-bars.ts";
 import { type Blend, before, blend, type ScaleMotion } from "./value-motion.ts";
@@ -33,6 +36,28 @@ export interface ShownLabels {
   starts: Float32Array | undefined;
   texts: readonly string[] | undefined;
   items: readonly (readonly TextItem[])[] | undefined;
+}
+
+const DIGIT = /\p{Nd}/u;
+
+/**
+ * `text` with each decimal digit written as the zero of its own digits:
+ * "59,268" as "00,000", Arabic-Indic "١٢٣" as "٠٠٠", signs, separators,
+ * and units kept. Unicode's decimal digits come in runs of ten from zero,
+ * some back to back, so a digit's zero is as far back as its place in its
+ * run of runs. Frames measure a counting number by its shape: a format
+ * writes few shapes, which the chart's measurer keeps, so a transition
+ * measures nothing new after its first frames; the number's text stays
+ * exact, and its run is drawn from the edge its line aligns to.
+ */
+export function shapeOf(text: string): string {
+  return text.replace(/\p{Nd}/gu, (digit) => {
+    if (digit <= "9") return "0";
+    const code = digit.codePointAt(0)!;
+    let start = code;
+    while (DIGIT.test(String.fromCodePoint(start - 1))) start--;
+    return String.fromCodePoint(code - ((code - start) % 10));
+  });
 }
 
 /** Whether a geometry's labels are named for value transitions. */
@@ -103,6 +128,12 @@ export interface MovingLabels {
   numbers: Float64Array;
   /** Bars' labels: how far each one's place is past where its text starts (NaN: not known). */
   offsets: Float32Array;
+  /**
+   * Per label, whether a frame drew it by its number's shape: kept, it
+   * goes on counting, so laid out, though its number stays, until the
+   * scene; going, its items keep that layout.
+   */
+  shaped: boolean[];
 }
 
 /** Each name's place (its set, and its place in it) among sets of names, and names given to more than one. */
@@ -133,7 +164,8 @@ const nameless = (name: string | number) => typeof name === "string" && name[0] 
  * How the labels of one mark, or one bar series (labels whose `of` names
  * it), move: `shown`, their geometries as drawn, to `next`, the new scene's
  * (with their places among the panel's geometry), on scales moving as `x`
- * and `y` do. Bars' labels without a match follow their bar in `bars`.
+ * and `y` do, counting numbers measured with `count` (by their shapes,
+ * `shapeOf`). Bars' labels without a match follow their bar in `bars`.
  */
 export function moveLabels(
   shown: readonly ShownLabels[],
@@ -142,6 +174,7 @@ export function moveLabels(
   y: ScaleMotion,
   side: "y" | "yRight",
   bars: MovingBars | undefined,
+  count: MeasureText,
 ): { moving: MovingLabels[]; moves: boolean } {
   const nextLabels = next.map(({ mark }) => mark.named!);
   const was = index(shown.map((labels) => labels.names));
@@ -218,6 +251,7 @@ export function moveLabels(
     at: new Float32Array(count * 2),
     numbers: new Float64Array(count),
     offsets: new Float32Array(count).fill(Number.NaN),
+    shaped: [],
   });
   // Labels going, by the geometry they were drawn in.
   const going = new Map<ShownLabels, number[]>();
@@ -239,26 +273,34 @@ export function moveLabels(
       const [px, py] = place(i);
       record.to[i * 2] = px!;
       record.to[i * 2 + 1] = py!;
-      const offset = px! - (labels.starts?.[i] ?? Number.NaN);
-      record.offsets[i] = offset;
+      record.offsets[i] = px! - (labels.starts?.[i] ?? Number.NaN);
       const found = match(name);
       if (found) {
         const [set, j] = found;
         const old = shown[set]!;
         matched.add(`${set}:${j}`);
-        // Anchored otherwise now (moving inside or outside its bar), its text starts where it did.
-        const start = old.starts?.[j] ?? Number.NaN;
-        const turned = anchorOf(old.mark, old.items?.[j]) !== anchorOf(mark, record.items[i]);
-        record.from[i * 2] =
-          turned && Number.isFinite(start + offset) ? start + offset : old.at[j * 2]!;
-        record.from[i * 2 + 1] = old.at[j * 2 + 1]!;
         const a = old.values?.[j] ?? Number.NaN;
         const b = labels.values?.[i] ?? Number.NaN;
         // Only finite numbers at both ends count; others show the new one.
-        const counts = Number.isFinite(a) && Number.isFinite(b) && labels.write;
+        const counts = Number.isFinite(a) && Number.isFinite(b) && !!labels.write;
         record.values[i * 2] = counts ? a : b;
         record.values[i * 2 + 1] = b;
-        moves ||= a !== b || record.from[i * 2] !== px || record.from[i * 2 + 1] !== py;
+        // (A frame's record of them is its own, never written again.)
+        record.shaped[i] = counts && !!old.mark.named?.shaped?.[j];
+        // Frames lay a label out by its number's shape as it counts: its
+        // text starts as far before its place as they write it.
+        const written = counts && (a !== b || record.shaped[i]) && labels.offset;
+        if (written) record.offsets[i] = written(i, b, count);
+        record.from[i * 2] = old.at[j * 2]!;
+        record.from[i * 2 + 1] = old.at[j * 2 + 1]!;
+        // Anchored otherwise now (moving inside or outside its bar), its text
+        // starts where it did, before its place by as much as frames write it.
+        if (anchorOf(old.mark, old.items?.[j]) !== anchorOf(mark, record.items[i])) {
+          const start =
+            (old.starts?.[j] ?? Number.NaN) + (written ? written(i, a, count) : record.offsets[i]!);
+          if (Number.isFinite(start)) record.from[i * 2] = start;
+        }
+        moves ||= (counts && a !== b) || record.from[i * 2] !== px || record.from[i * 2 + 1] !== py;
         continue;
       }
       moves = true;
@@ -319,6 +361,7 @@ export function moveLabels(
       offsets[k] = fx - (labels.starts?.[i] ?? Number.NaN);
       if (labels.texts) texts[k] = labels.texts[i]!;
       if (labels.items) items[k] = labels.items[i]!;
+      record.shaped[k] = !!labels.mark.named?.shaped?.[i];
     });
     record.texts = texts;
     record.items = items;
@@ -327,8 +370,17 @@ export function moveLabels(
   return { moving, moves };
 }
 
-/** The labels at eased progress `t`, placed on the frame's scales `x` and `y`. */
-export function labelsAt(moving: MovingLabels, t: number, x: Blend, y: Blend): Labeled {
+/**
+ * The labels at eased progress `t`, placed on the frame's scales `x` and
+ * `y`, counting numbers measured with `measure` (by their shapes, `shapeOf`).
+ */
+export function labelsAt(
+  moving: MovingLabels,
+  t: number,
+  x: Blend,
+  y: Blend,
+  measure: MeasureText,
+): Labeled {
   const { mark, kept, count, from, to, values, at, numbers, write } = moving;
   for (let i = 0; i < count; i++) {
     at[i * 2] = blend(x, from[i * 2]!, to[i * 2]!);
@@ -336,9 +388,19 @@ export function labelsAt(moving: MovingLabels, t: number, x: Blend, y: Blend): L
     const [a, b] = [values[i * 2]!, values[i * 2 + 1]!];
     numbers[i] = a + (b - a) * t;
   }
-  const counts = (i: number) =>
-    i < kept && write && Number.isFinite(numbers[i]!) && values[i * 2] !== values[i * 2 + 1];
-  const record: LabelItems = { ...mark.named!, names: moving.names, values: numbers };
+  // Labels whose numbers change count, and those a frame before drew by
+  // their shapes; labels going keep their items, laid out as they were.
+  const shaped: boolean[] = [];
+  const counts = (i: number) => {
+    const writes =
+      i < kept &&
+      !!write &&
+      Number.isFinite(numbers[i]!) &&
+      (values[i * 2] !== values[i * 2 + 1] || !!moving.shaped[i]);
+    shaped[i] = writes || !!moving.shaped[i];
+    return writes;
+  };
+  const record: LabelItems = { ...mark.named!, names: moving.names, values: numbers, shaped };
   if (record.starts)
     record.starts = Float32Array.from(moving.offsets, (offset, i) => at[i * 2]! - offset);
   // Bars' labels are cut to the plot as they come and go past its end (scenes leave out those outside it).
@@ -346,7 +408,7 @@ export function labelsAt(moving: MovingLabels, t: number, x: Blend, y: Blend): L
   if (mark.kind === "text") {
     const labels = Array.from({ length: count }, (_, i) =>
       counts(i)
-        ? (write!(i, numbers[i]!, at[i * 2]!, at[i * 2 + 1]!) as string)
+        ? (write!(i, numbers[i]!, at[i * 2]!, at[i * 2 + 1]!, measure) as string)
         : i < kept
           ? mark.labels[i]!
           : moving.texts[i]!,
@@ -360,7 +422,7 @@ export function labelsAt(moving: MovingLabels, t: number, x: Blend, y: Blend): L
   for (let i = 0; i < count; i++) {
     const [lx, ly] = [at[i * 2]!, at[i * 2 + 1]!];
     const made = counts(i)
-      ? (write!(i, numbers[i]!, lx, ly) as readonly TextItem[])
+      ? (write!(i, numbers[i]!, lx, ly, measure) as readonly TextItem[])
       : moving.items[i]!.map((item) => {
           const dx = lx - (i < kept ? own[i * 2]! : from[i * 2]!);
           const dy = ly - (i < kept ? own[i * 2 + 1]! : from[i * 2 + 1]!);

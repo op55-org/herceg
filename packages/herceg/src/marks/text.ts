@@ -7,7 +7,7 @@ import {
   type LabelRequest,
   placePanel,
 } from "../layout/placer.ts";
-import { lineCount } from "../layout/text.ts";
+import { lineCount, type MeasureText } from "../layout/text.ts";
 import { type Geometry, type LabelItems, NAMELESS, type Rect } from "../scene/scene.ts";
 import type { LabelLayoutSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -654,17 +654,25 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     );
     if (frame.keyed) {
       const text = (value: number) => (write ?? ((v) => formatNumber(v, frame.locale)))(value);
-      // A label placed again for a number between two, in its paint.
-      const again = (i: number, value: number, x: number, y: number) =>
-        labelsGeometry(id, [{ ...drawn[i]!, text: text(value), x, y }], paint, haloOption, frame)
-          .items;
+      // A label placed again for a number between two, in its paint, its box measured with `count`.
+      const again = (i: number, value: number, x: number, y: number, count: MeasureText) =>
+        labelsGeometry(
+          id,
+          [{ ...drawn[i]!, text: text(value), x, y }],
+          paint,
+          haloOption,
+          frame,
+          undefined,
+          count,
+        ).items;
       labels.named = {
         ...this.#named(rows, styled),
         ...(labels.kind === "labels" && {
           at: drawn.flatMap(({ x, y }) => [x, y]),
           owners,
         }),
-        write: (i, value, x, y) => (labels.kind === "text" ? text(value) : again(i, value, x, y)),
+        write: (i, value, x, y, count) =>
+          labels.kind === "text" ? text(value) : again(i, value, x, y, count),
       };
     }
     out.push(labels);

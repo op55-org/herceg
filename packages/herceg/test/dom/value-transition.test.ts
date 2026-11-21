@@ -857,7 +857,9 @@ describe("bars matched by name", () => {
       x: { domain: [0, 100] },
       y: { domain: [1.5, -0.5] },
     });
-    // Where label A's text starts: its first run's place (runs are placed from their start).
+    // Where label A's text starts as drawn: its first run's start (a
+    // counting run at its line's end is drawn from it, in frames).
+    const share = { start: 0, middle: 0.5, end: 1 };
     const startOf = (scene: Scene) => {
       for (const mark of scene.panels[0]!.marks) {
         const { named } = mark as LabelsGeometry;
@@ -866,7 +868,9 @@ describe("bars matched by name", () => {
           return Math.min(
             ...(mark as LabelsGeometry).items
               .filter((_, i) => named!.owners![i] === k)
-              .map(({ x }) => x),
+              .map(
+                ({ x, anchor, text, paint }) => x - share[anchor] * estimateText(text, paint.css),
+              ),
           );
       }
       throw new Error("no label of A");
