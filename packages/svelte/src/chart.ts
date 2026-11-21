@@ -4,6 +4,7 @@ import {
   type ChartListener,
   type ChartMark,
   type ChartUpdate,
+  type CustomMark,
   type Chart as HercegChart,
   type Hydration,
   type Inspection,
@@ -13,6 +14,7 @@ import {
 } from "herceg";
 import type { Snippet } from "svelte";
 import type { ClassValue } from "svelte/elements";
+import { heldCustom } from "./marks.js";
 
 /**
  * Chart options as props: one left out, or `undefined`, takes its default.
@@ -134,9 +136,9 @@ export function canonical(value: unknown): string {
 
 /**
  * Same mark when the spec and the tables are unchanged, so caches survive
- * updates: every built-in mark's spec and tables describe it. Custom marks,
- * whose `draw` may close over new values, are only the same mark as
- * themselves.
+ * updates: every built-in mark's spec and tables describe it. Custom marks
+ * are the same mark only as themselves: a <Custom> component keeps its own
+ * while its props but `draw` and `pointText` are the same.
  */
 export function sameMark(a: ChartMark, b: ChartMark): boolean {
   if (a === b) return true;
@@ -149,6 +151,20 @@ export function sameMark(a: ChartMark, b: ChartMark): boolean {
     thresholdsTable(a) === thresholdsTable(b) &&
     canonical(a.spec) === canonical(b.spec)
   );
+}
+
+/**
+ * Gives a <Custom> component's mark the `draw` and `pointText` its
+ * component gives now, drawing it again if they changed.
+ */
+export function install(mark: ChartMark): void {
+  const held = heldCustom(mark);
+  if (!held) return;
+  const latest = held.latest();
+  const { calls } = held;
+  if (calls.draw === latest.draw && calls.pointText === latest.pointText) return;
+  Object.assign(calls, latest);
+  (mark as CustomMark).redraw();
 }
 
 /** The table a rule or region at thresholds names: itself, which specs name only by its name. */

@@ -426,6 +426,8 @@ export class Navigator {
       [...new Set(drawn.map(({ entry }) => entry.mark))].flatMap((mark) => [
         ...tablesOf(mark).map((table) => table.version),
         viewOf(mark)?.revision ?? -1,
+        // A custom mark's `draw` changed (`redraw()`).
+        mark.drawingRevision ?? -1,
       ]),
     ]);
     const same =

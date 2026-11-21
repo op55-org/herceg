@@ -5,11 +5,13 @@ import {
   bar,
   boxplot,
   type ChartSelection,
+  type CustomMark,
   candlestick,
   category,
   col,
   createChart,
   custom,
+  type DataDrawContext,
   encodedCategory,
   errorbar,
   facet,
@@ -23,7 +25,10 @@ import {
   renderToSVG,
   rowView,
   rule,
+  type Schema,
+  type SchemaOf,
   sunburst,
+  type Table,
   table,
   text,
   time,
@@ -502,6 +507,47 @@ custom({ series: "service", draw() {} });
 custom({ draw: ({ table: none }) => none });
 // @ts-expect-error nor series to draw
 custom({ draw: ({ series }) => series });
+
+// Typing a draw: by the table's own schema; the broad one is refused.
+const forecastColumns = { id: ["C-12", "C-13"], start: [12, 30], end: [40, 52] };
+const forecasts = table(forecastColumns);
+type Forecast = SchemaOf<typeof forecastColumns>;
+function drawComets({ table: rows, series, x, y, path }: DataDrawContext<Forecast>) {
+  const end = rows.numbers("end");
+  for (const s of series) path(`M${x(s.x[0]!)} ${y(s.y[0]!)}H${x(end[0]!)}`);
+}
+custom(forecasts, { x: ["start", "end"], y: "id", draw: drawComets });
+const drawAlike = (_: DataDrawContext<typeof forecasts extends Table<infer S> ? S : never>) => {};
+custom(forecasts, { x: ["start", "end"], y: "id", draw: drawAlike });
+const drawAny = (_: DataDrawContext<Schema>) => {};
+// @ts-expect-error a table's schema is invariant: a draw of any schema could read fields it lacks
+custom(forecasts, { x: ["start", "end"], y: "id", draw: drawAny });
+
+// When draw reads your state: redraw() draws it again.
+let highlighted = "C-12";
+const comets: CustomMark = custom(forecasts, {
+  x: ["start", "end"],
+  y: "id",
+  itemKey: "id",
+  draw({ table: rows, series, x, y, item, path }) {
+    const end = rows.numbers("end");
+    for (const s of series)
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rowAt(k);
+        const wide = rows.value("id", row) === highlighted;
+        item(s, row, () =>
+          path(`M${x(s.x[row]!)} ${y(s.y[row]!)}H${x(end[row]!)}`, {
+            stroke: s.color,
+            strokeWidth: wide ? 3 : 1,
+          }),
+        );
+      }
+  },
+});
+export function highlight(id: string) {
+  highlighted = id;
+  comets.redraw();
+}
 
 // Candlesticks
 const prices = table({

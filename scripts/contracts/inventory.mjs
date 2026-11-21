@@ -3,7 +3,7 @@
 // adapter component is a row of the matrix (or listed as something else),
 // and every row names what exists:
 // - the spec's mark types and the engine's mark functions (those returning
-//   a ChartMark), from TypeScript 7's compiler API;
+//   a ChartMark or a type extending it), from TypeScript 7's compiler API;
 // - Python's, from scripts/contracts/inventory.py through uv;
 // - the adapters' components, from their index modules' exports.
 // And for the API audit (api.mjs), the options each takes, with the string
@@ -427,6 +427,15 @@ function engineInventory(root) {
       marksNested[type] = joinedNested(marksNested[type], nestedOf(checker, member));
     }
     const index = program.getSourceFile(join(root, "packages/herceg/src/index.ts"));
+    // A ChartMark, or an interface extending one (a custom mark's `CustomMark`).
+    const isMark = (type) => {
+      const symbol = type?.getSymbol();
+      if (symbol?.name === "ChartMark") return true;
+      return (
+        !!(symbol && symbol.flags & SymbolFlags.Interface) &&
+        checker.getBaseTypes(type).some(isMark)
+      );
+    };
     const factories = {};
     const factoriesNested = {};
     for (const exported of checker.getExportsOfModule(checker.getSymbolAtLocation(index))) {
@@ -435,10 +444,7 @@ function engineInventory(root) {
       if (!(symbol.flags & SymbolFlags.Function)) continue;
       const signatures = checker
         .getSignaturesOfType(checker.getTypeOfSymbol(symbol), SignatureKind.Call)
-        .filter(
-          (signature) =>
-            checker.getReturnTypeOfSignature(signature)?.getSymbol()?.name === "ChartMark",
-        );
+        .filter((signature) => isMark(checker.getReturnTypeOfSignature(signature)));
       if (signatures.length === 0) continue;
       // A mark function's options are its last parameter (after the table, where it takes one).
       for (const signature of signatures) {

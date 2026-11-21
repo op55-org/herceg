@@ -1587,6 +1587,55 @@ describe("anchors during value transitions", () => {
     tick(400);
     near(boxIn(chart, tag).y + 10, chart.toPixel(9, { axis: "y" })!);
   });
+
+  it("follow a custom mark's item as its draw paints it after redraw(), its values moving", async () => {
+    const flights = table({ id: ["F-1", "F-2"], start: [10, 30], end: [40, 90], lane: [1, 2] });
+    // How far below its lane the application draws each flight.
+    const look = { drop: 0 };
+    const mark = custom(flights, {
+      id: "flights",
+      x: ["start", "end"],
+      y: "lane",
+      itemKey: "id",
+      draw({ table: t, series, x, y, item, rect }) {
+        const end = t.numbers("end");
+        for (const s of series)
+          for (let k = 0; k < s.length; k++) {
+            const row = s.rowAt(k);
+            const top = y(s.y[row]!) - 4 + look.drop;
+            item(s, row, () => rect(x(s.x[row]!), top, x(end[row]!) - x(s.x[row]!), 8));
+          }
+      },
+    });
+    const chart = await mount({
+      animation: { values: true, duration: 300 },
+      marks: [mark],
+      x: { domain: [0, 100] },
+      y: { domain: [0, 3] },
+    });
+    const tag = button("F-2");
+    const held = anchor(chart, tag, {
+      at: { item: { mark: "flights", item: ["F-2"] } },
+      side: "right",
+      fit: "none",
+    });
+    await settle(chart);
+    await controlTime(chart);
+    const lane = chart.toPixel(2, { axis: "y" })!;
+    flights.setColumn("end", [40, 50]);
+    tick(100);
+    look.drop = 30;
+    mark.redraw();
+    for (let k = 0; k < 16; k++) {
+      tick(16);
+      // Beside the flight's end as each frame draws it, at the drop drawn now.
+      const drawn = boxIn(chart, chart.root.querySelectorAll('[data-kind="shapes"] path')[1]!);
+      expect(held.shown, `shown at ${k}`).toBe(true);
+      near(boxIn(chart, tag).x, drawn.x + drawn.width, `x at ${k}`);
+      near(boxIn(chart, tag).y + 10, lane + 30, `y at ${k}`);
+    }
+    near(boxIn(chart, tag).x, chart.toPixel(50, { axis: "x" })!);
+  });
 });
 
 describe("anchors' focus and input", () => {

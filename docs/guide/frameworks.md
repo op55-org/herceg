@@ -79,7 +79,8 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   default. They are compared on each render; when neither options nor any
   mark's spec or table changed, the chart is left alone, so inline objects
   are fine. Functions in options (formatters, tick generators) are compared
-  by identity, so define them once.
+  by identity, so define them once; `<Custom>`'s `draw` and `pointText`
+  are the exception ([Custom marks](#custom-marks)).
 
 ## Marks as components
 
@@ -111,9 +112,82 @@ Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
 <Chart title="Checkout" marks={[line(checkout, { x: "time", y: "p50" }), rule({ y: 250 })]} />
 ```
 
-- **Custom marks** draw outside the framework's dependency tracking: in
-  Vue, return `draw` from a `computed` that reads the reactive values it
-  needs; in Svelte, rebuild the mark with `{#key}` when its state changes.
+### Custom marks
+
+`<Custom>` keeps one [custom mark](marks.md#custom-marks) while its props
+other than `draw` and `pointText` are the same, and calls the `draw` and
+`pointText` of the latest render; a `pointText` given where there was
+none, or dropped, makes a new mark. In React and Vue the mark is matched by
+its place among the chart's marks, as other marks are; in Svelte each
+`<Custom>` component keeps its own. An inline `draw` is fine:
+
+- A new `draw` that draws alike changes nothing visible; a transition
+  playing ([Animating custom marks](marks.md#animating-custom-marks))
+  plays on.
+- A `draw` that draws differently shows from the chart's next frame, at
+  once: values keep moving as they were, but what changed in the drawing
+  is not animated. The chart then picks what the new `draw` paints.
+- A change of another prop (`data`, `x`, `encode`, ...) is a new mark, as
+  for the other marks, and shows at once.
+- React takes a render's `draw` once it commits: a render it discards
+  (suspended, or interrupted) changes nothing. Props the chart refuses
+  leave it as it was, its `draw` too, until it takes the next.
+- Marks alike that swap places each draw what their element gives: in
+  React and Vue they swap `draw`s and draw again; in Svelte each
+  component's mark moves with it.
+
+React's `draw` closes over the props and state of its render, so a change
+renders a new one. In Vue and Svelte, what `draw` reads as it runs is not
+tracked: read reactive values where the draw is made, so that a change
+makes a new one. A `draw` that reads `$state` or a `ref` only inside
+itself draws what they hold whenever the chart draws for another reason.
+
+```ts
+// A draw of flights, highlighting one: made anew for each highlight.
+const drawFlights =
+  (highlighted: string) =>
+  ({ table, series, x, y, item, rect }: DataDrawContext<FlightSchema>) => {
+    const end = table.numbers("end");
+    for (const s of series)
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rowAt(k);
+        const fill = table.value("id", row) === highlighted ? "#e4572e" : s.color;
+        item(s, row, () =>
+          rect(x(s.x[row]!), y(s.y[row]!) - 4, x(end[row]!) - x(s.x[row]!), 8, { fill }),
+        );
+      }
+  };
+```
+
+```vue
+<script setup lang="ts">
+const highlighted = ref("F-2");
+const draw = computed(() => drawFlights(highlighted.value));
+</script>
+
+<template>
+  <Chart>
+    <Custom :data="flights" :x="['start', 'end']" y="lane" item-key="id" :draw="draw" />
+  </Chart>
+</template>
+```
+
+```svelte
+<script lang="ts">
+  let highlighted = $state("F-2");
+  const draw = $derived(drawFlights(highlighted));
+</script>
+
+<Chart>
+  <Custom data={flights} x={["start", "end"]} y="lane" itemKey="id" {draw} />
+</Chart>
+```
+
+`FlightSchema` is the table's own schema ([Typing a
+draw](marks.md#typing-a-draw)). A custom mark built with `custom()` and
+passed as `marks` is the same mark only as itself: keep it, and call its
+`redraw()` when state its `draw` reads changes ([When draw reads your
+state](marks.md#when-draw-reads-your-state)).
 
 ## Events and the chart handle
 

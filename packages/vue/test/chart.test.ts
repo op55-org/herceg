@@ -149,7 +149,7 @@ function spyUpdates(chart: HercegChart): (readonly unknown[])[] {
   const update = chart.update.bind(chart);
   chart.update = (options) => {
     seen.push(options.marks ?? []);
-    update(options);
+    return update(options);
   };
   return seen;
 }
@@ -715,7 +715,7 @@ describe("<Chart>", () => {
     expect(paths()).toHaveLength(2);
   });
 
-  it("rebuilds custom marks so their draw sees new values", async () => {
+  it("calls the latest draw of a custom mark, which a computed returns with new values", async () => {
     const labels = () =>
       [...host.querySelectorAll('[data-kind="shapes"] text')].map((t) => t.textContent);
     const label = ref("first");

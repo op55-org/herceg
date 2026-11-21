@@ -10,7 +10,7 @@ import { ValueAnimation } from "../../src/dom/value-transition.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
-import { custom } from "../../src/marks/custom.ts";
+import { custom, type DataDrawContext } from "../../src/marks/custom.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
 import { graph } from "../../src/marks/graph.ts";
@@ -1930,6 +1930,222 @@ describe("custom marks changing values", () => {
     data.replace(0, { end: [60] });
     tick(16);
     expect(ends(reads.at(-1))).toEqual({ a: 60, b: 50, c: 60 });
+  });
+
+  /**
+   * Comets whose strokes reach `look.past` past their ends: a look of the
+   * application's own, which `draw` reads and `redraw()` tells of. Each
+   * read records it as the comet's width.
+   */
+  function reaching<S extends Schema>(data: Table<S>, look: { past: number }, reads: Read[] = []) {
+    return comets(data, reads, {
+      draw({ table: rows, series, x, y, item, path }: DataDrawContext<Schema>) {
+        const end = rows.numbers("end");
+        const read: Read = new Map();
+        reads.push(read);
+        for (const s of series)
+          for (let k = 0; k < s.length; k++) {
+            const row = s.rowAt(k);
+            read.set(rows.value("id", row) as string, { end: end[row]!, width: look.past });
+            item(s, row, () =>
+              path(`M${x(s.x[row]!)} ${y(s.y[row]!)}H${x(end[row]! + look.past)}`, {
+                stroke: s.color,
+                strokeWidth: 6,
+              }),
+            );
+          }
+      },
+    });
+  }
+  /** Where a pointer on lane `lane` at `value` is, in the page. */
+  const pointer = (chart: Chart, value: number, lane: number) => {
+    const rect = chart.root.getBoundingClientRect();
+    const panel = modelOf(chart).panels()[0]!;
+    return {
+      bubbles: true,
+      clientX: rect.left + panel.x.map(value),
+      clientY: rect.top + panel.y.map(lane),
+      pointerId: MOUSE,
+    };
+  };
+  /** The rows `hover` reports an item at, as they come (undefined for none). */
+  function hovers(chart: Chart): (number | undefined)[] {
+    const rows: (number | undefined)[] = [];
+    chart.on("hover", ({ target }) => rows.push(target?.kind === "item" ? target.row : undefined));
+    return rows;
+  }
+
+  it("draw again at rest after redraw(), at a new revision, and input waits for that frame", async () => {
+    const data = forecasts();
+    const look = { past: 0 };
+    const mark = reaching(data, look);
+    const chart = await mount(options([mark]));
+    const still = await mount(options([reaching(data, { past: 30 })], false));
+    const hovered = hovers(chart);
+    await controlTime();
+    const revision = chart.revision;
+    const before = drawn(chart);
+    // Past a's end (40), within its reach once it reaches 30 further.
+    chart.root.dispatchEvent(new PointerEvent("pointermove", pointer(chart, 60, 1)));
+    tick(16);
+    expect(hovered.at(-1)).toBeUndefined();
+    look.past = 30;
+    mark.redraw();
+    expect(chart.revision).toBe(revision + 1);
+    // Nothing draws until the frame, which input before it waits for.
+    expect(drawn(chart)).toBe(before);
+    chart.root.dispatchEvent(new PointerEvent("pointermove", pointer(chart, 61, 1)));
+    tick(16);
+    expect(drawn(chart)).toBe(drawn(still));
+    expect(chart.drawnRevision).toBe(revision + 1);
+    expect(hovered.at(-1)).toBe(0);
+  });
+
+  it("draw a change playing with draw as it is after redraw(), ending on what it draws then", async () => {
+    const data = forecasts();
+    const look = { past: 0 };
+    const reads: Read[] = [];
+    const mark = reaching(data, look, reads);
+    const moving = await mount(options([mark]));
+    const stillLook = { past: 0 };
+    const stillMark = reaching(data, stillLook);
+    const still = await mount(options([stillMark], false));
+    const hovered = hovers(moving);
+    await controlTime();
+    const revision = moving.revision;
+    data.replace(0, { end: [60, 70, 80] });
+    tick(160);
+    expect(ends(reads.at(-1))).toEqual({ a: 50, b: 60, c: 70 });
+    look.past = stillLook.past = 10;
+    mark.redraw();
+    stillMark.redraw();
+    tick(16);
+    // The next frame draws as draw is now, its values moving on (11 of 20, linearly).
+    expect(reads.at(-1)!.get("a")).toEqual({ end: 51, width: 10 });
+    expect(moving.drawnRevision).toBe(revision + 2);
+    tick(16);
+    expect(reads.at(-1)!.get("a")).toEqual({ end: 52, width: 10 });
+    tick(400);
+    // It ends on what draw paints now, not the scene built before redraw().
+    expect(drawn(moving)).toBe(drawn(still));
+    // What input picks is drawn anew: a reaches 70.
+    moving.root.dispatchEvent(new PointerEvent("pointermove", pointer(moving, 66, 1)));
+    tick(16);
+    expect(hovered.at(-1)).toBe(0);
+    moving.root.dispatchEvent(new PointerEvent("pointerleave", pointer(moving, 66, 1)));
+    tick(16);
+
+    // A pointer arriving during a change after redraw() settles it, and picks what draw paints now.
+    data.replace(0, { end: [40] });
+    tick(160);
+    look.past = 40;
+    mark.redraw();
+    tick(16);
+    moving.root.dispatchEvent(new PointerEvent("pointermove", pointer(moving, 75, 1)));
+    expect(reads.at(-1)!.get("a")).toEqual({ end: 40, width: 40 });
+    tick(16);
+    expect(hovered.at(-1)).toBe(0);
+  });
+
+  it("draw a view transition's next frame with draw as it is after redraw(), the view moving on", async () => {
+    const data = forecasts();
+    const look = { past: 0 };
+    const reads: Read[] = [];
+    const mark = reaching(data, look, reads);
+    const chart = await mount(options([mark], { duration: 320, easing: "linear" }));
+    await controlTime();
+    chart.setViewport([0, 50]);
+    tick(160);
+    const [, mid] = x(chart) as [number, number];
+    expect(between(mid, 50, 100)).toBe(true);
+    look.past = 10;
+    mark.redraw();
+    tick(16);
+    expect(reads.at(-1)!.get("a")!.width).toBe(10);
+    expect(between(x(chart)[1]!, 50, mid)).toBe(true);
+    tick(400);
+    expect(x(chart)).toEqual([0, 50]);
+    expect(reads.at(-1)!.get("a")!.width).toBe(10);
+  });
+
+  it("tell only the charts drawing them after redraw(), and hold none that stopped", async () => {
+    const data = forecasts();
+    const reads: Read[] = [];
+    const mark = reaching(data, { past: 0 }, reads);
+    await mount(options([mark]));
+    const left = await mount(options([mark]));
+    // A chart destroyed: nothing of the test's holds it.
+    const gone = await (async () => {
+      const chart = await mount(options([mark]));
+      charts.splice(charts.indexOf(chart), 1);
+      return new WeakRef(chart);
+    })();
+    await controlTime();
+    left.update(options([]));
+    gone.deref()!.root.parentElement!.remove();
+    gone.deref()!.destroy();
+    tick(16);
+    const [count, revision] = [reads.length, left.revision];
+    mark.redraw();
+    tick(16);
+    // The chart drawing it draws once; the others not at all.
+    expect(reads).toHaveLength(count + 1);
+    expect(left.revision).toBe(revision);
+    vi.useRealTimers();
+    for (let i = 0; i < 3; i++) {
+      await frame();
+      await collectGarbage();
+    }
+    expect(gone.deref()).toBeUndefined();
+  });
+
+  it("draw a mark that drew nothing from the frame after redraw(), while bars move on", async () => {
+    const sales = () => table({ k: ["a", "b"], v: [10, 20] });
+    const marker = (data: ReturnType<typeof sales>, look: { on: boolean }) =>
+      custom(data, {
+        x: "k",
+        y: "v",
+        draw({ series, x, y, circle }) {
+          if (!look.on) return;
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              circle(x(s.x[row]!), y(s.y[row]!), 3, { fill: s.color });
+            }
+        },
+      });
+    const [data, stillData] = [sales(), sales()];
+    const [look, stillLook] = [{ on: false }, { on: false }];
+    const [mark, stillMark] = [marker(data, look), marker(stillData, stillLook)];
+    const chart = (rows: typeof data, custom: typeof mark, animation: typeof VALUES | false) =>
+      mount({
+        animation,
+        renderer: "svg",
+        marks: [bar(rows, { x: "k", y: "v" }), custom],
+        y: { domain: [0, 50] },
+      });
+    const moving = await chart(data, mark, VALUES);
+    const still = await chart(stillData, stillMark, false);
+    await controlTime();
+    const circles = (of: Chart) => of.root.querySelectorAll('[data-kind="shapes"] path').length;
+    const bars = (of: Chart) => of.root.querySelector('[data-kind="rect"]')?.outerHTML;
+    expect(circles(moving)).toBe(0);
+    const before = bars(moving);
+    data.replace(0, { v: [30, 40] });
+    stillData.replace(0, { v: [30, 40] });
+    tick(160);
+    look.on = stillLook.on = true;
+    mark.redraw();
+    stillMark.redraw();
+    tick(16);
+    // The marker draws from this frame, at the new values; the bars are on their way.
+    expect(circles(moving)).toBe(2);
+    expect(bars(moving)).not.toBe(before);
+    expect(bars(moving)).not.toBe(bars(still));
+    tick(400);
+    expect(moving.root.querySelector("svg")!.outerHTML.replace(/herceg-\d+/g, "")).toBe(
+      still.root.querySelector("svg")!.outerHTML.replace(/herceg-\d+/g, ""),
+    );
   });
 });
 

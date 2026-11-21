@@ -17,7 +17,7 @@ import type { MeasureText } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import { monotonePolyline } from "../marks/curve.ts";
 import { tablesOf, viewOf } from "../marks/layout-mark.ts";
-import { keepsKey, referenceOf } from "../marks/mark.ts";
+import { keepsKey, type Mark, referenceOf } from "../marks/mark.ts";
 import { lowerPosition, placeAt, rowOf, xAt } from "../marks/series.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import { planAxis } from "../model/axis.ts";
@@ -518,8 +518,8 @@ export class MountedChart implements Chart, ExportsScene {
   /** Viewport events a listener's changes made, waiting for the one being delivered to reach every listener. */
   #viewQueue: Unextended<ChartEvents["viewport"]>[] | undefined;
   readonly #cleanup: (() => void)[] = [];
-  /** Subscriptions to the tables the marks read and the row views some show. */
-  readonly #tables = new Map<Table | RowView, () => void>();
+  /** Subscriptions to the tables the marks read, the row views some show, and custom marks. */
+  readonly #sources = new Map<Table | RowView | Mark, () => void>();
   /** Each view's `queryRevision` when it last reported: its own changes since are new. */
   readonly #seen = new WeakMap<RowView, number>();
   #leaveSync: (() => void) | undefined;
@@ -734,13 +734,13 @@ export class MountedChart implements Chart, ExportsScene {
     return chart.#anchors;
   }
 
-  update(options: ChartUpdate): void {
+  update(options: ChartUpdate): boolean {
     // State options alone change the state, not what the chart draws it
     // with; an empty update reads the page and the host again.
     const keys = Object.keys(options);
     if (keys.length && keys.every((key) => (STATE_OPTIONS as readonly string[]).includes(key))) {
       this.#state.options(options);
-      return;
+      return true;
     }
     const next: Record<string, unknown> = { ...this.#options, ...options };
     for (const [key, value] of Object.entries(options)) if (value === undefined) delete next[key];
@@ -764,7 +764,7 @@ export class MountedChart implements Chart, ExportsScene {
       // The last frame stays right: it is of the options kept.
       if (this.#refusal) this.#refusal = chartError(error, "validate");
       this.#fail(error, "validate", this.#drawn && !(this.#refusal ?? this.#compileFailure));
-      return;
+      return false;
     }
     // Refused options changed nothing, so only applied ones count.
     this.#revision++;
@@ -805,6 +805,7 @@ export class MountedChart implements Chart, ExportsScene {
     // no longer drawn go with the next frame (see `#finishFrame`).
     this.#changeView(() => {}, "options", undefined, undefined, views);
     this.#state.options(options);
+    return true;
   }
 
   /**
@@ -1627,8 +1628,8 @@ export class MountedChart implements Chart, ExportsScene {
     if (this.#describeTimer !== 0) clearTimeout(this.#describeTimer);
     for (const stop of this.#cleanup) stop();
     this.#unwatchPage?.();
-    for (const stop of this.#tables.values()) stop();
-    this.#tables.clear();
+    for (const stop of this.#sources.values()) stop();
+    this.#sources.clear();
     this.#clouds?.release(this);
     this.#controller?.dispose();
     this.#held = null;
@@ -2190,23 +2191,42 @@ export class MountedChart implements Chart, ExportsScene {
   #applyOptions() {
     const options = this.#options;
     this.root.setAttribute("aria-label", titleText(options.title) ?? "Chart");
-    // Re-subscribe to the tables the marks read, and to the views of rows they show.
-    const tables = new Set<Table | RowView>(
+    // Re-subscribe to the tables the marks read, to the views of rows they
+    // show, and to custom marks, which tell of their drawing changing.
+    const sources = new Set<Table | RowView | Mark>(
       options.marks.flatMap((mark) => {
         const view = viewOf(mark);
-        return view ? [...tablesOf(mark), view] : tablesOf(mark);
+        const read: (Table | RowView | Mark)[] = view ? [...tablesOf(mark), view] : tablesOf(mark);
+        if ((mark as Mark).subscribe) read.push(mark as Mark);
+        return read;
       }),
     );
-    for (const [table, stop] of this.#tables) {
-      if (!tables.has(table)) {
+    for (const [source, stop] of this.#sources) {
+      if (!sources.has(source)) {
         stop();
-        this.#tables.delete(table);
+        this.#sources.delete(source);
       }
     }
-    for (const table of tables) {
-      if (this.#tables.has(table)) continue;
+    for (const table of sources) {
+      if (this.#sources.has(table)) continue;
+      // What a custom mark's `draw` paints changed (`redraw()`): the next
+      // frame draws it, at a new revision, which a frame of values moving
+      // reports too (their frames call `draw` as it is then). Its records
+      // and failures are new, as a change of data's are.
+      if ("spec" in table) {
+        this.#sources.set(
+          table,
+          table.subscribe!(() => {
+            this.#values?.redrawn();
+            this.#content++;
+            this.#model.revision = ++this.#revision;
+            this.#invalidate(false);
+          }),
+        );
+        continue;
+      }
       if ("source" in table) this.#seen.set(table, table.queryRevision);
-      this.#tables.set(
+      this.#sources.set(
         table,
         table.subscribe((change?: TableChange) => {
           // A view telling of its table's write leaves it to the table,

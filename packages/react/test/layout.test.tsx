@@ -213,7 +213,7 @@ describe("layout elements", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     act(() => root.render(view(1)));
     expect(updates).toBe(0);

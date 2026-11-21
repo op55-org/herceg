@@ -368,7 +368,15 @@ its rows where they were, and no replaced value waiting in a transaction
 past 2,000 rows since shows its change at once. Value transitions reach custom marks' motion at
 four points, importing only its types: keeping (`keepCustom`), planning
 (`ShownCustom.plan`), frames (`CustomFrames.at`), and moving on from a
-frame (`CustomMotion.shown`). The lazy module imports no engine code; the
+frame (`CustomMotion.shown`). Frames call `draw` as it is then, so a
+custom mark's `redraw()` during a transition shows from its next frame;
+the transition, flagged `redrawn`, ends on a scene built anew instead of
+the one it planned to. A custom mark that drew nothing keeps its empty
+geometry in scenes whose values may move, which costs no budget: frames
+leave it as it is until a custom mark's `redraw()`, and then call it as
+they call the others, at its new values, judged by the frames' time
+(while its motion has not loaded, or categories change order, it waits
+for the transition's end). The lazy module imports no engine code; the
 chart hands it `planAxis`, `Polyline`, and `monotonePolyline`, and a
 sunburst's record the arc and label code its frames need (`SunburstKit`),
 since esbuild would otherwise split shared modules into chunks that

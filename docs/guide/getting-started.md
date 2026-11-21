@@ -119,7 +119,7 @@ methods of their own (see [Notebooks](python/notebooks-and-streamlit.md)).
 | Member | Does |
 | --- | --- |
 | `root` | The chart's element. |
-| `update(options)` | Changes options ([below](#updating-a-chart)). |
+| `update(options)` | Changes options ([below](#updating-a-chart)), returning whether the chart took them. |
 | `render()` | Draws now instead of on the next frame. |
 | `destroy()` | Removes the chart and frees its resources. |
 | `ready` | A promise of the first frame (and, where marks' tooltips show `fields` or `content`, of the code that writes them), rejected with what kept it from drawing or that code from loading. |
@@ -149,7 +149,8 @@ creating a chart should `await chart.loading` first.
 `update` takes a `ChartUpdate`. Each option given replaces the chart's
 whole (an axis, `interaction`, `tooltip`), so pass every setting to keep;
 an option given as `undefined` returns to its default; options left out are
-unchanged.
+unchanged. It returns whether the chart took them: options it refuses
+leave it as it was ([When a chart cannot draw](#when-a-chart-cannot-draw)).
 
 ```ts
 chart.update({ y: { title: "ms", domain: [0, 500] } });
@@ -208,7 +209,7 @@ Mark functions throw for their own options at once
 
 | `errorMode` | Behavior |
 | --- | --- |
-| `"inline"` (default) | `createChart` and `update` do not throw. A chart that drew nothing shows a box of its size saying "Chart could not be rendered" and why; a refused update keeps the last frame under a banner; a frame that fails on new data shows the box until data that draws arrives. Each is an alert read out as it appears. |
+| `"inline"` (default) | `createChart` and `update` do not throw. A chart that drew nothing shows a box of its size saying "Chart could not be rendered" and why; a refused update keeps the last frame under a banner (`update` returns false); a frame that fails on new data shows the box until data that draws arrives. Each is an alert read out as it appears. |
 | `"throw"` | Nothing is shown: `createChart` and `update` throw what they refuse; later failures go to `onError` and `error` listeners. Adapters throw in render, for error boundaries. |
 
 Each failure is reported once: to `onError`, to `"error"` listeners, or,

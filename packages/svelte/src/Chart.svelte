@@ -22,7 +22,15 @@
     viewOf,
   } from "herceg";
   import { untrack } from "svelte";
-  import { type Basis, basisOf, type ChartProps, canonical, holds, sameMark } from "./chart.js";
+  import {
+    type Basis,
+    basisOf,
+    type ChartProps,
+    canonical,
+    holds,
+    install,
+    sameMark,
+  } from "./chart.js";
   import { type Entry, type LayoutEntry, plain, provideMarks } from "./marks.js";
 
   let {
@@ -112,6 +120,8 @@
     /** The options but the state options, as `canonical` writes them. */
     key: string;
     refused?: ChartError | undefined;
+    /** The chart refused them, showing what it had. */
+    declined?: boolean;
   }
 
   /** The state options, which change the chart's state alone when only they change. */
@@ -313,14 +323,19 @@
       applied = { ...last, options: view.options };
       if (states.length > 0)
         current.update(Object.fromEntries(states.map((key) => [key, view.options[key]])));
+      // <Custom> marks call what their components give, once the chart
+      // takes it: options it refuses leave it as it was.
+      if (!last.declined) next.forEach(install);
       return;
     }
     // Props are the whole configuration: options no longer passed go back
     // to their defaults rather than keeping their previous values.
     const cleared = Object.keys(last.options).filter((key) => !(key in view.options));
     const reset = Object.fromEntries(cleared.map((key) => [key, undefined]));
-    applied = { ...view, marks: next };
-    current.update({ ...reset, ...view.options, marks: next });
+    const now: View = { ...view, marks: next };
+    applied = now;
+    if (current.update({ ...reset, ...view.options, marks: next })) next.forEach(install);
+    else now.declined = true;
   }
 
   // The first frame was drawn as the chart was created: `onrender` hears of

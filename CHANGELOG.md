@@ -213,6 +213,24 @@ matched by `itemKey` or row, its `encoded` widths, opacities, and ramp
 colors between too; `draw`'s `table` is a `ReadonlyTable` with or without
 animation. What moves custom marks loads only for charts that have them.
 
+Custom marks have `redraw()` (`custom` returns a `CustomMark`), for a
+`draw` that reads state of the application's own: the charts drawing the
+mark draw it again on their next frame, at a new revision, and input picks
+what that frame draws. A change of values playing plays on, each frame
+drawn by `draw` as it is then, a mark that drew nothing among them, and
+ends on what `draw` paints at its end. `<Custom>` in React, Vue, and
+Svelte keeps one mark while its props other than `draw` and `pointText`
+are the same (a `pointText` given where there was none, or dropped, makes
+a new one), calling the latest ones, once the chart takes the update, and
+drawing again when they change: an inline `draw` no longer ends a
+transition or rebuilds the mark each render, and a render React discards
+or props the chart refuses install nothing. In Vue and Svelte, make the
+draw where it reads reactive state (a `computed`, `$derived`); `{#key}` is
+no longer needed. See [Custom marks](docs/guide/frameworks.md#custom-marks).
+
+`chart.update()` returns whether the chart took the options: options it
+refuses leave it as it was, and are reported as before.
+
 Fixed: no value transition moved a mark over a row view (bars, points,
 lines, areas, error bars, candlesticks, heatmaps): the view's report of
 its table's write showed every change at once. They move as marks over

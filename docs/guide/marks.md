@@ -1014,6 +1014,81 @@ custom(forecasts, {
   draw in about 3 ms and are picked in about 30 µs). The built-in marks'
   internals (series resolution, layout) are not a public extension API.
 
+### Typing a draw
+
+`custom(table, { draw })` infers `draw`'s context, a
+`DataDrawContext<S>` of the table's schema `S`. A draw written apart, at
+module scope or shared by marks, is typed with that schema: `SchemaOf`
+of the columns `table()` was given, or the schema a table's type holds.
+
+```ts
+const columns = { id: ["C-12", "C-13"], start: [12, 30], end: [40, 52] };
+const forecasts = table(columns);
+type Forecast = SchemaOf<typeof columns>; // or: typeof forecasts extends Table<infer S> ? S : never
+
+function drawComets({ table, series, x, y, path }: DataDrawContext<Forecast>) {
+  const end = table.numbers("end"); // field names checked against the schema
+  // ...
+}
+custom(forecasts, { x: ["start", "end"], y: "id", draw: drawComets });
+```
+
+A table's schema is invariant: a draw typed with the broad
+`DataDrawContext<Schema>` is refused for a specific table, as it could
+read fields the table does not have. A mark without a table takes a
+`DrawContext`.
+
+### When draw reads your state
+
+`custom` returns a `CustomMark`. Where `draw` reads state of the
+application's own (a highlighted id, a mode), call `redraw()` when that
+state changes: the charts drawing the mark draw it again on their next
+frame, at a new `chart.revision`.
+
+```ts
+let highlighted = "C-12";
+const comets = custom(forecasts, {
+  x: ["start", "end"],
+  y: "id",
+  itemKey: "id",
+  draw({ table, series, x, y, item, path }) {
+    const end = table.numbers("end");
+    for (const s of series)
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rowAt(k);
+        const wide = table.value("id", row) === highlighted;
+        item(s, row, () =>
+          path(`M${x(s.x[row]!)} ${y(s.y[row]!)}H${x(end[row]!)}`, {
+            stroke: s.color,
+            strokeWidth: wide ? 3 : 1,
+          }),
+        );
+      }
+  },
+});
+
+function highlight(id: string) {
+  highlighted = id;
+  comets.redraw();
+}
+```
+
+- **At rest**, the next frame draws the mark again. Input reads what it
+  draws then: a click or a key before that frame waits for it.
+- **While values move** ([below](#animating-custom-marks)), each frame
+  calls `draw` as it is then: values keep moving as declared, and what
+  changed in the drawing shows at once, not animated. The change ends on
+  what `draw` paints at its end, and input, which settles a change
+  playing, picks that. A mark that drew nothing at the change's end
+  draws in its frames from then on. **While the view moves**, its next
+  frame draws the mark again.
+- `chart.update()` with the same marks still ends changes playing;
+  `redraw()` does not. A mark is told to the charts drawing it, and a
+  chart that stops drawing it, or is destroyed, lets go of it.
+- In React, Vue, and Svelte, `<Custom>` calls `redraw()` itself when its
+  `draw` or `pointText` changes ([Custom
+  marks](frameworks.md#custom-marks)).
+
 ### Animating custom marks
 
 With `animation: { values: true }`, a custom mark moves to changed values

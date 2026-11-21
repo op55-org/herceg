@@ -64,7 +64,7 @@ import {
   sankey,
   sunburst,
   surface,
-  type Table,
+  Table,
   type TextDataOptions,
   type TextOptions,
   type TreemapOptions,
@@ -325,12 +325,69 @@ type CustomProps<T> = { data?: T } & (T extends Table<infer S extends Schema>
   : CustomOptions & { data?: undefined });
 
 /**
+ * Ids of what options hold by identity: functions (tick generators,
+ * formatters), and tables and row views (in field displays' rules), so
+ * that a new one compares as a change and the same one as none.
+ */
+const identities = new WeakMap<object, number>();
+let identified = 0;
+
+/**
+ * JSON with object keys sorted, so equal settings written in any order
+ * compare equal, and functions, tables, and row views by identity (two
+ * unnamed tables write the same JSON).
+ */
+export function canonical(value: unknown): string {
+  return JSON.stringify(value, (_, v: unknown) => {
+    const table = v instanceof Table || (typeof v === "object" && v !== null && "markRows" in v);
+    if (typeof v === "function" || table) {
+      let id = identities.get(v as object);
+      if (id === undefined) {
+        id = ++identified;
+        identities.set(v as object, id);
+      }
+      return `${typeof v === "function" ? "function" : "table"} ${id}`;
+    }
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v;
+  });
+}
+
+/**
+ * What a <Custom> element's mark calls: its `draw` and `pointText` as the
+ * render committed last with the mark gave them (chart.tsx installs them); and its
+ * other props as they were then (`key`, as `canonical` writes them), by
+ * which a later render's element in its place is the same mark.
+ */
+export interface HeldCustom {
+  draw: CustomDataOptions<Schema>["draw"];
+  pointText: CustomDataOptions<Schema>["pointText"] | undefined;
+  readonly key: string;
+}
+
+/** What the marks <Custom> elements made call. */
+export const heldCustoms = /* @__PURE__ */ new WeakMap<ChartMark, HeldCustom>();
+
+/**
  * A custom mark: `draw` places shapes with the chart's scales, without
- * `data` or over the fields of `data`. Rebuilt on every render, since
- * `draw` may close over props or state.
+ * `data` or over the fields of `data`. The chart keeps one mark while the
+ * other props are the same, calling the `draw` and `pointText` of the last
+ * render committed, which may close over new props or state.
  */
 export const Custom = /* @__PURE__ */ markElement(
   "Custom",
-  ({ data, ...options }: CustomOptions & { data?: Table<Schema> }) =>
-    data ? custom(data, options as CustomDataOptions<Schema>) : custom(options),
+  ({ draw, pointText, data, ...options }: CustomDataOptions<Schema> & { data?: Table<Schema> }) => {
+    // A pointText given or not is another mark: without one, values are written as axes write them.
+    const key = canonical([options, data, !!pointText]);
+    const held: HeldCustom = { draw, pointText, key };
+    const own: CustomDataOptions<Schema> = {
+      ...options,
+      draw: (context) => held.draw(context),
+      ...(pointText && { pointText: (...args) => held.pointText!(...args) }),
+    };
+    const mark = data ? custom(data, own) : custom(own as CustomOptions);
+    heldCustoms.set(mark, held);
+    return mark;
+  },
 ) as unknown as <T = undefined>(props: CustomProps<T>) => null;

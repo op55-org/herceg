@@ -97,7 +97,9 @@ function lineKind(fill: boolean): ChartKind<SeriesData> {
         append: (x, ys, keep) => appendTo(source, x, ys, keep),
         setViewport: (x0, x1) => chart.setViewport([x0, x1]),
         pixelOf: (_series, _index, x, y) => pixelOf(chart, x, y),
-        resize: (width, height) => chart.update({ width, height }),
+        resize: (width, height) => {
+          chart.update({ width, height });
+        },
         destroy: () => chart.destroy(),
       };
     },
@@ -118,7 +120,9 @@ function common(
 ): Pick<ChartHandle<unknown>, "pixelOf" | "resize" | "destroy" | "rendered"> {
   return {
     pixelOf: (_series, _index, x, y) => pixelOf(chart, x, y),
-    resize: (width, height) => chart.update({ width, height }),
+    resize: (width, height) => {
+      chart.update({ width, height });
+    },
     destroy: () => chart.destroy(),
     // Large point series wait for the GPU painter, which loads on demand.
     rendered: () => chart.loading,
@@ -159,7 +163,9 @@ function surfaceColumns(data: SurfaceData) {
 function solid(chart: Chart): Omit<ChartHandle<never>, "setData"> {
   return {
     pixelOf: () => clientPoint(chart.root, 0, 0),
-    resize: (width, height) => chart.update({ width, height }),
+    resize: (width, height) => {
+      chart.update({ width, height });
+    },
     destroy: () => chart.destroy(),
     // Large point clouds wait for the GPU painter, which loads on demand.
     rendered: () => chart.loading,

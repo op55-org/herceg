@@ -6,6 +6,7 @@ import {
   type ChartMark,
   type ChartOptions,
   type ChartSelection,
+  type CustomMark,
   chartError,
   createChart,
   type DrillState,
@@ -16,7 +17,6 @@ import {
   type Panels,
   type RenderTooltip,
   showFailure,
-  Table,
   tablesOf,
   type ViewportState,
   type VisibilityState,
@@ -41,7 +41,7 @@ import {
   type VNode,
   watch,
 } from "vue";
-import { markBuilder, plain } from "./marks.ts";
+import { canonical, heldCustoms, markBuilder, plain } from "./marks.ts";
 
 /**
  * Options as props: the tooltip's content of your own is the `renderTooltip`
@@ -250,44 +250,18 @@ export function pathKey(path: unknown[]): string {
 }
 
 /**
- * Ids of what options hold by identity: functions (tick generators,
- * formatters), and tables and row views (in field displays' rules), so
- * that a new one compares as a change and the same one as none.
- */
-const identities = new WeakMap<object, number>();
-let identified = 0;
-
-/**
- * JSON with object keys sorted, so equal settings written in any order
- * compare equal, and functions, tables, and row views by identity (two
- * unnamed tables write the same JSON).
- */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_, v: unknown) => {
-    const table = v instanceof Table || (typeof v === "object" && v !== null && "markRows" in v);
-    if (typeof v === "function" || table) {
-      let id = identities.get(v as object);
-      if (id === undefined) {
-        id = ++identified;
-        identities.set(v as object, id);
-      }
-      return `${typeof v === "function" ? "function" : "table"} ${id}`;
-    }
-    return v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : v;
-  });
-}
-
-/**
  * Same mark when the spec and the tables are unchanged, so caches survive
- * re-renders: every built-in mark's spec and tables describe it. Custom
- * marks, whose `draw` may close over new props, are only the same mark as
- * themselves.
+ * re-renders: every built-in mark's spec and tables describe it. <Custom>
+ * components' marks are the same while their props but `draw` and
+ * `pointText` are; other custom marks only as themselves.
  */
 function sameMark(a: ChartMark, b: ChartMark): boolean {
   if (a === b) return true;
-  if (a.spec.type === "custom" || a.constructor !== b.constructor) return false;
+  if (a.constructor !== b.constructor) return false;
+  if (a.spec.type === "custom") {
+    const key = heldCustoms.get(a)?.key;
+    return key !== undefined && key === heldCustoms.get(b)?.key;
+  }
   const [tables, others] = [tablesOf(a), tablesOf(b)];
   return (
     tables.length === others.length &&
@@ -296,6 +270,21 @@ function sameMark(a: ChartMark, b: ChartMark): boolean {
     thresholdsTable(a) === thresholdsTable(b) &&
     canonical(a.spec) === canonical(b.spec)
   );
+}
+
+/**
+ * Gives the <Custom> mark kept in a component's place (`kept`) the `draw`
+ * and `pointText` the component was rendered with now (`built`'s),
+ * drawing it again if they changed.
+ */
+function install(built: ChartMark, kept: ChartMark): void {
+  const from = heldCustoms.get(built);
+  const into = heldCustoms.get(kept);
+  if (!from || !into || from === into) return;
+  if (into.draw === from.draw && into.pointText === from.pointText) return;
+  // Their keys are the same: the marks are.
+  Object.assign(into, from);
+  (kept as CustomMark).redraw();
 }
 
 /** The table a rule or region at thresholds names: itself, which specs name only by its name. */
@@ -335,6 +324,8 @@ interface View {
   options: Options & { renderTooltip?: RenderTooltip };
   /** The options but the state options, as `canonical` writes them. */
   key: string;
+  /** The chart refused them, showing what it had. */
+  declined?: boolean;
 }
 
 /** What the tooltip is at, what that was made on, and the element its content renders in. */
@@ -603,6 +594,13 @@ export const Chart = defineComponent({
         const previous = last.marks[i];
         return previous && sameMark(mark, previous) ? previous : mark;
       });
+      // <Custom> marks kept call what this render gave, once the chart takes
+      // it: options it refuses leave it as it was.
+      const installed = () => {
+        next.marks.forEach((mark, i) => {
+          install(mark, marks[i]!);
+        });
+      };
       const sameMarks =
         marks.length === last.marks.length && marks.every((mark, i) => mark === last.marks[i]);
       // State options changing alone change the chart's state alone.
@@ -613,12 +611,20 @@ export const Chart = defineComponent({
         applied = { ...last, options: next.options };
         if (states.length > 0)
           chart.value.update(Object.fromEntries(states.map((key) => [key, next.options[key]])));
+        if (!last.declined) installed();
         return;
       }
       // Props are the whole configuration: options no longer passed go back
       // to their defaults rather than keeping their previous values.
-      chart.value.update({ ...UNSET, renderTooltip: undefined, ...next.options, marks, onError });
-      applied = { ...next, marks };
+      const declined = !chart.value.update({
+        ...UNSET,
+        renderTooltip: undefined,
+        ...next.options,
+        marks,
+        onError,
+      });
+      applied = { ...next, marks, declined };
+      if (!declined) installed();
     }
 
     onMounted(sync);
