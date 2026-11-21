@@ -247,6 +247,10 @@ chart.to_png(fonts=fonts, dpi=192)
 - Canvas-drawn mark labels keep ligatures in Firefox and Safari (and
   kerning in Safari), so they can be slightly narrower than measured; SVG
   text, guides, and exports are drawn as measured.
+- A mounted chart's PDF keeps the layout it shows, measured in the page's
+  fonts, leaders included, and draws its text in PDF's: text without
+  supplied fonts can stand a pixel or two from where a leader meets it.
+  A PDF from options lays labels out in PDF's own fonts.
 
 ## Server rendering
 

@@ -198,3 +198,38 @@ def test_text_following_a_mark_goes_outside_the_plot():
             from_=hg.MarkAnchor(mark="l", at="last"),
             label=hg.Label(text="end", place=hg.LabelPlace(attachment="end")),
         )
+
+
+@pytest.mark.contract("labels.attach.view-edge.python")
+def test_labels_stand_where_the_line_meets_the_views_edge():
+    rows = {"t": [0, 1, 2, 3], "v": [0.0, 10, 20, 30], "note": ["a", "b", "c", "d"]}
+    parts = [hg.LabelPart(field="note"), " ", hg.LabelPart(value=True)]
+    chart = hg.Chart(rows, legend=False, x={"domain": [0.25, 2.5], "nice": False}).line(
+        x="t", y="v", id="v", labels=hg.SeriesLabels(at="view-end", content=parts)
+    )
+    # Where the line meets the right edge, between minutes 2 and 3: the
+    # value there, and the nearer observation's fields (the earlier on a tie).
+    assert "c 25" in texts(chart)
+    spec, _ = chart.to_spec()
+    assert spec["marks"][0]["labels"] == {
+        "at": "view-end",
+        "content": [{"field": "note"}, " ", {"value": True}],
+    }
+    following = chart.text(
+        label=hg.Label(content=parts), from_=hg.MarkAnchor(mark="v", at="view-start")
+    )
+    assert "a 2.5" in texts(following)
+    assert following.to_spec()[0]["marks"][1]["from"] == {"mark": "v", "at": "view-start"}
+
+
+def test_labels_name_the_places_they_take():
+    places = '"first", "last", "visible-start", "visible-end", "view-start", or "view-end"'
+    received = '; received "view-middle"'
+    with pytest.raises(
+        hg.ChartError, match=re.escape(f"SeriesLabels at: expected {places}{received}")
+    ):
+        hg.SeriesLabels(at="view-middle")  # type: ignore[arg-type]
+    with pytest.raises(
+        hg.ChartError, match=re.escape(f"MarkAnchor at: expected {places}{received}")
+    ):
+        hg.MarkAnchor(mark="v", at="view-middle")  # type: ignore[arg-type]

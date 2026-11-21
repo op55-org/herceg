@@ -404,13 +404,23 @@ export interface LabelLayoutSpec {
 export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec } & LabelLayoutSpec;
 
 /**
- * Which observation of a series a label follows, before level of detail,
- * in the series' own order: its first or last drawn ("first", "last"), or
- * its first or last drawn whose position is in the view along the series'
- * axis ("visible-start", "visible-end"); none where the series has none in
- * view. A label whose observation is outside the plot is not drawn.
+ * Where along a series a label goes. At an observation, before level of
+ * detail, in the series' own order: its first or last drawn ("first",
+ * "last"), or its first or last drawn whose position is in the view along
+ * the series' axis ("visible-start", "visible-end"); none where the series
+ * has none in view. Or where the line as drawn meets the view's edge along
+ * that axis, or its own end inside the view ("view-start", "view-end"):
+ * the crossing nearest the path's start or end, read from the drawn path
+ * (curves and steps as drawn, the last point before a gap). A label whose
+ * point is outside the plot is not drawn.
  */
-export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
+export type LabelAt =
+  | "first"
+  | "last"
+  | "visible-start"
+  | "visible-end"
+  | "view-start"
+  | "view-end";
 
 /**
  * Labels that follow each series of a line: placed at `at`, saying

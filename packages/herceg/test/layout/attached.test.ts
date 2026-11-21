@@ -615,30 +615,80 @@ describe("series labels keeping apart", () => {
     ]);
   });
 
-  it("draw a leader from labels displaced more than 6 pixels from their points, either way", () => {
+  it("draw a leader where the text, as painted, is more than 6 pixels from its point, either way", () => {
     // Two labels whose points are `apart` pixels closer than a block's
-    // height move apart evenly, one up and one down, half of that each. The
-    // threshold is on that displacement, not on the space the text paints.
+    // height move apart evenly, one up and one down, half of that each.
+    // Text is painted `drop` below its block's middle (where the measurer
+    // says), so the label moved up is that much nearer its point, and the
+    // one moved down that much farther: the threshold is on the text as
+    // painted, along y alone, so a wide label gains no leader for its width.
+    const drop = 1;
+    // A font whose "x" stands 4 high, its box 3 up and 1 down from the baseline.
+    const context = {
+      font: "",
+      measureText: (text: string) => ({
+        width: estimateText(text, context.font),
+        actualBoundingBoxAscent: 4,
+        fontBoundingBoxAscent: 3,
+        fontBoundingBoxDescent: 1,
+      }),
+    };
+    const measure = Object.assign((text: string, font: string) => estimateText(text, font), {
+      context,
+    });
+    const painted = { ...frame, measure } as Frame;
     const look = { stroke: undefined, path: "line labels.leader.stroke", strokeWidth: 1 };
-    const [single] = place([series(100, "a", "move", owner())], frame, GUIDE_KIT).boxes;
+    const [single] = place([series(100, "a", "move", owner())], painted, GUIDE_KIT).boxes;
     const block = single!.height;
-    const leaders = (moved: number) => {
+    const leaders = (moved: number, text = "up", style?: TextStyle, within = painted) => {
       const own = owner("labels", look);
       const lower = 100 + block - 2 * moved;
-      const { geometry, boxes } = place(
-        [series(100, "up", "move", own), series(lower, "down", "move", own)],
-        frame,
-        GUIDE_KIT,
-      );
+      const labels = [series(100, text, "move", own), series(lower, "down", "move", own)];
+      if (style) labels[0] = { ...labels[0]!, paint: labelPaint(theme, "#333333", style) };
+      const { geometry, boxes } = place(labels, within, GUIDE_KIT);
       const [up, down] = [...boxes].sort((a, b) => a.y - b.y);
-      expect(single!.y - up!.y).toBeCloseTo(moved, 6);
-      expect(down!.y - (single!.y + lower - 100)).toBeCloseTo(moved, 6);
-      const segments = geometry.get(own)!.find((g) => g.kind === "segments");
-      return (segments as SegmentGeometry | undefined)?.count ?? 0;
+      if (!style) {
+        expect(single!.y - up!.y).toBeCloseTo(moved, 6);
+        expect(down!.y - (single!.y + lower - 100)).toBeCloseTo(moved, 6);
+      }
+      const segments = geometry.get(own)!.find((g) => g.kind === "segments") as
+        | SegmentGeometry
+        | undefined;
+      // Which of the two draw one, by where they end: at the text's painted middle.
+      return Array.from({ length: segments?.count ?? 0 }, (_, k) =>
+        segments!.coords[k * 4 + 3]! < 100 ? "up" : "down",
+      ).sort();
     };
-    expect(leaders(5.9)).toBe(0);
-    expect(leaders(6)).toBe(0);
-    expect(leaders(6.1)).toBe(2);
+    // Moved down: painted a pixel farther.
+    expect(leaders(4.9)).toEqual([]);
+    expect(leaders(5.1)).toEqual(["down"]);
+    // Moved up: painted a pixel nearer.
+    expect(leaders(6.9)).toEqual(["down"]);
+    expect(leaders(7.1)).toEqual(["down", "up"]);
+    // A wide label the same: its leader's start does not count.
+    expect(leaders(5.1, "a label much wider than the other")).toEqual(["down"]);
+    // A box is painted where its block is: judged by the block.
+    const boxed = { background: { fill: "#eeeeee" }, padding: 0 } as TextStyle;
+    expect(leaders(6.1, "up", boxed)).toEqual(["down", "up"]);
+    expect(leaders(5.9, "up", boxed)).toEqual(["down"]);
+    // Its leader meets the text's painted middle; a box's, the box's.
+    const own = owner("labels", look);
+    const { geometry, boxes } = place(
+      [series(100, "up", "move", own), series(100, "down", "move", own)],
+      painted,
+      GUIDE_KIT,
+    );
+    const [up] = [...boxes].sort((a, b) => a.y - b.y);
+    const segments = geometry.get(own)!.find((g) => g.kind === "segments") as SegmentGeometry;
+    const ends = Array.from({ length: segments.count }, (_, k) => segments.coords[k * 4 + 3]!);
+    expect(Math.min(...ends)).toBeCloseTo(up!.y + up!.height / 2 + drop, 4);
+    // A measurer of one's own: Arial's metrics, text painted 0.087 em
+    // above its block's middle (1.044 pixels at 12).
+    const plain = { ...frame, measure: (text: string, font: string) => estimateText(text, font) };
+    expect(leaders(4.9, "up", undefined, plain as Frame)).toEqual([]);
+    expect(leaders(5, "up", undefined, plain as Frame)).toEqual(["up"]);
+    expect(leaders(7, "up", undefined, plain as Frame)).toEqual(["up"]);
+    expect(leaders(7.1, "up", undefined, plain as Frame)).toEqual(["down", "up"]);
   });
 
   it("move least where blocks meet only some of the others", () => {

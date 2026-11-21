@@ -101,8 +101,14 @@ export interface Geometry {
   readonly draw: Drawing<any>;
   /** What the drawing is cut to, as its mark's `clip` says; see `clipOf`. */
   readonly clip?: Clip | undefined;
-  /** Where it paints among its panel's grid lines and geometry, as its mark's `zIndex` says (0 when absent). */
+  /**
+   * Where it paints among its panel's grid lines and geometry, as its
+   * mark's `zIndex` says (0 when absent); for `attached` geometry, at least
+   * as high as the panel's highest grid lines (see scene/paint.ts).
+   */
   readonly zIndex?: number | undefined;
+  /** Labels a mark draws of its own data (bars' values, lines' and areas' series), and their leaders. */
+  readonly attached?: boolean | undefined;
   /** For geometry of a series with a key of its own (a line's markers), the series' key. */
   readonly of?: string | undefined;
 }

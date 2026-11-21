@@ -2798,7 +2798,7 @@
             "x": "t",
             "y": "v",
             "labels": {
-              "at": "middle"
+              "at": "view-middle"
             }
           }
         ]
@@ -2811,7 +2811,7 @@
               "x": "t",
               "y": "v",
               "labels": {
-                "at": "middle"
+                "at": "view-middle"
               }
             }
           }
@@ -2820,8 +2820,8 @@
       "code": "invalid-option",
       "stage": "load",
       "path": "marks[0].labels.at",
-      "message": "labels.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\"",
-      "python": "line labels.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\""
+      "message": "labels.at: expected \"first\", \"last\", \"visible-start\", \"visible-end\", \"view-start\", or \"view-end\"; received \"view-middle\"",
+      "python": "line labels.at: expected \"first\", \"last\", \"visible-start\", \"visible-end\", \"view-start\", or \"view-end\"; received \"view-middle\""
     },
     {
       "contract": "line.labels.edge",
@@ -3116,7 +3116,7 @@
             "type": "text",
             "from": {
               "mark": "a",
-              "at": "middle"
+              "at": "view-middle"
             },
             "label": {
               "text": "x"
@@ -3140,7 +3140,7 @@
               "label": "x",
               "from_": {
                 "mark": "a",
-                "at": "middle"
+                "at": "view-middle"
               }
             }
           }
@@ -3150,8 +3150,8 @@
       "stage": "load",
       "path": "marks[1].from.at",
       "python_path": "marks[1].from_.at",
-      "message": "from.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\"",
-      "python": "text from_.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\""
+      "message": "from.at: expected \"first\", \"last\", \"visible-start\", \"visible-end\", \"view-start\", or \"view-end\"; received \"view-middle\"",
+      "python": "text from_.at: expected \"first\", \"last\", \"visible-start\", \"visible-end\", \"view-start\", or \"view-end\"; received \"view-middle\""
     },
     {
       "contract": "text.from.exclusive",

@@ -54,6 +54,7 @@ export type FixtureName =
   | "hover-headings"
   | "custom-hover"
   | "pan-labels"
+  | "pan-view-labels"
   | "anchor-pan"
   | "cross-filter"
   | "crosshair-dashboard";
@@ -507,15 +508,16 @@ async function customHover(count: number): Promise<Fixture> {
 
 /**
  * One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at the
- * first and last observation of each series in view, panned by dragging:
- * the move's effect is a frame of the moved view.
+ * first and last observation of each series in view (or, `view`, where
+ * each line crosses the view's start and end), panned by dragging: the
+ * move's effect is a frame of the moved view.
  */
-async function panLabels(count: number): Promise<Fixture> {
+async function panLabels(count: number, at: "visible" | "view" = "visible"): Promise<Fixture> {
   const { data, names } = walks(8, 5_000, 2);
   const chart = createChart(host(800, 400), {
     marks: [
-      line(data, { id: "lines", x: "t", y: names, labels: { at: "visible-end" } }),
-      text({ from: { mark: "lines", at: "visible-start" }, label: "start" }),
+      line(data, { id: "lines", x: "t", y: names, labels: { at: `${at}-end` } }),
+      text({ from: { mark: "lines", at: `${at}-start` }, label: "start" }),
     ],
     interaction: { zoom: "x" },
     timeZone: "UTC",
@@ -575,11 +577,18 @@ async function panLabels(count: number): Promise<Fixture> {
       if (own.length !== 1) return `${own.length} "start" labels in ${name}'s color, not one`;
     }
     // Every label of a column follows a series (in its color) from its
-    // point at that end of the view: the first and last minute in view.
+    // point at that end of the view: the first and last minute in view, or
+    // where the line crosses the edge, between the minutes around it.
     const [from, to] = chart.getViewport().x!;
+    const minutes = { start: (from - START) / MINUTE, end: (to - START) / MINUTE };
     const rows = {
-      start: Math.ceil((from - START) / MINUTE - 1e-6),
-      end: Math.floor((to - START) / MINUTE + 1e-6),
+      start: Math.ceil(minutes.start - 1e-6),
+      end: Math.floor(minutes.end + 1e-6),
+    };
+    const valueAt = (name: string, minute: number) => {
+      const before = Math.floor(minute);
+      const [a, b] = [before, before + 1].map((row) => data.value(name, row) as number);
+      return a! + (b! - a!) * (minute - before);
     };
     for (const side of ["start", "end"] as const) {
       const column: ColumnLabel[] = [];
@@ -587,7 +596,8 @@ async function panLabels(count: number): Promise<Fixture> {
         const name = series.get(label.fill);
         if (name === undefined)
           return `the label "${label.text}" at the view's ${side} is in no series' color`;
-        const value = data.value(name, rows[side]) as number;
+        const value =
+          at === "view" ? valueAt(name, minutes[side]) : (data.value(name, rows[side]) as number);
         column.push({
           name: label.text === name ? `${name}'s label` : `${name}'s "${label.text}"`,
           point: box.top + chart.toPixel(value, { axis: "y" })!,
@@ -959,6 +969,7 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-headings": (count) => hoverListener(count, true),
   "custom-hover": customHover,
   "pan-labels": panLabels,
+  "pan-view-labels": (count) => panLabels(count, "view"),
   "anchor-pan": anchorPan,
   "cross-filter": crossFilter,
   "crosshair-dashboard": crosshairDashboard,

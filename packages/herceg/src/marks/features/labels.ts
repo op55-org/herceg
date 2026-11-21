@@ -11,7 +11,7 @@
 import { type AttachedLabel, type LabelOwner, placeAttached } from "../../layout/attached.ts";
 import type { PanelDrawing } from "../../layout/placer.ts";
 import type { FeatureKit, MarkFeatures } from "../../model/features.ts";
-import type { AreaGeometry, Geometry, Rect } from "../../scene/scene.ts";
+import type { AreaGeometry, Geometry, LineGeometry, Rect } from "../../scene/scene.ts";
 import type {
   AreaLabelsSpec,
   LabelAt,
@@ -100,7 +100,10 @@ export class Drawings {
       if (edge === "lower" && !area?.lower) continue;
       const [values, other] = edge === "lower" ? [bottom!, top] : [top, bottom];
       const seams = layered && along === "y";
-      const drawnEdge: DrawnEdge = { along, traced: traced[edge], series, values };
+      // The edge as drawn, which labels at the view's edge stand on, and its steps.
+      const path = area ? area[edge]! : (geometry as LineGeometry).path;
+      const { curve } = spec;
+      const drawnEdge: DrawnEdge = { along, traced: traced[edge], series, values, path, curve };
       anchors.set(
         key,
         anchorOf({ ...drawnEdge, other, shift, seams, zeros, curved, cut }, frame, at),
@@ -155,7 +158,7 @@ export function followingLabels(
   const wanted = following.drawings.want(at, following.edge);
   const style = following.style && frame.read(following.style, following.path);
   // Labels before their series' start go before their point; others after it.
-  const align = at === "first" || at === "visible-start" ? "end" : "start";
+  const align = at === "first" || at.endsWith("-start") ? "end" : "start";
   // Inside, labels are drawn on the plot's fill; outside, on the chart's background.
   const chart = kit.surface(frame.theme);
   const under = place?.outside ? chart : (frame.surface ?? chart);
@@ -202,12 +205,15 @@ export function followingLabels(
 /**
  * Labels following series where the feature compiler draws them: gathered
  * per panel for `panelLabels` to place with the panel's others, which
- * keeps the room those outside the plot took.
+ * keeps the room those outside the plot took. `attached` says whether they
+ * are the source mark's own `labels` (not text following it), which paint
+ * above the grid lines a guide raises over the mark.
  */
 export function placing(
   kit: FeatureKit,
   following: Following,
   key: string,
+  attached: boolean,
 ): Required<Pick<MarkFeatures, "labels" | "room">> {
   const at = following.path.replace(/\.style$/, "");
   checkLayout(following.layout, at);
@@ -217,6 +223,7 @@ export function placing(
   const look = leader === true ? {} : leader || undefined;
   const owner: LabelOwner = {
     key,
+    attached,
     leader: look && {
       stroke: look.stroke,
       path: `${at}.leader.stroke`,
@@ -341,13 +348,13 @@ export function checkContent(content: unknown, path: string): void {
 }
 
 /** Where along each series labels go. */
-const AT = ["first", "last", "visible-start", "visible-end"] as const;
+const AT = ["first", "last", "visible-start", "visible-end", "view-start", "view-end"] as const;
 
 /** Checks where along its series a label goes (`at`, or text's `from.at`). */
 export function checkAt(at: unknown, path: string): void {
   if (!(AT as readonly unknown[]).includes(at))
     throw new Error(
-      `${path}: expected "first", "last", "visible-start", or "visible-end"; received ${JSON.stringify(at)}`,
+      `${path}: expected "first", "last", "visible-start", "visible-end", "view-start", or "view-end"; received ${JSON.stringify(at)}`,
     );
 }
 

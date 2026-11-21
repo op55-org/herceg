@@ -910,10 +910,11 @@ for (const labelled of [false, true]) {
     },
   );
 }
-// Labels at the last observation in view while 30 series stream: one mark,
-// a row arriving and the first dropped each frame, the view following 500
-// rows behind the newest (panned back while streaming).
-{
+// Labels at the last observation in view while 30 series stream, and where
+// the lines cross the view's end: one mark, a row arriving and the first
+// dropped each frame, the view following 500 rows behind the newest (panned
+// back while streaming).
+for (const at of ["visible-end", "view-end"] as const) {
   const live = table({
     t: Float64Array.from({ length: 3000 }, (_, t) => t),
     ...Object.fromEntries(
@@ -931,7 +932,7 @@ for (const labelled of [false, true]) {
         line(live, {
           x: "t",
           y: SERIES_NAMES as never,
-          labels: { at: "visible-end", place: { outside: true }, leader: true },
+          labels: { at, place: { outside: true }, leader: true },
         }),
       ],
     },
@@ -942,7 +943,9 @@ for (const labelled of [false, true]) {
   let next = 3000;
   model.applyViews(model.viewChanges([next - 2500, next - 500]));
   drawsLabels(model, 30, true);
-  measure("labels: 30 lines at their last rows in view, a row arriving, the view following", () => {
+  const where =
+    at === "view-end" ? "where they cross the view's end" : "at their last rows in view";
+  measure(`labels: 30 lines ${where}, a row arriving, the view following`, () => {
     live.appendRow({
       t: next,
       ...Object.fromEntries(SERIES_NAMES.map((name, k) => [name, converging(k, next)])),

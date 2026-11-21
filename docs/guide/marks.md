@@ -121,7 +121,7 @@ hg.line(casts, x="temperature", y="depth", orient="y")
 | `curve` | `"linear"` (default), `"step"`, `"step-before"`, `"step-after"`, `"monotone"`: smooth through every point, never past a point's value between two points; points under 2 pixels apart are joined straight. |
 | `markers` | `true` or a symbol name: a point at each observation the line keeps after level of detail. Styled by `style.marker` (`symbol`, `radius` 3 by default, `fill`, `stroke`, `strokeWidth`, `opacity`). |
 | `orient` | `"x"` or `"y"`: the axis of positions. A category `y` with values on `x` lays a line along y. |
-| `labels` | Series labels at `"first"`, `"last"`, `"visible-start"`, or `"visible-end"` ([below](#labels-that-follow-series)). |
+| `labels` | Series labels at `"first"`, `"last"`, `"visible-start"`, `"visible-end"`, `"view-start"`, or `"view-end"` ([below](#labels-that-follow-series)). |
 
 - **Category positions.** On a category axis each row sits at its band's
   center and a series runs through the bands in order, whatever the row
@@ -750,12 +750,16 @@ draws has no place.
 - **Measurement.** Placement measures text with the browser's fonts on
   screen and with estimates in static SVG and PDF, so the two can place
   labels differently (supply [fonts](export.md#fonts) to make them agree).
+  Where text is painted, which leaders are judged by, comes from the
+  browser's font metrics on screen, Helvetica's in PDF, and Arial's in
+  static SVG, with supplied fonts, and with a measurer of one's own.
 
 ### Labels that follow series
 
 Lines and areas label each series with `labels`, in the series' color, at
 an observation: its `"first"` or `"last"` drawn, or its first or last
-drawn in view (`"visible-start"`, `"visible-end"`). Labels stay inside the
+drawn in view (`"visible-start"`, `"visible-end"`); or where its line, as
+drawn, meets the view's edge (`"view-start"`, `"view-end"`). Labels stay inside the
 plot (shortened with an ellipsis when too wide), or go beside the axis
 with `place: { outside: true }`. A band names the edge they follow
 (`edge: "y2"`). Text follows another mark's series with `from`:
@@ -784,10 +788,25 @@ hg.Chart(df, legend=False).line(
   data, a label moves to another observation when one enters or leaves the
   view, and with its observation in between; a series with no observation
   in view has none, even where its line crosses the view.
-- **In the plot.** A label whose observation is outside the plot (its
-  value past the view, as on a zoomed y axis) is not drawn, at any `at`.
+- **At the view's edge.** `"view-end"` is where the line, as drawn (curves,
+  steps, and gaps as they draw), crosses the view's end along its axis, so
+  labels there keep the order the lines cross in, and a line crossing the
+  view between two observations is labelled too. Where the line ends
+  inside the view, it is its last drawn point; where a gap is at the edge,
+  the last drawn point before it; a line that turns back (not in x order),
+  the crossing nearest its end. A step whose rise stands on the edge is
+  labelled with the value after it. `"view-start"` is the same at the
+  view's start, aligned as `"visible-start"` is.
+- **In the plot.** A label whose point is outside the plot is not drawn:
+  its observation's, past the view across the series' axis as on a
+  zoomed y axis, or at the view's edge, the crossing's.
 - **What it writes.** `{ field }` parts read the observation's row, and
-  `{ value: true }` the value drawn there (a stack's top).
+  `{ value: true }` the value drawn there (a stack's top). At a crossing,
+  `{ value: true }` writes the value where the line crosses, and `{ field }`
+  reads the observation drawn nearer it (the earlier of two as near; on a
+  step, the one whose level is drawn there, so at a rise on the edge the
+  one after it; where the crossing is beside a cut `where` makes, the
+  observation next to the cut).
 
 A panel's series labels, and text following series, keep apart as the
 next section describes.
@@ -882,11 +901,12 @@ Each kind takes only the fields it can honour and refuses the others:
   inside the plot, keeping off labels that "show" and labels that "hide"
   of higher priority than any that move. Where the plot is too short for
   all of them, "move" leaves out the lowest priority, then the last
-  series, until the rest fit. A label displaced more than 6 pixels from
-  where it would sit at its point draws a leader when asked, in its
-  series' color: the threshold is on how far layout moved it from that
-  place, not on where its glyphs fall. They are placed first in a panel;
-  annotation labels keep off them.
+  series, until the rest fit. A label whose text, as painted, is more than
+  6 pixels along y from where it would be painted at its point draws a
+  leader when asked, in its series' color; a wide label gains none for its
+  width, and a boxed label (or one with styled parts) is judged by its
+  block. They are placed first in a panel; annotation labels keep off
+  them.
 - **Annotation labels** are placed by priority, then mark order, then row
   order. A rule's label that moves tries the mirror place across its rule,
   then slides along the rule; text tries places around its point; a

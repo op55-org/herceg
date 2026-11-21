@@ -329,6 +329,12 @@ createChart(element, {
 ```
 
 - `zIndex: 1` lifts a mark over those declared after it.
+- A mark's own labels (bars' value labels, lines' and areas' series labels
+  and their leaders) paint at the higher of their mark's `zIndex` and the
+  panel's highest grid `zIndex`, so raised grid lines never cover them.
+  Raising a grid can so lift a label over a mark painted between the two.
+  Text marks, including text following a series, keep their own `zIndex`,
+  and hovering and clicking find labels where they paint.
 - The order is the panel's own (insets paint over their parents), and
   separate from the order the keyboard, descriptions, and tooltips read.
 - Hovering and clicking take the nearest stroke or point within reach,

@@ -99,6 +99,12 @@ as listed, grid before geometry. The order is local to the panel, like a CSS
 stacking context, and separate from clipping and from the logical order
 the keyboard, descriptions, and tooltips keep.
 
+- A mark's own labels (bar labels, line and area series labels, and their
+  leaders: geometry marked `attached`) paint at the higher of their mark's
+  `zIndex` and the panel's highest grid `zIndex`. The plan
+  (`guides/paint.ts`) raises their geometry's `zIndex` as it orders the
+  panel, so picking, which reads the same `zIndex`, finds them where they
+  paint. Text marks keep their own.
 - A panel has a paint plan (`Panel.paint`) only where `zIndex` values
   reorder it. Charts that give a `zIndex` load the plan with the guide
   compiler, so a line chart's first chunk carries only the shared walk
