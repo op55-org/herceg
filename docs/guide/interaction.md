@@ -327,7 +327,7 @@ where that point is out of view, and in charts following a cursor through
 
 | Option | Does |
 | --- | --- |
-| `tooltip` | `true` (default), `false`, or `{ axisLabels, pin, heading }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
+| `tooltip` | `true` (default), `false`, or `{ axisLabels, pin, heading }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw, while the keyboard's cursor still rings its point or outlines its item; inspection goes on for hover and click events. |
 | `tooltip.axisLabels` | Labels the crosshair on the axes. |
 | `tooltip.pin` | `"click"`: a click or Enter pins the tooltip ([Pinned tooltips](#pinned-tooltips)). |
 | `tooltip.heading` | `false`: no heading row in any of the chart's tooltips ([Headings](#headings)). |

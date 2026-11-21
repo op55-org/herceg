@@ -1436,6 +1436,7 @@ const ROLES = {
   axisLine: strokeStyle,
   tick: strokeStyle,
   crosshair: strokeStyle,
+  inspectionOutline: strokeStyle,
   brush: paintStyle,
   line: (v, path) => {
     object(v, path);

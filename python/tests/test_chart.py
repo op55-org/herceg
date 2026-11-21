@@ -2374,6 +2374,36 @@ def test_the_brush_role_reaches_the_spec_and_takes_a_paint():
         hg.Look(dash=[4, "x"])
 
 
+def test_the_inspection_outline_role_reaches_the_spec_and_takes_a_line():
+    sales = {"region": ["North", "South", "East"], "revenue": [50.0, 30.0, 20.0]}
+    none = hg.Theme(style=hg.Style(inspection_outline=hg.StrokeStyle(stroke="none")))
+    spec, _ = hg.Chart(sales, theme=none).pie(category="region", value="revenue").to_spec()
+    assert spec["theme"]["style"] == {"inspectionOutline": {"stroke": "none"}}
+    # A dict of its options too, in herceg.express as in charts.
+    outline = {"stroke": "#4c78a8", "stroke_width": 3, "dash": "--"}
+    styled = {"style": {"inspection_outline": outline}}
+    spec, _ = hx.barplot(sales, x="region", y="revenue", theme=styled).to_spec()
+    assert spec["theme"]["style"]["inspectionOutline"] == {
+        "stroke": "#4c78a8",
+        "strokeWidth": 3,
+        "dash": "--",
+    }
+    # An outline is a line: no fill, and an opacity from 0 to 1.
+    with pytest.raises(
+        ValueError,
+        match="Style inspection_outline: expected an hg.StrokeStyle or a dict of its options; "
+        "received PaintStyle",
+    ):
+        hg.Style(inspection_outline=hg.PaintStyle(fill="red"))
+    with pytest.raises(ValueError, match='Style inspection_outline: unknown key "fill"'):
+        hg.Style(inspection_outline={"fill": "red"})
+    with pytest.raises(ValueError, match="StrokeStyle opacity: expected a number from 0 to 1"):
+        hg.StrokeStyle(opacity=2)
+    # The theme's role only: an axis' or a panel's style refuses it.
+    with pytest.raises(ValueError, match='drop "inspection_outline", which belongs in the theme'):
+        hg.Chart(sales, x=hg.AxisOptions(style=hg.Style(inspection_outline={"stroke": "red"})))
+
+
 def test_inspection_reach_may_be_zero_as_a_duration_too():
     for within in (0, dt.timedelta(0), np.timedelta64(0, "s")):
         options = hg.InspectionOptions(mode="nearest-x", within=within)

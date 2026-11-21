@@ -238,6 +238,7 @@ subplot's axis.
 | `legendLabel`, `legendTitle` | text | Legend entries; titles of color and size legends. |
 | `grid`, `axisLine`, `tick` | line | Grid lines, axis lines, tick marks. |
 | `crosshair` | line | The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. |
+| `inspectionOutline` (`inspection_outline`) | line | The outline of the slice, sector, node, or stage the pointer or the pinned tooltip is on: the text color at 2 pixels by default; `stroke: "none"`, a zero width, or a zero opacity draws none. The keyboard's cursor always draws the default ([Keyboard](accessibility.md#keyboard)). |
 | `brush` | paint | Brushes and lassos, of charts, maps, and networks, while drawn and after, and a brush that zooms while drawn: the muted color at `fillOpacity` 0.18 by default, with no outline; a lasso is outlined in its fill's color at `strokeOpacity` 0.6 unless `stroke` gives one (`"none"` for none). High-contrast themes outline brushes in their muted color. |
 | `plot` | plot | `fill` behind the plot, `stroke` and `strokeWidth` around it. |
 | `line`, `bar`, `tooltip` | marks | Lines' default `strokeWidth`, bars' corner `radius`, the tooltip's `fill` and `stroke`. |
@@ -275,6 +276,24 @@ createChart(element, {
 ```python
 brush = hg.PaintStyle(fill="#4c78a8", fill_opacity=0.2, stroke="#4c78a8")
 hg.Chart(flights, brush="x", theme=hg.Theme(style=hg.Style(brush=brush))).histogram(x="delay")
+```
+
+A reference that outlines nothing it hovers is matched by the outline's
+role; the keyboard's cursor still outlines what it is on, in the text
+color at 2 pixels, so its focus shows:
+
+```ts
+createChart(element, {
+  marks: [sunburst(flare, { path: ["level1", "level2"], value: "size" })],
+  theme: { style: { inspectionOutline: { stroke: "none" } } },
+});
+```
+
+```python
+outline = hg.StrokeStyle(stroke="none")
+hg.Chart(flare, theme=hg.Theme(style=hg.Style(inspection_outline=outline))).sunburst(
+    path=["level1", "level2"], value="size"
+)
 ```
 
 How labels break into lines is in

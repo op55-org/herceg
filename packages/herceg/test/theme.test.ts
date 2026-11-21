@@ -177,6 +177,35 @@ describe("role styles", () => {
     expect(theme.style.legendLabel.align).toBeUndefined();
   });
 
+  it("outline inspected items in the text color at 2 pixels, unless the theme says", () => {
+    const solid = (stroke: string) => ({ stroke, strokeWidth: 2, dash: [], opacity: 1 });
+    for (const name of ["light", "dark", "high-contrast", "high-contrast-dark"] as const) {
+      const theme = resolveTheme(name);
+      expect(theme.style.inspectionOutline).toEqual(solid(theme.text));
+    }
+    // It follows the text token, and takes the role's changes property by property.
+    expect(resolveTheme({ tokens: { text: "#202020" } }).style.inspectionOutline).toEqual(
+      solid("#202020"),
+    );
+    const own = resolveTheme({ style: { inspectionOutline: { strokeWidth: 1, dash: "--" } } });
+    expect(own.style.inspectionOutline).toEqual({
+      stroke: own.text,
+      strokeWidth: 1,
+      dash: [3.7, 1.6],
+      opacity: 1,
+    });
+    expect(
+      resolveTheme({ style: { inspectionOutline: { stroke: "none" } } }).style.inspectionOutline
+        .stroke,
+    ).toBe("none");
+    // A color of the page's is read as other roles' colors are.
+    const read = resolveTheme(
+      { style: { inspectionOutline: { stroke: "var(--ring, #ff8800)" } } },
+      NO_PAGE,
+    );
+    expect(read.style.inspectionOutline.stroke).toBe("#ff8800");
+  });
+
   it("resolve dash styles, line widths, and box colors", () => {
     const theme = resolveTheme(
       {

@@ -103,6 +103,17 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
   series the tooltip lists ("12 series at 10:00: ..."), again when pressed
   again. What Enter selects is announced as a click's selection is
   ([Selections](#selections)).
+- **What the cursor is on is marked**: a ring around its point on a
+  series, an outline around its item (a slice, sector, node, or stage).
+  The keyboard's outline is always the theme's text color at 2 pixels,
+  whatever `inspectionOutline` says, as its ring is: the role restyles or
+  leaves out the pointer's and the pinned tooltip's outline
+  ([Role styles](styling.md#role-styles)), not the keyboard's. The mark
+  shows as well as the theme's text does against the chart and the item
+  under it, and only while its point or item is in view. It is drawn
+  wherever the cursor is, also where the inspection there reads nothing
+  (beyond `within`), and with `tooltip: false` alone, with no crosshair or
+  tooltip.
 - **The tooltip** stands at the cursor's point, which a ring marks, and
   shows the cursor's series in bold among those it lists. Where that point
   is out of view, it stands at the plot's middle, as in charts that follow
