@@ -163,10 +163,15 @@ describe("counting labels in a race", () => {
           // Mid-transition, the value's right edge is the brand's, the
           // labels' lines aligned to their end. (At rest both are drawn
           // from where they start, by widths the page's canvas measures,
-          // which WebKit's SVG text can differ from by a pixel.)
+          // which WebKit's SVG text can differ from by a pixel.) Both are
+          // drawn from the same end; as painted, Linux's hinted glyph
+          // advances can put an end-anchored line's box up to a pixel
+          // from it.
           if (value.getAttribute("text-anchor") !== "end") continue;
           moving++;
-          expect(Math.abs(right(value) - right(brand)), value.textContent!).toBeLessThan(0.5);
+          const end = (text: SVGTextElement) => Number(text.getAttribute("x"));
+          expect(Math.abs(end(value) - end(brand)), value.textContent!).toBeLessThan(0.01);
+          expect(Math.abs(right(value) - right(brand)), value.textContent!).toBeLessThan(1);
         }
       }
     }
