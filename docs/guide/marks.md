@@ -728,6 +728,10 @@ draws has no place.
 - **Dragging.** A rule at a number or a time with `drag: true` can be
   dragged along its axis, the application keeping or refusing where it is
   dropped ([Dragging rules](interaction.md#dragging-rules)).
+- **Fills.** A region's fill is drawn at `fillOpacity` 0.15 unless it
+  gives one, multiplied by the color's own alpha: a fill of
+  `"rgba(214, 39, 40, 0.12)"` shades at 0.018. To shade at a color's
+  alpha, give `fillOpacity: 1` (Python `fill_opacity=1`).
 - **Outlines.** Regions take `stroke`, `strokeWidth`, and `strokeSides`.
 - **Paint per row.** Regions over a table take `encode`: `color`, `fill`,
   `stroke`, and `opacity` from each row's fields through the chart's
@@ -1022,6 +1026,8 @@ module scope or shared by marks, is typed with that schema: `SchemaOf`
 of the columns `table()` was given, or the schema a table's type holds.
 
 ```ts
+import { custom, type DataDrawContext, type SchemaOf, type Table, table } from "herceg";
+
 const columns = { id: ["C-12", "C-13"], start: [12, 30], end: [40, 52] };
 const forecasts = table(columns);
 type Forecast = SchemaOf<typeof columns>; // or: typeof forecasts extends Table<infer S> ? S : never

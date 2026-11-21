@@ -126,6 +126,10 @@ right.panel("share", title="By region").pie("region", "requests")
   (`{ px: 220 }`, `hg.Pixels(220)`). Tracks size the panels' plots, as
   matplotlib's ratios do: titles, axes, and legends take room beside them.
   Plots line up across a track. `gap` is 12 px by default.
+- **Room left over.** Where a grid's tracks are all pixels and the chart
+  is larger than they need, they start at the top left of the panels'
+  room, after the chart's title and legends there, and what is left stays
+  empty below and to the right. Give a track a weight to take it.
 - **Rooms.** An axis' `room` fixes the depth its ticks and labels take
   beside the plots ([Axes](axes-and-legends.md#axes)): charts in a row
   with `x: { room: 28 }` end their plots at one line, and a panel's own

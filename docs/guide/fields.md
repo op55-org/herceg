@@ -487,6 +487,10 @@ displayOf(fields, { table: requests, field: "trace" }).link(requests, 0);
 // A field by name and kind, of a table by name, as specs name them.
 const quota = [{ match: { table: "quotas", field: "bytes_in" }, label: "Quota" }];
 displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; // "Quota"
+
+// Rules checked once, for many fields: the same displays.
+const compiled = compileFields(fields);
+compiled.displayOf({ table: requests, field: "latency" }).text(66_000); // "1m 6s"
 ```
 
 - `displayOf(fields, of, settings?)` takes a table's field (`{ table,
@@ -504,9 +508,11 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   missing text, without the mappings. `settings.defaultFormat` gives a
   surface's format where neither its own nor the field's applies (grids'
   times, to the second).
-- `compileFields(fields)` checks the rules once and returns their
-  `displayOf`, for application code resolving many fields; charts and
-  grids given its result share the one compilation.
+- `compileFields(fields)` checks the rules once and returns them compiled
+  (`CompiledFields`), for application code resolving many fields. Its
+  `displayOf(of, settings?)` takes what `displayOf` takes after `fields`
+  (above). Charts and grids given the compiled fields share the one
+  compilation.
 - `fieldsOf(table, displays)` writes rules for a table's fields, each
   display typed by its field's kind and checked against the schema, its
   link's `{ field }` parts typed by the table's fields; the rules match
