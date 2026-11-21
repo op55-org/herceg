@@ -51,6 +51,27 @@ export async function collectGarbage(): Promise<void> {
 }
 
 /**
+ * Collects garbage, a frame apart, until none of `refs` holds its object:
+ * ten times between reads of them, at most `rounds` times ten. A
+ * collection may leave some for the next one, under load especially, and
+ * JavaScriptCore keeps what a stale pointer on the stack reaches, which a
+ * later round may no longer find. Reading a reference keeps its object a
+ * while (in Firefox, past many collections), hence the ten between reads.
+ */
+export async function collectUntilGone(
+  refs: readonly WeakRef<object>[],
+  rounds = 4,
+): Promise<void> {
+  for (let round = 0; round < rounds; round++) {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await collectGarbage();
+    }
+    if (refs.every((ref) => ref.deref() === undefined)) return;
+  }
+}
+
+/**
  * Real mouse input, at a point of the page the browser's input lands on
  * (the test's frame is inside it).
  */

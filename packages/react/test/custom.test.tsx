@@ -6,7 +6,7 @@ import { type DataDrawContext, type Chart as HercegChart, type Table, table } fr
 import { act, StrictMode, Suspense, startTransition, use } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { collectGarbage } from "../../herceg/test/browser/helpers.ts";
+import { collectUntilGone } from "../../herceg/test/browser/helpers.ts";
 import { Chart, Custom, Line } from "../src/index.ts";
 
 declare global {
@@ -392,12 +392,7 @@ describe("<Custom>", () => {
     expect(reads.at(-1)!.past).toBe(3);
     // What the marks called is let go of, the test's handle on the chart aside.
     chart = null;
-    // A collection may leave some for the next one, under load especially;
-    // nothing derefs them in between, which would keep them a while.
-    for (let i = 0; i < 10; i++) {
-      await frame();
-      await collectGarbage();
-    }
+    await collectUntilGone(draws);
     expect(draws.filter((ref) => ref.deref() !== undefined)).toEqual([]);
   });
 });

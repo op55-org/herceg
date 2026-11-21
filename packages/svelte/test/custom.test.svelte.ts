@@ -4,7 +4,7 @@
 import type { DataDrawContext, Chart as HercegChart } from "herceg";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { collectGarbage } from "../../herceg/test/browser/helpers.ts";
+import { collectUntilGone } from "../../herceg/test/browser/helpers.ts";
 import Flights from "./Flights.svelte";
 import { type FlightSchema, flights, points } from "./flights.ts";
 import Labels from "./Labels.svelte";
@@ -264,13 +264,8 @@ describe("<Custom>", () => {
     }
     expect(reads.at(-1)!.past).toBe(3);
     vi.useRealTimers();
-    // A collection may leave some for the next one, under load especially;
-    // nothing derefs them in between, which would keep them a while.
-    for (let i = 0; i < 10; i++) {
-      await frame();
-      await collectGarbage();
-    }
     // The last is the mark's, and the component's.
+    await collectUntilGone(made.slice(0, -1));
     expect(made.slice(0, -1).filter((ref) => ref.deref() !== undefined)).toEqual([]);
     expect(made.at(-1)!.deref()).toBeDefined();
   });
@@ -304,10 +299,7 @@ describe("<Custom>", () => {
     mounted = undefined;
     flushSync();
     props.chart = null;
-    for (let i = 0; i < 10; i++) {
-      await frame();
-      await collectGarbage();
-    }
+    await collectUntilGone([chart]);
     expect(chart.deref()).toBeUndefined();
   });
 });

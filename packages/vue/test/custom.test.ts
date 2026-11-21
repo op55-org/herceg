@@ -19,7 +19,7 @@ import {
   ref,
   shallowRef,
 } from "vue";
-import { collectGarbage } from "../../herceg/test/browser/helpers.ts";
+import { collectUntilGone } from "../../herceg/test/browser/helpers.ts";
 import { Chart, Custom, Line } from "../src/index.ts";
 
 let host: HTMLDivElement;
@@ -275,13 +275,8 @@ describe("<Custom>", () => {
     data.replace(0, { end: [50] });
     await frame();
     expect(reads.at(-1)!.past).toBe(3);
-    // What the marks called is let go of, the computed's last aside. A
-    // collection may leave some for the next one, under load especially;
-    // nothing derefs them in between, which would keep them a while.
-    for (let i = 0; i < 10; i++) {
-      await frame();
-      await collectGarbage();
-    }
+    // What the marks called is let go of, the computed's last aside.
+    await collectUntilGone(draws.slice(0, -1));
     expect(draws.slice(0, -1).filter((ref) => ref.deref() !== undefined)).toEqual([]);
   });
 });
