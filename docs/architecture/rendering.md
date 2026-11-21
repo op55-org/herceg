@@ -89,6 +89,23 @@ the tooltip; visually hidden text for assistive technology.
   `height` are both given), and on explicit `render()` and `toSVG()`.
 - Legend entries are rewritten only when what they show changes, and the
   assistive data summary only when data or options change, not on zoom.
+- **Text on the canvas.** A chart on a canvas draws its labels and text
+  marks there with `fillText` (axes and titles stay SVG). No engine keeps
+  more of that text than of the same text in SVG, and what each keeps is
+  bounded however long labels keep changing. So the chart keeps one canvas
+  for its whole life (unlike the [measuring canvas](layout.md#text)):
+  - Chrome's 2D context keeps about 1.7 KB of shaping for each string of
+    its largest frames until the canvas goes. A frame of 5,000 strings
+    keeps 8 MB, where SVG keeps 18 MB for 5,000 `text` elements. Neither
+    `reset()`, a new size, nor clearing frees it sooner. Strings that
+    change from frame to frame do not add up: 300 frames of 500 new labels
+    each keep 1.7 MB. A canvas bar chart race writing 12 new labels a
+    frame (88,000 in 2 minutes), and a streaming line labelling its last
+    value, keep the same Blink heap (under 2.5 MB), JS heap, and process
+    memory as their SVG versions.
+  - Firefox keeps shaped words per font for canvas and SVG text alike.
+    The cache is bounded, and Gecko ages entries out of it.
+  - WebKit keeps nothing that grows.
 
 ## Paint order and picking
 
