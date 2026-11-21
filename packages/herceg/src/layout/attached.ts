@@ -25,11 +25,16 @@
 // too, or are left out where they would cover a label kept before them;
 // they are kept by priority, then series order: those that outrank every
 // label that moves before the movers are placed (and the movers keep off
-// them), the others after. A label moved more than LEADER_MOVE pixels draws
-// a leader back to its point when asked, in its series' color unless the
-// leader's look gives one. The feature compiler places labels with it, and
-// hands it the chart's code it uses (`AttachedKit`), so the line chart's
-// first chunk does not load it.
+// them), the others after. A label whose text, as painted, is more than
+// LEADER_MOVE pixels along y from where it would be painted at its point
+// draws a leader back to its point when asked, in its series' color unless
+// the leader's look gives one: the painted middle of text is where the
+// metrics of the measurer's fonts put it (`paintedMiddle`; a box's, or a
+// label of parts', is its block's). A line's or area's own labels and leaders are `attached`
+// geometry, which paints above grid lines raised over its mark (guides/
+// paint.ts); text following a series paints as text marks do. The feature
+// compiler places labels with it, and hands it the chart's code it uses
+// (`AttachedKit`), so the line chart's first chunk does not load it.
 
 import { leaderDrawingOf } from "../draw/leaders.ts";
 import type { markupOf, n } from "../draw/markup.ts";
@@ -52,7 +57,7 @@ import type { surface } from "../theme.ts";
 import { anchorBlock } from "./block.ts";
 import { LabelBoxes } from "./label-boxes.ts";
 import { separate } from "./separate.ts";
-import type { fitText, TextLines, textItem, textLines } from "./text.ts";
+import type { fitText, MeasuringContext, TextLines, textItem, textLines } from "./text.ts";
 
 /** The chart's code labels are placed and drawn with (see model/guides.ts `GUIDE_KIT`). */
 export interface AttachedKit {
@@ -71,7 +76,7 @@ let leaders: Drawing<SegmentGeometry> | undefined;
 
 /** Pixels between a label inside the plot and its point. */
 const GAP = 4;
-/** Pixels a label moves before it draws a leader back to its point. */
+/** Pixels a label's painted text is from its point before it draws a leader back to it. */
 export const LEADER_MOVE = 6;
 /** Pixels from a point to its leader's start, so the leader does not cover it. */
 const LEADER_GAP = 2;
@@ -93,12 +98,14 @@ export interface LeaderLook {
 
 /**
  * A mark whose series labels are placed: the key its geometry is drawn
- * under, the look of its leaders, and the room its labels outside the plot
- * took left and right in the panel placed last.
+ * under, the look of its leaders, whether they are the mark's own labels
+ * (`attached`: a line's or area's, not text following it), and the room
+ * its labels outside the plot took left and right in the panel placed last.
  */
 export interface LabelOwner {
   readonly key: string;
   readonly leader: LeaderLook | undefined;
+  readonly attached?: boolean | undefined;
   room: [number, number];
 }
 
@@ -125,6 +132,24 @@ export interface AttachedLabel {
   readonly owner: LabelOwner;
   /** Its series' color: its leader's, where the leader's look gives none. */
   readonly color: string;
+}
+
+/**
+ * How far below a line's middle text in `paint` is painted, in CSS pixels:
+ * the middle of its font's box (ascent to descent) about the baseline drawn
+ * half an x-height below the middle, as `baselineDrop` (draw/text-items.ts)
+ * draws it and browsers draw SVG text. The font's metrics are `context`'s;
+ * without one (built-in estimates, supplied fonts, a measurer of one's
+ * own), Arial's (x-height 0.519 em, ascent 0.905 em, descent 0.212 em).
+ * Here, not beside `baselineDrop`, since that module is drawn with at first
+ * frame and this only where labels are placed.
+ */
+export function paintedMiddle(context: MeasuringContext | undefined, paint: TextPaint): number {
+  if (!context) return -0.087 * paint.size;
+  if (context.font !== paint.css) context.font = paint.css;
+  const x = context.measureText("x");
+  // A browser without fonts' boxes (NaN): by the label's block.
+  return (x.actualBoundingBoxAscent + x.fontBoundingBoxDescent - x.fontBoundingBoxAscent) / 2 || 0;
 }
 
 /**
@@ -254,14 +279,17 @@ export function placeAttached(
     }
     boxes.push({ x: extent[0], y: top, width: extent[1] - extent[0], height });
     const look = owner.leader;
-    if (look && Math.abs(top - block.wanted) > LEADER_MOVE) {
+    // How far below its block's middle its text is painted: a box, and parts
+    // of their own sizes, are painted where the block is.
+    const drop = look && !paint.background && !parts ? paintedMiddle(measure.context, paint) : 0;
+    if (look && Math.abs(top - block.wanted + drop) > LEADER_MOVE) {
       const stroke = look.stroke === undefined ? label.color : look.stroke;
       let coords = own.leaders.get(stroke);
       if (!coords) {
         coords = [];
         own.leaders.set(stroke, coords);
       }
-      coords.push(...leaderOf(at, block, align));
+      coords.push(...leaderOf(at, block, align, drop));
     }
   }
   for (const [owner, { items, leaders: byColor }] of drawn) {
@@ -279,6 +307,7 @@ export function placeAttached(
         strokeWidth: look!.strokeWidth,
         coords: Float32Array.from(coords),
         count: coords.length / 4,
+        attached: owner.attached,
       };
       if (look!.dash) segments.dash = look!.dash;
       if (look!.opacity !== undefined) segments.opacity = look!.opacity;
@@ -286,7 +315,13 @@ export function placeAttached(
       k++;
     }
     drawing ??= labelsDrawingOf(textItemMarkup);
-    parts.push({ kind: "labels", draw: drawing, key: owner.key, items } as LabelsGeometry);
+    parts.push({
+      kind: "labels",
+      draw: drawing,
+      key: owner.key,
+      items,
+      attached: owner.attached,
+    } as LabelsGeometry);
     geometry.set(owner, parts);
   }
   return { geometry, boxes };
@@ -316,19 +351,24 @@ interface Block {
   readonly room: readonly [side: 0 | 1, size: number] | undefined;
 }
 
-/** A leader from `at` to the side of `block` facing it: its middle, at the edge its alignment puts nearest. */
+/**
+ * A leader from `at` to the side of `block` facing it, at the edge its
+ * alignment puts nearest: a side at the middle of its text as painted, `drop`
+ * below its block's; a top or bottom at its middle.
+ */
 function leaderOf(
   at: Attachment,
   block: Block,
   align: "start" | "center" | "end",
+  drop: number,
 ): [number, number, number, number] {
   const [from, to] = block.extent;
   const middle = block.top + block.height / 2;
   const [ex, ey] =
     align === "start"
-      ? [from, middle]
+      ? [from, middle + drop]
       : align === "end"
-        ? [to, middle]
+        ? [to, middle + drop]
         : [(from + to) / 2, middle > at.y ? block.top : block.top + block.height];
   const length = Math.hypot(ex - at.x, ey - at.y) || 1;
   return [

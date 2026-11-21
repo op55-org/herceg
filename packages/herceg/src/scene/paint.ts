@@ -5,8 +5,12 @@
 // descriptions, and tooltips keep. Ties keep the order things are listed
 // in: a panel's grid batches before its geometry at the same `zIndex`,
 // batches among themselves as their axes are listed, and geometry as its
-// marks are declared, then as each mark emits it. Picking takes the
-// topmost of the targets the pointer is over. Panels paint one after
+// marks are declared, then as each mark emits it. A mark's own labels and
+// their leaders (`attached` geometry) paint at the higher of its `zIndex`
+// and the panel's highest grid lines', so grid lines raised over a mark
+// never cover its labels, and lift them over marks between the two; text
+// marks keep their own. Picking takes the topmost of the targets the
+// pointer is over, by the same `zIndex`. Panels paint one after
 // another, each its plot's background and then its plan, so a later
 // panel's (an inset's over its parent) go over an earlier one's drawings;
 // only the chart's background is under every panel, and plots' borders,

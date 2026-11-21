@@ -9,9 +9,25 @@ import { haloOf, type ResolvedHalo, type TextPaint } from "../style/style.ts";
 /**
  * Returns the width in CSS pixels of `text` drawn with a CSS `font`: of
  * its widest line, for text "\n" breaks into lines, so a line break never
- * reaches a measurer's fonts (see `widestLine`).
+ * reaches a measurer's fonts (see `widestLine`). `context`, where given, is
+ * what it measures with: a canvas' 2D context, or one describing its fonts
+ * as a canvas would. Leaders of moved labels are judged by where its fonts'
+ * metrics say text is painted (layout/attached.ts `paintedMiddle`).
  */
-export type MeasureText = (text: string, font: string) => number;
+export type MeasureText = ((text: string, font: string) => number) & {
+  context?: MeasuringContext | undefined;
+};
+
+/** What a canvas' 2D context tells of a font: set `font`, then measure. */
+export interface MeasuringContext {
+  font: string;
+  measureText(text: string): {
+    width: number;
+    actualBoundingBoxAscent: number;
+    fontBoundingBoxAscent: number;
+    fontBoundingBoxDescent: number;
+  };
+}
 
 /** The width of `text`'s widest line, each measured by `measure`. */
 export function widestLine(text: string, measure: (line: string) => number): number {
@@ -84,12 +100,9 @@ export const estimateText: MeasureText = (text, font) => {
 };
 
 /** Measures with a 2D canvas context, caching results per font and string. */
-export function canvasMeasurer(context: {
-  font: string;
-  measureText(text: string): { width: number };
-}): MeasureText {
+export function canvasMeasurer(context: MeasuringContext): MeasureText {
   const cache = new Map<string, number>();
-  return (text, font) => {
+  const measure: MeasureText = (text, font) => {
     const key = `${font}|${text}`;
     let width = cache.get(key);
     if (width === undefined) {
@@ -100,6 +113,8 @@ export function canvasMeasurer(context: {
     }
     return width;
   };
+  measure.context = context;
+  return measure;
 }
 
 /** `text` shortened with an ellipsis, if needed, to at most `width` pixels. */

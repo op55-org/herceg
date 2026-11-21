@@ -361,3 +361,19 @@ a series' ends shorten it, and a series with none kept is no layer.
 Streaming stacks still restack only what appends, drops, and late rows
 touch; stacks of fields offset (fill, center, wiggle) only the rows kept.
 See [Areas and stacks](docs/guide/marks.md#areas-and-stacks).
+
+Series labels take `at: "view-start"` and `"view-end"`: where each line,
+as drawn (curves, steps, gaps), crosses the view's edge, so labels at a
+zoomed or panned edge keep the order the lines cross in. `{ value: true }`
+writes the value at the crossing and `{ field }` reads the observation
+drawn nearer it. Text following a series (`from: { mark, at }`), specs,
+Python's `hg.SeriesLabels(at="view-end")`, and the adapters take them.
+Leaders of moved series labels are judged by where the text is painted,
+not by how far its block moved: a label draws one where its painted
+middle is more than 6 pixels from its point, by the font's metrics
+(Helvetica's in PDF, Arial's in static SVG and with supplied fonts). Bar
+value labels and lines' and areas' series labels and leaders paint above
+grid lines raised over their mark (`grid: { zIndex }`), and are picked
+there; text marks keep their own `zIndex`. See [Labels that follow
+series](docs/guide/marks.md#labels-that-follow-series) and [Paint
+order](docs/guide/styling.md#paint-order).

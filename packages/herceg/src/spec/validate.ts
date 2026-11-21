@@ -2541,7 +2541,7 @@ const regionLabel: Check = (v, path) => {
 };
 
 /** Which point of a series a label follows. */
-const labelAt = oneOf("first", "last", "visible-start", "visible-end");
+const labelAt = oneOf("first", "last", "visible-start", "visible-end", "view-start", "view-end");
 /** The edge of a band (`y1` and `y2`, or `x1` and `x2`) labels follow. */
 const bandEdge = oneOf("y1", "y2", "x1", "x2");
 

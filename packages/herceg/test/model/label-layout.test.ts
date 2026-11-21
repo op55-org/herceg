@@ -4,6 +4,7 @@
 // the vocabulary each kind of label refuses.
 import { describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
+import { paintedMiddle } from "../../src/layout/attached.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
@@ -19,6 +20,7 @@ import type {
   Scene,
   SegmentGeometry,
   TextGeometry,
+  TextItem,
 } from "../../src/scene/scene.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
@@ -360,7 +362,9 @@ describe("30 series labels with leaders while streaming", () => {
         expect(item.y - height / 2).toBeGreaterThanOrEqual(plot.y - 1e-6);
         expect(item.y + height / 2).toBeLessThanOrEqual(plot.y + plot.height + 1e-6);
       }
-      const moved = items.filter((item) => Math.abs(item.y - end(item.text)) > 6);
+      // Each name's text painted where the measurer says, against its line's end.
+      const painted = (item: TextItem) => item.y + paintedMiddle(undefined, item.paint);
+      const moved = items.filter((item) => Math.abs(painted(item) - end(item.text)) > 6);
       // One geometry of leaders per color, each leader in its series' color
       // (its name's, here): the one whose label its end is at.
       const leaders = marks.filter((g): g is SegmentGeometry => g.kind === "segments");
@@ -370,7 +374,7 @@ describe("30 series labels with leaders while streaming", () => {
       expect(new Set(leaders.map(({ stroke }) => stroke)).size).toBe(leaders.length);
       for (const { stroke, coords, count } of leaders)
         for (let k = 0; k < count; k++) {
-          const label = moved.find((item) => Math.abs(item.y - coords[k * 4 + 3]!) < 0.5)!;
+          const label = moved.find((item) => Math.abs(painted(item) - coords[k * 4 + 3]!) < 0.5)!;
           expect(stroke).toBe(colors[names.indexOf(label.text)]);
         }
     }

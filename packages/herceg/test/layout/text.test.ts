@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { textItemMarkup } from "../../src/draw/text.ts";
+import { paintedMiddle } from "../../src/layout/attached.ts";
 import { anchorBlock } from "../../src/layout/block.ts";
 import {
   canvasMeasurer,
@@ -10,7 +11,7 @@ import {
   textLines,
 } from "../../src/layout/text.ts";
 import { measurePdfText } from "../../src/render/pdf-fonts.ts";
-import { haloOf, textPaint } from "../../src/style/style.ts";
+import { haloOf, type TextPaint, textPaint } from "../../src/style/style.ts";
 import { resolveTheme } from "../../src/theme.ts";
 
 describe("text estimates", () => {
@@ -156,11 +157,23 @@ describe("text layout", () => {
       font: "",
       measureText(text) {
         seen.push(text);
-        return { width: text.length };
+        return {
+          width: text.length,
+          actualBoundingBoxAscent: 5,
+          fontBoundingBoxAscent: 10,
+          fontBoundingBoxDescent: 3,
+        };
       },
     });
     expect(lines("ab\ncdef\n", "12px x")).toBe(4);
     expect(seen).toEqual(["ab", "cdef", ""]);
+    // Text drawn by its middle, its baseline half an x-height below: the
+    // font's box (10 up, 3 down) a pixel above.
+    const paint = { css: "12px x", size: 12 } as TextPaint;
+    expect(paintedMiddle(lines.context, paint)).toBe(-1);
+    // Without a context, Arial's; PDF's Helvetica drawn 0.35 em above its baseline.
+    expect(paintedMiddle(undefined, paint)).toBeCloseTo(-0.087 * 12, 9);
+    expect(paintedMiddle(measurePdfText.context, paint)).toBeCloseTo(0.0945 * 12, 9);
     for (const measure of [estimateText, measurePdfText])
       expect(measure("ab\nlonger", "12px x")).toBe(measure("longer", "12px x"));
   });

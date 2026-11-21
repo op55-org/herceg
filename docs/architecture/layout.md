@@ -479,6 +479,31 @@ the rows kept but not placed between (and O(log n) for layers), each
 frame; `first` and `last` of a series with `continuity` start from its
 drawn rows, found once per data version. Labels move to another observation as one enters
 or leaves the view, and with their observation's point in between.
+With `view-start` and `view-end`, the label stands where the path the
+frame drew (its `Polyline`, a band's edge the label follows) crosses the
+view's edge along the series' axis, in pixels: runs are walked from the
+path's end (its start, for `view-start`), so a path not in x order is
+labelled at the crossing nearest that end, a gap at the edge at the last
+drawn point before it, and a path ending in view at its end; a crossing
+between two points is solved on the cubic a curve draws there or on the
+segment, a step's vertical segment on the edge giving the point after it.
+The label's observation is the one at the nearer of the two points (a
+step's corner stands for the observation whose level it carries): of an
+edge that drew one point for each position it traced (with steps, a step's
+points), in one run, with no `where` or `continuity`, the point's own by its
+index, so a path back at a point it passed reads the visit it crosses
+beside; else the one the same walk finds drawn at that point's pixels, then
+at its position, comparing 32-bit pixels within their rounding. Failing
+that, the farther point's, then the one beside them inside their run (where
+`where` cuts the line, neither is one: before a cut ending the run, after
+one starting it), else the last drawn in view.
+Traces are not recorded point by point for this: writing positions through
+the reducers' sinks slowed every line drawn after a labelled one. Its value
+is the crossing's pixel read back through the value scale. A run only on
+the view's start edge (a point, a vertical line) is labelled there. Each
+frame this costs the points walked from the path's end to the crossing, a
+bounded walk for the observation, and a `measureText("x")` per moved
+label.
 Content is a list of parts (`writeContent`, `marks/features/content.ts`):
 text, `{ field }` (the observation's), `{ series: true }`, `{ value: true }`
 (the value drawn there), each with a format; bar value labels and
@@ -530,8 +555,14 @@ marks', and text following series) is placed in one call, by its
   those covering one kept: those outranking every moving label before
   the movers are placed, the others after.
 
-Labels moved more than `LEADER_MOVE` (6) pixels draw a leader from their
-point when asked (`LabelOwner.leader`), as segments geometries under the
+Labels whose text, as painted, is more than `LEADER_MOVE` (6) pixels along
+y from where it would be painted at their point draw a leader from it when
+asked (`LabelOwner.leader`). Painters draw a middle-aligned line with its
+baseline half an x-height below its middle; `paintedMiddle` takes the same
+font metrics from the measurer's `context` (the canvas' 2D context, or
+PDF's description of Helvetica; Arial's without one) to find the middle of
+the font's box, so the rule and the painter agree. Boxes and labels of
+parts are judged by their blocks. Leaders are segments geometries under the
 owner's labels: one per color, each leader in its series' color unless
 the leader's look gives a stroke. Annotation leaders (`leadersGeometry`,
 `marks/annotation.ts`) take their rule's stroke or their text's color the

@@ -211,11 +211,11 @@ def test_a_fit_checks_the_color_binding_of_the_estimates_it_draws_alone():
 def test_label_options_are_refused_where_the_chart_methods_refuse_them():
     for call, expected in (
         (
-            lambda: hx.lineplot(DATA, x="t", y="v", labels={"at": "middle"}),
+            lambda: hx.lineplot(DATA, x="t", y="v", labels={"at": "view-middle"}),
             (
                 "labels.at",
-                'lineplot labels.at: expected "first", "last", "visible-start", or '
-                '"visible-end"; received "middle"',
+                'lineplot labels.at: expected "first", "last", "visible-start", '
+                '"visible-end", "view-start", or "view-end"; received "view-middle"',
             ),
         ),
         (

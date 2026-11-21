@@ -324,7 +324,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Seven fixtures, each move checked
+drawing path; it compares no libraries. Eight fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -333,6 +333,7 @@ for its effect:
 | `hover-headings` | `hover-listener`'s chart, its lines' tooltip with heading parts, which every point read writes though the tooltip of eight keeps its place | The rule drawn there |
 | `custom-hover` | One chart of 2,000 custom range items (A2's comets) read `"nearest"`, their tooltip with `content`, `fields`, and a `heading` of the comet's id and category | The tooltip showing the comet under the pointer |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
+| `pan-view-labels` | `pan-labels`' chart labelled where each line crosses the view's start and end (`view-start`, `view-end`) | A frame of the moved view |
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
@@ -358,13 +359,14 @@ the SVG export:
   write them.
 - `custom-hover`: the tooltip showing the comet under the pointer, headed
   by its own heading in builds that write headings.
-- `pan-labels`: the labels the canvas painted since it was last cleared
+- `pan-labels`, `pan-view-labels`: the labels the canvas painted since it was last cleared
   (its `fillText` and halo `strokeText` calls, recorded during check moves
   only) and shown in a screenshot: one naming each series at the view's
   end and one "start" in its color at the view's start. Every label in a
   column, other labels following the series included, stands where the
   layout keeps labels apart (`checks.ts`): from its series' point (its
-  first or last minute in view), each a line of the theme's height and its
+  first or last minute in view; with `view-*`, the line's value at the
+  view's edge, between the minutes around it), each a line of the theme's height and its
   halo below the one before, the sum of squared moves least, within the
   plot.
 - `anchor-pan`: each anchor 8 px above or below its place where it is in

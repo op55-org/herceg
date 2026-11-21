@@ -604,6 +604,7 @@ function compile(
             path: `${path} labels.style`,
           },
           JSON.stringify([where.mark, "labels"]),
+          true,
         ),
       );
     return scope;
@@ -832,6 +833,7 @@ function followingText(
         path: `${where.path} label.style`,
       },
       JSON.stringify([where.mark, "text"]),
+      false,
     ),
   };
 }

@@ -48,6 +48,11 @@ export function paintOrder(
 export function planPanels(panels: readonly Panel[], plans: Map<string, PaintPlan>): void {
   let planned = 0;
   for (const panel of panels) {
+    // Marks' own labels over grid lines raised above them, as picking reads them too.
+    for (const { zIndex } of panel.grids)
+      for (const geometry of panel.marks)
+        if (geometry.attached && (geometry.zIndex ?? 0) < zIndex)
+          (geometry as { zIndex?: number }).zIndex = zIndex;
     const plan = paintOrder(panel.grids, panel.marks, plans.get(panel.key));
     if (plan) {
       plans.set(panel.key, plan);

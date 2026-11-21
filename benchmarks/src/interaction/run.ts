@@ -45,6 +45,7 @@ const FIXTURES: FixtureName[] = [
   "hover-headings",
   "custom-hover",
   "pan-labels",
+  "pan-view-labels",
   "anchor-pan",
   "cross-filter",
   "crosshair-dashboard",

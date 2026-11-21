@@ -1545,6 +1545,7 @@ class ValueLabels {
           draw: labelsDrawing,
           key: `${key}|${stage}`,
           items,
+          attached: true,
         };
         if (record)
           labels.named = {
@@ -1565,6 +1566,7 @@ class ValueLabels {
         kind: "text",
         draw: textDrawing,
         key: `${key}|${stage}`,
+        attached: true,
         fill: group.fill,
         anchor: group.anchor,
         halo,

@@ -11,6 +11,7 @@ import { table } from "../../src/data/table.ts";
 import { estimateText, textLines } from "../../src/layout/text.ts";
 import { columns, inset, panel } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
+import { bar } from "../../src/marks/bar.ts";
 import { Topology } from "../../src/marks/features/continuity.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
@@ -20,12 +21,14 @@ import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
+import { Picker } from "../../src/model/pick.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { num } from "../../src/render/pdf-document.ts";
 import { measurePdfText } from "../../src/render/pdf-fonts.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
+import { eachPainted } from "../../src/scene/paint.ts";
 import type {
   AreaGeometry,
   Geometry,
@@ -38,6 +41,7 @@ import type {
 import type { LabelAt } from "../../src/spec/encoding.ts";
 import { chartError, errorInfo } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { pickKit } from "../helpers/picker.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function model(config: ChartConfig, width = 400, height = 200) {
@@ -1848,5 +1852,387 @@ describe("labels in static exports", () => {
       expect([...pdf.matchAll(painted)].map(([, drawn]) => drawn)).toContain(path);
     }
     for (const label of labelsOf(scene)) expect(pdf).toContain(`(${label.text}) Tj`);
+  });
+});
+
+describe("labels where the line meets the view's edge", () => {
+  const rising = table({ t: [0, 1, 2, 3], v: [0, 10, 20, 30], note: ["a", "b", "c", "d"] });
+  /** The note and value labels at `at` write, outside the plot so they stand at their points' heights. */
+  const parts = (format = ".4~f") =>
+    ({
+      content: [{ field: "note" }, " ", { value: true, format: { number: format } }],
+      place: { outside: true },
+      overlap: "show",
+    }) as const;
+  const written = (config: ChartConfig, width = 400) =>
+    labelsOf(model(config, width).scene(estimateText)).map(({ text }) => text);
+  const config = (
+    at: LabelAt,
+    domain: [number, number],
+    options: { curve?: "linear" | "step" | "step-after" | "step-before" | "monotone" } = {},
+    rows: typeof rising = rising,
+  ): ChartConfig => ({
+    x: { domain, nice: false },
+    y: { domain: [0, 40], nice: false },
+    marks: [line(rows, { x: "t", y: "v", ...options, labels: { at, ...parts() } })],
+  });
+
+  contractTest("labels.attach.view-edge", () => {
+    // Read between the observations around the edge; the nearer one's
+    // fields, the earlier on a tie.
+    expect(written(config("view-end", [0.25, 2.5]))).toEqual(["c 25"]);
+    expect(written(config("view-end", [0.25, 2.6]))).toEqual(["d 26"]);
+    expect(written(config("view-start", [0.25, 2.5]))).toEqual(["a 2.5"]);
+    expect(written(config("view-start", [0.75, 2.5]))).toEqual(["b 7.5"]);
+    // At the line's own end inside the view, its observation's.
+    expect(written(config("view-end", [0.25, 5]))).toEqual(["d 30"]);
+    expect(written(config("view-start", [-1, 2.5]))).toEqual(["a 0"]);
+    // Reversed axes keep the series' order: its end is at the left edge.
+    expect(written(config("view-end", [2.5, 0.25]))).toEqual(["c 25"]);
+    // No observation in view, the line crossing it: still there.
+    expect(written(config("view-end", [1.2, 1.4]))).toEqual(["b 14"]);
+    expect(written(config("visible-end", [1.2, 1.4]))).toEqual([]);
+  });
+
+  it("stands at the crossing's pixel, beside the plot's edge", () => {
+    const chart = model(config("view-end", [0.25, 2.5]));
+    const scene = chart.scene(estimateText);
+    const { plot } = scene.panels[0]!;
+    const [label] = labelsOf(scene);
+    // Its middle at 25's height; outside the plot on the right.
+    expect(label!.y).toBeCloseTo(plot.y + plot.height * (1 - 25 / 40), 3);
+    expect(label!.x).toBeGreaterThan(plot.x + plot.width);
+  });
+
+  it("takes steps as drawn, and the value after a step standing at the edge", () => {
+    const step = (
+      at: LabelAt,
+      domain: [number, number],
+      curve: "step" | "step-after" | "step-before",
+    ) => written(config(at, domain, { curve }));
+    // After the step at t = 2: 20, at c.
+    expect(step("view-end", [0.5, 2], "step-after")).toEqual(["c 20"]);
+    expect(step("view-start", [1, 2.5], "step-after")).toEqual(["b 10"]);
+    // Between steps, the level drawn there, and the fields of the
+    // observation whose level it is (c's, nearer d's position).
+    expect(step("view-start", [0.5, 2], "step-after")).toEqual(["a 0"]);
+    expect(step("view-end", [0.5, 2.6], "step-after")).toEqual(["c 20"]);
+    // Rising before each observation: at t = 1, to c's 20.
+    expect(step("view-end", [0, 1], "step-before")).toEqual(["c 20"]);
+    expect(step("view-start", [1, 3], "step-before")).toEqual(["c 20"]);
+    expect(step("view-end", [0, 1.4], "step-before")).toEqual(["c 20"]);
+    // A step midway between b and c, at the edge: the value after it, and
+    // the fields of the observation it steps to.
+    expect(step("view-end", [0, 1.5], "step")).toEqual(["c 20"]);
+    expect(step("view-start", [1.5, 3], "step")).toEqual(["c 20"]);
+    // Off it, the nearer observation's.
+    expect(step("view-end", [0, 1.4], "step")).toEqual(["b 10"]);
+    expect(step("view-end", [0, 1.6], "step")).toEqual(["c 20"]);
+  });
+
+  it("reads curves as drawn, not between the observations", () => {
+    // Flat either side of t = 1 and t = 2, a monotone curve leaves both
+    // level: at a quarter of the way, 3/16 of the rise, where a straight
+    // line has a quarter.
+    const flat = table({ t: [0, 1, 2, 3], v: [0, 0, 10, 10], note: ["a", "b", "c", "d"] });
+    const at = (curve: "monotone" | "linear") =>
+      written(config("view-end", [0, 1.25], { curve }, flat));
+    const [curved] = at("monotone");
+    expect(curved).toMatch(/^b 1\.56/);
+    expect(at("linear")).toEqual(["b 2.5"]);
+  });
+
+  it("follows a band's edge, and a stack's layer as stacked", () => {
+    const band = table({
+      t: [0, 1, 2, 3],
+      lo: [0, 1, 2, 3],
+      hi: [10, 20, 30, 40],
+      note: ["a", "b", "c", "d"],
+    });
+    const edge = (at: "y1" | "y2") =>
+      written({
+        x: { domain: [0, 2.5], nice: false },
+        y: { domain: [0, 50], nice: false },
+        marks: [
+          area(band, {
+            x: "t",
+            y1: "lo",
+            y2: "hi",
+            labels: { at: "view-end", edge: at, ...parts() },
+          }),
+        ],
+      });
+    expect(edge("y2")).toEqual(["c 35"]);
+    expect(edge("y1")).toEqual(["c 2.5"]);
+    const layers = table({
+      t: [0, 1, 2, 3, 0, 1, 2, 3],
+      v: [1, 1, 1, 1, 1, 2, 3, 4],
+      g: ["a", "a", "a", "a", "b", "b", "b", "b"],
+      note: ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "b3"],
+    });
+    expect(
+      written({
+        x: { domain: [0, 2.5], nice: false },
+        y: { domain: [0, 10], nice: false },
+        marks: [
+          area(layers, {
+            x: "t",
+            y: "v",
+            series: "g",
+            stack: true,
+            labels: { at: "view-end", ...parts() },
+          }),
+        ],
+      }).sort(),
+    ).toEqual(["a2 1", "b2 4.5"]);
+  });
+
+  it("stands at the last point drawn before a gap at the edge", () => {
+    const gap = table({ t: [0, 1, 2, 3], v: [0, 10, Number.NaN, 30], note: ["a", "b", "c", "d"] });
+    expect(written(config("view-end", [0, 2.5], {}, gap))).toEqual(["b 10"]);
+    const left = table({ t: [0, 1, 2, 3], v: [0, Number.NaN, 20, 30], note: ["a", "b", "c", "d"] });
+    expect(written(config("view-start", [0.5, 3], {}, left))).toEqual(["c 20"]);
+  });
+
+  it("takes the crossing nearest the path's end, where positions do not ascend", () => {
+    // Drawn 5 → -3 → 14: it last leaves [0, 10] between -3 and 14, nearer 14.
+    const back = table({ t: [5, -3, 14], v: [10, 20, 37], note: ["p", "q", "r"] });
+    expect(written(config("view-end", [0, 10], {}, back))).toEqual(["r 33"]);
+    expect(written(config("view-start", [0, 10], {}, back))).toEqual(["p 10"]);
+    // Leaving through the left edge last: there.
+    const leftward = table({ t: [5, 14, -2], v: [10, 20, 36], note: ["p", "q", "r"] });
+    expect(written(config("view-end", [0, 10], {}, leftward))).toEqual(["r 34"]);
+    // Back at a position drawn before: the observation the path crosses
+    // beside (b), not the later one there (d).
+    const again = table({ t: [8, 12, 15, 12], v: [10, 20, 30, 40], note: ["a", "b", "c", "d"] });
+    expect(written(config("view-end", [0, 11], {}, again))).toEqual(["b 17.5"]);
+    // Back at the very point: the observation the path passes there then.
+    const same = table({ t: [8, 12, 15, 12], v: [10, 20, 30, 20], note: ["a", "b", "c", "d"] });
+    expect(written(config("view-end", [0, 11], {}, same))).toEqual(["b 17.5"]);
+    // A band's edge the same.
+    const band = table({
+      t: [8, 12, 15, 12],
+      lo: [0, 5, 10, 5],
+      hi: [10, 20, 30, 20],
+      note: ["a", "b", "c", "d"],
+    });
+    expect(
+      written({
+        x: { domain: [0, 11], nice: false },
+        y: { domain: [0, 40], nice: false },
+        marks: [
+          area(band, {
+            x: "t",
+            y1: "lo",
+            y2: "hi",
+            labels: { at: "view-end", edge: "y2", ...parts() },
+          }),
+        ],
+      }),
+    ).toEqual(["b 17.5"]);
+  });
+
+  it("finds observations drawn far off a deeply zoomed plot", () => {
+    // A 0.026-wide view of a line 10 wide: its points some 70,000 pixels
+    // away, where 32-bit pixels are thousandths apart.
+    const wide = table({ t: [0, 10], v: [10, 20], lo: [0, 10], note: ["a", "b"] });
+    const zoomed = (mark: "line" | "band") =>
+      written({
+        x: { domain: [4.987, 5.013], nice: false },
+        y: { domain: [0, 40], nice: false },
+        legend: false,
+        marks: [
+          mark === "line"
+            ? line(wide, { x: "t", y: "v", labels: { at: "view-end", ...parts() } })
+            : area(wide, {
+                x: "t",
+                y1: "lo",
+                y2: "v",
+                labels: { at: "view-end", edge: "y1", ...parts() },
+              }),
+        ],
+      });
+    expect(zoomed("line")).toEqual(["b 15.013"]);
+    expect(zoomed("band")).toEqual(["b 5.013"]);
+  });
+
+  it("stands where `where` ends the line, and on a line only at the view's start", () => {
+    // Cut where v reaches 15, between b and c: the line ends there, b nearest.
+    const cut = (at: LabelAt) =>
+      written({
+        x: { domain: [0, 3], nice: false },
+        y: { domain: [0, 40], nice: false },
+        marks: [
+          line(rising, { x: "t", y: "v", where: col("v").lt(15), labels: { at, ...parts() } }),
+        ],
+      });
+    expect(cut("view-end")).toEqual(["b 15"]);
+    expect(cut("visible-end")).toEqual(["b 10"]);
+    // Cut inside a view holding no observation: the one before the cut.
+    const narrow = (curve: "linear" | "step", domain: [number, number]) =>
+      written({
+        x: { domain, nice: false },
+        y: { domain: [0, 40], nice: false },
+        marks: [
+          line(rising, {
+            x: "t",
+            y: "v",
+            curve,
+            where: col("v").lt(15),
+            labels: { at: "view-end", ...parts() },
+          }),
+        ],
+      });
+    expect(narrow("linear", [1.1, 1.8])).toEqual(["b 15"]);
+    // A step cut at its level, crossed between the cut's corners: b's level.
+    expect(narrow("step", [1.1, 1.4])).toEqual(["b 10"]);
+    // At either edge, the observation inside the cut run: before a cut that
+    // ends it, after one that starts it.
+    const cutStep = (at: LabelAt, where: "below" | "above", domain: [number, number]) =>
+      written({
+        x: { domain, nice: false },
+        y: { domain: [0, 40], nice: false },
+        marks: [
+          line(rising, {
+            x: "t",
+            y: "v",
+            curve: "step",
+            where: where === "below" ? col("v").lt(15) : col("v").gt(15),
+            labels: { at, ...parts() },
+          }),
+        ],
+      });
+    expect(cutStep("view-start", "below", [1.3, 1.4])).toEqual(["b 10"]);
+    expect(cutStep("view-end", "above", [1.6, 1.7])).toEqual(["c 20"]);
+    expect(
+      written({
+        x: { domain: [1.3, 1.4], nice: false },
+        y: { domain: [0, 40], nice: false },
+        marks: [
+          area(rising, {
+            x: "t",
+            y: "v",
+            curve: "step",
+            where: col("v").lt(15),
+            labels: { at: "view-start", ...parts() },
+          }),
+        ],
+      }),
+    ).toEqual(["b 10"]);
+    // A point, and a vertical line, on the view's start edge.
+    const point = table({ t: [0], v: [5], note: ["a"] });
+    expect(written(config("view-start", [0, 10], {}, point))).toEqual(["a 5"]);
+    const upright = table({ t: [0, 0], v: [5, 10], note: ["a", "b"] });
+    expect(written(config("view-start", [0, 10], {}, upright))).toEqual(["a 5"]);
+    expect(written(config("view-end", [0, 10], {}, upright))).toEqual(["b 10"]);
+    // A run standing on the start's edge before a gap is met there, first.
+    const split = table({ t: [0, 1, 2], v: [5, Number.NaN, 10], note: ["a", "b", "c"] });
+    expect(written(config("view-start", [0, 10], {}, split))).toEqual(["a 5"]);
+  });
+
+  it("runs along a line's axis, and is left out where the line meets the edge outside the plot", () => {
+    const upright = table({ y: [0, 1, 2, 3], x: [0, 10, 20, 30], note: ["a", "b", "c", "d"] });
+    expect(
+      written({
+        x: { domain: [0, 40], nice: false },
+        y: { domain: [0.25, 2.5], nice: false },
+        marks: [
+          line(upright, { x: "x", y: "y", orient: "y", labels: { at: "view-end", ...parts() } }),
+        ],
+      }),
+    ).toEqual(["c 25"]);
+    expect(
+      written({ ...config("view-end", [0.25, 2.5]), y: { domain: [0, 20], nice: false } }),
+    ).toEqual([]);
+  });
+
+  it("is refused by name where no place along a series is", () => {
+    expect(refusal(config("view-middle" as LabelAt, [0, 3])).message).toBe(
+      'line (mark 0) labels.at: expected "first", "last", "visible-start", "visible-end", "view-start", or "view-end"; received "view-middle"',
+    );
+  });
+});
+
+describe("attached labels and raised grid lines", () => {
+  const data = table({ c: ["a", "b"], v: [4, 6], t: [0, 1] });
+  /** The chart's one panel: what paints, in order, as zIndex values and the plan give it. */
+  const painted = (config: ChartConfig) => {
+    const scene = model(config, 400, 300).scene(estimateText);
+    const panel = scene.panels[0]!;
+    const order: string[] = [];
+    eachPainted(
+      panel,
+      (batch) => order.push(`grid ${batch.key}`),
+      (g) => order.push(`${g.kind}${g.attached ? " attached" : ""} ${g.zIndex ?? 0}`),
+    );
+    return order;
+  };
+  const bars = (grid?: object, zIndex?: number): ChartConfig => ({
+    y: { grid: grid ?? true },
+    marks: [
+      bar(data, { x: "c", y: "v", labels: true, ...(zIndex === undefined ? {} : { zIndex }) }),
+    ],
+  });
+
+  contractTest("labels.paint.over-grid", () => {
+    // Under grid lines at their default, labels paint with their mark.
+    expect(painted(bars())).toEqual(["grid y", "rect 0", "text attached 0"]);
+    // Raised over the bars, the grid lines stay under the bars' labels.
+    expect(painted(bars({ zIndex: 1 }))).toEqual(["rect 0", "grid y", "text attached 1"]);
+    // A mark above the grid lines keeps its labels with it.
+    expect(painted(bars({ zIndex: 1 }, 2))).toEqual(["grid y", "rect 2", "text attached 2"]);
+  });
+
+  it("lifts a line's labels and leaders, not text following it or text marks", () => {
+    const rows = table({ t: [0, 1, 0, 1], v: [5, 5, 5.1, 5.1], g: ["a", "a", "b", "b"] });
+    const order = painted({
+      y: { domain: [0, 10], grid: { zIndex: 1 } },
+      marks: [
+        line(rows, { id: "l", x: "t", y: "v", series: "g", labels: { at: "last", leader: true } }),
+        text({ from: { mark: "l", at: "first" }, label: "start" }),
+        text({ x: 0.5, y: 2, label: "note" }),
+      ],
+    });
+    expect(order).toEqual([
+      "line 0",
+      "line 0",
+      "labels 0",
+      "text 0",
+      "grid y",
+      // A geometry of leaders per series' color.
+      "segments attached 1",
+      "segments attached 1",
+      "labels attached 1",
+    ]);
+  });
+
+  it("is picked as painted: over a mark between the label and the raised grid lines", () => {
+    const line5 = table({ t: [0, 1], v: [5, 5] });
+    const config = (grid: number): ChartConfig => ({
+      x: { domain: [0, 2], nice: false },
+      y: { domain: [0, 10], nice: false, grid: { zIndex: grid } },
+      marks: [
+        line(line5, {
+          x: "t",
+          y: "v",
+          labels: { at: "last", content: ["WWWWWW"], overlap: "show" },
+        }),
+        point(table({ t: [1.2], v: [5] }), { x: "t", y: "v", radius: 2, zIndex: 0.5 }),
+      ],
+    });
+    const picks = (grid: number) => {
+      const chart = model(config(grid), 400, 300);
+      const scene = chart.scene(estimateText);
+      const [label] = labelsOf(scene);
+      const picker = new Picker(pickKit);
+      // The point, under the label's text.
+      const x = scene.panels[0]!.plot.x + (1.2 / 2) * scene.panels[0]!.plot.width;
+      expect(label!.x).toBeLessThan(x);
+      return picker.pick(chart, { x, y: label!.y, slop: 4 })?.key;
+    };
+    // The point (zIndex 0.5) over the label (0); with grid lines at 1, the
+    // label goes over them both and covers the point.
+    expect(picks(-1)).toBe(1);
+    expect(picks(1)).not.toBe(1);
   });
 });

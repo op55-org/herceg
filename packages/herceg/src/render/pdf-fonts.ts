@@ -132,7 +132,28 @@ export function standardFont(family: string, bold: boolean): PdfFont {
 }
 
 /** Text widths in the standard fonts a PDF draws with: exact, since every viewer has them. */
-export const measurePdfText: MeasureText = (text, font) => {
+const pdfWidth = (text: string, font: string) => {
   const { size, bold, family } = parseFont(font);
   return widestLine(text, (line) => textWidth(encodeText(line), standardFont(family, bold))) * size;
 };
+
+/**
+ * Text widths in the standard fonts a PDF draws with, and the fonts as a
+ * canvas would measure them: Helvetica's box (ascent 0.718 em, descent
+ * 0.207 em) about the baseline PDF draws 0.35 em below a text's middle
+ * (render/pdf.ts), as half an "x" 0.7 em high puts it.
+ */
+export const measurePdfText: MeasureText = /* @__PURE__ */ Object.assign(pdfWidth, {
+  context: {
+    font: "",
+    measureText(this: { font: string }, text: string) {
+      const size = parseFont(this.font).size;
+      return {
+        width: pdfWidth(text, this.font),
+        actualBoundingBoxAscent: 0.7 * size,
+        fontBoundingBoxAscent: 0.718 * size,
+        fontBoundingBoxDescent: 0.207 * size,
+      };
+    },
+  },
+});

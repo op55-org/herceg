@@ -1080,8 +1080,8 @@ def axis_title_spec(value: Any, role: str) -> Any:
 
 
 #: Which point of a series a label follows.
-LabelAt = Literal["first", "last", "visible-start", "visible-end"]
-_LABEL_AT = ("first", "last", "visible-start", "visible-end")
+LabelAt = Literal["first", "last", "visible-start", "visible-end", "view-start", "view-end"]
+_LABEL_AT = ("first", "last", "visible-start", "visible-end", "view-start", "view-end")
 _EDGES = ("y1", "y2", "x1", "x2")
 
 
@@ -1188,7 +1188,9 @@ def _layout_spec(owner: Any) -> dict[str, Any]:
 class SeriesLabels:
     """Labels following each series of a line or area: at the observation
     ``at`` names (its ``"first"`` or ``"last"`` drawn, or its first or last
-    drawn in view, ``"visible-start"`` or ``"visible-end"``), saying
+    drawn in view, ``"visible-start"`` or ``"visible-end"``), or where the
+    line as drawn meets the view's edge (``"view-start"`` or
+    ``"view-end"``; its own end where it ends inside the view), saying
     ``content`` (the series' name by default; see ``hg.LabelPart``), placed
     by ``place`` (an ``hg.LabelPlace``) and styled by ``style``. A band
     (``y1`` and ``y2``) follows the edge ``edge`` names.
@@ -1198,9 +1200,9 @@ class SeriesLabels:
     leaves out the lowest ``priority`` (then the last series) where the plot
     is too short for all; ``"hide"`` leaves out those that would cover
     another; ``"show"`` draws them at their points. ``leader=True`` (or an
-    ``hg.StrokeStyle``) joins labels displaced more than 6 pixels from their
-    places at their points back to them, in their series' colors unless
-    the style gives a ``stroke``."""
+    ``hg.StrokeStyle``) joins labels whose text is painted more than 6
+    pixels from their places at their points back to them, in their series'
+    colors unless the style gives a ``stroke``."""
 
     at: LabelAt
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
