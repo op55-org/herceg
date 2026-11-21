@@ -154,6 +154,14 @@ export interface StyleRoles {
   /** The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. */
   crosshair?: StrokeStyle;
   /**
+   * The outline of the item the pointer or the pinned tooltip is on, in
+   * charts of items (slices, sectors, nodes, stages): the theme's text color
+   * at 2 pixels by default. `stroke: "none"`, a zero width, or a zero opacity
+   * leaves it out. The keyboard's cursor keeps that default whatever this
+   * says, as its ring on series points does, so this cannot hide its focus.
+   */
+  inspectionOutline?: StrokeStyle;
+  /**
    * Brushes and lassos, of charts, maps, and networks, while drawn and
    * after (and a brush that zooms, while drawn): the theme's muted color at
    * `fillOpacity` 0.18 by default. A brush has no outline unless `stroke`

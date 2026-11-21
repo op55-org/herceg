@@ -391,3 +391,18 @@ race with counting labels of parts held 12 MB more than with a text mark,
 most of it after its charts were gone. The measuring canvas is replaced
 every 1,000 strings it measures; widths stay exact (they are the same on
 any canvas of the page), and charts lay out frame for frame as before.
+
+The theme's `inspectionOutline` role (`theme.style.inspectionOutline`, a
+line: `hg.Style(inspection_outline=hg.StrokeStyle(...))` in Python, and
+`theme=` in `herceg.express`; specs, React, Vue, and Svelte through
+`theme`) styles the outline of the slice, sector, node, or stage the
+pointer or the pinned tooltip is on: the text color at 2 pixels by
+default, and nothing with `stroke: "none"`, a zero width, or a zero
+opacity. The keyboard's cursor always draws the default outline, as its
+ring on series points, whatever the role says. It marks its point or
+item wherever it is: also where the inspection there reads nothing
+(beyond `within`, or `snap: "previous"` before a series' first point),
+and with `tooltip: false`, where it draws its outline or ring and
+nothing else. See [Role
+styles](docs/guide/styling.md#role-styles) and
+[Keyboard](docs/guide/accessibility.md#keyboard).

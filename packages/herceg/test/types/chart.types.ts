@@ -40,6 +40,11 @@ chart.update({ marks: [line(data, { x: "x", y: "y" })] });
 chart.update({ marks: undefined });
 // @ts-expect-error options are checked as ever
 chart.update({ theme: "sepia" });
+// The inspected item's outline is a line: none for a reference that draws none.
+chart.update({ theme: { style: { inspectionOutline: { stroke: "none" } } } });
+chart.update({ theme: { style: { inspectionOutline: { strokeWidth: 3, dash: "--" } } } });
+// @ts-expect-error 'fill' does not exist in type 'StrokeStyle'
+chart.update({ theme: { style: { inspectionOutline: { fill: "red" } } } });
 
 // The handle carries no engine state; marks show their spec, not how they draw.
 // @ts-expect-error the model is internal

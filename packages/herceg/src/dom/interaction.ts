@@ -54,6 +54,7 @@ import type {
   PinTarget,
   SeriesReference,
 } from "../spec/state.ts";
+import type { StrokePaint } from "../style/style.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
@@ -396,6 +397,15 @@ const HIDDEN_ENTRY = 0.4;
 const OWN = ({ type }: Binding["action"]) => type !== "orbit" && type !== "moveItem";
 /** A gesture made with no key held. */
 const UNMODIFIED = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+
+/** Paints `element` as a line: its color, width, opacity, and dashes. */
+function stroked(element: SVGElement, { stroke, strokeWidth, opacity, dash }: StrokePaint): void {
+  element.setAttribute("stroke", stroke);
+  element.setAttribute("stroke-width", String(strokeWidth));
+  element.setAttribute("stroke-opacity", String(opacity));
+  if (dash.length > 0) element.setAttribute("stroke-dasharray", dash.join(" "));
+  else element.removeAttribute("stroke-dasharray");
+}
 
 export class Interaction {
   readonly #host: InteractionHost;
@@ -2174,8 +2184,16 @@ export class Interaction {
     const { svgElement, tickLabelGap, surface } = this.#kit;
     const document = host.root.ownerDocument;
     const lines = this.#crosshairs;
-    // Without the tooltip, the pointer's cursor is the application's to draw.
-    const drawn = showTooltip || !own ? shown : [];
+    // Without the tooltip, the pointer's cursor is the application's to
+    // draw. The keyboard's still marks what it is on, its item's outline or
+    // its point's ring, read alone: by itself without the tooltip, or where
+    // the inspection there reads nothing.
+    const keyboard = !this.#pointer && this.#keyboard;
+    const cue =
+      keyboard && (!showTooltip || !active)
+        ? (host.model.inspectItem(keyboard.key, keyboard.panel) ?? this.#keyedPoint())
+        : undefined;
+    const drawn = (showTooltip || !(own ?? cue) ? shown : []).concat(cue ?? []);
     while (lines.length < drawn.length) {
       const line = svgElement(document, "line", { "stroke-width": "1" });
       this.#dots.before(line);
@@ -2195,6 +2213,7 @@ export class Interaction {
       const inspection = drawn[i];
       if (!inspection || inspection.axis === "item") line.setAttribute("visibility", "hidden");
       if (!inspection) continue;
+      const keyed = !this.#pointer && (inspection === active || inspection === cue);
       // What the pointer draws in a panel stays off the insets over it.
       const target = panels.find(({ key }) => key === (inspection.panel ?? "")) ?? panels[0];
       const named = inspection.panel ?? target?.key;
@@ -2205,7 +2224,15 @@ export class Interaction {
         if (cut) this.#outline.setAttribute("clip-path", cut);
         else this.#outline.removeAttribute("clip-path");
         this.#outline.setAttribute("d", inspection.outline);
-        this.#outline.setAttribute("stroke", theme.text);
+        // The theme's role for the pointer and the pin. The keyboard's cursor
+        // keeps the text color at 2 pixels, as its ring does, so no theme
+        // can style its focus away (WCAG 2.4.7).
+        stroked(
+          this.#outline,
+          keyed
+            ? { stroke: theme.text, strokeWidth: 2, dash: [], opacity: 1 }
+            : theme.style.inspectionOutline,
+        );
         this.#outline.setAttribute("visibility", "visible");
         const [item] = inspection.points;
         const at = { x: item!.px, y: item!.py };
@@ -2232,13 +2259,8 @@ export class Interaction {
       line.setAttribute("x2", vertical ? at : String(plot.x + plot.width));
       line.setAttribute("y1", vertical ? String(plot.y) : at);
       line.setAttribute("y2", vertical ? String(plot.y + plot.height) : at);
-      const { stroke, strokeWidth, opacity, dash } = theme.style.crosshair;
-      line.setAttribute("stroke", stroke);
-      line.setAttribute("stroke-width", String(strokeWidth));
-      line.setAttribute("stroke-opacity", String(opacity));
-      if (dash.length > 0) line.setAttribute("stroke-dasharray", dash.join(" "));
-      else line.removeAttribute("stroke-dasharray");
-      line.setAttribute("visibility", "visible");
+      stroked(line, theme.style.crosshair);
+      line.setAttribute("visibility", inspection === cue ? "hidden" : "visible");
       // A bar may end outside the plot; its marker would land on the axes.
       const inside = (point: { px: number; py: number }) =>
         (visible ?? [plot]).some(
@@ -2248,11 +2270,11 @@ export class Interaction {
             point.py >= box.y - 0.5 &&
             point.py <= box.y + box.height + 0.5,
         );
-      for (const point of inspection.points.filter(inside))
-        dots.push([point.px, point.py, point.color, cut || undefined]);
+      if (inspection !== cue)
+        for (const point of inspection.points.filter(inside))
+          dots.push([point.px, point.py, point.color, cut || undefined]);
       // The keyboard cursor's own point is ringed where it is in view.
-      const own =
-        inspection === active && !this.#pointer ? this.#keyedPoint()?.points[0] : undefined;
+      const own = keyed ? this.#keyedPoint()?.points[0] : undefined;
       const ringed = own && inside(own) ? own : undefined;
       if (ringed) {
         this.#ring.setAttribute("cx", String(ringed.px));

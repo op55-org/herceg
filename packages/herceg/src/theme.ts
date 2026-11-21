@@ -28,6 +28,7 @@ export interface ThemeStyles {
   axisLine: StrokePaint;
   tick: StrokePaint;
   crosshair: StrokePaint;
+  inspectionOutline: StrokePaint;
   line: { strokeWidth: number };
   bar: { radius: number };
   tooltip: { fill: string; stroke: string };
@@ -39,6 +40,9 @@ export type ThemeRoles = Readonly<Required<StyleRoles>> & {
   readonly bar: { radius: number };
   readonly tooltip: { fill: string; stroke: string };
 };
+
+/** The roles of lines, which `ROLES` lists together. */
+type StrokeRole = "grid" | "axisLine" | "tick" | "crosshair" | "inspectionOutline";
 
 /** The text roles, which start from the theme's base text. */
 export type TextRole =
@@ -267,6 +271,7 @@ function baseRoles(base: Base, { text, muted, grid, axis }: Required<ThemeTokens
     axisLine: line(axis),
     tick: line(axis),
     crosshair: line(axis),
+    inspectionOutline: { ...line(text), strokeWidth: 2 },
     brush: base.brushOutline ? { stroke: muted } : {},
     line: { strokeWidth: base.lineWidth },
     bar: { radius: base.barRadius },
@@ -319,6 +324,7 @@ const ROLES = [
   "axisLine",
   "tick",
   "crosshair",
+  "inspectionOutline",
   "line",
   "bar",
   "tooltip",
@@ -547,7 +553,8 @@ function paints({ tokens, roles: resolved }: ResolvedTokens): Theme {
   // The base text, then the text roles over it.
   for (const role of ROLES.slice(0, 7) as ("text" | TextRole)[])
     style[role] = textPaint([resolved.text, resolved[role]]);
-  for (const role of ["grid", "axisLine", "tick", "crosshair"] as const)
+  // The lines: grid lines, axis lines, ticks, the crosshair, and the inspected item's outline.
+  for (const role of ROLES.slice(8, 13) as StrokeRole[])
     style[role] = strokePaint([resolved[role]]);
   return {
     ...tokens,

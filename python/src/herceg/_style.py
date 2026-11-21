@@ -494,6 +494,7 @@ _ROLES: dict[str, type[Any]] = {
     "axis_line": StrokeStyle,
     "tick": StrokeStyle,
     "crosshair": StrokeStyle,
+    "inspection_outline": StrokeStyle,
     "brush": PaintStyle,
     "line": LineStyle,
     "bar": BarStyle,
@@ -515,12 +516,15 @@ class Style:
     Text roles (``text``, the base of every text, ``title``, ``panel_title``,
     ``axis_title``, ``tick_label``, ``legend_label``, ``legend_title``) take
     an ``hg.TextStyle``; ``plot`` an ``hg.PlotStyle``; ``grid``,
-    ``axis_line``, ``tick``, and ``crosshair`` (the line the pointer's, the
-    keyboard's, and other charts' cursors draw across a plot) an
-    ``hg.StrokeStyle``; ``brush`` (brushes and lassos, of charts, maps, and
-    networks: the muted color at ``fill_opacity`` 0.18 by default, a lasso
-    outlined in its fill's color at ``stroke_opacity`` 0.6) an
-    ``hg.PaintStyle``; ``line`` an ``hg.LineStyle``, ``bar`` an
+    ``axis_line``, ``tick``, ``crosshair`` (the line the pointer's, the
+    keyboard's, and other charts' cursors draw across a plot), and
+    ``inspection_outline`` (the outline of the slice, sector, node, or stage
+    the pointer or the pinned tooltip is on: the text color at 2 pixels by
+    default, ``stroke="none"`` for none; the keyboard's cursor always keeps
+    that default) an ``hg.StrokeStyle``; ``brush`` (brushes and lassos, of
+    charts, maps, and networks: the muted color at ``fill_opacity`` 0.18 by
+    default, a lasso outlined in its fill's color at ``stroke_opacity`` 0.6)
+    an ``hg.PaintStyle``; ``line`` an ``hg.LineStyle``, ``bar`` an
     ``hg.BarStyle``, and ``tooltip`` an ``hg.TooltipStyle``::
 
         hg.Style(tick_label=hg.TextStyle(color="#555"), grid=hg.StrokeStyle(dash="--"))
@@ -538,6 +542,7 @@ class Style:
     axis_line: StrokeStyle | Mapping[str, Any] | None = None
     tick: StrokeStyle | Mapping[str, Any] | None = None
     crosshair: StrokeStyle | Mapping[str, Any] | None = None
+    inspection_outline: StrokeStyle | Mapping[str, Any] | None = None
     brush: PaintStyle | Mapping[str, Any] | None = None
     line: LineStyle | Mapping[str, Any] | None = None
     bar: BarStyle | Mapping[str, Any] | None = None

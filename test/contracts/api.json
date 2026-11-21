@@ -945,6 +945,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1296,6 +1297,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1313,6 +1315,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1326,6 +1329,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1339,6 +1343,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1357,6 +1362,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },
@@ -1375,6 +1381,7 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text.",
+        "inspection_outline": "As text.",
         "brush": "As text."
       }
     },

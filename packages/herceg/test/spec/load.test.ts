@@ -297,6 +297,22 @@ describe("loadSpec", () => {
       /animation\.values: expected true or false/,
     );
     expect(check({ animation: { duration: 300, values: true }, marks: [] })).not.toThrow();
+    // The inspected item's outline is a line, checked as every line role is.
+    const outline = (style: unknown) =>
+      check({ marks: [], theme: { style: { inspectionOutline: style } } });
+    expect(outline({ stroke: "none" })).not.toThrow();
+    expect(outline({ fill: "red" })).toThrow(
+      "theme.style.inspectionOutline.fill: not a property of herceg's spec format",
+    );
+    expect(outline({ strokeWidth: -1 })).toThrow(
+      "theme.style.inspectionOutline.strokeWidth: expected a number of at least 0; received -1",
+    );
+    expect(outline({ opacity: 2 })).toThrow(
+      "theme.style.inspectionOutline.opacity: expected a number from 0 to 1; received 2",
+    );
+    expect(outline("none")).toThrow(
+      'theme.style.inspectionOutline: expected an object; received "none"',
+    );
     // Valid edge cases the TypeScript API produces still load.
     expect(check({ marks: [{ type: "rule", y: 1, strokeWidth: 0 }] })).not.toThrow();
     expect(check({ x: { type: "time", format: { hour: "2-digit" } }, marks: [] })).not.toThrow();

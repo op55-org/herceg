@@ -8192,6 +8192,11 @@
           "description": "The line the pointer's, the keyboard's, and other charts' cursors draw across a plot.",
           "$ref": "#/$defs/StrokeStyle"
         },
+        "inspectionOutline": {
+          "title": "Inspection outline",
+          "description": "The outline of the item the pointer or the pinned tooltip is on, in charts of items (slices, sectors, nodes, stages): the theme's text color at 2 pixels by default. `stroke: \"none\"`, a zero width, or a zero opacity leaves it out. The keyboard's cursor keeps that default whatever this says, as its ring on series points does, so this cannot hide its focus.",
+          "$ref": "#/$defs/StrokeStyle"
+        },
         "brush": {
           "title": "Brush",
           "description": "Brushes and lassos, of charts, maps, and networks, while drawn and after (and a brush that zooms, while drawn): the theme's muted color at `fillOpacity` 0.18 by default. A brush has no outline unless `stroke` gives one; a lasso's is its fill's color at `strokeOpacity` 0.6 unless `stroke` gives one (`\"none\"` for none). `opacity` scales both.",
