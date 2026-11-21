@@ -148,7 +148,7 @@ hg.AxisOptions(type="log", domain=(1 / 6.5, 6.5), nice=False, ticks=10,
 | --- | --- |
 | Intl options | `Intl.NumberFormat` options on number axes, `Intl.DateTimeFormat` on time axes (Python: a dict of the camelCase names). |
 | `{ number: ",.2f" }` | A d3-format pattern `[sign][,][.precision][~][type]`: sign `-`, `+`, `(`, or space; `,` groups thousands; `~` trims zeros; type `d`, `f`, `e`, `g`, `s` (SI, `"1.5k"`), `%`, or none; precision 1 to 21 significant digits (`g`, `s`, none) or 0 to 20 decimals (`f`, `e`, `%`). Digits and separators are the locale's. |
-| `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`, `%q` the quarter (1 to 4); `%-d` drops padding. |
+| `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`, `%q` the quarter (1 to 4); `%-d` drops padding. Other text is written as it is, so a pattern of text alone (`"★"`) writes the same label at every tick. |
 | `{ time: "FY%y Q%q", fiscal: { start: 7, name? } }` | Years and quarters of a fiscal year starting on the first of month `start`, named by the year it ends in (`name: "end"`, the default) or starts in (`"start"`). Months and days stay the calendar's. |
 | `{ number: ",.0f", prefix: "$", suffix: " req/s" }` | A number pattern with text around the number, inside its sign: "-$1,234", "($1,234)". |
 | `{ duration: "millisecond", maxUnits?, decimals? }` | Lengths of time in the given unit (`"nanosecond"`, `"microsecond"`, `"millisecond"`, `"second"`, `"minute"`, `"hour"`, `"day"`), in their largest units: 66,000 ms is "1m 6s". At most `maxUnits` units (1 to 7, 2 by default), the last with `decimals` (0 to 20, 0 by default). |
@@ -162,6 +162,28 @@ hg.AxisOptions(type="log", domain=(1 / 6.5, 6.5), nice=False, ticks=10,
   apart, so a date-only format uses day ticks. A label still repeating the
   one before is left blank and its tick kept, on automatic and chosen ticks
   alike (`labels: { duplicates: "show" }` writes it).
+- A label of text alone repeats at every tick, so only the first is
+  written unless `duplicates` is `"show"`. To mark chosen days with an
+  icon in place of their numbers, give a layer the days and the icon:
+
+  ```ts
+  axis({
+    scale: "x",
+    layers: [
+      {
+        id: "releases",
+        ticks: { values: releaseDays },
+        format: { time: "★" },
+        labels: { priority: 1, duplicates: "show" },
+      },
+    ],
+  });
+  // Python: hg.TickLayer(id="releases", ticks=hg.Ticks(values=release_days), format=hg.Format(time="★"),
+  //                      labels=hg.TickLabels(priority=1, duplicates="show"))
+  ```
+
+  The layer's labels share the axis' row, and `priority` keeps them where
+  they collide with the day numbers.
 - Specs and Python carry every form but functions, which stay in
   JavaScript; `validateSpec` refuses them with their path.
 - Durations round the last unit, and rounding carries into larger units
@@ -247,6 +269,20 @@ What does not fit a room is left out, never drawn past it:
   not tried (the labels thin instead), and wrapped labels keep the lines
   that fit, the last ending with an ellipsis. Hours over days in a room
   for one row lose the days, so give such axes a room their rows fit.
+- **A row's depth** on an x axis is its deepest label: a line of the
+  labels' `lineHeight` (1.25 × the font size by default, rounded), a
+  turned label's turned height, or for staggered labels
+  (`overlap: "stagger"`) two lanes 2 px apart. Before the first row comes
+  how far labels stand from the axis line:
+  - by default 8 px (0.65 × the font size above 12 px), and the length of
+    outward tick marks past 5 px;
+  - with `labels.gap`, the outward tick marks and the gap.
+
+  Rows after the first add 2 px between them; labels in boxes add their
+  padding and outline, haloed labels their halo. At the default 12 px a
+  row needs 23 px, staggered 40 px. A 16 px room holds a row of 10 px
+  labels (13 px lines) where the outward tick marks and `labels.gap` add
+  up to 3 px or less; the default 8 px gap leaves it out.
 
 An x axis on top needs panels without headers; a y axis on the right
 beside each row's last panel needs rows that share y.
@@ -416,7 +452,7 @@ hg.Chart(df, legend=hg.LegendOptions(place=hg.Place(side="bottom", align="center
 
 | `legend` (Python `hg.LegendOptions`; `hg.legend` in `guides`) | Means |
 | --- | --- |
-| `place` | A side `{ side, align?, offset?, scope?, panel? }`, or inside a plot `{ inside, inset?, scope?, panel? }`: a corner or edge middle (`"top-left"`, `"top"`, ...), `inset` px in (8). Inside takes no room from the plots. |
+| `place` | A side `{ side, align?, offset?, scope?, panel? }`, or inside a plot `{ inside, inset?, scope?, panel? }`: a corner or edge middle (`"top-left"`, `"top"`, ...), `inset` px in (8). On a side, `offset` adds pixels between the legend and the plots: a chart's legend keeps its place at the chart's side and the panels' room shrinks by it ([pixel tracks](layout.md#subplots) keep their size), and a panel's legend (`scope: "panel"`) stands that much further from its plot. Inside takes no room from the plots. |
 | `columns`, `rows` | Entries in a grid of that many columns or rows. |
 | `order` | `"row"` (default with `columns`) or `"column"` (default with `rows`). |
 | `title` | Text, or `{ text, style }`. |

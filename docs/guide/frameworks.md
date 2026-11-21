@@ -232,6 +232,33 @@ A `rowSelection` binding made again each render is the same binding while
 it binds the same stores and channels, so it neither updates nor
 resubscribes the chart.
 
+**An annotation that follows the hover.** State a hover handler sets
+renders when the framework commits it, usually after the chart's frame,
+so a `<Rule x={hovered}>` trails the pointer by a frame. To draw with the
+move, write a table the annotation reads, in the handler: the chart draws
+what a `hover` listener changes in the frame of the move
+([When hover is reported](interaction.md#when-hover-is-reported)).
+
+```tsx
+function Latency() {
+  // One row, kept out of React state: where the rule stands, or missing for none.
+  const cursor = useMemo(() => table({ time: time([null]) }), []);
+  return (
+    <Chart
+      onHover={({ pointer }) => {
+        const at = pointer?.inPlot ? (pointer.values.x ?? null) : null;
+        if (at !== cursor.value("time", 0)) cursor.set("time", 0, at); // write only a change
+      }}
+    >
+      <Line data={metrics} x="time" y="p50" />
+      <Rule data={cursor} x="time" stroke="#888" dash="--" />
+    </Chart>
+  );
+}
+```
+
+Vue and Svelte write the table the same way, from `@hover` and `onhover`.
+
 ## Chart state
 
 The chart's [state options](interaction.md#chart-state), `selection`,

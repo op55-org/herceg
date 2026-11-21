@@ -658,7 +658,8 @@ chart.on("viewport", ({ views, cause }) => cause !== "sync" && save(views));
 chart.on("click", ({ target }) => {
   if (target?.kind === "item" && target.markId === "orders" && target.row !== undefined)
     openOrder(orders.value("id", target.row));
-  if (target?.kind === "axisLabel" && target.layer === "major") zoomToDay(target.value);
+  // y labels are axis labels too: check the scale as well as the layer.
+  if (target?.kind === "axisLabel" && target.scale === "x" && target.layer === "major") zoomToDay(target.value);
 });
 chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer.values));
 ```
@@ -708,10 +709,11 @@ chart.on("select", ({ revision }) => {
 `revision`:
 
 - `pointer`: `x` and `y` in the chart's pixels, the `panel` it is over,
-  `inPlot`, and its `values` on the panel's axes (epoch ms on time axes,
-  through breaks; a fractional band index on category axes, whose
-  `categories` name the band). Undefined for the keyboard and for cursors
-  other charts share.
+  `inPlot`, its `values` on the panel's axes (epoch ms on time axes,
+  through breaks; a fractional band index on category axes), and its
+  `categories`: on category axes, the band it is in, by name
+  (`pointer.categories.x`, `"Mon"`). Undefined for the keyboard and for
+  cursors other charts share.
 - `target`: what input addresses there, picked as described below, by
   `kind`:
 
@@ -829,13 +831,24 @@ Marks with `pick: false` are passed over. Picking loads with the first
 listener of `hover`, `click`, or `contextMenu`, or a row selection taking
 clicks.
 
-**Inspection points.** Each point of an inspection has `mark` (the mark's
-index), `markId`, `key` (an opaque series or item key), `label`, `row`
-(the position of the row in the mark's table, which `table.value(field,
-row)` reads and a `RowSet` adds), and `fields`. Points that are no one row
-(bins, box groups, slices, stages, tree nodes, network and Sankey nodes and
-links) have no `row`. Positions shift as a stream drops rows, so read a row
-in the listener that receives it.
+**Inspection points.** Each point of an inspection (`InspectedPoint`) has:
+
+- `mark` (the mark's index), `markId`, and `key` (an opaque series or
+  item key);
+- `label`, what the tooltip names it by, and `color`, its swatch's;
+- `value`, and `text`, the value as the tooltip writes it;
+- `px` and `py`, where it is drawn, in the chart's pixels;
+- `row`: the position of its row in the mark's table, which
+  `table.value(field, row)` reads and a `RowSet` adds. Points that are no
+  one row (bins, box groups, slices, stages, tree nodes, network and
+  Sankey nodes and links) have none. Positions shift as a stream drops
+  rows, so read a row in the listener that receives it;
+- `fields`, the row's fields its mark's `tooltip.fields` shows;
+- `content` and `heading`, where its mark's tooltip writes them
+  ([Content](#content), [Headings](#headings)): each part's text and
+  style;
+- `names`, for an item of a pie, funnel, treemap, or sunburst: its raw
+  names from the top.
 
 **Keyboard selections.** Shift with the arrow keys selects a range along
 the axis the keys step along; Enter zooms to it where zoom is on; Escape
@@ -921,7 +934,12 @@ const chart = createChart(element, {
   interaction: { select: "series", brush: { shape: "xy", edit: true, clear: "double-click" } },
 });
 chart.on("select", ({ selection, phase }) => {
-  if (phase === "commit" && selection?.kind === "series") showOrigins(selection.series);
+  if (phase !== "commit" || selection?.kind !== "series") return;
+  // Keys, typed with the references `select` takes too: narrow before reading one.
+  const origins = selection.series.map((key) =>
+    typeof key === "string" ? chart.referenceOf("series", key)?.series : key.series,
+  );
+  showOrigins(origins); // ["Europe"]
 });
 chart.select({ kind: "series", series: [{ mark: "cars", series: "Europe" }] });
 ```
@@ -959,6 +977,10 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   without an `id` and for groups of networks, maps, and 3D points. Legend
   entries list theirs (`references` on `getLegend()`'s entries and on
   `legendEntry` targets): a series name an area and a line draw is two.
+- **Reading what was selected.** Reported selections hold keys, but
+  their `series` and `items` are typed as `chart.select` takes them, keys
+  or references: narrow each to a key (`typeof key === "string"`) before
+  `referenceOf` reads it, as the example above does.
 - **Looks.** A mark's `selected` and `unselected` looks (`fill`,
   `stroke`, `strokeWidth`, `dash`, `opacity`, `fillOpacity`,
   `strokeOpacity`, and a point's `radius`) are laid over its paint where

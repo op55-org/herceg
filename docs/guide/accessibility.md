@@ -103,6 +103,12 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
   series the tooltip lists ("12 series at 10:00: ..."), again when pressed
   again. What Enter selects is announced as a click's selection is
   ([Selections](#selections)).
+- **What names a point** is its mark's tooltip. A mark's
+  `tooltip.content` line is read in place of its series' name and value,
+  and where the cursor reads one point, its mark's `tooltip.heading` is
+  read first ("C-12. rates: 21.4 – 22.8 at 21.4"). Give marks content
+  where the name and value alone do not say what a point is
+  ([Content](interaction.md#content)).
 - **What the cursor is on is marked**: a ring around its point on a
   series, an outline around its item (a slice, sector, node, or stage).
   The keyboard's outline is always the theme's text color at 2 pixels,

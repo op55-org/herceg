@@ -55,6 +55,26 @@ accepts only number or time fields, and `series` only category fields;
 position fields may be categories where the mark takes them (points, bars,
 lines along y).
 
+**Columns built by name.** `ColumnInput` is any of these inputs. To build
+columns in a loop, give the record that type, so the table knows its
+fields only at run time: options then take any field name, and marks check
+each one as they are made.
+
+```ts
+import { area, type ColumnInput, table, time } from "herceg";
+
+const columns: Record<string, ColumnInput> = { time: time(hours) };
+bands.forEach((values, band) => {
+  columns[`band${band}`] = values; // a Float64Array per band
+});
+const folded = table(columns);
+area(folded, { x: "time", y: "band0" }); // a field it lacks throws here
+```
+
+A record built without that type (`{ time, ...Object.fromEntries(pairs) }`)
+leaves the table knowing only the fields written out, and options refuse
+the others at compile time.
+
 `fromRows(rows, { types })` converts row objects: `Date` properties become
 time fields, numbers number fields, strings category fields. `types` reads a
 property as another kind (`"time"` for epoch milliseconds or ISO strings,
