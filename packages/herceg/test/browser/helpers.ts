@@ -18,6 +18,7 @@ declare module "vitest/browser" {
     clipboard(text?: string): Promise<string | null>;
     collectGarbage(): Promise<void>;
     forcedColors(active: boolean): Promise<boolean>;
+    heapUsage(): Promise<{ js: number; blink: number } | null>;
     mouse(input: MouseInput): Promise<void>;
   }
 }

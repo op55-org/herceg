@@ -438,6 +438,22 @@ box. Turning the clip off does not grow the chart.
 or [supplied fonts'](export.md#fonts)) measure multi-line text by its
 widest line.
 
+- **The page's canvas.** Charts without supplied fonts measure on a canvas
+  of their document (`dom/measurers.ts`), one measurer per document (an
+  iframe has its own), its widths cached by font and string (cleared past
+  5,000). Chrome's 2D context keeps what it shaped of every distinct string
+  for as long as it lives (1 to 1.6 KB each, near 30 MB before it levels
+  off), and counting labels, streaming values, and moving axes write new
+  strings every frame, so the measurer measures on a new canvas every
+  1,000 strings it measures (`canvasMeasurer`'s `renew`) and the old one
+  goes, with what Chrome kept of it. Widths are the same on any canvas of
+  a document, so the cache keeps them across a replacement. Firefox keeps
+  its shaping per font, bounded and aged out, and WebKit keeps none that
+  grows; replacing costs a canvas (5 to 50 µs) per 1,000 strings there.
+  Faces that supplied fonts register loading in the document
+  (`facesLoaded`) drop the whole measurer; fonts the page loads itself do
+  not.
+
 - **Lines.** `"\n"` breaks a label into lines, kept whole until drawn: SVG
   writes `tspan`s at absolute positions and PDF a run per line, so a line
   break never reaches a font's shaper. `textLines`, `textBox`, and

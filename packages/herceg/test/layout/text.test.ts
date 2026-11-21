@@ -6,6 +6,7 @@ import {
   canvasMeasurer,
   estimateText,
   fontKind,
+  type MeasuringContext,
   textBox,
   textItem,
   textLines,
@@ -176,6 +177,63 @@ describe("text layout", () => {
     expect(paintedMiddle(measurePdfText.context, paint)).toBeCloseTo(0.0945 * 12, 9);
     for (const measure of [estimateText, measurePdfText])
       expect(measure("ab\nlonger", "12px x")).toBe(measure("longer", "12px x"));
+  });
+
+  it("measures on a new context every 1,000 strings, in the font asked for, keeping its widths", () => {
+    // Contexts that measure a line as wide as its length in its font's pixels.
+    const made: { context: MeasuringContext; lines: string[] }[] = [];
+    const context = (): MeasuringContext => {
+      const lines: string[] = [];
+      const own: MeasuringContext = {
+        font: "10px sans-serif",
+        measureText(text) {
+          lines.push(text);
+          return {
+            width: text.length * Number.parseFloat(own.font),
+            actualBoundingBoxAscent: 0,
+            fontBoundingBoxAscent: 0,
+            fontBoundingBoxDescent: 0,
+          };
+        },
+      };
+      made.push({ context: own, lines });
+      return own;
+    };
+    const counts = () => made.map(({ lines }) => lines.length);
+    let refuse = false;
+    const measure = canvasMeasurer(context(), () => (refuse ? null : context()));
+    const strings = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => `line ${from + i}`);
+    for (const line of strings(0, 998)) measure(line, "12px x");
+    // Measured already, a string is the cache's: the context measures nothing.
+    expect(measure("line 0", "12px x")).toBe(6 * 12);
+    // A string of two lines is the context's 999th; the 1,001st is the next
+    // context's, in its font, which fonts' metrics read.
+    expect(measure("a\nbb", "20px x")).toBe(40);
+    measure("line 998", "12px x");
+    expect(counts()).toEqual([1001]);
+    expect(measure("x", "20px x")).toBe(20);
+    expect(counts()).toEqual([1001, 1]);
+    expect(made[1]!.context.font).toBe("20px x");
+    expect(measure.context).toBe(made[1]!.context);
+    for (const line of strings(1000, 999)) measure(line, "12px x");
+    expect(counts()).toEqual([1001, 1000]);
+    // A context the document cannot make leaves the old one measuring 1,000 more.
+    refuse = true;
+    expect(measure("line 2000", "12px x")).toBe(9 * 12);
+    refuse = false;
+    for (const line of strings(2001, 999)) measure(line, "12px x");
+    expect(counts()).toEqual([1001, 2000]);
+    expect(measure("line 3000", "12px x")).toBe(9 * 12);
+    expect(counts()).toEqual([1001, 2000, 1]);
+    expect(measure.context).toBe(made[2]!.context);
+    // Widths measured on an old context stay the cache's.
+    expect(measure("line 5", "12px x")).toBe(6 * 12);
+    expect(counts()).toEqual([1001, 2000, 1]);
+    // Without `renew`, one context measures everything.
+    const one = canvasMeasurer(context());
+    for (const line of strings(0, 2500)) one(line, "12px x");
+    expect(counts().at(-1)).toBe(2500);
   });
 
   it("gives automatic halos the surface's color, whatever the text's, and others their own", () => {

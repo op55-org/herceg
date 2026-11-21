@@ -382,3 +382,12 @@ grid lines raised over their mark (`grid: { zIndex }`), and are picked
 there; text marks keep their own `zIndex`. See [Labels that follow
 series](docs/guide/marks.md#labels-that-follow-series) and [Paint
 order](docs/guide/styling.md#paint-order).
+
+Fixed: pages kept the memory of every distinct string their charts
+measured. Chrome's 2D context keeps what it shaped of each (1 to 1.6 KB,
+about 30 MB before it levels off) for as long as it lives, and each
+document's measuring canvas lived as long as the document, so a bar chart
+race with counting labels of parts held 12 MB more than with a text mark,
+most of it after its charts were gone. The measuring canvas is replaced
+every 1,000 strings it measures; widths stay exact (they are the same on
+any canvas of the page), and charts lay out frame for frame as before.

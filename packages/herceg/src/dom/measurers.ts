@@ -16,12 +16,17 @@ export const roughText: MeasureText = (text, font) =>
 const measurers = new WeakMap<Document, MeasureText>();
 const listeners = new WeakMap<Document, Set<() => void>>();
 
-/** `document`'s canvas measurer, made again after faces load there. */
+/**
+ * `document`'s canvas measurer, made again after faces load there. It
+ * measures on a new canvas every 1,000 strings, so the old one and what
+ * Chrome keeps of its text can go (`canvasMeasurer`).
+ */
 export function measurer(document: Document): MeasureText {
   let measure = measurers.get(document);
   if (!measure) {
-    const context = document.createElement("canvas").getContext("2d");
-    measure = context ? canvasMeasurer(context) : roughText;
+    const canvas = () => document.createElement("canvas").getContext("2d");
+    const context = canvas();
+    measure = context ? canvasMeasurer(context, canvas) : roughText;
     measurers.set(document, measure);
   }
   return measure;
