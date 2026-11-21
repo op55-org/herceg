@@ -430,7 +430,18 @@ const drawnItems = /* @__PURE__ */ new WeakMap<ShapesGeometry, DrawnItems>();
 /** The shapes geometry a plot's last frame drew of a mark, by mark: what inspection reads. */
 const byPlot = /* @__PURE__ */ new WeakMap<PlotRect, Map<Mark, ShapesGeometry>>();
 
-export class CustomMark implements Mark<Frozen<CustomSpec>> {
+/** A custom mark, as `custom` makes it. */
+export interface CustomMark extends ChartMark<Frozen<CustomSpec>> {
+  /**
+   * Says that what `draw` paints has changed, as when it reads state of
+   * the application's own: the charts drawing the mark draw it again.
+   * Values moving keep moving, each frame drawn by `draw` as it is then;
+   * input picks what is drawn anew.
+   */
+  redraw(): void;
+}
+
+class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
   declare readonly [MARK]: true;
   readonly spec: Frozen<CustomSpec>;
   readonly table: Table | undefined;
@@ -466,6 +477,9 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   readonly #draw: (context: DataDrawContext<Schema>) => void;
   readonly #pointText: CustomDataOptions<Schema>["pointText"];
   readonly #description: string | undefined;
+  /** Each chart drawing the mark, told of `redraw()`. */
+  readonly #told = new Set<() => void>();
+  #drawingRevision = 0;
   /** Columns placed on panels' own bands, by column and places, as of a table version. */
   readonly #placedColumns = new WeakMap<
     ArrayLike<number>,
@@ -585,6 +599,20 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   }
 
   #rows: MarkRows | undefined;
+
+  get drawingRevision(): number {
+    return this.#drawingRevision;
+  }
+
+  redraw(): void {
+    this.#drawingRevision++;
+    for (const tell of this.#told) tell();
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#told.add(listener);
+    return () => this.#told.delete(listener);
+  }
 
   /** `values` placed through a panel's own bands, shared by the series and tooltips reading them. */
   #placed = (values: ArrayLike<number>, places: BandPlaces): ArrayLike<number> => {
@@ -957,7 +985,9 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
           grown(clipBox(this.spec.clip, frame)),
         ),
       });
-    if (shapes.length === 0) return [];
+    // In scenes whose values may move, a mark that drew nothing keeps its
+    // place among the panel's, which its frames take after `redraw()`.
+    if (shapes.length === 0 && !frame.keyed) return [];
     return [geometry];
   }
 
@@ -1200,8 +1230,10 @@ function positionOf(s: Series, row: number): number {
  * tooltips; shapes drawn in `item` calls are rows' items, which the
  * pointer picks by shape and selections dim. Over a `RowView`, the
  * series hold the view's rows only, in its order (`draw`'s `table` is the
- * view's table, which rows index). JavaScript only: chart specs (and so
- * the Python package) cannot hold custom marks.
+ * view's table, which rows index). Where `draw` reads state of the
+ * application's own, `redraw()` draws the mark again when it changes.
+ * JavaScript only: chart specs (and so the Python package) cannot hold
+ * custom marks.
  *
  * ```ts
  * custom(forecasts, {
@@ -1225,21 +1257,21 @@ function positionOf(s: Series, row: number): number {
  * })
  * ```
  */
-export function custom(options: CustomOptions): ChartMark<Frozen<CustomSpec>>;
+export function custom(options: CustomOptions): CustomMark;
 export function custom<S extends Schema>(
   data: Table<S> | RowView<S>,
   options: CustomDataOptions<S>,
-): ChartMark<Frozen<CustomSpec>>;
+): CustomMark;
 export function custom<S extends Schema>(
   first: Table<S> | RowView<S> | CustomOptions,
   second?: CustomDataOptions<S>,
-): ChartMark<Frozen<CustomSpec>> {
+): CustomMark {
   const data = second ? (first as Table<S> | RowView<S>) : undefined;
   const view = data && isRowView(data) ? data : undefined;
   const table = view ? view.source : (data as Table<S> | undefined);
   const options = (second ?? first) as CustomDataOptions<S>;
   // Field names were checked against S above; marks work on the erased schema.
-  return new CustomMark(
+  return new CustomShapeMark(
     table as unknown as Table | undefined,
     options as unknown as CustomDataOptions<Schema>,
     view as unknown as RowView | undefined,

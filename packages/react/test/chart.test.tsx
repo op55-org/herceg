@@ -490,7 +490,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       seen.push(options.marks ?? []);
-      update(options);
+      return update(options);
     };
     // Equal props over the same tables keep the mark, and with it the layout.
     act(() => root.render(alone(teams)));
@@ -530,7 +530,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       seen.push(options);
-      update(options);
+      return update(options);
     };
     act(() => root.render(map("mercator")));
     expect(seen).toHaveLength(0);
@@ -679,7 +679,7 @@ describe("<Chart>", () => {
     expect(host.textContent).toContain("peak");
   });
 
-  it("rebuilds custom marks so their draw sees new props", async () => {
+  it("calls the latest draw of a custom mark, which sees new props", async () => {
     const labels = () =>
       [...host.querySelectorAll('[data-kind="shapes"] text')].map((t) => t.textContent);
     const view = (label: string) => (
@@ -833,7 +833,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     // A new binding of the same store and channel is the same binding.
     act(() => root.render(<App tick={2} bound={store} />));
@@ -1033,7 +1033,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     act(() => root.render(view(2)));
     expect(updates).toBe(0);
@@ -1056,7 +1056,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     // A new facet object for the same field is the same option.
     act(() => root.render(<App field="region" />));
@@ -1120,7 +1120,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     // New breaks with the same rules are the same option; other rules are not.
     act(() => root.render(<App days={["sat", "sun"]} />));
@@ -1146,7 +1146,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     act(() => root.render(<App height={40} />));
     expect(updates).toBe(0);
@@ -1169,7 +1169,7 @@ describe("<Chart>", () => {
     const update = chart.update.bind(chart);
     chart.update = (options) => {
       seen.push(options.marks ?? []);
-      update(options);
+      return update(options);
     };
     act(() => root.render(view(3)));
     act(() => root.render(view(4)));
@@ -1239,7 +1239,7 @@ describe("<Chart>", () => {
     const update = ref.current!.update.bind(ref.current);
     ref.current!.update = (options) => {
       updates++;
-      update(options);
+      return update(options);
     };
     act(() => root.render(view({ grid: true, title: "X" })));
     expect(updates).toBe(0);

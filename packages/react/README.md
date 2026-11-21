@@ -45,6 +45,10 @@ export function Latency() {
 - **Live data.** Keep the table outside render (`useMemo`, a ref, module
   scope) and change it directly: `data.appendRow(...)` draws on the next
   frame without rendering React.
+- **Custom marks**: `<Custom draw={...}>` keeps one mark while its other
+  props are the same and calls the `draw` of the last render committed,
+  so an inline `draw` keeps values moving; a `draw` that paints
+  differently shows from the next frame.
 - **Events** are props (`onSelect`, `onViewport`, `onHover`, `onClick`,
   `onContextMenu`, ...); a `ref` gives herceg's chart handle for `setViewport`, `toSVG`,
   and the rest. What `onHover` changes in a table or through the handle

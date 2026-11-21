@@ -423,6 +423,16 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /** The view of `table` whose rows the mark shows, when it shows only some, in its order. */
   readonly view?: RowView | undefined;
   /**
+   * For custom marks: how many times what their `draw` paints has changed
+   * (`redraw()`). Records drawn at another count are not read.
+   */
+  readonly drawingRevision?: number;
+  /**
+   * For custom marks: calls `listener` after each `redraw()`, as a table
+   * calls its listeners after a change. Returns what stops it.
+   */
+  subscribe?(listener: () => void): () => void;
+  /**
    * For marks drawing series of a table: the rows they read now, through
    * which every read of the table goes (marks/rows.ts).
    */

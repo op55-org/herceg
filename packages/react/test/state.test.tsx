@@ -74,7 +74,7 @@ it("writes the selection and the view it reports back, with no loop", () => {
   const update = chart!.update.bind(chart!);
   chart!.update = (options) => {
     updates.push(Object.keys(options));
-    update(options);
+    return update(options);
   };
   const before = renders;
   act(() => chart!.select([1, 2]));

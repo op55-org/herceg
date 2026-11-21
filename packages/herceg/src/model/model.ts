@@ -1244,21 +1244,25 @@ export class ChartModel {
   /**
    * Whether what a scene drew of `mark` is still readable (drawn-mark
    * records' `current`): no later scene has reused its buffers nor has the
-   * model been disposed, the chart's options are these, and every table
-   * and view the mark reads has the version it has now.
+   * model been disposed, the chart's options are these, every table and
+   * view the mark reads has the version it has now, and a custom mark's
+   * `draw` has not changed since (`redraw()`), unless what is read is the
+   * frame on screen (`painted`), whichever `draw` drew it.
    */
-  whileCurrent(mark: ChartMark): () => boolean {
+  whileCurrent(mark: ChartMark): (painted?: boolean) => boolean {
     const epoch = this.#epoch;
     const config = this.#config;
     const tables = tablesOf(mark);
     const versions = tables.map((table) => table.version);
     const view = viewOf(mark);
     const seen = view?.revision;
-    return () =>
+    const drawing = (mark as Mark).drawingRevision;
+    return (painted) =>
       this.#epoch === epoch &&
       this.#config === config &&
       tables.every((table, k) => table.version === versions[k]) &&
-      view?.revision === seen;
+      view?.revision === seen &&
+      (painted || (mark as Mark).drawingRevision === drawing);
   }
 
   /**

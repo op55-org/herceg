@@ -263,6 +263,11 @@ export interface Tween {
   panels: PanelTween[];
   /** How custom marks move (value-custom.ts); undefined for a scene without them. */
   custom: CustomMotion | undefined;
+  /**
+   * A custom mark's `draw` changed since the scene was built: custom marks
+   * that drew nothing join its frames, and it ends on a scene built anew.
+   */
+  redrawn?: boolean;
 }
 
 /** One panel's geometry of a custom mark, which frames draw again. */
@@ -588,7 +593,8 @@ export class ValueAnimation {
     ) {
       this.#ended();
       this.#between = false;
-      if (stale) return undefined;
+      // After a custom mark's `redraw()`, the scene is not what its `draw` paints now.
+      if (stale || tween.redrawn) return undefined;
       this.#keep(scene);
       return scene;
     }
@@ -606,6 +612,11 @@ export class ValueAnimation {
       );
     }
     return frame;
+  }
+
+  /** Hears that what a custom mark's `draw` paints changed (`redraw()`; see `Tween.redrawn`). */
+  redrawn(): void {
+    if (this.#tween) this.#tween.redrawn = true;
   }
 
   /** Forgets the change playing, and the frames' items the pointer read. */
@@ -891,9 +902,12 @@ function movable(panels: readonly Panel[]): boolean {
       items += mark.slices?.items.length ?? (mark.sectors ? countOf(mark.sectors) : 1);
       any = true;
     } else if (mark.kind === "shapes" && (mark as ShapesGeometry).redraw) {
-      // A custom mark draws again for each frame: its rows count as bars do.
-      items += (mark as ShapesGeometry).redraw!.rows;
-      any = true;
+      // A custom mark draws again for each frame: its rows count as bars
+      // do; one that drew nothing, once it draws (see `redrawn`).
+      if ((mark as ShapesGeometry).shapes.length > 0) {
+        items += (mark as ShapesGeometry).redraw!.rows;
+        any = true;
+      }
     } else {
       vertices += mark.draw.size(mark);
       any ||= mark.kind === "segments" || mark.kind === "raster";
@@ -1103,13 +1117,18 @@ function planPanel(
     if (redraw) {
       // A custom mark draws again on the frame's scales, which cannot follow
       // categories changing order in pixels; one shown nothing of (what
-      // moves them had not loaded) shows its new values at once.
+      // moves them had not loaded) shows its new values at once. One that
+      // drew nothing costs nothing until a `draw` changes (`redrawn`), and
+      // then the frame's time; where its frames cannot draw it, it waits
+      // for the change's end.
       const frames = custom?.framesOf(mark);
-      if (reordered || !frames) return undefined;
-      budget.bars += redraw.rows;
-      if (budget.bars > MOVING_ITEMS) return undefined;
-      tween.customs.push({ index, side, frames });
-      moves ||= frames.moves;
+      if ((mark as ShapesGeometry).shapes.length > 0) {
+        if (reordered || !frames) return undefined;
+        budget.bars += redraw.rows;
+        if (budget.bars > MOVING_ITEMS) return undefined;
+        moves ||= frames.moves;
+      }
+      if (frames && !reordered) tween.customs.push({ index, side, frames });
       continue;
     }
     if (named(mark) && !followed(of)) {
@@ -1476,7 +1495,7 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
   const t = progress(tween, elapsed);
   const { scene } = tween;
   const panels = scene.panels.map((panel, i) =>
-    panelAt(panel, tween.panels[i]!, t, tween.builders),
+    panelAt(panel, tween.panels[i]!, t, tween.builders, tween.redrawn),
   );
   // Insets paint panels in an order of their own.
   const moved = new Map(scene.panels.map((panel, i) => [panel, panels[i]!]));
@@ -1484,8 +1503,17 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
   return { ...scene, panels, ...(painted && { painted }) };
 }
 
-/** A panel at eased progress `t` of its tween, `builders` placing its axes. */
-function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders): Panel {
+/**
+ * A panel at eased progress `t` of its tween, `builders` placing its axes;
+ * `redrawn` while a custom mark's `draw` changed since it began.
+ */
+function panelAt(
+  panel: Panel,
+  tween: PanelTween,
+  t: number,
+  builders: Builders,
+  redrawn?: boolean,
+): Panel {
   const { x, y, yRight } = tween.motions;
   const blends = { x: blendAt(x, t), y: blendAt(y, t), yRight: blendAt(yRight, t) };
   const { pie, dial, sunburst } = tween;
@@ -1531,7 +1559,12 @@ function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders)
   const plans = tween.axes && plansAt(tween.axes, t);
   // Custom marks draw again, on the frame's scales.
   for (const custom of tween.customs)
-    marks[custom.index] = custom.frames.at(t, plans?.x?.scale, plans?.[custom.side]?.scale);
+    marks[custom.index] = custom.frames.at(
+      t,
+      plans?.x?.scale,
+      plans?.[custom.side]?.scale,
+      redrawn,
+    );
   let guides = plans && axesAt(panel, tween.axes!, plans);
   // Axes the guides list, laid out over the automatic axes between.
   if (plans && tween.listed) {

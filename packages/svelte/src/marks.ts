@@ -45,6 +45,29 @@ export type CustomProps<T> = { data?: T } & (T extends Table<infer S extends Sch
   ? CustomDataOptions<S>
   : CustomOptions & NoData);
 
+/** What a <Custom> component's mark calls. */
+export type CustomCalls = Pick<CustomDataOptions<Schema>, "draw" | "pointText">;
+
+/**
+ * A <Custom> component's mark: what it calls (`calls`), and what its
+ * component gives now (`latest`, reading its props), which chart.ts
+ * installs once the chart takes the update.
+ */
+export interface HeldCustom {
+  readonly calls: CustomCalls;
+  readonly latest: () => CustomCalls;
+}
+
+const held = /* @__PURE__ */ new WeakMap<ChartMark, HeldCustom>();
+
+/** What `mark` calls, if a <Custom> component made it. */
+export const heldCustom = (mark: ChartMark): HeldCustom | undefined => held.get(mark);
+
+/** Records what a <Custom> component's `mark` calls. */
+export const holdCustom = (mark: ChartMark, custom: HeldCustom): void => {
+  held.set(mark, custom);
+};
+
 /** What a mark component's props were refused for, which its <Chart> shows (or throws). */
 export interface Refused {
   readonly refused: unknown;

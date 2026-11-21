@@ -83,10 +83,16 @@ export class ShownCustom {
     const tables = new Map<object, MovingTable>();
     const frames = new Map<Geometry, CustomFrames>();
     for (const [mark, geometries] of redrawsOf(scene)) {
-      const table = this.#move(geometries, panels, sides, limit);
+      // Geometry that drew nothing moves nothing: after its mark's
+      // `redraw()`, its frames draw the new values.
+      const drew = geometries.filter(({ geometry }) => geometry.shapes.length > 0);
+      const table = drew.length > 0 ? this.#move(drew, panels, sides, limit) : undefined;
       if (table) tables.set(mark, table);
       for (const { geometry } of geometries)
-        frames.set(geometry, new CustomFrames(geometry, table));
+        frames.set(
+          geometry,
+          new CustomFrames(geometry, geometry.shapes.length > 0 ? table : undefined),
+        );
     }
     return new CustomMotion(frames, tables);
   }
@@ -180,10 +186,17 @@ export class CustomFrames {
   /**
    * The geometry at eased progress `t`, on the frame's scales (`x` and
    * `y`; undefined for the scene's): its `draw` again, over the values
-   * between where its rows move.
+   * between where its rows move. Geometry that drew nothing stays so
+   * until a custom mark's `draw` changed (`redrawn`).
    */
-  at(t: number, x: PositionScale | undefined, y: PositionScale | undefined): ShapesGeometry {
+  at(
+    t: number,
+    x: PositionScale | undefined,
+    y: PositionScale | undefined,
+    redrawn?: boolean,
+  ): ShapesGeometry {
     const geometry = this.#geometry;
+    if (!redrawn && geometry.shapes.length === 0) return geometry;
     const drawn = geometry.redraw!.draw(this.#table?.at(t), x, y) ?? { ...geometry, shapes: [] };
     // Painted as the scene's, and counted as it is by a change arriving now.
     const { clip, zIndex, redraw } = geometry;
@@ -228,10 +241,14 @@ export function keepCustom(
   const drawn = new Map<object, Drawn>();
   const redraws = redrawsOf(scene);
   if (redraws.size === 0) return undefined;
-  for (const [mark, geometries] of redraws) {
-    const { table, version } = geometries[0]!.redraw;
-    if (!table || table.version !== version || table.length > limit) continue;
-    const { moving, classes, key } = declared(geometries[0]!.redraw)!;
+  for (const [mark, all] of redraws) {
+    // What drew nothing has nothing to move from.
+    const geometries = all.filter(({ geometry }) => geometry.shapes.length > 0);
+    const redraw = geometries[0]?.redraw;
+    if (!redraw?.table || redraw.table.version !== redraw.version || redraw.table.length > limit)
+      continue;
+    const { table } = redraw;
+    const { moving, classes, key } = declared(redraw)!;
     const need = fields.get(table) ?? { numbers: new Set(), names: new Set() };
     fields.set(table, need);
     for (const field of moving) need.numbers.add(field);

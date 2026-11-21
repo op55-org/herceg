@@ -42,6 +42,11 @@ made per data point.
   your own.
 - **Live data.** Keep the table in a plain variable and change it
   directly: `data.appendRow(...)` draws on the next frame.
+- **Custom marks**: `<Custom {draw}>` keeps one mark while its other props
+  are the same and calls the latest `draw`, so values moving keep moving.
+  Make the draw where it reads state
+  (`const draw = $derived(drawFlights(highlighted))`): reads inside `draw`
+  are not tracked.
 - **Events** are callback props (`onselect`, `onviewport`, `onhover`,
   `onclick`, `oncontextmenu`, ...); `bind:chart` gives herceg's chart handle.
   What `onhover` changes in a table or through the handle draws in the

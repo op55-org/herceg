@@ -142,8 +142,13 @@ export interface InspectOptions extends PanelTarget {
 export interface Chart {
   /** The chart's element, inside the container it was mounted in. */
   readonly root: HTMLDivElement;
-  /** Replaces options (see `ChartUpdate`). Unspecified keys keep their current values. */
-  update(options: ChartUpdate): void;
+  /**
+   * Replaces options (see `ChartUpdate`). Unspecified keys keep their
+   * current values. Returns whether the chart took them: options it refuses
+   * leave it as it was, said in its place and reported (`onError`, "error"
+   * listeners), or thrown with `errorMode: "throw"`.
+   */
+  update(options: ChartUpdate): boolean;
   /**
    * Zooms: each axis given (`x`, `y`, `yRight`) shows a range (epoch ms on
    * time axes), or with null its configured domain or its data; axes left

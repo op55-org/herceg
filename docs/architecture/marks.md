@@ -622,9 +622,31 @@ marks' `DIM`. `encode` compiles through the channels above
 revision. `zero` puts zero in the domain through `Mark.zero`. Since shapes
 between points are unknown, y extents take in the points just past the
 view. Specs hold only the type, id, and series fields, so Python cannot
-make custom marks and adapters rebuild them on every render. Custom marks
+make custom marks. Custom marks
 implement the internal `Mark` interface with a spec of only a type and an
 id (`MarkIdentity`).
+
+**Redrawing.** A custom mark keeps a drawing revision (`drawingRevision`),
+which `redraw()` raises before telling its subscribers: the charts drawing
+it, which subscribe to their custom marks as to their tables. A chart told
+of it counts a revision and draws its next frame; a value transition
+playing draws on (see rendering.md, "Animated values"). Drawn records are
+current only at the revision they were drawn at (`ChartModel.whileCurrent`),
+so input waits for the frame drawing the new `draw`; anchors, which read
+the frame on screen while values move, take its geometry whichever `draw`
+drew it. The adapters' `<Custom>` builds its mark with a `draw` and a
+`pointText` that call those the adapter holds for it. React and Vue build
+marks from elements each render; at commit, marks are matched by place as
+built-in marks are, a `<Custom>`'s mark is kept while the element's other
+props and whether it has a `pointText` (as `canonical` wrote them when it
+was built) are the same. A Svelte mark component owns its mark: `<Custom>`
+builds a new one only when those change, each with a `draw` and a
+`pointText` of its own, and the chart reads the latest with the mark.
+Once the chart takes an update, each kept `<Custom>` mark is given the
+latest `draw` and `pointText`, with `redraw()` when they changed; options
+the chart refuses (`update` returns false), and props a component refuses,
+leave its marks calling what they called. Marks passed
+as `marks` are the same only as themselves.
 
 ## Layout marks
 

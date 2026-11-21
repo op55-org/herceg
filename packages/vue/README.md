@@ -45,6 +45,11 @@ const metrics = table({ time: time(timestamps), p50, p99 });
 - **Live data.** Keep the table in a plain `const`, `shallowRef`, or
   `markRaw` (deep proxies cannot reach its private fields) and change it
   directly: `data.appendRow(...)` draws on the next frame.
+- **Custom marks**: `<Custom :draw="draw">` keeps one mark while its other
+  props are the same and calls the latest `draw`, so values moving keep
+  moving. Make the draw where it reads reactive state
+  (`computed(() => drawFlights(highlighted.value))`): reads inside `draw`
+  are not tracked.
 - **Events** are Vue events (`@select`, `@viewport`, ...); input events
   (`@hover`, `@click`, `@context-menu`) are listener props, which the chart
   listens for only while given. A template ref's `chart` is herceg's chart

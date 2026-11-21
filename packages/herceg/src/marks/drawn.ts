@@ -93,9 +93,12 @@ export interface DrawnMark {
   /**
    * Whether every table and view it read has the version it read, and the
    * chart's options and marks are unchanged: only then are its series'
-   * column views valid and the record readable.
+   * column views valid and the record readable. A custom mark's record is
+   * current only while its `draw` is unchanged (`redraw()`), unless the
+   * caller reads the geometry of the frame on screen (`painted`), as
+   * anchors do while values move.
    */
-  current(): boolean;
+  current(painted?: boolean): boolean;
 }
 
 /**

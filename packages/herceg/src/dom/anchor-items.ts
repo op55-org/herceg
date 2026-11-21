@@ -184,7 +184,9 @@ function boxesOf(
       : part?.kind === "group" && part.key === key;
   for (const drawn of model.drawnMarks()) {
     const { frame, panel } = drawn;
-    if (drawn.mark !== named || !frame || drawn.layout || !drawn.current()) continue;
+    // While values move, the frame on screen is read, as a custom mark's
+    // latest `draw` drew it.
+    if (drawn.mark !== named || !frame || drawn.layout || !drawn.current(!!framed)) continue;
     drawn.geometry.forEach((geometry, g) => {
       const clip = clipBox(geometry.clip ?? geometry.draw.defaultClip ?? "plot", frame);
       const shown = drawn.keep ? within(clip, drawn.keep) : clip;

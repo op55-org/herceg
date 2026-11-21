@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { showFailure } from "../../src/dom/errors.ts";
+import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import { panels } from "../../src/model/panels.ts";
 import { renderToPDF } from "../../src/pdf.ts";
@@ -98,13 +99,18 @@ describe("charts that cannot draw", () => {
     chart.destroy();
   });
 
-  it("keep the last frame under a banner when an update is refused", async () => {
+  it("keep the last frame under a banner when an update is refused, which update returns", async () => {
     const heard: string[] = [];
-    const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
+    const rows = data();
+    const chart = createChart(host, { marks: [line(rows, { x: "t", y: "v" })] });
     await chart.ready;
-    chart.on("error", ({ error }) => heard.push(error.message));
+    // A listener writing to the chart's data does not make the refusal taken.
+    chart.on("error", ({ error }) => {
+      heard.push(error.message);
+      rows.replace(0, { v: [1] });
+    });
     const path = host.querySelector("svg path")!.getAttribute("d");
-    chart.update({ animation: { duration: -1 } });
+    expect(chart.update({ animation: { duration: -1 } })).toBe(false);
     expect(heard).toEqual([expect.stringContaining("expected 0 or more ms")]);
     expect(alert()!.textContent).toMatch(
       /^Chart update failed; showing previous data\.\n.*expected 0 or more ms/,
@@ -113,9 +119,10 @@ describe("charts that cannot draw", () => {
     chart.render();
     expect(host.querySelector("svg path")!.getAttribute("d")).toBe(path);
     expect(chart.root.style.visibility).toBe("");
-    chart.update({ animation: { duration: 100 } });
+    expect(chart.update({ animation: { duration: 100 } })).toBe(true);
     chart.render();
     expect(alert()).toBeNull();
+    expect(chart.update({ selection: null })).toBe(true);
     chart.destroy();
   });
 
@@ -143,6 +150,45 @@ describe("charts that cannot draw", () => {
     rows.reset({ t: [0, 1], v: [1, 2], kind: ["b", "b"], g: ["p", "p"] });
     chart.render();
     expect(alert()).toBeNull();
+    chart.destroy();
+  });
+
+  it("report a custom mark's draw failing after each redraw() that makes it fail", async () => {
+    const errors: ChartError[] = [];
+    let failure: string | undefined;
+    const drawn = custom({
+      draw: ({ text, x, y }) => {
+        if (failure) throw new Error(failure);
+        text(x(1), y(2), "drawn");
+      },
+    });
+    const chart = createChart(host, {
+      x: { domain: [0, 2] },
+      y: { domain: [0, 3] },
+      marks: [drawn],
+      onError: (error) => errors.push(error),
+    });
+    await chart.ready;
+    const messages = () => errors.map((error) => error.message);
+    failure = "first";
+    drawn.redraw();
+    chart.render();
+    expect(messages()).toEqual(["first"]);
+    expect(alert()!.textContent).toContain("first");
+    // Another failing draw is another failure, told of and shown.
+    failure = "second";
+    drawn.redraw();
+    chart.render();
+    expect(messages()).toEqual(["first", "second"]);
+    expect(alert()!.textContent).toContain("second");
+    failure = undefined;
+    drawn.redraw();
+    chart.render();
+    expect(alert()).toBeNull();
+    failure = "third";
+    drawn.redraw();
+    chart.render();
+    expect(messages()).toEqual(["first", "second", "third"]);
     chart.destroy();
   });
 

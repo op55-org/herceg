@@ -178,6 +178,7 @@ export {
 export { type ContourOptions, contour } from "./marks/contour.ts";
 export {
   type CustomDataOptions,
+  type CustomMark,
   type CustomOptions,
   type CustomSeries,
   type CustomSpec,
