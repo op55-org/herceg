@@ -46,6 +46,13 @@ afterEach(() => {
   }
 });
 
+/** Destroys `chart` and its host now, rather than after the test. */
+function unmount(chart: Chart) {
+  charts.splice(charts.indexOf(chart), 1);
+  chart.root.parentElement?.remove();
+  chart.destroy();
+}
+
 async function mount(options: ChartOptions): Promise<Chart> {
   const host = document.createElement("div");
   host.style.cssText = "width:400px;height:300px";
@@ -442,6 +449,10 @@ describe("the keyboard's mark without the tooltip", () => {
           expect(paintOf(outlineOf(chart)), name).toEqual(DEFAULT);
           expect(outlineOf(chart).getAttribute("d"), name).toBe(d);
           expectAlone(chart, name);
+          // Each family's charts go before the next mount, so the page keeps
+          // two charts and their contexts, not ninety.
+          unmount(tipped);
+          unmount(chart);
         }
       for (const listening of [false, true])
         for (const [name, marks] of POINT_FAMILIES) {
@@ -458,6 +469,8 @@ describe("the keyboard's mark without the tooltip", () => {
           expect(ring.getAttribute("stroke"), name).toBe(LIGHT.text);
           expect([ring.getAttribute("cx"), ring.getAttribute("cy")], name).toEqual(at);
           expectAlone(chart, name);
+          unmount(tipped);
+          unmount(chart);
         }
     },
     "with tooltip false, the keyboard's cursor still draws its outline or ring, and nothing else",
