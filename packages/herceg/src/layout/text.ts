@@ -99,13 +99,29 @@ export const estimateText: MeasureText = (text, font) => {
   });
 };
 
-/** Measures with a 2D canvas context, caching results per font and string. */
-export function canvasMeasurer(context: MeasuringContext): MeasureText {
+/**
+ * Measures with a 2D canvas context, caching results per font and string.
+ * With `renew`, a context of the same document, it measures on a new
+ * context every 1,000 strings: Chrome's keeps what it shaped of every
+ * distinct string (1 to 1.6 KB each) for as long as it lives, and counting
+ * or streaming labels write new strings every frame. Widths are the same on
+ * any context of a document, so the cache outlives it.
+ */
+export function canvasMeasurer(
+  context: MeasuringContext,
+  renew?: () => MeasuringContext | null,
+): MeasureText {
   const cache = new Map<string, number>();
+  let measured = 0;
   const measure: MeasureText = (text, font) => {
     const key = `${font}|${text}`;
     let width = cache.get(key);
     if (width === undefined) {
+      // Without a new context, the old one measures 1,000 more.
+      if (renew && ++measured > 1000) {
+        measured = 1;
+        context = measure.context = renew() ?? context;
+      }
       if (context.font !== font) context.font = font;
       width = widestLine(text, (line) => context.measureText(line).width);
       if (cache.size > 5000) cache.clear();

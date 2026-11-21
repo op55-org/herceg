@@ -97,6 +97,23 @@ const collectGarbage: BrowserCommand<[]> = async (context) => {
 };
 
 /**
+ * The page's heaps in bytes once garbage is collected, in Chrome: V8's (`js`)
+ * and Blink's (`blink`, where a 2D context keeps what it shaped of the text it
+ * measured); null in the other engines, which report no heap sizes.
+ */
+const heapUsage: BrowserCommand<[]> = async (context) => {
+  if (context.project.config.browser.name !== "chromium") return null;
+  const session = await context.page.context().newCDPSession(context.page);
+  try {
+    await session.send("HeapProfiler.collectGarbage");
+    const usage = await session.send("Runtime.getHeapUsage");
+    return { js: usage.usedSize, blink: usage.embedderHeapUsedSize };
+  } finally {
+    await session.detach();
+  }
+};
+
+/**
  * herceg's engine bundled into one file, as notebooks and pages that load
  * it from a script embed it: an ES module, or a script setting the global
  * `herceg` ("iife"), its lazily loaded modules inlined.
@@ -143,5 +160,6 @@ export const commands = {
   clipboard,
   collectGarbage,
   forcedColors,
+  heapUsage,
   mouse,
 };
