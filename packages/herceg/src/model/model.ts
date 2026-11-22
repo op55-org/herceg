@@ -2402,6 +2402,8 @@ export class ChartModel {
     // must not squeeze the plots away.
     const edgeRoom = Math.floor(width / 4);
     const widens = hasData && (showX || !!placing);
+    // What the right y labels and the guides' axes there take beside the plots.
+    const rightRoom = rightLabels.room + (beside?.right ?? 0);
     const kept = { left: this.#left, right: this.#right, columnGap: this.#columnGap };
     const placedX = placement?.horizontal({
       width,
@@ -2442,7 +2444,6 @@ export class ChartModel {
         (leftLabels.room && leftLabels.title) +
         (head.auto("left") ? EDGE : 0) +
         (beside?.left ?? 0);
-      const rightRoom = rightLabels.room + (beside?.right ?? 0);
       let to =
         head.right +
         (rightRoom && rightRoom + rightLabels.title) +
@@ -2465,8 +2466,9 @@ export class ChartModel {
           need <= current
             ? current
             : Math.max(current, pass < 3 ? Math.min(need, edgeRoom) : edgeRoom);
-        const over = head.left + (head.auto("left") ? 2 : 0) - end[0];
-        const past = end[1] - (width - head.right - (head.auto("right") ? 2 : 0));
+        // End labels may stand under marks' labels' tracks.
+        const over = head.outerInset[0] + (head.auto("left") ? 2 : 0) - end[0];
+        const past = end[1] - (width - head.outerInset[1] - (head.auto("right") ? 2 : 0));
         const nextFrom = over > 0.5 ? widen(from, from + Math.ceil(over)) : from;
         const nextTo = past > 0.5 ? widen(to, to + Math.ceil(past)) : to;
         if (nextFrom === from && nextTo === to) break;
@@ -2689,7 +2691,7 @@ export class ChartModel {
             plot,
             grid,
             styles.panelTitle(i),
-            rightLabels.room + (beside?.right ?? 0),
+            rightRoom,
             theme.background,
             measure,
             key,
@@ -2742,14 +2744,25 @@ export class ChartModel {
         axes.push(axisGuide(`x|${i}`, "x", placement, ticks, title, measure));
       }
       const rightAt = rightIn[i] ? rightY!.plans[i] : undefined;
+      // What stands beside the plot on each side, as drawn: its y labels and
+      // the guides' axes there, its y titles (below), and what its layout
+      // puts there. Marks' labels outside the plot stand GAP past it.
+      const beyond = [
+        plot.x - (leftLabels.labeled[i] ? leftLabels.reach[i]! + (beside?.lefts[i] ?? 0) : 0),
+        plot.x +
+          plot.width +
+          (rightLabels.labeled[i] ? rightLabels.reach[i]! : 0) +
+          (rightLabels.labeled[i] || beside?.after[i] ? (beside?.rights[i] ?? 0) : 0),
+      ];
       // The y axes: a subplot's title as far out from its plot as the first
       // column's (on the right, the last one's), other charts' once.
       for (const right of [false, true]) {
         const labels = right ? rightLabels : leftLabels;
         if (!labels.labeled[i]) continue;
+        const scale = right ? "yRight" : "y";
         const title =
           config.panels || i === labels.first
-            ? (panelAxis(i, right ? "yRight" : "y")?.title as string | undefined)
+            ? (panelAxis(i, scale)?.title as string | undefined)
             : undefined;
         // At the chart's edge along the plot, or where the panels' layout says.
         const size = labels.titleHeight;
@@ -2764,9 +2777,18 @@ export class ChartModel {
           x: right ? width - head.right - edge : head.left + edge,
           span: [plot.y + plot.height, plot.y] as [number, number],
         };
+        // As painted: a subplot's in its axes' room, titled or not (as tall
+        // as its own lines, which may be fewer than the room's); other
+        // charts' beside every panel at the layout's side.
+        if (config.panels || (labels.title && (placement?.edge(i, right) ?? true))) {
+          const half =
+            (title ? tallest([styles.axisText("axisTitle", scale, i)], [title]) : size) / 2;
+          beyond[+right] = at.x + (right ? half : -half);
+        }
         const plan = right ? rightAt! : yAt;
         axes.push(yAxis(right ? "right" : "left", i, plot, plan, labels.labelsOf(i), title, at));
       }
+      placement?.aside?.(i, plot, beyond);
       // Horizontal grid lines follow the left axis, or the right one where
       // the left is unused, as a subplot's own settings say.
       const gridAt = leftIn[i]
@@ -2797,14 +2819,7 @@ export class ChartModel {
         features: this.#featured,
         chart,
         scaleOf: ownScales && ((name, axis) => ownScales.scale(name, axis, i, plot)),
-        // Beside the first and last columns, marks' labels go in their tracks;
-        // elsewhere, beyond the panel's y labels.
-        outside: [
-          ((placement?.edge(i, false) ?? true) && head.labels[0]) ||
-            plot.x - (leftLabels.labeled[i] ? leftLabels.room : 0) - GAP,
-          ((placement?.edge(i, true) ?? true) && head.labels[1]) ||
-            plot.x + plot.width + (rightLabels.labeled[i] ? rightLabels.room : 0) + GAP,
-        ],
+        outside: [beyond[0]! - GAP, beyond[1]! + GAP],
         highlighted: this.layoutHighlight ?? this.layoutLooks,
         ...this.#pools(i),
       };
@@ -3220,10 +3235,12 @@ export class ChartModel {
         });
       }
     requests.push(...listed.reverse());
+    // The sides the title and legends take room on, marks' labels' tracks apart.
+    const sides = new Set(requests.map((r) => r.side));
     // Marks' labels outside the plots (rules' names, labels following
-    // series) stand innermost, beside the y axes, in tracks that only grow
-    // while the chart's size and settings stay, as margins do, so labels
-    // that follow streaming data do not move the plots back and forth.
+    // series) take room innermost, beside the y axes, in tracks that only
+    // grow while the chart's size and settings stay, as margins do, so
+    // labels that follow streaming data do not move the plots back and forth.
     const same = this.#layoutKey === `${width}x${height}`;
     if (!same) {
       this.#placedRooms = new Map(this.#placedLast);
@@ -3241,7 +3258,7 @@ export class ChartModel {
         });
     });
     const bottomEdge = height - (auto("bottom") ? 4 : pb);
-    const stacked = stackTracks(requests, {
+    const { tracks, edges } = stackTracks(requests, {
       top: auto("top")
         ? title && titleSide === "top"
           ? 6
@@ -3251,8 +3268,6 @@ export class ChartModel {
       left: contentLeft,
       right: contentRight,
     });
-    const { tracks, edges } = stacked;
-    const sides = new Set(requests.map((r) => r.side));
     let { top } = edges;
     // With explicit padding, y labels reaching above the plots get room of
     // their own; labels in boxes get the room their boxes reach further.
@@ -3261,8 +3276,8 @@ export class ChartModel {
     const floor = edges.bottom;
     // Sides padding leaves out are 0 in it.
     const lift = floor < bottomEdge ? height - floor : pb;
-    const left = sides.has("left") ? edges.left : pl;
-    const right = sides.has("right") ? width - edges.right : pr;
+    const left = sides.has("left") || outside[0] ? edges.left : pl;
+    const right = sides.has("right") || outside[1] ? width - edges.right : pr;
     if (title) {
       // In the chart's width, at its start (the default), center, or end;
       // `y` is the middle of the title's room.
@@ -3311,7 +3326,6 @@ export class ChartModel {
           : measured.place(at, alignedAt(align, top, floor - top, measured.height))),
       );
     }
-    const track = (i: number) => tracks.get(`labels${i}`);
     return {
       guides,
       inside,
@@ -3321,7 +3335,11 @@ export class ChartModel {
       lift,
       left,
       right,
-      labels: [outside[0] && track(0)! + outside[0], track(1)],
+      // Where the marks' labels' tracks start, or without them the panels' room.
+      outerInset: [
+        sides.has("left") ? (tracks.get("labels0") ?? edges.left) : pl,
+        sides.has("right") ? width - (tracks.get("labels1") ?? edges.right) - outside[1] : pr,
+      ],
       box: {
         x: (auto("left") ? EDGE : 0) + left,
         y: top,
@@ -3740,8 +3758,12 @@ interface Furniture {
   /** The room beside the plots' axes on each side: padding, a legend, and marks' labels. */
   left: number;
   right: number;
-  /** Where marks' labels outside the plots end on the left and start on the right, in their tracks. */
-  labels: [number | undefined, number | undefined];
+  /**
+   * Of that room, padding's and legends', left and right: the marks'
+   * labels' tracks left out. x end tick labels may stand under those
+   * tracks, so the margin rule keeps them within this.
+   */
+  outerInset: readonly [left: number, right: number];
   /** The room left for a chart of one layout mark, which has no axes. */
   box: Rect;
 }

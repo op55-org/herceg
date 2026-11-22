@@ -234,10 +234,12 @@ export interface Frame {
    */
   clip?: Clip | undefined;
   /**
-   * Where marks' labels outside the plot go: the x where those on the left
-   * end and those on the right start, in the tracks the chart keeps for
-   * them (`Mark.room`) beside its first and last columns, else beyond the
-   * panel's y labels.
+   * Where marks' labels outside the plot go, before their offsets: the x
+   * where those on the left end and those on the right start, a gap past
+   * what stands beside the plot (its y labels, the guides' axes, its y
+   * title as drawn, a grid's row header, a legend beside it at the
+   * layout's side). The chart keeps room for them (`Mark.room`) in tracks
+   * beside its first and last columns, else between columns.
    */
   outside?: readonly [left: number, right: number] | undefined;
   /**

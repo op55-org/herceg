@@ -18,6 +18,9 @@ import {
   yReachOf,
 } from "./panel-layout.ts";
 
+/** Pixels between the last column's right y labels and a grid's row headers beside it. */
+export const HEADER_GAP = 4;
+
 /** The placement of `count` panels in `grid`, refusing panels too small with `remedy` saying what to do. */
 export function uniformPlacement(grid: PanelGrid, count: number, remedy: string): PanelPlacement {
   const { columns, rows, header, columnHeader, rowHeader } = grid;
@@ -34,6 +37,8 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
   let bottom = 0;
   // Each panel's least plot across, for the x labels it writes, as placing them down found.
   let wide: readonly number[] = [];
+  // The room the right y labels and the guides' axes there take, which row headers stand past.
+  let rightRoom = 0;
   /** The least of `count` tracks (rows, or columns), the most its panels need each (see `leastOf`). */
   const tracksLeast = (
     count: number,
@@ -129,7 +134,7 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
       else if (sameLayout) left = Math.max(left, kept.left);
       // The right labels decide the right margin, with a grid's row headers
       // and the right title beyond them.
-      const rightRoom = rightSide.room + (beside?.right ?? 0);
+      rightRoom = rightSide.room + (beside?.right ?? 0);
       let right =
         head.right +
         (rightRoom || rowHeader
@@ -224,18 +229,22 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
           if (!end) continue;
           labeled = true;
           const [firstStart, lastEnd] = end;
+          // At the chart's sides, labels may stand under marks' labels'
+          // tracks (see `AxesState.head`).
           if (column > 0) spillLeft = Math.max(spillLeft, left - firstStart);
           else
             overflowLeft = Math.max(
               overflowLeft,
-              head.left + (head.auto("left") ? 2 : 0) - firstStart,
+              head.outerInset[0] + (head.auto("left") ? 2 : 0) - firstStart,
             );
           if (column < columns - 1)
             spillRight = Math.max(spillRight, lastEnd - (left + widths[column]!));
           else
             overflowRight = Math.max(
               overflowRight,
-              lastEnd + offsets[column]! - (width - head.right - (head.auto("right") ? 2 : 0)),
+              lastEnd +
+                offsets[column]! -
+                (width - head.outerInset[1] - (head.auto("right") ? 2 : 0)),
             );
         }
         if (!labeled) break;
@@ -264,6 +273,12 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
     edge(i, end) {
       const column = i % columns;
       return end ? column === columns - 1 : column === 0;
+    },
+
+    aside(i, plot, beyond) {
+      // A row's header beside its last panel (see `Facet.headers`), short of a right y title.
+      if (rowHeader && i % columns === columns - 1)
+        beyond[1] = Math.max(beyond[1]!, plot.x + plot.width + rightRoom + rowHeader + HEADER_GAP);
     },
 
     yTitle(_i, _plot, right, size, chart) {

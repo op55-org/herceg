@@ -308,7 +308,11 @@ chart's width are shortened with an ellipsis.
 
 An x axis' first or last label that would cross the chart's left or right
 edge widens that side's margin, by up to a quarter of the chart's width,
-and the plots narrow for it. y labels at the plots' top and bottom are
+and the plots narrow for it. A label may stand under the room the chart
+keeps for marks' labels outside the plots (series names, rules' labels):
+only padding and side legends count as the edge there, so names beside the
+plot stay where they are (labels inside the plot can meet them; see
+[labels that would overlap](marks.md#labels-that-would-overlap)). y labels at the plots' top and bottom are
 moved inside the chart instead. Margins grow as labels need and shrink
 only when the chart is resized or its options change, so streamed data,
 zooming, and value transitions do not move the plots back and forth: a
@@ -320,7 +324,7 @@ chart's edge, and does not widen the margin for it:
 - The label is judged as painted: turned, with its box's outline or its
   text's halo past the box's padding on each side.
 - A label that fits in the room the chart has anyway (the y labels'
-  margin, `padding`) stays.
+  margin, `padding`, the room marks' labels outside the plots take) stays.
 - Its tick mark and grid line stay, and its row of labels keeps its depth.
 - Between facets and subplots, a label crossing its plot's side into the
   gap beside it counts as crossing.

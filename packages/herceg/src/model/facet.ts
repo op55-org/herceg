@@ -45,7 +45,7 @@ import {
   typedGroups,
 } from "./panel-layout.ts";
 import { type ScaledConfig, type Scopes, scopesOf } from "./scales.ts";
-import { uniformPlacement } from "./uniform-grid.ts";
+import { HEADER_GAP, uniformPlacement } from "./uniform-grid.ts";
 
 export interface FacetOptions extends FacetLayoutSpec {
   /** Panels per row; by default about as many columns as rows. */
@@ -374,7 +374,7 @@ export class Facet implements PanelLayout {
       }
       if (rowHeader && column === grid.columns - 1) {
         const text = fit(values[0]!, plot.height);
-        const x = plot.x + plot.width + aside + rowHeader / 2 + 4;
+        const x = plot.x + plot.width + aside + rowHeader / 2 + HEADER_GAP;
         // Turned clockwise, the text's start is at the top.
         const { at, anchor } = aligned(align ?? "center", plot.y, plot.height);
         out.push({ text, x, y: at, anchor, angle: 90 });
