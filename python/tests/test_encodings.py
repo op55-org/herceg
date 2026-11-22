@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import herceg as hg
+import herceg.express as hx
 
 SITES = {
     "t": [0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
@@ -219,8 +220,52 @@ def test_bars_group_unless_asked_to_overlap_and_take_outlines_and_label_objects(
         hg.BarLabels(style="percent")
     inside = hg.BarLabels(place=hg.LabelPlace(attachment="center", outside=False))
     assert inside._spec() == {"place": {"attachment": "center", "outside": False}}
-    with pytest.raises(ValueError, match="BarLabels place: bars' labels take attachment"):
+    with pytest.raises(
+        ValueError, match="BarLabels place: bars' labels take attachment, outside, and offset"
+    ):
         hg.BarLabels(place={"side": "top"})
+
+
+@pytest.mark.contract("bar.labels.offset.python")
+def test_bar_labels_stand_their_offset_from_the_bar_or_are_refused():
+    sales = {"month": ["Jan", "Feb"], "v": [3.0, 5.0]}
+    labels = hg.BarLabels(place=hg.LabelPlace(outside=False, offset=6))
+    assert labels._spec() == {"place": {"outside": False, "offset": 6}}
+    chart = hg.Chart(sales).bar(x="month", y="v", labels=labels)
+    assert marks(chart)[0]["labels"] == {"place": {"outside": False, "offset": 6}}
+    # Stacked bars' labels at a segment's end take one.
+    stacked = hg.Chart(sales).bar(
+        x="month",
+        y="v",
+        stack=True,
+        labels=hg.BarLabels(place=hg.LabelPlace(attachment="end", offset=6)),
+    )
+    assert marks(stacked)[0]["labels"]["place"] == {"attachment": "end", "offset": 6}
+    centered = (
+        "centered labels, stacked bars' by default, take no offset; "
+        'attach them at "start" or "end"'
+    )
+    with pytest.raises(hg.ChartError) as error:
+        hg.BarLabels(place=hg.LabelPlace(attachment="center", offset=6))
+    assert str(error.value) == f"BarLabels place offset: {centered}"
+    with pytest.raises(hg.ChartError) as error:
+        hg.BarLabels(place={"offset": -2})
+    assert str(error.value) == (
+        "BarLabels place offset: expected a number of at least 0; received -2"
+    )
+    # The chart's bar builder knows the stack, whose labels are centered by default.
+    with pytest.raises(hg.ChartError) as error:
+        hg.Chart(sales).bar(x="month", y="v", stack=True, labels={"place": {"offset": 6}})
+    assert str(error.value) == f"bar labels place offset: {centered}"
+    assert error.value.path == "marks[0].labels.place.offset"
+    # herceg.express's bars take the same labels.
+    plot = hx.barplot(
+        {"month": ["Jan", "Jan", "Feb"], "v": [3.0, 4.0, 5.0]},
+        x="month",
+        y="v",
+        labels=hg.BarLabels(place=hg.LabelPlace(offset=8)),
+    )
+    assert next(m for m in marks(plot) if m["type"] == "bar")["labels"]["place"] == {"offset": 8}
 
 
 def test_bars_color_by_column_as_series_or_each_bar_with_series_false():

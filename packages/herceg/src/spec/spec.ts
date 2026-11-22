@@ -35,6 +35,7 @@ import type {
   GuideSpec,
   LegendOptionsSpec,
   NumberFormatSpec,
+  Room,
   ScalePadding,
   ScalesSpec,
   TicksSpec,
@@ -667,16 +668,9 @@ export interface AxisSpec {
   /**
    * Pixels the axis' tick marks and labels take beside the plot, its title
    * apart: a fixed room, or bounds on the room its labels need (see the
-   * axis guide's `room`). @minimum 0
+   * axis guide's `room`).
    */
-  room?:
-    | number
-    | {
-        /** @minimum 0 */
-        min?: number;
-        /** @minimum 0 */
-        max?: number;
-      };
+  room?: Room;
   /** How the axis' parts look: its line, ticks, tick labels, title, and grid lines. */
   style?: AxisStyles;
 }

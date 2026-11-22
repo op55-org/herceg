@@ -3,7 +3,9 @@ import { encodedCategory, time } from "../../src/data/column.ts";
 import { geometry } from "../../src/data/geometry.ts";
 import { type Table, table } from "../../src/data/table.ts";
 import { loadSpec, SPEC_VERSION, specToPDF, specToSVG, validateSpec } from "../../src/from-spec.ts";
+import { legend } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
+import { bar } from "../../src/marks/bar.ts";
 import { tablesOf } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
 import { PointMark, point } from "../../src/marks/point.ts";
@@ -193,6 +195,54 @@ describe("loadSpec", () => {
     );
     const viaSpec = specToSVG(spec, [x, y]).replace(/herceg-svg-\d+/g, "chart");
     expect(viaSpec).toBe(direct);
+  });
+
+  it("round trip bars' label offsets and legends' rooms, drawn as the options draw them", () => {
+    const sales = { zone: ["North", "South", "East"], gain: [12, -7, 9] };
+    const spec: ChartSpec = {
+      version: SPEC_VERSION,
+      width: 400,
+      height: 240,
+      locale: "en-US",
+      data: { sales: { columns: sales } },
+      legend: { place: { side: "bottom" }, room: { min: 40 } },
+      guides: [{ type: "legend", place: { side: "right" }, room: 70 }],
+      marks: [
+        {
+          type: "bar",
+          data: "sales",
+          x: "zone",
+          y: "gain",
+          series: "zone",
+          labels: { place: { outside: false, attachment: "start", offset: 6 } },
+        },
+      ],
+    };
+    expect(checkSpec(spec)).toEqual([]);
+    const { config } = loadSpec(JSON.parse(JSON.stringify(spec)));
+    expect(config.legend).toEqual({ place: { side: "bottom" }, room: { min: 40 } });
+    expect(config.marks[0]!.spec).toMatchObject({
+      labels: { place: { outside: false, attachment: "start", offset: 6 } },
+    });
+    const direct = renderToSVG(
+      {
+        width: 400,
+        height: 240,
+        locale: "en-US",
+        legend: { place: { side: "bottom" }, room: { min: 40 } },
+        guides: [legend({ place: { side: "right" }, room: 70 })],
+        marks: [
+          bar(table(sales, { name: "sales" }), {
+            x: "zone",
+            y: "gain",
+            series: "zone",
+            labels: { place: { outside: false, attachment: "start", offset: 6 } },
+          }),
+        ],
+      },
+      { idPrefix: "chart" },
+    );
+    expect(specToSVG(spec).replace(/herceg-svg-\d+/g, "chart")).toBe(direct);
   });
 
   it("never writes to borrowed category codes", () => {

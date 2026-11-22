@@ -876,7 +876,7 @@
         "place": "Python's one hg.AxisOptions serves every axis; y_right refuses place (`Chart y_right place: the right y axis is on the right; drop place`)."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings YAxisSpec hg.AxisOptions": {
@@ -885,7 +885,7 @@
         "seams": "As settings ChartAxisSpec hg.AxisOptions's."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings TooltipSpec hg.Tooltip": {
@@ -918,7 +918,7 @@
         "place": "Python's one hg.AxisOptions serves every axis; y_right refuses place (`Chart y_right place: the right y axis is on the right; drop place`)."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings YAxisOptions hg.AxisOptions": {
@@ -927,7 +927,7 @@
         "seams": "As settings ChartAxisOptions hg.AxisOptions's."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings PanelTitleSpec hg.Title": {
@@ -1179,12 +1179,12 @@
     "settings XAxisConfig hg.AxisOptions": {
       "untyped": {
         "breaks": "TypeScript takes timeBreaks()'s TimeBreaks, an instance; the widget's update() takes hg.Break dataclasses.",
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings XAxisSpec hg.AxisOptions": {
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings ScalesSpec hg.ChannelScale|hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
@@ -1213,7 +1213,7 @@
         "type": "Python's hg.AxisGuide, hg.Colorbar, and hg.LegendGuide are the guide's type."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings GuideOptions hg.AxisGuide|hg.Colorbar|hg.LegendGuide": {
@@ -1221,7 +1221,7 @@
         "type": "Python's hg.AxisGuide, hg.Colorbar, and hg.LegendGuide are the guide's type."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings PanelSpec hg.Panel": {
@@ -1238,9 +1238,13 @@
     },
     "settings BarLabelPlaceSpec hg.LabelPlace": {
       "only": {
-        "side": "Python's one hg.LabelPlace serves bars' and series' labels; bars' refuse the rest (`BarLabels place: bars' labels take attachment and outside; drop side`).",
-        "reserve": "As side.",
-        "offset": "As side."
+        "side": "Python's one hg.LabelPlace serves bars' and series' labels; bars' refuse the rest (`BarLabels place: bars' labels take attachment, outside, and offset; drop side`).",
+        "reserve": "As side."
+      }
+    },
+    "settings LegendOptionsSpec hg.LegendOptions": {
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "chart python title place": {
@@ -1671,7 +1675,7 @@
         "place": "Python's one hg.AxisOptions serves every axis; a panel's refuses place (`Panel x place: a panel's axes are on the chart's sides; give place on the chart's x`)."
       },
       "untyped": {
-        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }.",
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }.",
         "title": "Python's one hg.AxisOptions serves every axis; a panel's refuses a title of parts (`Panel x title: a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis`), as the spec's validator does."
       }
     },

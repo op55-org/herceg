@@ -418,17 +418,7 @@
         "room": {
           "title": "Room",
           "description": "Pixels the axis' tick marks and labels take beside the plot, its title apart: a fixed room, so that the plots of charts and panels line up, or bounds on the room its labels need. A y axis' labels wider than it are shortened with an ellipsis; an x axis' rows of labels that do not fit are left out whole, from the plot outward. Unset, the short form's.",
-          "anyOf": [
-            { "type": "number", "minimum": 0 },
-            {
-              "type": "object",
-              "properties": {
-                "min": { "title": "Min", "type": "number", "minimum": 0 },
-                "max": { "title": "Max", "type": "number", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/Room"
         },
         "style": { "title": "Style", "$ref": "#/$defs/AxisStyles" }
       },
@@ -582,11 +572,24 @@
       "properties": {
         "attachment": {
           "title": "Attachment",
-          "type": "string",
-          "enum": ["start", "center", "end"]
+          "anyOf": [{ "type": "string", "enum": ["start", "end"] }, { "const": "center" }]
         },
-        "outside": { "title": "Outside", "type": "boolean" }
+        "outside": { "title": "Outside", "type": "boolean" },
+        "offset": {
+          "title": "Offset",
+          "description": "Pixels between the label and the edge of its bar it stands at: past the end, from the end outward; inside, from the end or the root inward. Labels centered in their bar take none, nor do stacked bars' unless attached at \"start\" or \"end\".",
+          "type": "number",
+          "default": 4,
+          "minimum": 0
+        }
       },
+      "anyOf": [
+        { "properties": { "attachment": { "type": "string", "enum": ["start", "end"] } } },
+        {
+          "required": ["attachment"],
+          "properties": { "attachment": { "const": "center" }, "offset": false }
+        }
+      ],
       "additionalProperties": false
     },
     "BarLabelsSpec": {
@@ -2277,17 +2280,7 @@
         "room": {
           "title": "Room",
           "description": "Pixels the axis' tick marks and labels take beside the plot, its title apart: a fixed room, or bounds on the room its labels need (see the axis guide's `room`).",
-          "anyOf": [
-            { "type": "number", "minimum": 0 },
-            {
-              "type": "object",
-              "properties": {
-                "min": { "title": "Min", "type": "number", "minimum": 0 },
-                "max": { "title": "Max", "type": "number", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/Room"
         },
         "style": {
           "title": "Style",
@@ -5278,6 +5271,11 @@
           "description": "Swatches that look like the marks: a dashed line for a dashed line, a symbol for points.",
           "const": "mark"
         },
+        "room": {
+          "title": "Room",
+          "description": "Pixels the legend takes on its side, in place of what its entries measure (above or below the plots its height, beside them its width), so that plots line up whether a legend wraps or not; or bounds on what they measure. The gap to the plots and `place.offset` come on top. A legend deeper than its room is drawn whole, from its side's edge toward the plots. Not with a place inside a plot, which takes no room.",
+          "$ref": "#/$defs/Room"
+        },
         "style": { "title": "Style", "$ref": "#/$defs/LegendStyles" },
         "action": {
           "title": "Action",
@@ -5337,6 +5335,11 @@
           "title": "Swatches",
           "description": "Swatches that look like the marks: a dashed line for a dashed line, a symbol for points.",
           "const": "mark"
+        },
+        "room": {
+          "title": "Room",
+          "description": "Pixels the legend takes on its side, in place of what its entries measure (above or below the plots its height, beside them its width), so that plots line up whether a legend wraps or not; or bounds on what they measure. The gap to the plots and `place.offset` come on top. A legend deeper than its room is drawn whole, from its side's edge toward the plots. Not with a place inside a plot, which takes no room.",
+          "$ref": "#/$defs/Room"
         },
         "style": { "title": "Style", "$ref": "#/$defs/LegendStyles" },
         "action": {
@@ -6210,17 +6213,7 @@
         "room": {
           "title": "Room",
           "description": "Pixels the axis' tick marks and labels take beside the plot, its title apart: a fixed room, or bounds on the room its labels need (see the axis guide's `room`).",
-          "anyOf": [
-            { "type": "number", "minimum": 0 },
-            {
-              "type": "object",
-              "properties": {
-                "min": { "title": "Min", "type": "number", "minimum": 0 },
-                "max": { "title": "Max", "type": "number", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/Room"
         },
         "style": {
           "title": "Style",
@@ -7223,6 +7216,20 @@
       },
       "required": ["op", "field", "as"],
       "additionalProperties": false
+    },
+    "Room": {
+      "description": "Pixels a guide takes beside the plots: a fixed room, so that the plots of charts and panels line up, or bounds on what it needs (`{ min: 40 }`). Axes and legends take it.",
+      "anyOf": [
+        { "type": "number", "minimum": 0 },
+        {
+          "type": "object",
+          "properties": {
+            "min": { "title": "Min", "type": "number", "minimum": 0 },
+            "max": { "title": "Max", "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "RowChannelList<number, minimum 0, maximum 1>": {
       "description": "Row channels tried in order (see `ChannelsSpec`).",
@@ -10016,17 +10023,7 @@
         "room": {
           "title": "Room",
           "description": "Pixels the axis' tick marks and labels take beside the plot, its title apart: a fixed room, or bounds on the room its labels need (see the axis guide's `room`).",
-          "anyOf": [
-            { "type": "number", "minimum": 0 },
-            {
-              "type": "object",
-              "properties": {
-                "min": { "title": "Min", "type": "number", "minimum": 0 },
-                "max": { "title": "Max", "type": "number", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/Room"
         },
         "style": {
           "title": "Style",
@@ -10126,17 +10123,7 @@
         "room": {
           "title": "Room",
           "description": "Pixels the axis' tick marks and labels take beside the plot, its title apart: a fixed room, or bounds on the room its labels need (see the axis guide's `room`).",
-          "anyOf": [
-            { "type": "number", "minimum": 0 },
-            {
-              "type": "object",
-              "properties": {
-                "min": { "title": "Min", "type": "number", "minimum": 0 },
-                "max": { "title": "Max", "type": "number", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/Room"
         },
         "style": {
           "title": "Style",

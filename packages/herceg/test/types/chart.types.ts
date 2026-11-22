@@ -3,7 +3,7 @@ import type { Expression } from "../../src/data/expression.ts";
 import { table } from "../../src/data/table.ts";
 import { anchor } from "../../src/dom/anchors.ts";
 import { createChart } from "../../src/dom/chart.ts";
-import { axis, colorbar } from "../../src/guides/options.ts";
+import { axis, colorbar, legend } from "../../src/guides/options.ts";
 import type { ViewportEvent } from "../../src/index.ts";
 import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
@@ -156,3 +156,13 @@ held.side satisfies Side | "center" | undefined;
 anchor(chart, element, { at: { x: 1, y: 2 }, fit: "auto" });
 // @ts-expect-error the side used is read-only
 held.side = "top";
+
+// Legends take a room on their side, as axes do: pixels, or bounds.
+createChart(element, { legend: { place: { side: "top" }, room: 30 }, marks: [] });
+createChart(element, { legend: { room: { min: 40 } }, x: { room: { max: 30 } }, marks: [] });
+createChart(element, {
+  guides: [legend({ place: { side: "left" }, room: { min: 0, max: 80 } })],
+  marks: [],
+});
+// @ts-expect-error a room is pixels, or { min, max }
+createChart(element, { legend: { room: "auto" }, marks: [] });

@@ -169,6 +169,17 @@ true satisfies Takes<
 true satisfies Takes<PropsOf<typeof Legend>, Omit<LegendGuideOptions, "type">>;
 true satisfies Takes<PropsOf<typeof Anchor>, AnchorOptions & Children>;
 
+// Bars' labels stand their offset from their bar's edge, centered ones taking
+// none; legends take a room on their side, as axes do.
+type BarLabelsProp = Exclude<PropsOf<typeof Bar<Mixed>>["labels"], boolean | undefined>;
+({ place: { outside: false, offset: 6 } }) satisfies BarLabelsProp;
+// @ts-expect-error a centered label stands at its bar's middle
+({ place: { attachment: "center", offset: 6 } }) satisfies BarLabelsProp;
+({ place: { side: "top" }, room: { min: 40 } }) satisfies Exclude<
+  PropsOf<typeof Chart>["legend"],
+  boolean | undefined
+>;
+
 /** <Chart>'s props of its own, which the API audit names (`chart react` in test/contracts/api.json). */
 type Own = "renderTooltip" | "marks" | "children" | "className" | "style" | "ref" | "initial";
 type Listeners = {

@@ -396,18 +396,25 @@ export interface AxisGuideSpec {
    * apart: a fixed room, so that the plots of charts and panels line up, or
    * bounds on the room its labels need. A y axis' labels wider than it are
    * shortened with an ellipsis; an x axis' rows of labels that do not fit
-   * are left out whole, from the plot outward. Unset, the short form's. @minimum 0
+   * are left out whole, from the plot outward. Unset, the short form's.
    */
-  room?:
-    | number
-    | {
-        /** @minimum 0 */
-        min?: number;
-        /** @minimum 0 */
-        max?: number;
-      };
+  room?: Room;
   style?: AxisStyles;
 }
+
+/**
+ * Pixels a guide takes beside the plots: a fixed room, so that the plots of
+ * charts and panels line up, or bounds on what it needs (`{ min: 40 }`).
+ * Axes and legends take it. @minimum 0
+ */
+export type Room =
+  | number
+  | {
+      /** @minimum 0 */
+      min?: number;
+      /** @minimum 0 */
+      max?: number;
+    };
 
 /**
  * Grid lines across the plot at an axis' major ticks: `zIndex` places them
@@ -507,6 +514,15 @@ export interface LegendOptionsSpec {
   entries?: readonly LegendEntrySpec[];
   /** Swatches that look like the marks: a dashed line for a dashed line, a symbol for points. */
   swatches?: "mark";
+  /**
+   * Pixels the legend takes on its side, in place of what its entries
+   * measure (above or below the plots its height, beside them its width),
+   * so that plots line up whether a legend wraps or not; or bounds on what
+   * they measure. The gap to the plots and `place.offset` come on top. A
+   * legend deeper than its room is drawn whole, from its side's edge
+   * toward the plots. Not with a place inside a plot, which takes no room.
+   */
+  room?: Room;
   style?: LegendStyles;
   /**
    * What a click (or Enter) on an entry does: "hide" (the default) hides

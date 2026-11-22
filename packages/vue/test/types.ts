@@ -208,6 +208,17 @@ const ranked = table({ brand: ["IBM", "Apple"], value: [53, 40], rank: [1, 0] })
 Bar({ data: ranked, x: "value", y: "rank", orient: "y" });
 // @ts-expect-error bars along y measure numbers along x
 Bar({ data: ranked, x: "brand", y: "rank", orient: "y" });
+// Bars' labels stand their offset from their bar's edge; centered ones take none.
+Bar({ data: ranked, x: "value", y: "brand", labels: { place: { outside: false, offset: 6 } } });
+Bar({
+  data: ranked,
+  x: "value",
+  y: "brand",
+  // @ts-expect-error a centered label stands at its bar's middle
+  labels: { place: { attachment: "center", offset: 6 } },
+});
+// Legends take a room on their side, as axes do.
+export const roomed: ChartProps = { legend: { place: { side: "top" }, room: { min: 40 } } };
 Text({
   data: ranked,
   from: { mark: "cells", item: [{ field: "brand" }], at: "top-left" },

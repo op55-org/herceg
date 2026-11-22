@@ -18,6 +18,7 @@ import type { Side } from "../spec/place.ts";
 import type {
   AxisLabelsSpec,
   AxisStyles,
+  Room,
   StrokeStyle,
   TextStyle,
   TickLabelsSpec,
@@ -103,13 +104,13 @@ export interface ListedAxis {
   /** Where panels sharing its scale draw it: on their outer edge, or "all" of them. */
   repeat: "outer" | "all" | undefined;
   /** The least and most its ticks and labels take beside the plot, as `room` says. */
-  room: Room | undefined;
+  room: Bounds | undefined;
   /** In subplots: each panel's own room, by its place in the layout, over `room` (see `roomIn`). */
-  rooms?: readonly (Room | undefined)[] | undefined;
+  rooms?: readonly (Bounds | undefined)[] | undefined;
 }
 
-/** The least and most pixels an axis' ticks and labels take beside the plot. */
-type Room = { min: number; max: number };
+/** The least and most pixels a guide takes beside the plots, as its `room` says. */
+export type Bounds = { min: number; max: number };
 
 /**
  * A guide, and where it is set, for messages: in `guides`, or by a short
@@ -369,25 +370,27 @@ function resolve(
   };
 }
 
-/** An axis' `room`, set at `path`: a fixed one, or bounds. */
-function roomOf(room: AxisGuideOptions["room"], path: string): Room | undefined {
+/** An axis' or legend's `room`, set at `path`: a fixed one, or bounds. */
+export function roomOf(room: Room | undefined, path: string): Bounds | undefined {
   if (room === undefined) return undefined;
+  const bounds = typeof room === "object" && room !== null && !Array.isArray(room);
   const { min = 0, max = Number.POSITIVE_INFINITY } =
-    typeof room === "number" ? { min: room, max: room } : (room ?? {});
-  // No most where it is left out; pixels where they are given.
-  const given = typeof room === "number" ? [room] : [min, room?.max ?? 0];
+    typeof room === "number" ? { min: room, max: room } : bounds ? room : {};
+  // No most where it is left out; pixels where they are given (null is not left out).
+  const given =
+    typeof room === "number" ? [room] : [min, bounds && room.max !== undefined ? max : 0];
   if (
-    !(typeof room === "number" || (typeof room === "object" && room !== null)) ||
+    !(typeof room === "number" || bounds) ||
     !(given.every(Number.isFinite) && min >= 0 && max >= min)
   )
     throw new Error(
-      `${path}.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received ${typeof room === "object" && room !== null ? `{ min: ${room.min}, max: ${room.max} }` : typeof room === "number" ? room : JSON.stringify(room)}`,
+      `${path}.room: expected finite pixels of at least 0, or { min, max } with min no more than max; received ${bounds ? `{ min: ${room.min}, max: ${room.max} }` : typeof room === "number" ? room : JSON.stringify(room)}`,
     );
   return { min, max };
 }
 
 /** The room `axis` takes in panel `i`: the panel's own, or the axis'. */
-function roomIn(axis: ListedAxis, i: number): Room | undefined {
+function roomIn(axis: ListedAxis, i: number): Bounds | undefined {
   return axis.rooms?.[i] ?? axis.room;
 }
 
@@ -397,7 +400,7 @@ function unroomed(axis: ListedAxis): ListedAxis {
 }
 
 /** `size` held within `room`'s bounds. */
-function within(size: number, room: Room | undefined): number {
+export function within(size: number, room: Bounds | undefined): number {
   return room ? Math.min(Math.max(size, room.min), room.max) : size;
 }
 
@@ -410,7 +413,7 @@ function within(size: number, room: Room | undefined): number {
  */
 function roomFit(
   kit: GuideKit,
-  axis: { layers: readonly Layer[]; across: boolean; room?: Room | undefined },
+  axis: { layers: readonly Layer[]; across: boolean; room?: Bounds | undefined },
   labels: TickLabelsSpec,
   label: TextPaint,
   measure: MeasureText,
@@ -1255,7 +1258,7 @@ export function layered(
     scale: string;
     across: boolean;
     above: boolean;
-    room?: Room | undefined;
+    room?: Bounds | undefined;
     /** The first row of labels outside the plot to leave out, whatever fits. */
     cut?: number | undefined;
   },

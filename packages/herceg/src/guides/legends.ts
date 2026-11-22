@@ -24,7 +24,7 @@ import type {
 } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { CaptionGuide, Guide, GuideItem, LegendGuide, LegendItem } from "../scene/scene.ts";
-import type { Place } from "../spec/place.ts";
+import type { Place, SidePlace } from "../spec/place.ts";
 import type {
   Dash,
   LegendEntrySpec,
@@ -36,6 +36,7 @@ import type {
   SwatchSpec,
 } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import { roomOf, within } from "./axes.ts";
 import { type ColorbarPlan, measureColorbar, plannedColorbars } from "./colorbars.ts";
 import { type Read, restyle } from "./paints.ts";
 import { drawnOf, markKey, rowKey, seriesKey, Visibility } from "./visibility.ts";
@@ -99,10 +100,14 @@ interface Planned {
  */
 export function plannedLegends(kit: GuideKit, config: ChartConfig): Planned | undefined {
   const { legend } = config;
-  const listed = (config.guides ?? []).flatMap((guide, i) =>
-    guide.type === "legend" && guide.show !== false ? [{ guide, i }] : [],
-  );
   const options = typeof legend === "object" ? legend : {};
+  // Rooms are checked whether their legends show or not.
+  checkRoom(options, "chart legend");
+  const listed = (config.guides ?? []).flatMap((guide, i) => {
+    if (guide.type !== "legend") return [];
+    checkRoom(guide, `chart guides[${i}]`);
+    return guide.show === false ? [] : [{ guide, i }];
+  });
   const colorbars = plannedColorbars(config.guides);
   if (legend === false && listed.length === 0 && colorbars.length === 0) return undefined;
   const plans: Plan[] = listed.map(({ guide, i }) => ({
@@ -163,6 +168,39 @@ export function plannedLegends(kit: GuideKit, config: ChartConfig): Planned | un
     ),
     panels: config.panels?.list.map(({ id }) => id) ?? [],
     zone: config.timeZone ?? "UTC",
+  };
+}
+
+/** Refuses a legend's bad `room`, and any room on a legend inside a plot. */
+function checkRoom({ room, place }: LegendOptionsSpec, path: string): void {
+  if (room !== undefined && place && "inside" in place)
+    throw new Error(`${path}.room: a legend inside a plot takes no room; place it on a side`);
+  roomOf(room, path);
+}
+
+/**
+ * `measured` as its side's tracks take it: as deep as its room holds it
+ * (above or below the plots its height, beside them its width), drawn
+ * whole at the chart's side of its room. Tracks below and right of the
+ * plots start nearest them, so there it moves by what it measures past or
+ * short of its room; above and left, a legend deeper than its room already
+ * reaches toward the plots.
+ */
+function inRoom(measured: MeasuredLegend | undefined, { place, options, path }: Plan) {
+  const room = roomOf(options.room, path);
+  if (!measured || !room) return measured;
+  // A room inside a plot is refused (see checkRoom).
+  const { side } = place as SidePlace;
+  const depth = side === "top" || side === "bottom" ? "height" : "width";
+  const held = within(measured[depth], room);
+  const shift = side === "bottom" || side === "right" ? held - measured[depth] : 0;
+  return {
+    ...measured,
+    [depth]: held,
+    place: (x: number, y: number, surface?: string) =>
+      depth === "width"
+        ? measured.place(x + shift, y, surface)
+        : measured.place(x, y + shift, surface),
   };
 }
 
@@ -657,12 +695,13 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
           };
         });
         const { options } = plan;
-        // An automatic legend without layout settings, or annotations' looks, is the default legend's.
+        // An automatic legend without layout settings, or annotations' looks, is
+        // the default legend's; a room sets only how much its side takes.
         const plain =
           plan.automatic &&
           !shown &&
           !sampled &&
-          !Object.keys(options).some((k) => k !== "place" && k !== "style");
+          !Object.keys(options).some((k) => k !== "place" && k !== "style" && k !== "room");
         const measured = plain
           ? kit.measureLegends({ ...content, entries, parts, hidden }, text, flow(plan.place))
           : measureLegend(
@@ -688,7 +727,10 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
               shown,
             );
         const notes = notesOf(plan, measured);
-        return { index: plan.index, legend: { key: plan.key, place: plan.place, measured, notes } };
+        return {
+          index: plan.index,
+          legend: { key: plan.key, place: plan.place, measured: inRoom(measured, plan), notes },
+        };
       })
       .concat(bars)
       .sort((a, b) => a.index - b.index)

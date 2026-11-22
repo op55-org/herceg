@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 import herceg as hg
+import herceg.express as hx
 
 HOURS = [dt.datetime(2026, 9, 28) + dt.timedelta(hours=i) for i in range(49)]
 WEEK = {"t": HOURS, "v": [i % 7 for i in range(49)]}
@@ -225,13 +226,72 @@ def test_axis_room_lines_plots_up_and_shortens_labels():
     )
     assert "…</text>" in chart.line(x="x", y="v").to_svg()
     assert hg.axis("y", room=(20, 60))._spec()["room"] == {"min": 20, "max": 60}
-    for room in [(30, 20), float("inf"), (0, float("inf")), float("nan"), -1, True]:
-        with pytest.raises(hg.ChartError, match="^axis room: expected finite pixels of at least 0"):
+    # An end of None is no bound.
+    assert hg.axis("y", room=(40, None))._spec()["room"] == {"min": 40}
+    assert hg.AxisOptions(room=(None, 60))._spec()["room"] == {"max": 60}
+    assert hg.AxisOptions(room=(None, None))._spec()["room"] == {}
+    assert plot_x([1, 5, 9], room=(60, None)) == plot_x([1, 5, 9], room=60)
+    expected = "expected finite pixels of at least 0, or (least, most), None for no bound"
+    refused = {
+        (30, 20): "(30, 20)",
+        float("inf"): "inf",
+        (0, float("inf")): "(0, inf)",
+        float("nan"): "nan",
+        -1: "-1",
+        (None, -1): "(None, -1)",
+        True: "True",
+        "auto": '"auto"',
+        (1, 2, 3): "(1, 2, 3)",
+    }
+    for room, received in refused.items():
+        with pytest.raises(hg.ChartError) as error:
             hg.axis("y", room=room)
-        with pytest.raises(
-            hg.ChartError, match="^AxisOptions room: expected finite pixels of at least 0"
-        ):
+        assert str(error.value) == f"axis room: {expected}; received {received}"
+        with pytest.raises(hg.ChartError) as error:
             hg.AxisOptions(room=room)
+        assert str(error.value) == f"AxisOptions room: {expected}; received {received}"
+
+
+@pytest.mark.contract("legend.room.python")
+def test_legend_room_lines_plots_up_and_is_refused_inside():
+    data = {"t": [0, 1, 0, 1], "v": [1.0, 2.0, 3.0, 4.0], "s": ["a", "a", "b", "b"]}
+
+    def plot_y(legend: object = None, **options: object) -> float:
+        chart = hg.Chart(data, padding=0, legend=legend, **options).line(x="t", y="v", color="s")
+        return plot_of(chart)[1]
+
+    # The room, then the 8 px gap: with padding 0, the plots start below both.
+    assert plot_y(hg.LegendOptions(place=hg.Place(side="top"), room=30)) == 38
+    assert plot_y(hg.LegendOptions(room=(40, None))) == 48
+    assert plot_y(hg.LegendOptions(room=(None, 100))) == plot_y(True)
+    assert plot_y(guides=[hg.legend(room=30)], legend=False) == 38
+    assert hg.LegendOptions(room=(40, None))._spec() == {"room": {"min": 40}}
+    assert hg.legend(room=(10, 20))._spec() == {"type": "legend", "room": {"min": 10, "max": 20}}
+    inside = "a legend inside a plot takes no room; place it on a side"
+    with pytest.raises(hg.ChartError) as error:
+        hg.Chart(data, legend=hg.LegendOptions(place=hg.Place(inside="top-right"), room=30))
+    assert str(error.value) == f"LegendOptions room: {inside}"
+    with pytest.raises(hg.ChartError) as error:
+        hg.Chart(data, guides=[hg.legend(place=hg.Place(inside="top"), room=(None, None))])
+    assert str(error.value) == f"legend room: {inside}"
+    # Legends' rooms are read as axes' are.
+    expected = "expected finite pixels of at least 0, or (least, most), None for no bound"
+    for room, received in [(-4, "-4"), ("auto", '"auto"'), ((50, 30), "(50, 30)")]:
+        with pytest.raises(hg.ChartError) as error:
+            hg.Chart(data, legend=hg.LegendOptions(room=room))  # type: ignore[arg-type]
+        assert str(error.value) == f"LegendOptions room: {expected}; received {received}"
+    # herceg.express takes the chart's legend and axes alike.
+    plot = hx.lineplot(
+        data,
+        x="t",
+        y="v",
+        series="s",
+        legend=hg.LegendOptions(room=(40, None)),
+        y_axis=hg.AxisOptions(room=(40, None)),
+    )
+    spec, _ = plot.to_spec()
+    assert spec["legend"] == {"room": {"min": 40}}
+    assert spec["y"]["room"] == {"min": 40}
 
 
 def plot_of(chart: hg.Chart) -> tuple[float, float, float, float]:
