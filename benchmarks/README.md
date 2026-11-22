@@ -324,7 +324,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Ten fixtures, each move checked
+drawing path; it compares no libraries. Eleven fixtures, each move checked
 for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -332,6 +332,7 @@ for its effect:
 | `hover-listener` | One chart of 8 series x 2,000 minutes, and a rule a `hover` listener moves to the hovered minute | The rule drawn there |
 | `hover-headings` | `hover-listener`'s chart, its lines' tooltip with heading parts, which every point read writes though the tooltip of eight keeps its place | The rule drawn there |
 | `custom-hover` | One chart of 2,000 custom range items (A2's comets) read `"nearest"`, their tooltip with `content`, `fields`, and a `heading` of the comet's id and category | The tooltip showing the comet under the pointer |
+| `point-hover` | One SVG chart of many marks: 3,500 translucent points in two series, a circle each (under the automatic renderer's canvas threshold), read along x (`"nearest-x"`) with a crosshair, markers, and a tooltip | The hover reported at the move, once drawn |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
 | `pan-view-labels` | `pan-labels`' chart labelled where each line crosses the view's start and end (`view-start`, `view-end`) | A frame of the moved view |
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
@@ -361,6 +362,10 @@ the SVG export:
   write them.
 - `custom-hover`: the tooltip showing the comet under the pointer, headed
   by its own heading in builds that write headings.
+- `point-hover`: the crosshair in a screenshot at the points read and
+  nowhere else, over the points at every height clear of the tooltip (and
+  its shadow) and the markers, and a marker for each point read. The
+  fixture refuses to run unless the chart drew its points in SVG.
 - `pan-labels`, `pan-view-labels`: the labels the canvas painted since it was last cleared
   (its `fillText` and halo `strokeText` calls, recorded during check moves
   only) and shown in a screenshot: one naming each series at the view's
@@ -402,7 +407,7 @@ selected bars drawn as plain ones, or 5% too tall; bars not drawn, moved
 that overlap and leave a gap, or at 65% opacity; labels at the plot's
 middle, 3 px off, at another series' points, left at their first view,
 drawn twice, or kept apart by half their height; anchors left where first
-placed, or 3 px off; a dragged rule 3 px off the pointer; lines picked by
+placed, or 3 px off; the pointer's overlay under the data; a dragged rule 3 px off the pointer; lines picked by
 paint order (the topmost stroke holding the pointer). `checks.test.ts`
 tests the label and bar models.
 

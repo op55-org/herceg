@@ -140,8 +140,8 @@ export interface InteractionKit extends PickKit {
 export interface InteractionHost {
   readonly root: HTMLDivElement;
   readonly model: ChartModel;
-  /** The pointer overlay of the chart's SVG layer. */
-  readonly overlay: SVGGElement;
+  /** The pointer overlay, the `<svg>` over the chart's marks and axes; made when first asked for. */
+  overlay(): SVGSVGElement;
   /** The live region, which reads sentences aloud. */
   readonly live: HTMLElement;
   /** The legend's element, whose presses and clicks are its own. */
@@ -423,6 +423,12 @@ export class Interaction {
   #keyShared: string | null = null;
   /** What the pointer shared last, by value and panel, which a new scene shares again where it reads otherwise. */
   #pointerShared: string | null = null;
+  /**
+   * What the pointer and keyboard draw: crosshairs, markers, the item's
+   * outline, and the keyboard's ring, put in the overlay by the first frame
+   * that draws one.
+   */
+  readonly #feedback: SVGGElement;
   /** A crosshair per panel shown; the first stays, hidden, when none is. */
   readonly #crosshairs: SVGLineElement[];
   /** Clip paths keeping a panel's crosshair off the insets over it, by panel key; and how many were made. */
@@ -602,7 +608,8 @@ export class Interaction {
       "stroke-width": "2",
       visibility: "hidden",
     });
-    host.overlay.append(...this.#crosshairs, this.#dots, this.#outline, this.#ring);
+    this.#feedback = svgElement(document, "g");
+    this.#feedback.append(...this.#crosshairs, this.#dots, this.#outline, this.#ring);
     // What presses focus draws no ring until a key (see press-focus.ts); a
     // focus the chart has without one now is a press's, held while this loaded.
     this.#cleanup.push(pressFocus(host.root));
@@ -2200,6 +2207,7 @@ export class Interaction {
         ? (host.model.inspectItem(keyboard.key, keyboard.panel) ?? this.#keyedPoint())
         : undefined;
     const drawn = (showTooltip || !(own ?? cue) ? shown : []).concat(cue ?? []);
+    if (drawn.length && !this.#feedback.parentNode) host.overlay().append(this.#feedback);
     while (lines.length < drawn.length) {
       const line = svgElement(document, "line", { "stroke-width": "1" });
       this.#dots.before(line);
@@ -3475,7 +3483,7 @@ export class Interaction {
     let clip = this.#cuts.get(key);
     if (!clip) {
       clip = svgElement(document, "clipPath", { id: `${host.id}-cut-${++this.#cutsMade}` });
-      host.overlay.prepend(clip);
+      host.overlay().prepend(clip);
       this.#cuts.set(key, clip);
     }
     clip.replaceChildren(

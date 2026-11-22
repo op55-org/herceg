@@ -103,8 +103,8 @@ export function modelOf(chart: Chart): ChartModel {
  */
 export function panelGroups(root: Element): Element[] {
   const children = [...root.querySelector("svg")!.children];
-  // Defs and backgrounds first, guides and the pointer's overlay last.
-  return children.slice(2, -2);
+  // Defs and backgrounds first, guides last (the pointer's overlay is an SVG of its own).
+  return children.slice(2, -1);
 }
 
 /** The text a chart's marks draw, as its scene holds it: a canvas holds no text to read. */

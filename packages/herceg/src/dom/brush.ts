@@ -47,7 +47,10 @@ export interface Handle {
 const EDGE = 5;
 
 export class Brush {
-  /** Holds an outline per panel, each clipped to its plot. */
+  /**
+   * Holds an outline per panel, each clipped to its plot: in the pointer's
+   * overlay from the first selection it draws, under the pointer's feedback.
+   */
   readonly element: SVGGElement;
   #mode: BrushSpec = "x";
   /** A drag in progress: its pixel points in the panel it started in. */
@@ -70,11 +73,19 @@ export class Brush {
   readonly #id: string;
   /** How a selection's ends sit on a panel's scales (brushed.ts), handed in for the same reason. */
   readonly #normalize: typeof normalize;
+  /** The chart's pointer overlay, made when first asked for. */
+  readonly #overlay: () => SVGSVGElement;
 
-  constructor(element: SVGGElement, id: string, ends: typeof normalize) {
-    this.element = element;
+  constructor(
+    document: Document,
+    id: string,
+    ends: typeof normalize,
+    overlay: () => SVGSVGElement,
+  ) {
+    this.element = document.createElementNS(SVG, "g");
     this.#id = id;
     this.#normalize = ends;
+    this.#overlay = overlay;
   }
 
   /** Whether a drag draws, moves, or resizes the brush. */
@@ -254,6 +265,7 @@ export class Brush {
       return;
     }
     this.#shown = true;
+    if (!this.element.parentNode) this.#overlay().prepend(this.element);
     const document = this.element.ownerDocument;
     // The theme's brush, the muted color at 0.18 by default; a lasso's
     // outline in its fill's color unless it gives a stroke.

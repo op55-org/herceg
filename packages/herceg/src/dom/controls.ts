@@ -29,8 +29,8 @@ export interface ControlsHost {
   bindings(panel?: string): Bindings;
   /** Whether the chart has the keyboard focus, which wheel bindings may ask for. */
   focused(): boolean;
-  /** The pointer overlay, above the marks, where controls draw outlines (a lasso). */
-  readonly overlay: SVGGElement;
+  /** The pointer overlay, above the marks, where controls draw outlines (a lasso); made when first asked for. */
+  overlay(): SVGSVGElement;
   /** Reads a sentence aloud through the chart's live region. */
   announce(text: string): void;
   /** Draws again on the next frame, for changes no public method reports (a node being dragged). */

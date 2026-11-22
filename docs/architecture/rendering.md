@@ -78,14 +78,32 @@ WebGL2 painter by size, inside Canvas or automatic rendering (see
 ## Layers in the browser
 
 Bottom to top: an optional canvas for marks; the SVG layer (grid and marks
-when not on canvas, guides, axes, title, pointer overlay); the HTML legend;
-the tooltip; visually hidden text for assistive technology.
+when not on canvas, guides, axes, title); the pointer overlay, an `<svg>`
+of its own; the HTML legend; anchors (`z-index: 1`); the tooltip; visually
+hidden text for assistive technology. Both SVGs are `aria-hidden`, of the
+chart's size and coordinates, and the overlay takes no pointer input, so
+the pointer reaches the chart's element through it and anchors and
+controls over it.
 
-- Pointer feedback changes the overlay and the tooltip, never the marks'
-  nodes. Where marks share the SVG with the overlay, the browser can
-  repaint that SVG on each move, so a hover's paint can grow with the
-  marks drawn in it (in Chrome, a chart of 4,000 paths painted several
-  times longer per move than the same chart on a canvas).
+- **What a hover repaints.** Pointer and keyboard feedback (crosshairs, the
+  points read, the item outline, the keyboard's ring, the brush, controls'
+  outlines) draws in the overlay, and the tooltip in its box; a hover
+  writes no node of the data's SVG. A browser repaints the SVG whose
+  content changed, so the overlay is apart from the marks: in Chrome, a
+  hover over 4,000 SVG paths paints 0.08 ms a move (0.2 ms with the CPU
+  idle) where, with the overlay inside the data's SVG, it painted every
+  path again, 0.3-0.4 ms (2 ms idle). The browser may still raster again
+  the tiles under what changed, marks included. The overlay has no
+  compositing layer of its own: with `will-change: transform` it had one,
+  and Chrome's GPU process held 18 MB more for 10 synced charts with their
+  cursors shown, and 285 MB more for 100.
+- The overlay is made the first time something draws there (a cursor, a
+  selection, a lasso), right after the data's SVG, and kept until the chart
+  goes: a chart nothing draws over has none, which saves about 3.4 KB of
+  heap a chart. Selections paint under the pointer's feedback. Server
+  snapshots, written before any input, have none either. The clip paths
+  the overlay draws through (around insets, and the brush's to its plots)
+  are its own, so nothing in it refers into the data's SVG.
 - Scheduled frames read no layout (which would force layout of the previous
   frame's DOM writes). The container is measured when a `ResizeObserver`
   reports a change, for the first frame (not at all when `width` and
