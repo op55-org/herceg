@@ -697,7 +697,7 @@ draws has no place.
 | `place.attachment` | Where along a rule or region side: `"start"`, `"center"`, `"end"` (default). |
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
-| `place.offset` | Pixels away from its place. |
+| `place.offset` | Pixels away from its place; outside the plot, pixels past the plot's edge and its y axis (after a 6 px gap). |
 | `overlap`, `overlapGroup`, `leader`, `priority` | How it keeps apart from other labels (Python `overlap_group`); see [labels that would overlap](#labels-that-would-overlap). |
 
 - **Domains.** Annotations count toward the axes' domains only with
@@ -822,6 +822,16 @@ hg.Chart(df, legend=False).line(
 - **In the plot.** A label whose point is outside the plot is not drawn:
   its observation's, past the view across the series' axis as on a
   zoomed y axis, or at the view's edge, the crossing's.
+- **Outside the plot.** Labels with `place: { outside: true }` stand
+  `place.offset` pixels, after a 6 px gap, past what stands beside the
+  plot on their side as drawn: the plot's edge, the y axis' labels there
+  (listed axes' too), its title, a grid's row headers, and a legend beside
+  a subplot at the layout's side (between subplots, the legend stands
+  past the names). So the names keep their place at every zoom. The chart keeps
+  room for them (unless `reserve: false`); the x axis' first or last tick
+  label may stand under that room rather than narrow the plot (see
+  [labels at the chart's edge](axes-and-legends.md#labels-at-the-charts-edge)).
+  Rules' labels outside the plot stand in the same column.
 - **What it writes.** `{ field }` parts read the observation's row, and
   `{ value: true }` the value drawn there (a stack's top). At a crossing,
   `{ value: true }` writes the value where the line crosses, and `{ field }`
@@ -928,7 +938,15 @@ Each kind takes only the fields it can honour and refuses the others:
   leader when asked, in its series' color; a wide label gains none for its
   width, and a boxed label (or one with styled parts) is judged by its
   block. They are placed first in a panel; annotation labels keep off
-  them.
+  them. Labels that "show" (or "hide") stay at their points: outside the
+  plot, one within half its height of the plot's top or bottom reaches
+  into the x axis' row, where it can cover an end tick label that
+  overhangs the plot. "move" keeps them within the plot's height, where an
+  x tick label inside the plot (`labels.inside`) at the plot's end stands
+  in its bottom or top row: a name there meets it where the tick label
+  overhangs the plot by more than the names stand from it (6 px and
+  `place.offset` past the y axis' labels, or past a y title on that side,
+  which stands by the chart's edge).
 - **Annotation labels** are placed by priority, then mark order, then row
   order. A rule's label that moves tries the mirror place across its rule,
   then slides along the rule; text tries places around its point; a

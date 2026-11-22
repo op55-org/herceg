@@ -311,9 +311,10 @@ export interface CompiledAxes {
   ends(plan: AxisPlan, state: AxesState, i: number): [number, number] | undefined;
   /**
    * Pixels they take beside the plots, beyond the default y axes', once y
-   * is planned: the most for every panel, and each panel's (`lefts`,
-   * `rights`; its own where a room of its own holds its axis, else the
-   * most); and which panels draw an axis on the right of their plot.
+   * is planned: the most for every panel (margins), and each panel's own
+   * (`lefts`, `rights`: within its room where it has one, else as its
+   * labels reach; the most where it labels none); and which panels draw
+   * an axis on the right of their plot.
    */
   beside(state: AxesState): {
     left: number;
@@ -388,12 +389,14 @@ export interface AxesState {
   readonly height: number;
   /**
    * The chart's furniture: the room beside the plots' axes (padding, side
-   * legends, marks' labels outside the plots), and whether the spacing on
-   * each side is automatic.
+   * legends, marks' labels outside the plots), of that padding's and
+   * legends' (`outerInset`, which x end labels stay within, under marks'
+   * labels' tracks), and whether the spacing on each side is automatic.
    */
   readonly head: {
     readonly left: number;
     readonly right: number;
+    readonly outerInset: readonly [left: number, right: number];
     auto(side: Side): boolean;
   };
   /** Panels in a row, and whether panels have headers above them. */

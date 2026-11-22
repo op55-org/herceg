@@ -791,7 +791,8 @@ export function compiledAxes(
     beside(state) {
       let left = 0;
       let right = 0;
-      // A panel whose room is its own takes it, beside the model's room for its labels.
+      // What each panel's axes take beyond the room the model keeps for its
+      // labels: within a room of their own, or as far as its labels reach.
       const own = { y: [] as number[], right: [] as number[] };
       for (const scale of ["y", "yRight"] as const) {
         const home = changed(scale);
@@ -812,8 +813,8 @@ export function compiledAxes(
           const keep = Math.ceil(widest(kit, [whole[0]!], state.measure)) + Y_GAP;
           needs.all.push(takes);
           keeps.all.push(keep);
-          if (room) own[scale === "y" ? "y" : "right"][i] = takes - keep;
-          else {
+          own[scale === "y" ? "y" : "right"][i] = takes - keep;
+          if (!room) {
             needs.free.push(takes);
             keeps.free.push(keep);
           }
@@ -839,7 +840,10 @@ export function compiledAxes(
           const breadthIn = breadth(kit, axis, state, i);
           takes.all.push(breadthIn);
           if (roomIn(axis, i)) own.right[i] = breadthIn;
-          else takes.free.push(breadthIn);
+          else {
+            takes.free.push(breadthIn);
+            own.right[i] = Math.max(own.right[i] ?? 0, breadthIn);
+          }
         });
         right = Math.max(right, mostOf(takes.free.length ? takes.free : takes.all));
       }
@@ -1199,15 +1203,17 @@ function placedLayers(
 
 /**
  * The span along x panel `i`'s end labels stay inside (see
- * `AxisLabelsSpec.ends`): at the layout's sides, what margins keep beside
- * the plots; elsewhere, and in an inset, its `plot`'s sides.
+ * `AxisLabelsSpec.ends`): at the layout's sides, what padding and legends
+ * keep beside the plots, labels standing under marks' labels' tracks
+ * (`AxesState.head`); elsewhere, and in an inset, its `plot`'s sides.
  */
 function edgesOf(state: AxesState, i: number, plot: Rect): Span {
   const { head, columns, cells } = state;
   const column = i % columns;
   const outer = (end: boolean) =>
     cells ? !cells.within(i) && cells.edge(i, end) : end ? column === columns - 1 : !column;
-  const inset = (side: "left" | "right") => head[side] + (head.auto(side) ? 2 : 0);
+  const inset = (side: "left" | "right") =>
+    head.outerInset[side === "left" ? 0 : 1] + (head.auto(side) ? 2 : 0);
   return [
     outer(false) ? inset("left") : plot.x,
     outer(true) ? state.width - inset("right") : plot.x + plot.width,

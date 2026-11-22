@@ -486,11 +486,8 @@ export interface YLabelRoom {
 /** What the scene measured that placing panels from left to right reads. */
 export interface HorizontalPlacing {
   readonly width: number;
-  readonly head: {
-    readonly left: number;
-    readonly right: number;
-    readonly auto: (side: Side) => boolean;
-  };
+  /** The chart's furniture beside the plots (see `AxesState.head`). */
+  readonly head: AxesState["head"];
   /** The left and right y labels and titles. */
   readonly sides: readonly [YLabelRoom, YLabelRoom];
   /**
@@ -590,6 +587,12 @@ export interface PanelPlacement {
   again?(): boolean;
   /** Where the `k`th legend `VerticalPlacing.beside` listed goes: its top left corner, beside its panel's `plot`. */
   beside?(k: number, plot: Rect): { x: number; y: number };
+  /**
+   * Moves `beyond`, where what stands beside panel `i`'s `plot` ends on its
+   * left and right (its y axes, as drawn), out past what the layout puts
+   * there: a grid's row headers, legends beside a panel at the layout's sides.
+   */
+  aside?(i: number, plot: Rect, beyond: number[]): void;
   /**
    * Where panel `i`'s y title, `size` tall, goes across (its middle) and
    * the span it is aligned along, beside `plot` (on the right with `right`).

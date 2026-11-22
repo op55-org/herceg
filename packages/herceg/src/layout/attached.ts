@@ -1,6 +1,7 @@
 // Labels attached to marks' series (marks/attachments.ts): placed as blocks
-// beside the point they follow, or outside the plot in the side tracks the
-// chart keeps for marks' labels (`Frame.outside`, `Mark.room`). Inside,
+// beside the point they follow, or outside the plot, their offset past what
+// stands beside it, in room the chart keeps for marks' labels
+// (`Frame.outside`, `Mark.room`). Inside,
 // `align` says which way the block goes from its point: "start" after it
 // (to the right), "end" before it, "center" over it, where `verticalAlign`
 // puts it below ("top"), above ("bottom"), or on it; it stands `GAP` and

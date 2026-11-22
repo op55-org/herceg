@@ -84,12 +84,18 @@ edge. `model.#furniture` makes the title's and legends' requests
   ends are monotonic passes bounded by a quarter of the chart's width.
   Margins grow freely but shrink only on resizes and option changes, so
   streaming data does not move the plot back and forth.
-- An x end label crossing the chart's edge (`model.ts`'s margin rule,
-  bounded by what the margins keep beside the plots) widens its side; the
-  guide compiler reports listed axes' end labels as painted (`ends`,
-  `painted`: turned, with outline and halo). Layers whose labels' `ends`
-  are `"hide"` report none: once the panels are placed, the compiler
-  blanks their labels crossing the bounds (`placedLayers`). Along x those
+- An x end label crossing the chart's edge (`model.ts`'s margin rule)
+  widens its side; the guide compiler reports listed axes' end labels as
+  painted (`ends`, `painted`: turned, with outline and halo). The rule's
+  bound at the layout's sides is the chart's edge less padding and side
+  legends (`Furniture.outerInset`): labels outside the plot may stand
+  under marks' labels' tracks, as under a right y axis' labels, since
+  those labels stay within the plots' height. Labels inside the plot
+  (`labels.inside`) may too: marks' labels stand their offset from the
+  plot, not at the track, so keeping inside labels out of the track would
+  narrow the plot without keeping them apart. Layers whose labels' `ends` are
+  `"hide"` report none: once the panels are placed, the compiler blanks
+  their labels crossing the same bounds (`placedLayers`). Along x those
   are the margin rule's at the layout's sides (`AxesState.head`) and the
   plot's sides between facets and subplots (`edgesOf`, `cells.edge`), in
   insets the inset plot's; along y the chart's (or the inset's) box the
@@ -99,12 +105,19 @@ edge. `model.#furniture` makes the title's and legends' requests
   (`Placed.sized`); value transitions' frames place their labels the same
   way.
 - Marks labelling outside their plots ask for room (`Mark.room`), the
-  widest per side a track of its own, innermost (`Frame.outside`). Marks
-  that measure as they place (`Mark.roomPlaced`) report after drawing; if a
-  panel needs more than kept, the scene is laid out once more. A new
-  layout (a resize, an update) starts from the rooms last drawn, so an
-  update that leaves labels as they were lays out once; where they take
-  other rooms, it is laid out once more from theirs.
+  widest per side a track of its own, innermost, and between columns room
+  in the gap. Their labels stand a gap (`GAP`, 6 px) and their offset past
+  what stands beside each plot as drawn (`Frame.outside`): its y labels
+  and listed axes (each panel's own, `CompiledAxes.beside`), its y title
+  (by the chart's edge, so after a margin widened, past the title), and
+  what the layout puts there (`PanelPlacement.aside`: a grid's row
+  headers, legends beside a subplot at the layout's sides). In subplots'
+  gutters the order is plot, y labels, title, marks' labels, legends.
+  Marks that measure as they place (`Mark.roomPlaced`) report after
+  drawing; if a panel needs more than kept, the scene is laid out once
+  more. A new layout (a resize, an update) starts from the rooms last
+  drawn, so an update that leaves labels as they were lays out once; where
+  they take other rooms, it is laid out once more from theirs.
 - Text measurement is injected: the browser measures with a canvas context;
   static rendering uses built-in Helvetica metrics (0.6 em per glyph for
   monospace fonts) padded by 10%, or supplied fonts (see

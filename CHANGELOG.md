@@ -475,3 +475,19 @@ drawn 14 px below it), else moves in, in every output and on every frame
 of a value transition. `clip` (`"plot"`, `"chart"`, or `false`) draws text
 exactly where told, as does a label of a point outside the chart. See
 [Annotations](docs/guide/marks.md#annotations) and [Events](docs/guide/interaction.md#events).
+
+Fixed: series and rules' labels outside the plot (`place: { outside: true,
+offset }`) stood `offset` past the room the chart keeps for them, which an
+x end tick label overhanging the plot pushed out: in a view of 1.2 seconds
+ticked in sub-second steps, names asked to stand 28 px from their lines
+stood 69 px out, and the plot narrowed. They now stand `offset` pixels,
+after a 6 px gap, past what stands beside the plot as drawn (its y labels,
+listed axes, its y title, a grid's row headers, a legend beside a
+subplot), in every panel and output, and an x end tick label may stand
+under their room: the margin widens only for one reaching past it, to the
+chart's edge less padding and side legends, and `labels.ends: "hide"`
+keeps an end label that fits under it. In subplots' gutters a y title now
+stands beside its axis' labels, before marks' labels, and a subplot keeps
+the room a listed y axis takes beside it, not the subplots' most (which
+fell short where its own labels were narrower than another's). See
+[Labels that follow series](docs/guide/marks.md#labels-that-follow-series).

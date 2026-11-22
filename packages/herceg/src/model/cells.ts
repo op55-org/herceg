@@ -93,7 +93,10 @@ export class Cells {
     // What each panel needs beside its plot across, as the last horizontal placing found.
     let before = new Float64Array(count);
     let after = new Float64Array(count);
-    // Of that, what legends beside the panels take, at the room's outer edge.
+    // Of that, what each panel's axes take (y labels, titles, the guides'
+    // axes) before and after it, nearest the plot, and legends beside the
+    // panels, outermost.
+    let axes = [before, after];
     let legends = { left: new Float64Array(count), right: new Float64Array(count) };
     const labels = (
       along: "x" | "y",
@@ -204,6 +207,7 @@ export class Cells {
               (right.labeled[i] || h.beside?.after[i] ? (h.beside?.rights[i] ?? 0) : 0) ||
             (head.auto("right") ? 12 - EDGE : 0),
         );
+        axes = [before.slice(), after.slice()];
         // Legends beside a panel take room there, beyond its y labels and titles.
         legends = { left: new Float64Array(count), right: new Float64Array(count) };
         for (const { index, side, width, offset } of this.#beside) {
@@ -236,9 +240,11 @@ export class Cells {
         };
         place();
         // A panel whose first or last x label reaches past its cell (by more
-        // than half the gap between cells, or into the chart's edge) needs
-        // that much more room beside its plot, up to a quarter of the chart;
-        // an inset's labels stay in its box, which is refused when too small.
+        // than half the gap between cells, or into the chart's edge, where
+        // labels may stand under marks' labels' tracks)
+        // needs that much more room beside its plot, up to a quarter of the
+        // chart; an inset's labels stay in its box, which is refused when too small.
+        const tracks = [head.left - head.outerInset[0], head.right - head.outerInset[1]];
         for (let pass = 0; pass < 10 && h.widens && h.keep !== "frozen"; pass++) {
           let grew = false;
           const left0 = Math.min(...xs);
@@ -251,9 +257,7 @@ export class Cells {
               inset
                 ? 0
                 : this.edge(i, end)
-                  ? head.auto(end ? "right" : "left")
-                    ? EDGE - 2
-                    : 0
+                  ? (head.auto(end ? "right" : "left") ? EDGE - 2 : 0) + tracks[+end]!
                   : Math.min(REACH, this.#gutter(i, end) / 2);
             const lo = spans!.outer[2 * i]! - reach(false);
             const hi = spans!.outer[2 * i + 1]! + reach(true);
@@ -400,13 +404,24 @@ export class Cells {
         return painted;
       },
 
-      yTitle: (i, plot, right, size) => ({
-        // At the outer edge of the room the panel keeps beside its plot, inside its legends there.
-        x: right
-          ? plot.x + plot.width + after[i]! - legends.right[i]! - size / 2
-          : plot.x - before[i]! + legends.left[i]! + size / 2,
-        span: [plot.y + plot.height, plot.y],
-      }),
+      yTitle: (i, plot, right, size) => {
+        // At the outer edge of the room its axes take beside its plot:
+        // marks' labels and legends there stand past it.
+        const room = axes[+right]![i]! - size / 2;
+        return {
+          x: right ? plot.x + plot.width + room : plot.x - room,
+          span: [plot.y + plot.height, plot.y],
+        };
+      },
+
+      aside: (i, plot, beyond) => {
+        // Legends beside a panel at the layout's sides stand past its axes,
+        // before the chart's tracks for marks' labels; elsewhere past the
+        // room it keeps for those.
+        if (legends.left[i] && this.edge(i, false)) beyond[0] = plot.x - before[i]! + LEGEND_GAP;
+        if (legends.right[i] && this.edge(i, true))
+          beyond[1] = plot.x + plot.width + after[i]! - LEGEND_GAP;
+      },
 
       xTitle: (_i, plot, titling) => {
         // Under each labeled panel's own labels.
