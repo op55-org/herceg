@@ -713,7 +713,22 @@ draws has no place.
   `false`.
 - **Staying inside.** Labels in the plot stay inside it in every output: a
   label at the edge flips to the rule's other side or moves in. Labels of
-  rules and regions outside the plot stay inside the chart.
+  rules and regions outside the plot stay inside the chart. Text labels
+  stay inside the chart: a label whose painted block (its box, halo, and
+  outline) would reach past the chart's edge goes to the other side of its
+  point along that axis (14 px above becomes 14 px below; a start-aligned
+  label at the right edge goes to its point's left), and where that
+  reaches past too, it moves in as little as stays inside; a label larger
+  than the chart starts at its left or top edge. Labels in the margins
+  are inside the chart and stay where they are put, so an annotation at
+  the plot's top needs no padding. With `clip` (`"plot"`, `"chart"`, or
+  `false`) text is drawn exactly where told, and a label of a point
+  outside the chart is too. Labels that hide or move start from the place
+  they are kept at; those that move stay in the plot as before (in the
+  chart for a point outside the plot). Through a [value
+  transition](interaction.md#animation), labels stay inside on every
+  frame, a counting label by its number's shape (a pixel or so off the
+  painted number).
 - **Overlap.** Labels that would cover another are drawn anyway by
   default; see [labels that would overlap](#labels-that-would-overlap).
   Text is meant for a few hundred labels.

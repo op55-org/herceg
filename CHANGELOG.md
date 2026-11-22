@@ -462,3 +462,16 @@ the chart, and a room leaves out a row of blocks that does not fit. A
 plain axis whose labels are written in lines is laid out by the guide
 compiler from then on, as listed axes are. See [Titles and
 padding](docs/guide/axes-and-legends.md#titles-and-padding).
+
+The pointer names the nearest band on category axes: `pointer.categories`
+(Python `hg.Pointer.categories`) names the first or last band in the room
+a band axis keeps beside them, and the nearer band between two, wherever
+the pointer is within the plot's span along that axis (in a chart of one
+panel, over the x axis' labels too); beyond it, none. `values` keeps the fractional band index.
+Text labels stay inside the chart, as rule and region labels do: a label
+that would reach past the chart's edge goes to the other side of its
+point (an annotation's label 14 px above a marker at the plot's top is
+drawn 14 px below it), else moves in, in every output and on every frame
+of a value transition. `clip` (`"plot"`, `"chart"`, or `false`) draws text
+exactly where told, as does a label of a point outside the chart. See
+[Annotations](docs/guide/marks.md#annotations) and [Events](docs/guide/interaction.md#events).

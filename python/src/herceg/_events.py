@@ -294,8 +294,12 @@ class Pointer:
     chart of one panel; None over none), and whether it is ``in_plot``.
     ``values`` holds its place on the panel's axes ("x", "y", "y_right"):
     numbers, datetimes on time axes, and on category axes a fractional band
-    position, whose category ``categories`` names. Axes the panel lacks are
-    left out."""
+    position. ``categories`` names, on category axes, the band nearest it
+    along the axis: the band it is in, the nearer of two it is between, or
+    the first or last beside them; only
+    within the plot's span along the axis (in a chart of one panel, under
+    the plot too, over its x axis' labels), none beyond it. Axes the panel
+    lacks are left out."""
 
     x: float
     y: float

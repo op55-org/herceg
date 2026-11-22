@@ -1679,8 +1679,12 @@ export class Interaction {
         const value = scale.invert(axis === "x" ? x : y);
         if (!Number.isFinite(value)) continue;
         values[axis] = value;
-        const category = scale.categories?.[Math.round(value)];
-        if (category !== undefined) categories[axis] = category;
+        // The nearest band, beside the outer ones too, within the plot's span along the axis.
+        const names = scale.categories;
+        const [from, to] = scale.range;
+        const at = axis === "x" ? x : y;
+        if (names?.length && (at - from) * (at - to) <= 0)
+          categories[axis] = names[Math.min(names.length - 1, Math.max(0, Math.round(value)))]!;
       }
     const all = model.allPanels();
     const inItems = over

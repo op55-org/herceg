@@ -342,6 +342,16 @@ export interface LabelItems {
    * its number's shape: a transition interrupting goes on laying it out so.
    */
   shaped?: readonly boolean[] | undefined;
+  /**
+   * For a text mark's labels without a clip: moves label `label`'s place in
+   * `at` (x and y alternating) inside the chart in a value transition's
+   * frame, as its scene keeps it there, by as little as it reaches past: by
+   * its box's width in the scene, or for a counting label, the number it
+   * writes there (`written`), measured with `count`.
+   */
+  stayInside?:
+    | ((label: number, at: Float32Array, written: string | undefined, count: MeasureText) => void)
+    | undefined;
 }
 
 /** Line segments of one series, such as error bars: x1, y1, x2, y2 per segment. */

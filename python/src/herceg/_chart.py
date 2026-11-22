@@ -5629,10 +5629,13 @@ class Chart:
         with that panel's series labels, as ``hg.SeriesLabels`` are; text
         ``from_`` an ``hg.ItemAnchor`` is placed at a point of a layout
         mark's item (a treemap's cell), each row's item by its names. Without
-        ``clip``, text at a value is left out while the value is out of the
-        plot's view, and text at pixels or a share of the chart (above the
-        plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
-        and ``"plot"`` or ``"chart"`` cuts it to the plot or chart.
+        ``clip``, labels stay inside the chart (one reaching past its edge
+        goes to the other side of its point, else moves in; one of a point
+        outside the chart is drawn where told), text at a value is left out
+        while the value is out of the plot's view, and text at pixels or a
+        share of the chart (above the plot, say) is drawn wherever it is;
+        ``clip=False`` draws all of it exactly where told, and ``"plot"`` or
+        ``"chart"`` cuts it to the plot or chart.
         ``item_key`` names a numeric, datetime, or category column whose value
         names each row's item, which selections and transitions follow across
         replaced data.

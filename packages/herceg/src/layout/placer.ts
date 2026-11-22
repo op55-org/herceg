@@ -434,18 +434,33 @@ export function shiftInside(
   plot: Rect,
   mirror?: { axis: "x" | "y"; at: number },
 ): [dx: number, dy: number] {
-  const shift = { x: 0, y: 0 };
-  for (const axis of ["x", "y"] as const) {
-    const [start, length] = axis === "x" ? [box.x, box.width] : [box.y, box.height];
-    const [from, room] = axis === "x" ? [plot.x, plot.width] : [plot.y, plot.height];
-    let at = start;
-    if (mirror?.axis === axis) {
-      const image = 2 * mirror.at - start - length;
-      if (beyond(image, length, from, room) < beyond(start, length, from, room)) at = image;
-    }
-    shift[axis] = within(at, length, from, room) - start;
-  }
-  return [shift.x, shift.y];
+  const across = (axis: "x" | "y") => (mirror?.axis === axis ? mirror.at : undefined);
+  return [
+    shiftWithin(box.x, box.width, plot.x, plot.width, across("x")),
+    shiftWithin(box.y, box.height, plot.y, plot.height, across("y")),
+  ];
+}
+
+/**
+ * How far a span from `start`, `length` long, moves to stay inside the room
+ * from `from`, `room` long: to its mirror image across `at`, where given and
+ * where that reaches less far past the room, then in by as much as it
+ * still reaches past (to the room's start, where it is longer).
+ */
+export function shiftWithin(
+  start: number,
+  length: number,
+  from: number,
+  room: number,
+  at?: number,
+): number {
+  // Most spans are inside already.
+  const past = beyond(start, length, from, room);
+  if (past === 0) return 0;
+  const image = at === undefined ? start : 2 * at - start - length;
+  return (
+    within(beyond(image, length, from, room) < past ? image : start, length, from, room) - start
+  );
 }
 
 /** The offsets of a block at `box` to where it is and to its mirror image across a rule's `line`. */

@@ -67,7 +67,13 @@ export interface Pointer {
    * units. Axes the panel lacks are left out.
    */
   readonly values: { readonly x?: number; readonly y?: number; readonly yRight?: number };
-  /** On category axes, the category whose band it is in, by name. */
+  /**
+   * On category axes, the band nearest it along the axis, by name: the band
+   * it is in, the nearer of two it is between, or the first or last beside
+   * them. Only within the plot's span
+   * along the axis (in a chart of one panel, under the plot too, over its x
+   * axis' labels); none beyond it.
+   */
   readonly categories: { readonly x?: string; readonly y?: string; readonly yRight?: string };
 }
 

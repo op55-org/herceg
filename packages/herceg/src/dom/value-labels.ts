@@ -400,19 +400,25 @@ export function labelsAt(
     shaped[i] = writes || !!moving.shaped[i];
     return writes;
   };
+  // Text labels stay inside the chart, as their scene keeps them: each
+  // moved in once it is written, counting ones by their numbers' shapes.
+  const { stayInside } = mark.named!;
   const record: LabelItems = { ...mark.named!, names: moving.names, values: numbers, shaped };
   if (record.starts)
     record.starts = Float32Array.from(moving.offsets, (offset, i) => at[i * 2]! - offset);
   // Bars' labels are cut to the plot as they come and go past its end (scenes leave out those outside it).
   const clip = record.of !== undefined && mark.clip === undefined ? "plot" : mark.clip;
   if (mark.kind === "text") {
-    const labels = Array.from({ length: count }, (_, i) =>
-      counts(i)
+    const labels = Array.from({ length: count }, (_, i) => {
+      const counting = counts(i);
+      const text = counting
         ? (write!(i, numbers[i]!, at[i * 2]!, at[i * 2 + 1]!, measure) as string)
         : i < kept
           ? mark.labels[i]!
-          : moving.texts[i]!,
-    );
+          : moving.texts[i]!;
+      if (i < kept) stayInside?.(i, at, counting ? text : undefined, measure);
+      return text;
+    });
     return { ...mark, coords: at, labels, count, named: record, clip };
   }
   // Each label's items move by its place, or are written again at it as it counts.
@@ -421,19 +427,21 @@ export function labelsAt(
   const own = mark.named!.at!;
   for (let i = 0; i < count; i++) {
     const [lx, ly] = [at[i * 2]!, at[i * 2 + 1]!];
-    const made = counts(i)
+    const counting = counts(i);
+    let made = counting
       ? (write!(i, numbers[i]!, lx, ly, measure) as readonly TextItem[])
-      : moving.items[i]!.map((item) => {
-          const dx = lx - (i < kept ? own[i * 2]! : from[i * 2]!);
-          const dy = ly - (i < kept ? own[i * 2 + 1]! : from[i * 2 + 1]!);
-          const { box } = item;
-          return {
-            ...item,
-            x: item.x + dx,
-            y: item.y + dy,
-            box: box && { ...box, x: box.x + dx, y: box.y + dy },
-          };
-        });
+      : moving.items[i]!.map((item) =>
+          moved(
+            item,
+            lx - (i < kept ? own[i * 2]! : from[i * 2]!),
+            ly - (i < kept ? own[i * 2 + 1]! : from[i * 2 + 1]!),
+          ),
+        );
+    if (stayInside && i < kept) {
+      stayInside(i, at, counting ? made[0]?.text : undefined, measure);
+      const [dx, dy] = [at[i * 2]! - lx, at[i * 2 + 1]! - ly];
+      if (dx || dy) made = made.map((item) => moved(item, dx, dy));
+    }
     for (const item of made) {
       items.push(item);
       owners.push(i);
@@ -442,4 +450,15 @@ export function labelsAt(
   record.at = at;
   record.owners = Uint32Array.from(owners);
   return { ...mark, items, named: record, clip };
+}
+
+/** `item` moved by (`dx`, `dy`), with its box. */
+function moved(item: TextItem, dx: number, dy: number): TextItem {
+  const { box } = item;
+  return {
+    ...item,
+    x: item.x + dx,
+    y: item.y + dy,
+    box: box && { ...box, x: box.x + dx, y: box.y + dy },
+  };
 }

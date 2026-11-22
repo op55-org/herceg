@@ -84,7 +84,9 @@ describe("placement.panel", () => {
       if (cell.state === "refused") return expectRefused(() => build(placed), cell);
       if (cell.state !== "works") throw new Error(`placement.panel is never ${cell.state}`);
       // The panels are the same size: the mark draws in b what it draws in a.
-      expectPlaced(cell.row, { panels: twoPanels }, ["b", "a"], ["a", "b"]);
+      // Room above the top one keeps its labels off the chart's edge, which
+      // text labels stay inside.
+      expectPlaced(cell.row, { panels: twoPanels, padding: { top: 12 } }, ["b", "a"], ["a", "b"]);
     });
 });
 

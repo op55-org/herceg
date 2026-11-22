@@ -720,9 +720,15 @@ chart.on("select", ({ revision }) => {
 - `pointer`: `x` and `y` in the chart's pixels, the `panel` it is over,
   `inPlot`, its `values` on the panel's axes (epoch ms on time axes,
   through breaks; a fractional band index on category axes), and its
-  `categories`: on category axes, the band it is in, by name
-  (`pointer.categories.x`, `"Mon"`). Undefined for the keyboard and for
-  cursors other charts share.
+  `categories`: on category axes, the nearest band by name
+  (`pointer.categories.x`, `"Mon"`): the band it is in, the nearer of two
+  it is between, and the first or last beside them, in the room a band axis keeps past its outer bands. It
+  names one wherever the pointer is within the plot's span along that
+  axis, and none beyond it; in a chart of one panel, under the plot too
+  (over the x axis' labels). Off the plots of facets or subplots the
+  pointer is over no panel and reads no axis; over a tick label there,
+  the `target` names its category.
+  Undefined for the keyboard and for cursors other charts share.
 - `target`: what input addresses there, picked as described below, by
   `kind`:
 
