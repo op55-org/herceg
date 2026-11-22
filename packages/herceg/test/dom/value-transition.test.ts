@@ -76,6 +76,7 @@ import {
 import { ChartError } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
+import { tickMarksOf } from "../helpers/guides.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
 
 // The page's last frame time, and the one-off work left out of the frame running.
@@ -1588,6 +1589,41 @@ describe("axes moving with values", () => {
     },
     "keep a race's plot with its end labels left out, and leave them out between",
   );
+
+  it("leave end labels' tick marks out with them on every frame", () => {
+    // b6.05's race with tick marks: "0" at the chart's left edge, and from
+    // 40 the last label at its right edge.
+    const data = table({ brand: ["a", "b", "c"], value: [10, 20, 33] });
+    const model = new ChartModel(
+      {
+        locale: "en-US",
+        animation: { values: true },
+        padding: { top: 0, right: 6, bottom: 0, left: 0 },
+        marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "brand" })],
+        x: { nice: false },
+        y: { show: false },
+        guides: [
+          axis({ scale: "x", place: { side: "top" }, line: false, labels: { ends: "hide" } }),
+        ],
+      },
+      undefined,
+      [guideCompiler(GUIDE_KIT)],
+    );
+    model.setSize(600, 300, 1);
+    const { tween } = change(model, () => data.set("value", 2, 40));
+    expect(tween).toBeDefined();
+    const last = axisOf(tween!.scene, "top").ticks.at(-1)!;
+    expect(last.label).toBe("");
+    expect(tickMarksOf(axisOf(tween!.scene, "top")).at(-1)!.at).toBeLessThan(last.position - 1);
+    for (const t of [0, 50, 100, 150, 200]) {
+      const top = axisOf(frameAt(tween!, t), "top");
+      const labelled = top.ticks.filter(({ label }) => label);
+      expect(top.ticks.length - labelled.length).toBeGreaterThan(0);
+      expect(tickMarksOf(top).map((mark) => mark.at)).toEqual(
+        labelled.map(({ position }) => Math.round(position)),
+      );
+    }
+  });
 
   it("move axes the guides list with their scales, their layers laid out between", () => {
     // b6.05: a bar race's x axis on top, without tick marks, moving with the bars.

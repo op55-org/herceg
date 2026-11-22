@@ -158,10 +158,11 @@ default, widens the margin for a first or last label crossing the chart's
 edge, as before; `"hide"` leaves that label out, judged as painted (turned,
 outlined, haloed), and keeps the margin, so the plots of races, streams,
 and zoomed dashboards keep their width. Between facets and subplots a
-label crossing its plot's side counts as crossing; tick marks and grid
-lines stay. Python takes `hg.TickLabels(ends="hide")`, and
-`herceg.express` through `guides`; colorbars refuse it. The margins that
-x end labels widen now make room for their outlines and halos too.
+label crossing its plot's side counts as crossing; the label's tick mark
+goes with it, its grid line stays. Python takes
+`hg.TickLabels(ends="hide")`, and `herceg.express` through `guides`;
+colorbars refuse it. The margins that x end labels widen now make room
+for their outlines and halos too.
 
 Log axes tick and label as d3's log scales do: every digit of each decade
 (1 to 9 × 10ⁿ) where the domain spans fewer decades than the axis' count,
@@ -541,3 +542,10 @@ Python's rooms, of axes and legends alike, take `None` for an open end
 the axes' messages. See
 [Bars](docs/guide/marks.md#bars) and
 [Legends](docs/guide/axes-and-legends.md#legends).
+
+`labels.ends: "hide"` leaves out an end label's tick mark with it, so no
+mark stands half cut at the chart's edge; its grid line stays, as does
+another layer's mark at the same place, and labels blank for other
+reasons (overlap thinning, duplicates, a row a room leaves out) keep
+theirs, in every output and frame. See [Labels at the chart's
+edge](docs/guide/axes-and-legends.md#labels-at-the-charts-edge).

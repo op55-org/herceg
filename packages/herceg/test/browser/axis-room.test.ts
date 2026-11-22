@@ -6,16 +6,20 @@ import "./interactive.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
+import { measurer } from "../../src/dom/measurers.ts";
 import { SvgLayer } from "../../src/dom/svg-layer.ts";
 import { axis } from "../../src/guides/options.ts";
+import { renderToImage } from "../../src/image.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { renderToPDF } from "../../src/pdf.ts";
+import { EXPORT_SCENE, type ExportsScene } from "../../src/render/export-scene.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, Scene } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { tickMarksOf } from "../helpers/guides.ts";
 import { modelOf } from "./helpers.ts";
 
 // The guide compiler as it is, counting the charts that make one.
@@ -299,5 +303,80 @@ describe("end labels", () => {
       expect(renderToPDF({ ...options, width: 600, height: 300 })).toEqual(renderToPDF(chart));
     },
     "draw static SVG and PDF as the live chart leaves its end labels out",
+  );
+
+  /** How a PNG's pixels look along row `y`: each pixel's color, for comparing. */
+  const rowOf = async (png: Blob, y: number) => {
+    const bitmap = await createImageBitmap(png);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d")!;
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, y, bitmap.width, 1);
+    return (x: number) => [...data.subarray(x * 4, x * 4 + 4)].join(",");
+  };
+  /** Where a PDF's first page strokes straight down: the x of each segment drawn top to bottom. */
+  const downStrokes = async (pdf: Uint8Array) => {
+    const text = new TextDecoder("latin1").decode(pdf);
+    const at = text.indexOf("stream\n") + 7;
+    const bytes = pdf.slice(at, text.indexOf("\nendstream", at));
+    const out = new Blob([bytes as Uint8Array<ArrayBuffer>])
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate"));
+    const content = await new Response(out).text();
+    return [...content.matchAll(/^(\S+) \S+ m\n(\S+) \S+ l$/gm)]
+      .filter(([, from, to]) => from === to)
+      .map(([, x]) => Number(x));
+  };
+
+  contractTest(
+    "axis.tick-labels.ends.marks-export",
+    async () => {
+      // B4's axis on top, without its line: the end labels cross the chart's
+      // edges, and their tick marks go with them.
+      const values = table({ x: [0, 1000], v: [0, 1] });
+      const options = (renderer: "svg" | "canvas"): ChartOptions => ({
+        renderer,
+        animation: false,
+        legend: false,
+        padding: 0,
+        marks: [line(values, { x: "x", y: "v" })],
+        x: { nice: false, grid: false },
+        y: { show: false, grid: false },
+        guides: [
+          axis({
+            scale: "x",
+            place: { side: "top" },
+            room: 30,
+            line: false,
+            ticks: { values: [0, 250, 500, 750, 1000] },
+            labels: { ends: "hide" },
+          }),
+        ],
+      });
+      const measureText = measurer(document);
+      const svg = (text: string) => text.replace(/herceg-(svg-)?\d+-(export-)?/g, "");
+      for (const renderer of ["svg", "canvas"] as const) {
+        const chosen = options(renderer);
+        const chart = await mount(chosen, 600, 200);
+        const scene = (chart as unknown as ExportsScene)[EXPORT_SCENE]((scene) => scene);
+        const top = scene.panels[0]!.axes.find(({ side }) => side === "top")!;
+        expect(top.ticks.map(({ label }) => label)).toEqual(["", "250", "500", "750", ""]);
+        expect(tickMarksOf(top)).toEqual([150, 300, 450].map((at) => ({ at, length: 5 })));
+        // Static SVG, measured as the page measures, draws the live chart.
+        const sized = { ...chosen, width: 600, height: 200 };
+        expect(svg(renderToSVG(sized, { measureText }))).toBe(svg(chart.toSVG()));
+        // The images: no mark at the left edge, between 25 and 30 px down,
+        // where the kept labels' ticks have theirs.
+        for (const png of [await chart.toPNG(), await renderToImage(sized)]) {
+          const at = await rowOf(png, 27);
+          expect(at(0), renderer).toBe(at(75));
+          expect(at(150), renderer).not.toBe(at(75));
+        }
+        // The PDF strokes the kept marks alone.
+        for (const pdf of [renderToPDF(chart), renderToPDF(sized)])
+          expect(await downStrokes(pdf)).toEqual([150.5, 300.5, 450.5]);
+      }
+    },
+    "draw static SVG, PNG, and PDF as the live chart leaves end labels' tick marks out",
   );
 });

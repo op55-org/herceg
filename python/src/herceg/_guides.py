@@ -501,10 +501,10 @@ class TickLabels:
     whose painted extent would cross the chart's edge do (or, in panels
     among others, the gap to a neighbour): ``"room"`` (the default) widens
     the margin, narrowing the plots, and margins only grow while the
-    chart's size and options stay; ``"hide"`` leaves them out, keeping
-    their tick marks and grid lines, and widens nothing for them, which
-    suits axes whose domain moves. Colorbars take none of ``inside``,
-    ``gap``, and ``ends``."""
+    chart's size and options stay; ``"hide"`` leaves them out with their
+    tick marks, keeping their grid lines, and widens nothing for them,
+    which suits axes whose domain moves. Colorbars take none of
+    ``inside``, ``gap``, and ``ends``."""
 
     rotation: float | Sequence[float] | None = None
     overlap: TickOverlap | None = None

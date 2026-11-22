@@ -20,6 +20,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, LabelsGeometry, Panel, Scene, TextItem } from "../../src/scene/scene.ts";
 import type { SeriesLabelsSpec } from "../../src/spec/encoding.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { tickMarksOf } from "../helpers/guides.ts";
 
 function model(config: ChartConfig, width = 900, height = 500) {
   const made = new ChartModel(
@@ -584,8 +585,18 @@ describe("x end tick labels under the labels' track", () => {
     const named = hidden(A6);
     expect(tickLabels(axisOn(named, "bottom")).at(-1)!.text).toBe("05:39:00.600");
     // Without the names' track the chart's edge is nearer: left out.
-    expect(tickLabels(axisOn(hidden(undefined), "bottom")).at(-1)!.text).not.toBe("05:39:00.600");
+    const bare = hidden(undefined);
+    expect(tickLabels(axisOn(bare, "bottom")).at(-1)!.text).not.toBe("05:39:00.600");
+    expect(axisOn(bare, "bottom")!.ticks.at(-1)).toMatchObject({ label: "" });
     expect(named.plot).toEqual(sceneOf(a6(HOURS)).panels[0]!.plot);
+    // Tick marks stay with the labels kept and go with those left out.
+    for (const panel of [named, bare]) {
+      const bottom = axisOn(panel, "bottom")!;
+      const labelled = bottom.ticks.filter(({ label }) => label);
+      expect(tickMarksOf(bottom).map((mark) => mark.at)).toEqual(
+        labelled.map(({ position }) => Math.round(position)),
+      );
+    }
   });
 
   it("stand under the track as blocks of several lines", () => {
@@ -598,6 +609,30 @@ describe("x end tick labels under the labels' track", () => {
     expect(last.text).toBe("the last\nlabel of lines");
     expect(extent(last)[1]).toBeGreaterThan(right(panel) + TRACK);
     expect(extent(last)[1]).toBeLessThanOrEqual(900 - 2);
+    // Under "hide" it stays, with its tick mark; past the chart's edge, both go.
+    for (const [text, kept] of [
+      ["the last\nlabel of lines", true],
+      ["the last label, written\nfar too long to stand there", false],
+    ] as const) {
+      const ended = sceneOf(
+        numbered(String, A6, {
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { values: [0, 50, 100] },
+              format: (v) => (v === 100 ? text : `${v}`),
+              labels: { ends: "hide" },
+            }),
+          ],
+        }),
+      ).panels[0]!;
+      const bottom = axisOn(ended, "bottom")!;
+      expect(tickLabels(bottom).some((item) => item.text === text)).toBe(kept);
+      const ticks = [ended.plot.x, ended.plot.x + ended.plot.width / 2, right(ended)];
+      expect(tickMarksOf(bottom).map((mark) => mark.at)).toEqual(
+        (kept ? ticks : ticks.slice(0, 2)).map(Math.round),
+      );
+    }
   });
 
   it("lay out alike with static output's metrics", () => {

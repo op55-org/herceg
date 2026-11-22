@@ -575,7 +575,9 @@ export interface Placed {
   tick: StrokePaint;
   /**
    * Its ticks as placed, where `ticks` leaves out labels crossing the
-   * chart's edge (`ends`): those still size their rows and lanes.
+   * chart's edge (`ends`): those still size their rows and lanes, and
+   * take their tick marks with them, where labels blank for other
+   * reasons (overlap, duplicates, rooms) keep theirs.
    */
   sized?: readonly AxisTick[];
 }
@@ -2156,7 +2158,8 @@ function titleItem(
 /**
  * The items of an axis at `placement`: its line, each layer's tick marks
  * (one stroke for those that look alike, each position once, as long as
- * the longest there), and labels in rows outward from the line. With
+ * the longest there; none for a label `ends` leaves out, where another
+ * layer's mark stays), and labels in rows outward from the line. With
  * `record`, each label's box goes into its `boxes` as it is laid out
  * (`AxisGuide.labelBoxes`), named by its category on a category axis.
  */
@@ -2190,7 +2193,7 @@ export function drawn(
   };
   if (line)
     strokeOf(line).coords.push(...point(placement.start, edge), ...point(placement.end, edge));
-  for (const { layer, ticks, tick: paint } of layers) {
+  for (const { layer, ticks, sized, tick: paint } of layers) {
     const tick = layer.tick;
     if (!tick) continue;
     const { length, direction } = tick;
@@ -2201,7 +2204,9 @@ export function drawn(
           ? [-length, 0]
           : [-length / 2, length / 2];
     const { at } = strokeOf(paint);
-    for (const { position } of ticks) {
+    for (const [k, { position, label }] of ticks.entries()) {
+      // A label `ends` leaves out takes its tick mark with it.
+      if (!label && sized?.[k]?.label) continue;
       const where = Math.round(position) + 0.5;
       const before = at.get(where);
       if (before) at.set(where, [Math.min(before[0]!, reach[0]!), Math.max(before[1]!, reach[1]!)]);
