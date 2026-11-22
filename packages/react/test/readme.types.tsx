@@ -1,7 +1,7 @@
 // The examples of the README and docs/guide/frameworks.md, compiled by
 // `npm run typecheck` so the docs stay true.
 import { table, time, viridis } from "herceg";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Legend } from "../src/guides.tsx";
 import {
   Bar,
@@ -334,5 +334,26 @@ export function Dashboard() {
         </Panel>
       </Columns>
     </Chart>
+  );
+}
+
+// A rule the user drags: its value set on commit, previews in a readout.
+export function Threshold() {
+  const [threshold, setThreshold] = useState(250);
+  const [dragged, setDragged] = useState<number | null>(null); // while the rule moves
+  return (
+    <>
+      <output>{Math.round(dragged ?? threshold)} ms</output>
+      <Chart
+        onItemMove={({ markId, phase, position }) => {
+          if (markId !== "threshold") return;
+          setDragged(phase === "preview" ? (position?.y ?? null) : null);
+          if (phase === "commit" && position?.y !== undefined) setThreshold(Math.round(position.y));
+        }}
+      >
+        <Line data={metrics} x="time" y="p99" />
+        <Rule id="threshold" y={threshold} drag />
+      </Chart>
+    </>
   );
 }

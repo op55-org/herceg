@@ -64,10 +64,37 @@ hg.Chart(df, time_zone="UTC",
 ).line(x="time", y="load")
 ```
 
-Charts asking for more than a tick count, Intl formats, and the automatic
-axes and legend (a short form's `place` or `room` is more) load a guide compiler, once per page, and draw their first
-frame when it has loaded (`chart.loading` settles then). Static output
-brings it along; other charts never load it.
+### The guide compiler
+
+The automatic axes and legend, tick counts, and Intl formats are in every
+chart's bundle. A chart asking for more loads a guide compiler, once per
+page, and draws its first frame when it has loaded (`chart.loading`
+settles then); static output brings it along. A chart asks for more with:
+
+- `guides`, `fields`, or a scale in `scales` other than a scale of
+  categories (`"ordinal"`) or an `"identity"` scale;
+- on `x`, `y`, `yRight`, or a subplot's own: `padding`, `place`, or
+  `room`; `ticks` other than a number (`{ count }` included); a `title`
+  or `grid` object; a `format` or `tooltipFormat` other than Intl options
+  (a pattern, a duration, a unit with prefixes, a fiscal year, a
+  function);
+- tick labels aligned by style (`align` or `verticalAlign` in a
+  `tickLabel` or `text` style, in the theme or an axis' `style`);
+- a mark's nonzero `zIndex`, a mark on a position scale of the chart's own
+  (`{ field, scale }`), or an annotation listed in the legend (`legend:
+  true`);
+- `legend` settings other than `place` and `style` (`columns`, `entries`,
+  `room`, ...);
+- visibility set in one panel (`setVisibility(key, shown, { panel })`), a
+  mark hidden whole, or a mark's rows hidden by a field's value.
+
+It is about 32 KB of gzipped JavaScript, and about 5 KB more of format
+patterns and markers it shares with the feature compiler, field displays,
+and tooltip fields, where none of those loaded them first. Its code keeps
+about 0.2 MB of heap once a page, and a line chart drawn with it keeps
+about 40 KB more than one without. Where that matters and the data's ends
+are known, give the axis a fixed `domain` rather than `padding: 0`: a set
+domain is drawn as given, without padding, and needs no compiler.
 
 ## Scale options
 
@@ -78,7 +105,7 @@ brings it along; other charts never load it.
 | `type` | `"linear"`, `"log"`, `"time"`. A continuous axis is a time axis when a mark places times on it. |
 | `domain` | Fixed ends. |
 | `nice`, `zero` | Round the ends to ticks; include zero (bars' value axes do by default). |
-| `padding` | Room past the data: automatic for markers and bar labels, a share, or pixels (Python `hg.Pixels`). |
+| `padding` | Room past the data: automatic for markers and bar labels, a share, or pixels (Python `hg.Pixels`). A set `domain` takes none unless given. Category axes refuse it: their bands keep room of their own, a fifth of a band's step at each end as between bands (none where a heatmap's cells are on the axis), in which the pointer names the outer band ([`pointer.categories`](interaction.md#events)). |
 | `scope` | Which panels share the scale ([Layout](layout.md#sharing-scales)). |
 | `repeat` | `"outer"` (default) or `"all"`: which panels sharing the scale label it. |
 | `title`, `show`, `grid` | The axis title; hide the axis; grid lines (`{ zIndex }` to draw them over data). |
@@ -302,7 +329,9 @@ beside each row's last panel needs rows that share y.
 
 Flat labels stand at their ticks as `style.tickLabel` aligns them (`align`
 on x, `verticalAlign` on y). Category labels longer than 30% of the
-chart's width are shortened with an ellipsis.
+chart's width are shortened with an ellipsis. A format's `"\n"` writes a
+label in lines, laid out as one block in every `overlap` mode
+([lines](#titles-and-padding)).
 
 ### Labels at the chart's edge
 
@@ -312,11 +341,11 @@ and the plots narrow for it. A label may stand under the room the chart
 keeps for marks' labels outside the plots (series names, rules' labels):
 only padding and side legends count as the edge there, so names beside the
 plot stay where they are (labels inside the plot can meet them; see
-[labels that would overlap](marks.md#labels-that-would-overlap)). y labels at the plots' top and bottom are
-moved inside the chart instead. Margins grow as labels need and shrink
-only when the chart is resized or its options change, so streamed data,
-zooming, and value transitions do not move the plots back and forth: a
-margin a label once needed stays.
+[labels that would overlap](marks.md#labels-that-would-overlap)). y
+labels at the plots' top and bottom are moved inside the chart instead.
+Margins grow as labels need and shrink only when the chart is resized or
+its options change, so streamed data, zooming, and value transitions do
+not move the plots back and forth: a margin a label once needed stays.
 
 `labels: { ends: "hide" }` leaves out an end label that would cross the
 chart's edge, and does not widen the margin for it:

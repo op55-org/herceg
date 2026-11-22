@@ -155,14 +155,17 @@ longer keeps the room of category labels' extra lines twice.
 
 Listed axes' labels take `ends` (and their layers' labels): `"room"`, the
 default, widens the margin for a first or last label crossing the chart's
-edge, as before; `"hide"` leaves that label out, judged as painted (turned,
+edge; `"hide"` leaves that label out, judged as painted (turned,
 outlined, haloed), and keeps the margin, so the plots of races, streams,
 and zoomed dashboards keep their width. Between facets and subplots a
-label crossing its plot's side counts as crossing; the label's tick mark
-goes with it, its grid line stays. Python takes
+label crossing its plot's side counts as crossing. The label's tick mark
+goes with it, so no mark stands half cut at the chart's edge; its grid
+line stays, as does another layer's mark at the same place, and labels
+blank for other reasons (overlap thinning, duplicates, a row a room
+leaves out) keep their marks, in every output and frame. Python takes
 `hg.TickLabels(ends="hide")`, and `herceg.express` through `guides`;
-colorbars refuse it. The margins that x end labels widen now make room
-for their outlines and halos too.
+colorbars refuse it. The margins that x end labels widen make room for
+their outlines and halos too.
 
 Log axes tick and label as d3's log scales do: every digit of each decade
 (1 to 9 × 10ⁿ) where the domain spans fewer decades than the axis' count,
@@ -428,124 +431,115 @@ nothing else. See [Role
 styles](docs/guide/styling.md#role-styles) and
 [Keyboard](docs/guide/accessibility.md#keyboard).
 
-Counting labels measure nothing new mid-transition. A label counting
-through a value transition writes its number exactly every frame and lays
-it out by its shape (its digits as zeros), so a bar race's frames measure
-a few shapes instead of every number they write, and Chrome's text cache
-no longer grows with them. Lines aligned to their end are drawn from it
-mid-transition, so a value under its brand meets the label's edge however
-its digits' widths differ; a unit after a number, or a box behind it, can
-be a pixel off until the transition ends. Bars' labels of parts with a
-`{ value: true }` part count whether or not a part has a style of its own,
-and so do bars' value labels written through the chart's field displays,
-which showed each new value at once. See [Counting
-labels](docs/guide/interaction.md#counting-labels).
+- **Counting labels measure nothing new mid-transition.** Through a value
+  transition, a label counting its numbers writes them exactly every
+  frame, each in its format, and lays them out by their shapes (their
+  digits as zeros), so a bar chart race's frames measure a few shapes
+  rather than every number they write, and Chrome's text cache stays
+  level. What counts:
+  - bars' value labels, and their labels of parts with a `{ value: true }`
+    part, styled or not;
+  - a text mark's label of one number field, and each part of a number
+    field in a text mark's label of parts, in its part's format;
+  - labels written through the chart's field displays as well.
 
-Text labels made of parts count. Through a value transition, a text
-mark's label of parts counts each part of a number field between its two
-values, each in its part's format, and so does a text label of one field
-written through the chart's field displays; both showed each new value at
-once. Literal text, `{ label }` parts, categories, and a part whose value
-is missing at either end show the new scene's text at once while the
-label's other numbers count. Labels of parts are drawn from the edge their
-lines align to at rest too: a line aligned to its end from its end, a
-centered line of one part from its middle, so the part at the edge meets
-it whatever the renderer's text widths (WebKit's SVG text is about a pixel
-wider than its canvas measures), and nothing moves as a transition ends.
-Static SVG writes those parts with `text-anchor` `end` or `middle`. See
-[Counting labels](docs/guide/interaction.md#counting-labels).
-
-Fixed: SVG left out the spaces at the ends of a label's part, so a part
-after a space (`[{ value: true }, " kg"]`) touched the one before it, and a
-part before one drawn from its end lost its room. Parts are drawn without
-their edge spaces, which keep their room, in every output.
-
-Fixed: inspection could read the later of two observations midway between
-them, as `snap: "each"` should not ("ties to the earlier"): distances on
-screen differ by rounding, so 31 of 260 exact midpoints between 500
-jittered times read the later. Distances within a thousandth of a pixel of
-the nearest now tie, and the earliest is read, by the pointer, hover
-events, `chart.inspect`, cursors shown or synced at a value, and the
-keyboard (its tooltip, announcements, and Up and Down), on every axis:
-`"shared"` snaps to the earliest value tied, whichever series has it, and
-`"each"` reads the first row of points at one value on either side of it.
-See [Inspection](docs/guide/interaction.md#inspection).
-
-Fixed: a format's line break in tick labels (`format: { time: "%b %-d\n%Y"
-}`) was written as a space unless a listed axis' labels were `overlap:
-"show"`, against "`\n` breaks any label into lines". Tick labels a format
-writes in lines are now blocks on every axis, the short form's or listed,
-in every overlap mode and every output: rows of x labels are as deep as
-their blocks, turned labels turn as blocks, labels kept apart are kept
-apart as blocks, y labels take their widest line's width and stay inside
-the chart, and a room leaves out a row of blocks that does not fit. A
-plain axis whose labels are written in lines is laid out by the guide
-compiler from then on, as listed axes are. See [Titles and
-padding](docs/guide/axes-and-legends.md#titles-and-padding).
-
-The pointer names the nearest band on category axes: `pointer.categories`
-(Python `hg.Pointer.categories`) names the first or last band in the room
-a band axis keeps beside them, and the nearer band between two, wherever
-the pointer is within the plot's span along that axis (in a chart of one
-panel, over the x axis' labels too); beyond it, none. `values` keeps the fractional band index.
-Text labels stay inside the chart, as rule and region labels do: a label
-that would reach past the chart's edge goes to the other side of its
-point (an annotation's label 14 px above a marker at the plot's top is
-drawn 14 px below it), else moves in, in every output and on every frame
-of a value transition. `clip` (`"plot"`, `"chart"`, or `false`) draws text
-exactly where told, as does a label of a point outside the chart. See
-[Annotations](docs/guide/marks.md#annotations) and [Events](docs/guide/interaction.md#events).
-
-Fixed: series and rules' labels outside the plot (`place: { outside: true,
-offset }`) stood `offset` past the room the chart keeps for them, which an
-x end tick label overhanging the plot pushed out: in a view of 1.2 seconds
-ticked in sub-second steps, names asked to stand 28 px from their lines
-stood 69 px out, and the plot narrowed. They now stand `offset` pixels,
-after a 6 px gap, past what stands beside the plot as drawn (its y labels,
-listed axes, its y title, a grid's row headers, a legend beside a
-subplot), in every panel and output, and an x end tick label may stand
-under their room: the margin widens only for one reaching past it, to the
-chart's edge less padding and side legends, and `labels.ends: "hide"`
-keeps an end label that fits under it. In subplots' gutters a y title now
-stands beside its axis' labels, before marks' labels, and a subplot keeps
-the room a listed y axis takes beside it, not the subplots' most (which
-fell short where its own labels were narrower than another's). See
-[Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
-
-A hover repaints only what it draws. The crosshair, the points read, the
-item outline, the keyboard's ring, the brush, and controls' outlines draw
-in an `<svg>` of their own over the chart's marks and axes, so a pointer
-move no longer makes the browser paint the marks' SVG again: in Chrome, a
-hover over 4,000 SVG paths paints 0.08 ms a move instead of 0.3-0.4 ms, and
-its main-thread work fell from 1.85 to 1.3 ms a move. The chart makes that
-`<svg>`, `aria-hidden` and passing the pointer through, right after the
-data's the first time something draws there, so a chart nothing draws over
-keeps no more nodes than before. See [Layers in the
-browser](docs/architecture/rendering.md#layers-in-the-browser).
-
-Bars' labels take `place.offset`, the pixels between a label and the bar's
-edge it stands at (4 by default, as before): past the end, inside at the
-end or root, and just inside where past would leave the plot. A label fits
-inside where its text and offset do, the axis keeps room past the bars'
-ends for both, and neighbors' labels keep 4 px apart. Centered labels
-(stacked bars' by default) and negative offsets are refused, in
-TypeScript's types for an explicit `"center"`, at run time, in specs, and
-in Python (`hg.BarLabels(place=hg.LabelPlace(outside=False, offset=6))`;
-the chart's bar builder refuses a stack's centered default). Legends take
-`room`, the type axes' rooms have, now named `Room`: a fixed depth on
-their side, or `{ min, max }` bounds on what their entries measure, so
-plots line up whether a legend wraps or not; the gap and `place.offset`
-come on top. A legend deeper than its room is drawn whole at its side's
-edge, reaching toward the plots; a legend inside a plot refuses it.
-Python's rooms, of axes and legends alike, take `None` for an open end
-(`room=(40, None)`), and one check reads axes' and legends' rooms with
-the axes' messages. See
-[Bars](docs/guide/marks.md#bars) and
-[Legends](docs/guide/axes-and-legends.md#legends).
-
-`labels.ends: "hide"` leaves out an end label's tick mark with it, so no
-mark stands half cut at the chart's edge; its grid line stays, as does
-another layer's mark at the same place, and labels blank for other
-reasons (overlap thinning, duplicates, a row a room leaves out) keep
-theirs, in every output and frame. See [Labels at the chart's
-edge](docs/guide/axes-and-legends.md#labels-at-the-charts-edge).
+  Text labels of parts, and value labels written through field displays,
+  showed each new value at once. Literal text, `{ label }` parts,
+  categories, and a part whose value is missing at either end show the
+  new scene's text at once while the label's other numbers count. A
+  unit after a number, or a box behind it, can be a pixel off until the
+  transition ends. See [Counting
+  labels](docs/guide/interaction.md#counting-labels).
+- **Labels of parts are drawn from the edge their lines align to**, at
+  rest and mid-transition: a line aligned to its end from its end, a
+  centered line of one part from its middle, so the part at the edge
+  meets it whatever the renderer's text widths (WebKit's SVG text is about
+  a pixel wider than its canvas measures), and nothing moves as a
+  transition ends. Static SVG writes those parts with `text-anchor` `end`
+  or `middle`. Fixed: SVG left out the spaces at the ends of a label's
+  part, so a part after a space (`[{ value: true }, " kg"]`) touched the
+  one before it, and a part before one drawn from its end lost its room.
+  Parts are drawn without their edge spaces, which keep their room, in
+  every output. See [Parts with a look of their
+  own](docs/guide/marks.md#parts-with-a-look-of-their-own).
+- **Text labels stay inside the chart**, as rule and region labels do: a
+  label that would reach past the chart's edge goes to the other side of
+  its point (an annotation's label 14 px above a marker at the plot's top
+  is drawn 14 px below it), else moves in, in every output and on every
+  frame of a value transition. `clip` (`"plot"`, `"chart"`, or `false`)
+  draws text exactly where told, as does a label of a point outside the
+  chart. See [Annotations](docs/guide/marks.md#annotations).
+- **Labels outside the plot stand at their offset from it.** Series and
+  rules' labels with `place: { outside: true, offset }` stand `offset`
+  pixels, after a 6 px gap, past what stands beside the plot as drawn (its
+  y labels, listed axes, its y title, a grid's row headers, a legend
+  beside a subplot), in every panel and output. An x end tick label may
+  stand under the room the chart keeps for them: the margin widens only
+  for one reaching past it, to the chart's edge less padding and side
+  legends, and `labels.ends: "hide"` keeps an end label that fits under
+  it. In subplots' gutters a y title stands beside its axis' labels,
+  before marks' labels. Fixed: the labels stood `offset` past that room,
+  which an x end tick label overhanging the plot pushed out (in a view of
+  1.2 seconds ticked in sub-second steps, names asked to stand 28 px from
+  their lines stood 69 px out, and the plot narrowed); and a subplot
+  whose own listed y axis' labels were narrower than another's kept the
+  subplots' most room beside it rather than its own. See [Labels that
+  follow series](docs/guide/marks.md#labels-that-follow-series).
+- **Bars' labels take `place.offset`**, the pixels between a label and the
+  bar's edge it stands at (4 by default): past the end, inside at the end
+  or root, and just inside where past would leave the plot. A label fits
+  inside where its text and offset do, the axis keeps room past the bars'
+  ends for both, and neighbors' labels keep 4 px apart. An offset on
+  centered labels (stacked bars' by default) is refused, as are negative
+  offsets, in TypeScript's types for an explicit `"center"`, at run time,
+  in specs, and in Python (`hg.BarLabels(place=hg.LabelPlace(outside=False,
+  offset=6))`; the chart's bar builder refuses an offset on a stack's
+  centered default). See [Bars](docs/guide/marks.md#bars).
+- **Tick labels a format writes in lines** (`format: { time: "%b
+  %-d\n%Y" }`) are blocks on every axis, the short form's or listed, in
+  every overlap mode and every output: rows of x labels are as deep as
+  their blocks, turned labels turn as blocks, labels kept apart are kept
+  apart as blocks, y labels take their widest line's width and stay
+  inside the chart, and a room leaves out a row of blocks that does not
+  fit. A plain axis whose labels are written in lines is laid out by the
+  guide compiler, as listed axes are. Fixed: the line break was written as
+  a space unless a listed axis' labels were `overlap: "show"`, against
+  "`\n` breaks any label into lines". See [Titles and
+  padding](docs/guide/axes-and-legends.md#titles-and-padding).
+- **Legends take `room`**, of the type axes' rooms have (`Room`): a fixed
+  depth on their side, or `{ min, max }` bounds on what their entries
+  measure, so plots line up whether a legend wraps or not; the gap and
+  `place.offset` come on top. A legend deeper than its room is drawn
+  whole at its side's edge, reaching toward the plots; a legend inside a
+  plot refuses it. Python's rooms, of axes and legends alike, take `None`
+  for an open end (`room=(40, None)`), and axes' and legends' rooms are
+  refused in the same words. See
+  [Legends](docs/guide/axes-and-legends.md#legends).
+- **The pointer names the nearest band on category axes.**
+  `pointer.categories` (Python `hg.Pointer.categories`) names the first or
+  last band in the room a band axis keeps beside them, and the nearer band
+  between two, wherever the pointer is within the plot's span along that
+  axis (in a chart of one panel, over the x axis' labels too); beyond it,
+  none. `values` keeps the fractional band index. See
+  [Events](docs/guide/interaction.md#events).
+- **Inspection reads the earliest of ties.** Distances within a
+  thousandth of a pixel of the nearest tie, and the earliest is read, by
+  the pointer, hover events, `chart.inspect`, cursors shown or synced at a
+  value, and the keyboard (its tooltip, announcements, and Up and Down),
+  on every axis: `"shared"` snaps to the earliest value tied, whichever
+  series has it, and `"each"` reads the first row of points at one value
+  on either side of it. Fixed: distances on screen differ by rounding, so
+  inspection could read the later of two observations midway between
+  them, against `snap: "each"`'s "ties to the earlier" (31 of 260 exact
+  midpoints between 500 jittered times). See
+  [Inspection](docs/guide/interaction.md#inspection).
+- **A hover repaints only the pointer overlay.** The crosshair, the points
+  read, the item outline, the keyboard's ring, the brush, and controls'
+  outlines draw in the pointer overlay, an `<svg>` of its own over the
+  chart's marks and axes, so a pointer move leaves the marks' SVG as it
+  was painted: in Chrome, a hover over 4,000 SVG paths paints 0.08 ms a
+  move, where painting the marks again took 0.3-0.4 ms. The chart makes
+  the overlay, `aria-hidden` and passing the pointer through, right after
+  the data's `<svg>` the first time something draws there, so a chart
+  nothing draws over keeps no more nodes. See [Layers in the
+  browser](docs/architecture/rendering.md#layers-in-the-browser).

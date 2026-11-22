@@ -232,12 +232,13 @@ A `rowSelection` binding made again each render is the same binding while
 it binds the same stores and channels, so it neither updates nor
 resubscribes the chart.
 
-**An annotation that follows the hover.** State a hover handler sets
-renders when the framework commits it, usually after the chart's frame,
-so a `<Rule x={hovered}>` trails the pointer by a frame. To draw with the
-move, write a table the annotation reads, in the handler: the chart draws
-what a `hover` listener changes in the frame of the move
-([When hover is reported](interaction.md#when-hover-is-reported)).
+### An annotation that follows the hover
+
+State a hover handler sets renders when the framework commits it, usually
+after the chart's frame, so a `<Rule x={hovered}>` trails the pointer by a
+frame. To draw with the move, write a table the annotation reads, in the
+handler: the chart draws what a `hover` listener changes in the frame of
+the move ([When hover is reported](interaction.md#when-hover-is-reported)).
 
 ```tsx
 function Latency() {
@@ -258,6 +259,40 @@ function Latency() {
 ```
 
 Vue and Svelte write the table the same way, from `@hover` and `onhover`.
+
+### A rule the user drags
+
+A [dragged rule](interaction.md#dragging-rules)'s value is the
+application's: state holds it, set on commit. The chart draws the rule at
+the pointer while it moves, so a rule whose `y` follows every preview has
+the chart draw each move twice. Previews can go into state the chart does
+not read, such as a readout: a render that leaves the chart's props as
+they were changes nothing in the chart.
+
+```tsx
+function Threshold() {
+  const [threshold, setThreshold] = useState(250);
+  const [dragged, setDragged] = useState<number | null>(null); // while the rule moves
+  return (
+    <>
+      <output>{Math.round(dragged ?? threshold)} ms</output>
+      <Chart
+        onItemMove={({ markId, phase, position }) => {
+          if (markId !== "threshold") return;
+          setDragged(phase === "preview" ? (position?.y ?? null) : null);
+          if (phase === "commit" && position?.y !== undefined) setThreshold(Math.round(position.y));
+        }}
+      >
+        <Line data={latency} x="time" y="p99" />
+        <Rule id="threshold" y={threshold} drag />
+      </Chart>
+    </>
+  );
+}
+```
+
+Vue's `@item-move` and Svelte's `onitemmove` take the same handler, with
+the rule's value in a `ref` or `$state` set on commit.
 
 ## Chart state
 
@@ -452,9 +487,9 @@ band's top edge, inside the chart, and its wrapper's `data-side` says
 the card slides along to stay inside, the wrapper's
 `--hg-anchor-slide-x` says how far, so that the arrow's CSS can keep it
 over its place. The wrapper's attribute and properties reach the content
-through React's portal, Vue's teleport, and Svelte's children alike. `fit="shift"` keeps it above and
-slides it down inside; `fit="none"` leaves it where it was told, cut by
-the chart's edge ([Fitting inside the
+through React's portal, Vue's teleport, and Svelte's children alike.
+`fit="shift"` keeps it above and slides it down inside; `fit="none"`
+leaves it where it was told, cut by the chart's edge ([Fitting inside the
 chart](interaction.md#fitting-inside-the-chart)).
 
 ```vue

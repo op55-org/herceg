@@ -593,6 +593,14 @@ a commit the next frame draws the rule where its options say: where the
 listener set it (accepted), back where it was (rejected), or nowhere (the
 rule removed).
 
+Give the value back on commit, not on every preview. While the rule
+moves, the chart draws it at the pointer itself; an application that
+updates the chart with each preview's value (framework state set from
+every `itemMove`) has the chart build and draw each move a second time,
+about twice the work of the move. To show the value while it moves (a
+readout beside the chart), read the preview's `position`
+([React, Vue, and Svelte](frameworks.md#a-rule-the-user-drags)).
+
 ```ts
 let threshold = 250;
 const marks = () => [line(latency, { x: "time", y: "p99" }), rule({ id: "threshold", y: threshold, drag: true })];
@@ -685,7 +693,7 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 | `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, `panels` for panels' own legends, and the whole state (`state`). |
 | `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with its whole `state`); a network node moved, or a [rule dragged](#dragging-rules) (`markId`, `phase`), each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
 | `pin` | The tooltip was [pinned](#pinned-tooltips) or let go: `at` (null when let go), its `inspection`, `cause`, `revision`. |
-| `render` | A frame of the data, or a selection over it, was drawn, for overlays that follow the panels: the `revision` on screen. |
+| `render` | A frame of the data, or a selection over it, was drawn, for the application's own overlays that follow the panels: the `revision` on screen. |
 | `error` | A `ChartError`, once per failed change. |
 
 **Causes and revisions.** A `cause` says what made a change:
@@ -722,12 +730,12 @@ chart.on("select", ({ revision }) => {
   through breaks; a fractional band index on category axes), and its
   `categories`: on category axes, the nearest band by name
   (`pointer.categories.x`, `"Mon"`): the band it is in, the nearer of two
-  it is between, and the first or last beside them, in the room a band axis keeps past its outer bands. It
-  names one wherever the pointer is within the plot's span along that
-  axis, and none beyond it; in a chart of one panel, under the plot too
-  (over the x axis' labels). Off the plots of facets or subplots the
-  pointer is over no panel and reads no axis; over a tick label there,
-  the `target` names its category.
+  it is between, and the first or last beside them, in the room a band
+  axis keeps past its outer bands. It names one wherever the pointer is
+  within the plot's span along that axis, and none beyond it; in a chart
+  of one panel, under the plot too (over the x axis' labels). Off the
+  plots of facets or subplots the pointer is over no panel and reads no
+  axis; over a tick label there, the `target` names its category.
   Undefined for the keyboard and for cursors other charts share.
 - `target`: what input addresses there, picked as described below, by
   `kind`:
@@ -1348,7 +1356,7 @@ chart from drawing or failing `chart.ready`.
 | Mark | Moves |
 | --- | --- |
 | Bars (stacked, labeled, histograms') | Matched within their series by `itemKey`, else by position (a category's name, a number, a time). Bars move between places on a category axis whose categories change order (its labels move with them) and along a continuous position axis. Bars keyed by `itemKey` come in and go out past the end of the position axis (below the last rank above); others grow from and shrink to their base. A bar changing sign passes through the baseline. |
-| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing numbers count through the values between, each in its format ([counting labels](#counting-labels)). |
+| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels count through the numbers between, each in its format, as [counting labels](#counting-labels) says. |
 | Pie slices, gauges | Slices turn to new sizes, always making a whole pie; a gauge turns its dial. |
 | Sunbursts | Sectors matched by path move their angles and rings, new ones growing out of their parent; drilling moves the rings to the new root ([drilling](hierarchy-and-flow.md#drilling-into-trees)). Labels fade in and out where they are drawn at one end only. |
 | Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). |
@@ -1413,6 +1421,8 @@ A label counts the numbers it writes, where both ends have them:
   them), as the new scene writes them; the label's other numbers count
   on.
 
+Between the two scenes:
+
 - **The number is exact** in every frame, in its format: signs, digits,
   units, prefixes, and mapped text as a still chart writes them.
 - **Frames measure nothing new.** Between the ends, a counting number is
@@ -1421,10 +1431,10 @@ A label counts the numbers it writes, where both ends have them:
   such as a mapping's words, is measured as it is. A format writes few
   shapes, so a race measures its keyframes' text and a few shapes, however
   long it runs.
-- **The number meets the edge its line aligns to.** Labels of parts draw
-  lines aligned to their end from it, and a centered line of one part from
-  its middle, mid-transition and at rest, so a race's value stays under
-  its brand's right edge whatever the renderer's text widths.
+- **The number meets the edge its line aligns to**, as labels of parts
+  are drawn mid-transition and at rest ([parts with a look of their
+  own](marks.md#parts-with-a-look-of-their-own)), so a race's value stays
+  under its brand's right edge whatever the renderer's text widths.
 - **Off by the shape until the transition ends:** with proportional
   digits, a run after the number on a line aligned to its start (a unit),
   the runs of a centered line of several, a box behind the number

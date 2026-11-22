@@ -145,10 +145,11 @@ never geometry made again from current data.
   logical series (`drawn-parts.ts` builds the trace part): for sorted
   series, the eligible observation nearest the pointer along the axis on
   screen (the earliest of ties) among those inside the segment's span and
-  the two bracketing it, in the run the segment draws (on a panel's own categories, by their places);
-  for unsorted lines and areas, the path point's own position, which `drawn-parts.ts` finds by walking the series as it was
-  traced (rows the trace cannot draw end a run, rows a break hides are
-  left out, steps add their corners) when first asked.
+  the two bracketing it, in the run the segment draws (on a panel's own
+  categories, by their places); for unsorted lines and areas, the path
+  point's own position, which `drawn-parts.ts` finds by walking the series
+  as it was traced (rows the trace cannot draw end a run, rows a break
+  hides are left out, steps add their corners) when first asked.
 - **Lookups.** Marks whose geometry says too little (candlesticks,
   distributions, heatmaps, 2D histograms, contours, error bars, rugs) pick
   or name their own items (`Mark.pickItem`), through the lookups the picker hands
@@ -231,7 +232,7 @@ another chart's listener may move it), and notes what it read
 move replaces), as `resolve` notes the hover it captures after a draw.
 The controller's next `draw` takes the note: it skips a hover read in
 the scene it draws, and keeps nothing after, so what else a hover reads
-(a gesture's end, say) is read again at each draw, as before. A report
+(a gesture's end, say) is read again at each draw. A report
 whose chart a listener drew at once in the meantime is dropped: that
 draw reported the newer read. Keys report from their handlers, which
 draw the cursor at once; cursors other charts share, `showCursor`, and

@@ -71,6 +71,12 @@ const folded = table(columns);
 area(folded, { x: "time", y: "band0" }); // a field it lacks throws here
 ```
 
+Reads are typed by what the record allows: any field may be a category,
+so `folded.value("band0", 0)` is `string | number | null`. To read a
+number column typed, take its numbers: `folded.numbers("band0")` is a
+typed array view of its live rows, as above (it throws for a category
+field).
+
 A record built without that type (`{ time, ...Object.fromEntries(pairs) }`)
 leaves the table knowing only the fields written out, and options refuse
 the others at compile time.

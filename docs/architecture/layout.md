@@ -155,10 +155,10 @@ renderer draws the items as they are (`render/svg.ts` `itemsMarkup`, PDF
 `scales` merges into the short forms before anything reads a
 configuration. What only some charts need is the **guide compiler**
 (`guides/`), which loads with them: `needsGuides` (`model/guides.ts`, in
-every bundle) says whether a configuration asks for it (ticks other than a
-count, formats other than Intl options, `scales`, `guides`, legend settings
-beyond `place` and `style`, `zIndex`, field displays, or axis titles of
-parts).
+every bundle) says whether a configuration asks for it (the options the
+[axes guide lists](../guide/axes-and-legends.md#the-guide-compiler)), and
+the model's `lacks` adds state only the compiler's legends read
+(visibility per panel, marks hidden whole or by their rows' values).
 
 - A live chart imports it before drawing such a configuration: the first
   frame waits, exports refuse with "await chart.loading", updates keep the
@@ -201,11 +201,11 @@ parts).
   axes of a scale once the tick planner writes its labels in lines (a
   format's `"\n"`): the compiled axes keep a plain axis on each scale's
   default side, which takes over from the model's automatic one for the
-  rest of the configuration, and the model lays that scene out again. A `room` is per panel
-  (a panel's own, or the chart's): a y axis shortens labels to it; an x
-  axis keeps rows from the plot outward while their depth, with the gap
-  the axis draws, fits, tries only rotations that fit, and cuts wrapped
-  lines, so the plot's edge is exact.
+  rest of the configuration, and the model lays that scene out again. A
+  `room` is per panel (a panel's own, or the chart's): a y axis shortens
+  labels to it; an x axis keeps rows from the plot outward while their
+  depth, with the gap the axis draws, fits, tries only rotations that
+  fit, and cuts wrapped lines, so the plot's edge is exact.
 - **Colorbars** (`guides/colorbars.ts`) draw a mark's ramp or a contour's
   bands, with ticks planned as an axis' along the bar.
 - **Field displays** (`fields`, [Field displays](../guide/fields.md)) reach
