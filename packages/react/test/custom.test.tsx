@@ -42,7 +42,12 @@ async function controlTime(chart: HercegChart) {
   await act(frame);
   await act(frame);
   vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
-  act(() => chart.render());
+  // A frame on the test's clock, so one timed on the real clock (slow on a
+  // loaded machine) doesn't make transitions fall back for speed.
+  act(() => {
+    chart.render();
+    chart.root.dispatchEvent(new PointerEvent("pointerleave"));
+  });
   tick(16);
 }
 
