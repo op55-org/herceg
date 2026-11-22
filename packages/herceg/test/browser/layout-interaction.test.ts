@@ -331,11 +331,13 @@ describe("maps", () => {
     expect(span(y.domain)!).toBeLessThan(10 * radians);
     const [left, right] = x.range;
     const [bottom, top] = y.range;
-    const outline = chart.root.querySelector<SVGPathElement>(
-      "path[fill='none'][stroke-width='2'][stroke-linejoin='round']",
-    )!;
+    // The overlay's outline, there from the first hover.
+    const outline = () =>
+      chart.root.querySelector<SVGPathElement>(
+        "path[fill='none'][stroke-width='2'][stroke-linejoin='round']",
+      )!;
     const inPlot = () => {
-      const coords = outline
+      const coords = outline()
         .getAttribute("d")!
         .match(/-?[\d.]+/g)!
         .map(Number);
@@ -345,13 +347,13 @@ describe("maps", () => {
     };
     await mouse(chart, "mouseMoved", x.map(25 * radians), y.map(0));
     await frame();
-    expect(outline.getAttribute("visibility")).toBe("visible");
+    expect(outline().getAttribute("visibility")).toBe("visible");
     expect(inPlot()).toBe(true);
     await mouse(chart, "mouseMoved", 2, 2);
     chart.root.focus();
     await userEvent.keyboard("{ArrowRight}");
     await frame();
-    expect(outline.getAttribute("visibility")).toBe("visible");
+    expect(outline().getAttribute("visibility")).toBe("visible");
     expect(inPlot()).toBe(true);
     expect(fitted.zoom).toBe(1);
   });

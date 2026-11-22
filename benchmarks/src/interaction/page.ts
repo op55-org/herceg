@@ -16,6 +16,7 @@ import {
   custom,
   histogram,
   line,
+  point,
   rowSelection,
   rule,
   selectionStore,
@@ -53,6 +54,7 @@ export type FixtureName =
   | "hover-listener"
   | "hover-headings"
   | "custom-hover"
+  | "point-hover"
   | "pan-labels"
   | "pan-view-labels"
   | "anchor-pan"
@@ -506,6 +508,127 @@ async function customHover(count: number): Promise<Fixture> {
       return `the tooltip is headed "${shown.firstElementChild!.textContent}", not "${heading}"`;
   };
   return { moves: all.slice(0, count), checks: all.slice(count) };
+}
+
+/**
+ * An SVG chart of many marks: 3,500 translucent points in two series
+ * (each its own circle, under the automatic renderer's canvas threshold),
+ * read along x, the crosshair `MARKED`, with markers on the points read
+ * and a tooltip. The move's effect is the hover reported at the move, once
+ * its frame has drawn the crosshair.
+ */
+async function pointHover(count: number): Promise<Fixture> {
+  const n = 1_750;
+  const next = random(5);
+  const series = [0, 1].map(() => Float64Array.from({ length: n }, () => 10 + next() * 80));
+  const data = table({
+    x: Float64Array.from({ length: n }, (_, i) => i),
+    a: series[0]!,
+    b: series[1]!,
+  });
+  const chart = createChart(host(800, 400), {
+    inspection: { mode: "nearest-x" },
+    marks: [
+      point(data, { x: "x", y: "a", fillOpacity: 0.6 }),
+      point(data, { x: "x", y: "b", fillOpacity: 0.6 }),
+    ],
+    theme: { style: { crosshair: { stroke: MARKED } } },
+  });
+  charts = [chart];
+  await chart.loading;
+  await until(chart);
+  // What the fixture measures: the points in SVG, a circle each.
+  const circles = chart.root.querySelectorAll("svg [data-kind] circle").length;
+  if (chart.root.querySelector("canvas") || circles !== 2 * n)
+    throw new Error(`point-hover: expected ${2 * n} circles in SVG; the chart drew ${circles}`);
+  const moves = sweep(chart, count, 0.1, 0.9, 0.5);
+  // Between the sweep's steps, and far apart.
+  const checks = [0.27, 0.81, 0.46].map((fx) => inPlot(chart, fx, 0.5));
+  const all = [...moves, ...checks];
+  stops.push(
+    chart.on("hover", ({ cause, pointer, inspection }) => {
+      if (moving() && cause === "pointer" && inspection?.axis === "x")
+        if (at(chart, pointer, all[armed!.index])) drawn();
+    }),
+  );
+  verify = async (index, screenshot) => {
+    const pixel = await pixels(screenshot!);
+    const box = chart.root.getBoundingClientRect();
+    const move = all[index]!;
+    const read = chart.inspect(move.x - box.left, move.y - box.top);
+    if (read?.axis !== "x" || !read.points.length) return "the pointer reads no points";
+    // The crosshair is at the points read, and nowhere else,
+    const x = box.left + Math.round(read.position) + 0.5;
+    const wrong = markedLine(pixel, chart, x);
+    if (wrong) return `the crosshair ${wrong}, the points read`;
+    // over the points in every row clear of the tooltip and the markers.
+    const { plot } = chart.getPanels()[0]!;
+    const tip = tooltipBox(chart)?.getBoundingClientRect();
+    if (!tip) return "the tooltip does not show";
+    const covered: number[] = [];
+    for (let y = box.top + plot.y + 2; y < box.top + plot.y + plot.height - 2; y += 4) {
+      if (
+        y > tip.top - SHADOW &&
+        y < tip.bottom + SHADOW &&
+        x > tip.left - SHADOW &&
+        x < tip.right + SHADOW
+      )
+        continue;
+      if (read.points.some((p) => Math.abs(box.top + p.py - y) < 6)) continue;
+      let shown = false;
+      for (let column = Math.floor(x) - 2; column <= Math.ceil(x) + 2; column++)
+        shown ||= isMarked(pixel(column, y));
+      if (!shown) covered.push(Math.round(y - box.top));
+    }
+    if (covered.length)
+      return `the crosshair is covered at ${covered.length} heights (${covered.slice(0, 3).join(", ")} px)`;
+    const markers = chart.root.querySelectorAll("circle[r='3.5']").length;
+    if (markers !== read.points.length)
+      return `${markers} markers for the ${read.points.length} points read`;
+    // The data shows, from the fixture's own values on the chart's scales:
+    // each point read's marker in its color, and points of its series in
+    // its color at 0.6 over the plot's white, where no other point is near.
+    const underTip = (px: number, py: number) =>
+      px > tip.left - SHADOW &&
+      px < tip.right + SHADOW &&
+      py > tip.top - SHADOW &&
+      py < tip.bottom + SHADOW;
+    const clear = (px: number, py: number) => Math.abs(px - x) > 10 && !underTip(px, py);
+    const place = (row: number, values: Float64Array): [number, number] => [
+      box.left + chart.toPixel(row, { axis: "x" })!,
+      box.top + chart.toPixel(values[row]!, { axis: "y" })!,
+    ];
+    for (const point of read.points) {
+      const color = rgb(point.color);
+      if (!color) return `a point read is colored ${point.color}, not #rrggbb`;
+      const [mx, my] = [box.left + point.px, box.top + point.py];
+      if (!underTip(mx, my) && shadeWrong(pixel(mx, my), color))
+        return `no marker in ${point.color} at (${point.px.toFixed(1)}, ${point.py.toFixed(1)})`;
+      const values = series.find((column) => Math.abs(place(point.row!, column)[1] - my) < 0.5);
+      if (!values) return `the point read at row ${point.row} is at neither series' value`;
+      const faint = color.map((channel) => 0.6 * channel + 0.4 * 255) as unknown as RGB;
+      let checked = 0;
+      let wrong = 0;
+      for (let row = 3; row < n && checked < 8; row += 7) {
+        const [px, py] = place(row, values);
+        if (!clear(px, py)) continue;
+        const near = series.some((column) => {
+          for (let other = Math.max(0, row - 20); other < Math.min(n, row + 21); other++) {
+            if (column === values && other === row) continue;
+            const [ox, oy] = place(other, column);
+            if (Math.hypot(ox - px, oy - py) < 6) return true;
+          }
+          return false;
+        });
+        if (near) continue;
+        checked++;
+        if (shadeWrong(pixel(px, py), faint)) wrong++;
+      }
+      if (checked < 4) return `only ${checked} points of a series stand clear to check`;
+      if (wrong > 1) return `${wrong} of ${checked} points in ${point.color} do not show at 0.6`;
+    }
+  };
+  return { moves, checks, screenshot: true };
 }
 
 /**
@@ -1255,6 +1378,7 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
   "hover-headings": (count) => hoverListener(count, true),
   "custom-hover": customHover,
+  "point-hover": pointHover,
   "pan-labels": panLabels,
   "pan-view-labels": (count) => panLabels(count, "view"),
   "anchor-pan": anchorPan,

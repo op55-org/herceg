@@ -6,8 +6,9 @@
 // keeps the input that arrives (`#gate`).
 //
 // Layers, bottom to top: a canvas for dense marks (only when used), the SVG
-// layer (grid and marks when not on canvas, rules, axes, title, pointer
-// overlay), the HTML legend, a visually hidden description, and the tooltip.
+// layer (grid and marks when not on canvas, rules, axes, title), the pointer
+// overlay's own SVG (once something draws there), the HTML legend, a
+// visually hidden description, and the tooltip.
 
 import type { RowView } from "../data/row-view.ts";
 import type { Table, TableChange } from "../data/table.ts";
@@ -479,8 +480,6 @@ export class MountedChart implements Chart, ExportsScene {
   /** Drags and draws selections; loaded the first time a chart brushes or selects. */
   #brush: Brush | undefined;
   #brushLoading: Promise<void> | undefined;
-  /** Where the brush draws, in the pointer overlay. */
-  readonly #brushLayer: SVGGElement;
   /** What the selection belongs to (see `SelectionOwner`); null without a selection. */
   #owner: SelectionOwner | null = null;
   /** Writes the rows gestures select to the stores `rowSelection` binds, and highlights theirs. */
@@ -602,8 +601,6 @@ export class MountedChart implements Chart, ExportsScene {
     this.root.tabIndex = 0;
     this.root.setAttribute("role", "figure");
     this.#svg = new SvgLayer(document, this.#id, adopted?.layer);
-    this.#brushLayer = svgElement(document, "g");
-    this.#svg.overlay.append(this.#brushLayer);
     this.#legend = new Legend(
       document,
       // An entry hidden, or hidden in some panels only, shows its series; one
@@ -2542,7 +2539,7 @@ export class MountedChart implements Chart, ExportsScene {
           mountControls(kind, {
             chart: this,
             model: this.#model,
-            overlay: this.#svg.overlay,
+            overlay: () => this.#svg.overlay(),
             live: this.#live,
             legend: this.#legend.element,
             invalidate: () => this.#invalidate(false),
@@ -2730,7 +2727,7 @@ export class MountedChart implements Chart, ExportsScene {
     return {
       root: this.root,
       model: this.#model,
-      overlay: this.#svg.overlay,
+      overlay: () => this.#svg.overlay(),
       live: this.#live,
       legend: this.#legend.element,
       legendClicks: this.#legend.clicked,
@@ -2799,7 +2796,9 @@ export class MountedChart implements Chart, ExportsScene {
     this.#brushLoading = import("./brush.ts")
       .then(({ Brush }) => {
         if (this.#destroyed) return;
-        this.#brush = new Brush(this.#brushLayer, `${this.#id}-brush`, normalize);
+        this.#brush = new Brush(this.root.ownerDocument, `${this.#id}-brush`, normalize, () =>
+          this.#svg.overlay(),
+        );
         this.#brush.mode = this.#options.interaction?.brush;
         // A selection made while it loaded shows now, or when the chart is
         // back on screen if it left while the brush loaded.

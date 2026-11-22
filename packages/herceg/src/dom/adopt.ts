@@ -65,13 +65,13 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
   const written = host.ownerDocument.createElement("template");
   written.innerHTML = snapshot.html;
   if (!root?.isEqualNode(written.content.firstElementChild)) throw unlike();
+  // The pointer's overlay is not there: it is made when something first draws in it.
   const [svg, legend, description, live, ...rest] = root.children;
   if (!(svg instanceof SVGSVGElement) || rest.length) throw unlike();
   const count = state.panels.length;
   // After the chart's background, the layer draws each panel in paint
-  // order: its background when it has one, then what it paints.
+  // order: its background when it has one, then what it paints; the guides last.
   const [defs, under, ...groups] = svg.children;
-  const overlay = groups.pop();
   const guides = groups.pop();
   // Defs hold the chart's clip, when it has one, then each panel's, and
   // after a panel's with insets over it, what its other drawings keep to.
@@ -86,7 +86,6 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
     defs?.tagName !== "defs" ||
     groups.length !== count + backs ||
     clips.length !== count ||
-    !overlay ||
     !guides ||
     !(legend instanceof HTMLDivElement) ||
     !(description instanceof HTMLDivElement) ||
@@ -131,7 +130,6 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
       defs: defs as SVGDefsElement,
       under: under as SVGGElement,
       guides: guides as SVGGElement,
-      overlay: overlay as SVGGElement,
       panels,
       underHash: state.under,
       guidesHash: state.guides,

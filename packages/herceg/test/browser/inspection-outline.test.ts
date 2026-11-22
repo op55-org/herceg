@@ -482,7 +482,8 @@ describe("the keyboard's mark without the tooltip", () => {
       marks: [pie(sales, { id: "pie", category: "region", value: "revenue" })],
     });
     hover(chart, inside(chart, itemOf(chart, "pie", "North")));
-    expect(paintOf(outlineOf(chart)).shown).toBe(false);
+    // The chart draws nothing over itself: not even its overlay is made.
+    expect(chart.root.querySelector("svg circle[r='6.5'][fill='none']")).toBeNull();
     leave(chart);
     // A cursor shown on a chart of series, then the keyboard's.
     const lines = await mount({

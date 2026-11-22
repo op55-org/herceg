@@ -600,7 +600,8 @@ describe("events and brushing", () => {
     await frame();
     // Each move is reported, with where the pointer is: the second reads the same point.
     expect(hovers).toEqual([1, 1, 2]);
-    expect(chart.root.querySelector("svg line")!.getAttribute("visibility")).toBe("hidden");
+    // The crosshair is the application's to draw: the chart draws none.
+    expect(chart.root.querySelector("svg line[visibility='visible']")).toBeNull();
     press(chart.root, "pointerdown", x.map(2), 150);
     press(chart.root, "pointerup", x.map(2), 150);
     expect(clicks).toEqual([2]);
@@ -1340,7 +1341,9 @@ describe("sankey diagrams", () => {
     });
     const hovers: (string | undefined)[] = [];
     chart.on("hover", ({ inspection }) => hovers.push(inspection?.points[0]?.label));
-    const outline = chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
+    // The overlay's outline, there from the first hover.
+    const outline = () =>
+      chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
     const rect = chart.root.getBoundingClientRect();
     for (const key of [
       [0, "Electricity"],
@@ -1355,11 +1358,11 @@ describe("sankey diagrams", () => {
         }),
       );
       await frame();
-      expect(outline.getAttribute("visibility")).toBe("visible");
+      expect(outline().getAttribute("visibility")).toBe("visible");
     }
     expect(hovers).toEqual(["Electricity", "Coal → Electricity"]);
     // Bands are outlined by their curves, nodes by their rectangles.
-    expect(outline.getAttribute("d")).toMatch(/C/);
+    expect(outline().getAttribute("d")).toMatch(/C/);
     const tooltip = [...chart.root.children].find(
       (el) => (el as HTMLElement).style.pointerEvents === "none" && el.tagName === "DIV",
     ) as HTMLElement;
@@ -1429,7 +1432,9 @@ describe("networks", () => {
     const chart = createChart(host, { locale: "en-US", marks: [network()] });
     const hovers: (string | undefined)[] = [];
     chart.on("hover", ({ inspection }) => hovers.push(inspection?.points[0]?.label));
-    const outline = chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
+    // The overlay's outline, there from the first hover.
+    const outline = () =>
+      chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
     for (const key of [
       [0, "Cy"],
       [0, "Cy", "Dee"],
@@ -1437,11 +1442,11 @@ describe("networks", () => {
       const { px, py } = modelOf(chart).inspectItem(JSON.stringify(key))!.points[0]!;
       move(chart, px, py);
       await frame();
-      expect(outline.getAttribute("visibility")).toBe("visible");
+      expect(outline().getAttribute("visibility")).toBe("visible");
     }
     expect(hovers).toEqual(["Cy", "Cy — Dee"]);
     // Links are outlined by a band around them.
-    expect(outline.getAttribute("d")).toMatch(/^M[\d. ]+L[\d. ]+L[\d. ]+L[\d. ]+Z$/);
+    expect(outline().getAttribute("d")).toMatch(/^M[\d. ]+L[\d. ]+L[\d. ]+L[\d. ]+Z$/);
     const tooltip = [...chart.root.children].find(
       (el) => (el as HTMLElement).style.pointerEvents === "none" && el.tagName === "DIV",
     ) as HTMLElement;
@@ -1553,7 +1558,9 @@ describe("maps", () => {
     });
     const hovers: (string | undefined)[] = [];
     chart.on("hover", ({ inspection }) => hovers.push(inspection?.points[0]?.label));
-    const outline = chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
+    // The overlay's outline, there from the first hover.
+    const outline = () =>
+      chart.root.querySelector("svg path[stroke-linejoin='round'][fill='none']")!;
     for (const key of [
       [0, 0],
       [1, 0],
@@ -1561,7 +1568,7 @@ describe("maps", () => {
       const { px, py } = modelOf(chart).inspectItem(JSON.stringify(key))!.points[0]!;
       move(chart, px, py);
       await frame();
-      expect(outline.getAttribute("visibility")).toBe("visible");
+      expect(outline().getAttribute("visibility")).toBe("visible");
     }
     expect(hovers).toEqual(["Ada", "Port"]);
     const tooltip = [...chart.root.children].find(

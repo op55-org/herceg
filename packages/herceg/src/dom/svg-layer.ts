@@ -79,7 +79,6 @@ export interface LayerParts {
   defs: SVGDefsElement;
   under: SVGGElement;
   guides: SVGGElement;
-  overlay: SVGGElement;
   panels: Map<string, PanelNodes>;
   underHash: number;
   guidesHash: number;
@@ -99,14 +98,13 @@ function newParts(document: Document): LayerParts {
     defs: element(document, "defs"),
     under: element(document, "g"),
     guides: element(document, "g"),
-    overlay: element(document, "g", { "pointer-events": "none" }),
     panels: new Map(),
     underHash: hash(""),
     guidesHash: hash(""),
     clips: 0,
     chartClip: undefined,
   };
-  svg.append(parts.defs, parts.under, parts.guides, parts.overlay);
+  svg.append(parts.defs, parts.under, parts.guides);
   return parts;
 }
 
@@ -130,12 +128,12 @@ export function elementsOf(
  * kept by key, in the panel's paint order: elements updated attribute by
  * attribute, or a group per geometry whose markup is rewritten only when it
  * changes; nodes that move keep their identity. The backgrounds and the
- * guides are rebuilt only when their markup changes. The overlay group
- * belongs to the pointer layer.
+ * guides are rebuilt only when their markup changes.
  */
 export class SvgLayer {
   readonly svg: SVGSVGElement;
-  readonly overlay: SVGGElement;
+  /** The pointer's overlay, once made (see `overlay`). */
+  #overlay: SVGSVGElement | undefined;
   readonly #document: Document;
   readonly #defs: SVGDefsElement;
   /** The chart's background, followed by each panel's groups in its paint order. */
@@ -157,7 +155,6 @@ export class SvgLayer {
     this.#id = id;
     ({
       svg: this.svg,
-      overlay: this.overlay,
       defs: this.#defs,
       under: this.#under,
       guides: this.#guides,
@@ -197,9 +194,12 @@ export class SvgLayer {
   ): void {
     const { svg } = this;
     const { width, height, theme } = scene;
-    set(svg, "width", String(width));
-    set(svg, "height", String(height));
-    set(svg, "viewBox", `0 0 ${width} ${height}`);
+    for (const node of [svg, this.#overlay]) {
+      if (!node) continue;
+      set(node, "width", String(width));
+      set(node, "height", String(height));
+      set(node, "viewBox", `0 0 ${width} ${height}`);
+    }
     set(svg, "font-family", theme.font);
     set(svg, "font-size", String(theme.fontSize));
     set(svg, "fill", theme.muted);
@@ -349,6 +349,27 @@ export class SvgLayer {
         for (const node of entry.nodes) node.remove();
         map.delete(key);
       }
+  }
+
+  /**
+   * What the pointer and keyboard draw over the chart (dom/interaction.ts),
+   * selections, and controls' outlines: an `<svg>` of its own right after
+   * the data's, with its box, so that drawing in it repaints it alone and
+   * not the marks under it. Made the first time something draws there:
+   * charts nothing draws over keep no more nodes than their data's.
+   */
+  overlay(): SVGSVGElement {
+    if (!this.#overlay) {
+      // A shallow copy of the data's: its box, place, and `aria-hidden` (and
+      // presentation attributes nothing drawn in it reads).
+      const overlay = this.svg.cloneNode() as SVGSVGElement;
+      // The pointer reaches what is under it: in its style, which page rules
+      // for `svg` do not override.
+      overlay.style.pointerEvents = "none";
+      this.svg.after(overlay);
+      this.#overlay = overlay;
+    }
+    return this.#overlay;
   }
 
   /** A new, empty clip path of id `id`. */

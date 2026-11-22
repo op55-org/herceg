@@ -510,3 +510,14 @@ stands beside its axis' labels, before marks' labels, and a subplot keeps
 the room a listed y axis takes beside it, not the subplots' most (which
 fell short where its own labels were narrower than another's). See
 [Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
+
+A hover repaints only what it draws. The crosshair, the points read, the
+item outline, the keyboard's ring, the brush, and controls' outlines draw
+in an `<svg>` of their own over the chart's marks and axes, so a pointer
+move no longer makes the browser paint the marks' SVG again: in Chrome, a
+hover over 4,000 SVG paths paints 0.08 ms a move instead of 0.3-0.4 ms, and
+its main-thread work fell from 1.85 to 1.3 ms a move. The chart makes that
+`<svg>`, `aria-hidden` and passing the pointer through, right after the
+data's the first time something draws there, so a chart nothing draws over
+keeps no more nodes than before. See [Layers in the
+browser](docs/architecture/rendering.md#layers-in-the-browser).

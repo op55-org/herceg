@@ -167,6 +167,48 @@ describe("hydrateChart", () => {
     );
   });
 
+  it("makes the pointer's overlay at its first hover, held while the controller loads", async () => {
+    const initial = renderToSnapshot(options(), { width: 640, height: 320, idPrefix: "first" });
+    host.innerHTML = initial.html;
+    const root = host.firstElementChild!;
+    const svgs = () => root.querySelectorAll(":scope > svg");
+    // Written before any input, the snapshot has the data's SVG alone.
+    expect(svgs()).toHaveLength(1);
+    const svg = root.querySelector("svg")!;
+    const chart = hydrateChart(host, options(), initial);
+    const { plot } = chart.getPanels()[0]!;
+    const rect = chart.root.getBoundingClientRect();
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + plot.x + plot.width / 2,
+        clientY: rect.top + plot.y + plot.height / 2,
+        pointerId: MOUSE,
+      }),
+    );
+    await chart.loading;
+    await expect.poll(() => svgs().length).toBe(2);
+    const overlay = svg.nextElementSibling as SVGSVGElement;
+    expect(overlay.tagName).toBe("svg");
+    expect(overlay.querySelector("line[visibility='visible']")).not.toBeNull();
+    expect(svg.querySelector("line[visibility='visible']")).toBeNull();
+    expect(overlay.getAttribute("width")).toBe(svg.getAttribute("width"));
+    host.style.width = "500px";
+    await expect.poll(() => overlay.getAttribute("width")).toBe("500");
+    expect(svg.getAttribute("width")).toBe("500");
+    chart.update({ ...options(), renderer: "canvas" });
+    chart.render();
+    expect([...chart.root.children].slice(0, 3)).toEqual([
+      chart.root.querySelector("canvas"),
+      svg,
+      overlay,
+    ]);
+    chart.update({ ...options(), renderer: "svg" });
+    chart.render();
+    expect([...chart.root.children].slice(0, 2)).toEqual([svg, overlay]);
+    chart.destroy();
+  });
+
   it("keeps the markup of a chart drawn on canvas until the canvas has drawn", () => {
     const n = 6000;
     const data = table({

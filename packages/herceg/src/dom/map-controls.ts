@@ -221,12 +221,11 @@ export class Controls implements ChartControls {
     const ids = this.#host.model.config.panels?.list.map(({ id }) => id) ?? [];
     const lasso = [undefined, ...ids].some((panel) => this.#can(panel).lassos);
     if (lasso && !this.#brush) {
-      const group = this.#root.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "g");
-      this.#host.overlay.append(group);
       this.#brush = new Brush(
-        group,
+        this.#root.ownerDocument,
         `herceg-${this.#family}-lasso-${++lassos}`,
         this.#host.normalize,
+        () => this.#host.overlay(),
       );
       this.#brush.mode = "lasso";
     } else if (!lasso && this.#brush) {

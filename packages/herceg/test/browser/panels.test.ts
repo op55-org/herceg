@@ -51,11 +51,11 @@ function mount(): SvgLayer {
 
 /**
  * The layer's groups of what each panel paints, in document order (after
- * the backgrounds, before the guides and the overlay), its clips, and the
- * left edge of the plot each group's data is cut to.
+ * the backgrounds, before the guides), its clips, and the left edge of the
+ * plot each group's data is cut to.
  */
 function groups(layer: SvgLayer) {
-  const painted = [...layer.svg.children].filter((node) => node.tagName === "g").slice(1, -2);
+  const painted = [...layer.svg.children].filter((node) => node.tagName === "g").slice(1, -1);
   const clips = [...layer.svg.querySelectorAll("clipPath")];
   const rects = painted.map((group) => {
     const cut = group.querySelector("[clip-path]")?.getAttribute("clip-path") ?? "";

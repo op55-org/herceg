@@ -398,12 +398,12 @@ describe("layouts in the browser", () => {
       panels: panels(panel("main", [inset("detail")])),
     });
     // The layer's groups: the backgrounds and grid lines under the data,
-    // what each panel paints, an inset's box, then the axes and the overlay.
+    // what each panel paints, an inset's box, then the axes.
     const groups = () => chart.root.querySelector("svg")!.querySelectorAll(":scope > g").length;
-    expect(groups()).toBe(1 + 2 + 1 + 2);
+    expect(groups()).toBe(1 + 2 + 1 + 1);
     chart.update({ panels: panels(columns([1, 1], [panel("main"), panel("detail")])) });
     chart.render();
-    expect(groups()).toBe(1 + 2 + 2);
+    expect(groups()).toBe(1 + 2 + 1);
     chart.destroy();
   });
 
