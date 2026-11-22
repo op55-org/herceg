@@ -257,7 +257,7 @@ hg.AxisOptions(type="log", domain=(1 / 6.5, 6.5), nice=False, ticks=10,
 | `line` | Draw the axis line (x axes do, y axes do not, by default). |
 | `layers` | More tick layers `[{ id, ticks, format, tick, labels, style }]`: minor ticks (`labels: false`), day boundaries in a second row. |
 | `repeat` | `"all"` draws the axis by every panel sharing the scale. |
-| `room` | The pixels the axis' ticks and labels take beside the plot, its title aside, so plots of charts and panels line up (`room: 28`), or bounds on what they need (`{ min, max }`, Python `(min, max)`). Unset, it is the short form's. Tick marks are not shortened, so a room shorter than the outward ticks is refused. Refused on colorbars. |
+| `room` | The pixels the axis' ticks and labels take beside the plot, its title aside, so plots of charts and panels line up (`room: 28`), or bounds on what they need (`{ min, max }`, either left out for no bound; Python `(least, most)`, `None` for no bound: `(40, None)`). Unset, it is the short form's. Tick marks are not shortened, so a room shorter than the outward ticks is refused. Refused on colorbars. [Legends](#legends) take a room of the same type. |
 
 What does not fit a room is left out, never drawn past it:
 
@@ -463,6 +463,7 @@ hg.Chart(df, legend=hg.LegendOptions(place=hg.Place(side="bottom", align="center
 | `include` | What it lists: `{ mark, channel }` (`"series"`, `"color"`, `"size"`, `"symbol"`), `{ scale }` (a scale of categories), `{ mark }` (a mark whole); `[]` for `entries` alone. Every scale by default. |
 | `entries` | Entries of your own: `{ key, label, swatch? \| sample?: { mark }, targets? }`. A `swatch` is a `line`, `rect`, `symbol`, or `composite`; `targets` (`{ mark }`, `{ mark, field, values }`, `{ scale, values }`) are what it hides; entries without targets explain. |
 | `swatches` | `"mark"`: swatches that look like the marks (dash, width, markers, fill, symbol). |
+| `room` | The pixels it takes on its side in place of what its entries measure (above or below the plots its height, beside them its width), so plots line up whether a legend wraps or not (`room: 30`), or bounds on what they measure (`{ min: 40 }`; Python `room=(40, None)`), as an [axis'](#axes) `room`. The gap and `place.offset` come on top. Refused inside a plot. |
 | `style` | `legendLabel`, `legendTitle`, `tickLabel`. |
 | `action` | What clicking an entry does: `"hide"` (default) hides and shows it; `"select"` [selects its series](interaction.md#selections) (Shift adds); `false`, nothing of the chart's own (`click` reports it). |
 | `panel` | A [panel's own legend](layout.md#panels-legends). |
@@ -488,6 +489,20 @@ hg.Chart(df, legend=hg.LegendOptions(place=hg.Place(side="bottom", align="center
 - Color scales show a ramp, sizes a key of round values, and category
   colors or symbols a key, below the series entries.
 - Legends on one side stack in `guides` order, the first nearest the plots.
+- **Spacing.** A legend on a side stands 8 px from the plots, or what
+  stands beside them (16 px beside a left or right side with explicit
+  `padding`), plus `place.offset`; a panel's legend 4 px from its panel's
+  axes, plus `offset`. Above the plots the first track starts at the top
+  spacing: explicit `padding.top`, else `ceil(fontSize / 2) + 2` (8 px in
+  the default theme; 6 px above a title, which keeps 8 px before what
+  follows). So under a legend of `room: 30` and `offset: 6` with
+  `padding: { top: 0 }`, the plots start 44 px down: 30 + 8 + 6.
+- **A legend and its room.** A legend stands at its side's edge of its room,
+  as it would without one: wrapped and aligned alike, its entries none the
+  fewer. One shallower than its room leaves the rest between it and the
+  plots; one deeper is drawn whole, reaching past its room toward the plots
+  and over them where it reaches (a misfit shows at once). Give legends
+  whose entries vary `{ min }` rather than a fixed room.
 
 ## Colorbars
 

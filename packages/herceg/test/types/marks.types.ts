@@ -152,6 +152,18 @@ area(readings, { x: "at", y: "cpu", stack: { offset: "wiggle", order: "inside-ou
 area(readings, { x: "cpu", y: "at", orient: "y", stack: "center" });
 // @ts-expect-error stream offsets belong to areas
 bar(readings, { x: "stage", y: "cpu", stack: "center" });
+// Bars' labels stand `offset` pixels from the edge they are attached at; centered ones take none.
+bar(readings, { x: "stage", y: "cpu", labels: { place: { outside: false, offset: 6 } } });
+bar(readings, { x: "stage", y: "cpu", labels: { place: { attachment: "start", offset: 0 } } });
+bar(readings, {
+  x: "stage",
+  y: "cpu",
+  labels: { place: { attachment: "center", outside: false } },
+});
+// @ts-expect-error a centered label stands at its bar's middle: no offset
+bar(readings, { x: "stage", y: "cpu", labels: { place: { attachment: "center", offset: 6 } } });
+// @ts-expect-error an offset is pixels
+bar(readings, { x: "stage", y: "cpu", labels: { place: { offset: "6px" } } });
 // @ts-expect-error bands do not have a stack order
 area(band, { x: "x", y1: "low", y2: "high", stackOrder: "inside-out" });
 const usage = table({ t: [0], cpu: [1], host: ["a"] });

@@ -1344,6 +1344,12 @@ def label_spec(value: Any, role: str, *, places: bool = True, following: bool = 
     return placed(f"{role} label", built._spec)
 
 
+#: Why centered labels, stacked bars' unless attached at an end, take no offset.
+CENTERED_OFFSET = (
+    'centered labels, stacked bars\' by default, take no offset; attach them at "start" or "end"'
+)
+
+
 @refuses
 @dataclass
 class BarLabels:
@@ -1355,8 +1361,10 @@ class BarLabels:
     an ``hg.LabelPlace`` with ``outside=False`` puts them inside the bars at
     their ``attachment`` (``"start"``, ``"center"``, or ``"end"``, the
     default); by default they go past each bar's end, and inside stacked
-    bars' segments. ``overlap="hide"`` leaves out those that would cover an
-    earlier one's; ``"show"`` (the default) draws them all."""
+    bars' segments. Its ``offset`` is the pixels between a label and the
+    bar's edge it stands at (4 by default); centered labels take none.
+    ``overlap="hide"`` leaves out those that would cover an earlier one's;
+    ``"show"`` (the default) draws them all."""
 
     field: str | None = None
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
@@ -1376,13 +1384,23 @@ class BarLabels:
         self.style = _built(self.style, TextStyle, "BarLabels style")
         if self.min_length is not None:
             _number(self.min_length, "BarLabels min_length")
-        self.place = _built(self.place, LabelPlace, "BarLabels place")
-        if self.place is not None:
-            for name in ("side", "reserve", "offset"):
-                if getattr(self.place, name) is not None:
+        place: LabelPlace | None = _built(self.place, LabelPlace, "BarLabels place")
+        self.place = place
+        if place is not None:
+            for name in ("side", "reserve"):
+                if getattr(place, name) is not None:
                     raise ChartError(
-                        f"BarLabels place: bars' labels take attachment and outside; drop {name}"
+                        "BarLabels place: bars' labels take attachment, outside, and offset; "
+                        f"drop {name}"
                     )
+            offset = place.offset
+            if offset is not None and offset < 0:
+                raise ChartError(
+                    "BarLabels place offset: expected a number of at least 0; "
+                    f"received {shown(offset)}"
+                )
+            if offset is not None and place.attachment == "center":
+                raise ChartError(f"BarLabels place offset: {CENTERED_OFFSET}")
         if self.overlap == "move":
             raise ChartError(
                 "BarLabels overlap: bar labels fit at their bar or are left out; "

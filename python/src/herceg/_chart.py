@@ -45,6 +45,7 @@ from ._derive import (
     bin_spec,
 )
 from ._encoding import (
+    CENTERED_OFFSET,
     SYMBOLS,
     BarLabels,
     Channel,
@@ -58,6 +59,7 @@ from ._encoding import (
     ItemAnchor,
     Label,
     LabelPart,
+    LabelPlace,
     MarkAnchor,
     MarkStyle,
     Measure,
@@ -150,6 +152,7 @@ from ._guides import (
     LegendOptions,
     OrdinalScale,
     Padding,
+    Room,
     Scale,
     Scope,
     Ticks,
@@ -570,7 +573,8 @@ class AxisOptions:
     ``place``, on the chart's ``x`` and ``y`` only, moves the axis to the
     other side of the plots: ``hg.Place(side="top")`` for x,
     ``hg.Place(side="right")`` for y. ``room`` holds the axis' ticks and
-    labels in that many pixels beside the plots, or ``(least, most)``: a y
+    labels in that many pixels beside the plots, or ``(least, most)``, None
+    for no bound (``(40, None)``): a y
     axis shortens labels wider than it with an ellipsis, and an x axis
     leaves out rows of labels that do not fit, the farthest from the plot
     first. A panel's own room holds its axis; unset, it is the chart's::
@@ -594,7 +598,7 @@ class AxisOptions:
     scope: Scope | None = None
     repeat: Literal["outer", "all"] | None = None
     place: Place | dict[str, Any] | None = None
-    room: float | tuple[float, float] | None = None
+    room: Room | None = None
     style: Style | dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -2324,6 +2328,18 @@ class Chart:
             value_labels = self._option(
                 "bar labels", lambda: _built(labels, BarLabels, "bar labels")
             )
+            place = value_labels.place
+            # Stacked bars' labels stand at their segment's middle unless attached at an end.
+            if (
+                stack
+                and isinstance(place, LabelPlace)
+                and place.offset is not None
+                and place.attachment is None
+            ):
+                raise ChartError(
+                    f"bar labels place offset: {CENTERED_OFFSET}",
+                    path=self._path("bar", "labels.place.offset"),
+                )
             pattern = value_labels.format
             if isinstance(pattern, Mapping) and not FORMS & set(pattern):
                 self._option(

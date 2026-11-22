@@ -831,13 +831,13 @@ function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
     format: axisFormat(spec.type),
     tooltipFormat: axisFormat(spec.type),
     show: boolean,
-    room: axisRoom,
+    room,
     style: axisStyle,
   };
 }
 
-/** Pixels an axis takes beside the plot: a fixed room, or `{ min, max }` with min no more than max. */
-const axisRoom: Check = (v, path) => {
+/** Pixels a guide takes beside the plots (`Room`): a fixed room, or `{ min, max }` with min no more than max. */
+const room: Check = (v, path) => {
   if (typeof v === "number") return width(v, path);
   object(v, path);
   properties(v as Record<string, unknown>, path, { min: width, max: width });
@@ -1701,6 +1701,11 @@ function legendOptions(spec: Record<string, unknown>, path: string) {
       }
     },
     swatches: oneOf("mark"),
+    room: (v: unknown, at: string) => {
+      if (isRecord(spec.place) && "inside" in spec.place)
+        throw refusal(at, "a legend inside a plot takes no room; place it on a side");
+      room(v, at);
+    },
     style: rolesOf(["legendLabel", "legendTitle", "tickLabel"]),
     action: (v: unknown, at: string) => {
       if (v !== false) oneOf("hide", "select")(v, at);
@@ -1793,7 +1798,7 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
     layers: tickLayers(type),
     show: boolean,
     repeat: labelRepeat,
-    room: axisRoom,
+    room,
     style: axisStyle,
   } satisfies ChecksOf<AxisGuideSpec>);
 }
@@ -3084,6 +3089,7 @@ const MARKS: MarkChecks = {
             properties(p as Record<string, unknown>, at, {
               attachment: oneOf("start", "center", "end"),
               outside: boolean,
+              offset: width,
             } satisfies ChecksOf<BarLabelPlaceSpec>);
           },
         } satisfies ChecksOf<BarLabelsSpec>);
@@ -4367,6 +4373,17 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
   for (const [i, item] of (chart.marks as Record<string, unknown>[]).entries()) {
     if (item.type === "violin" && item.split === true && item.series === undefined)
       fail(`marks[${i}].split`, "a series field for split violins", item.split);
+    // Centered labels, stacked bars' by default, take no offset.
+    const place = item.type === "bar" && (item.labels as BarLabelsSpec | undefined)?.place;
+    if (
+      place &&
+      place.offset !== undefined &&
+      (place.attachment ?? (item.stack ? "center" : "end")) === "center"
+    )
+      throw refusal(
+        `marks[${i}].labels.place.offset`,
+        'centered labels, stacked bars\' by default, take no offset; attach them at "start" or "end"',
+      );
     if (item.type === "heatmap")
       for (const axis of ["x", "y"])
         if (item[`${axis}Step`] !== undefined && item[`${axis}Banded`] === true)

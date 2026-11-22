@@ -488,7 +488,16 @@ export type BarLabelsSpec = (
  * inside it at its root, middle, or tip (`attachment`: "start", "center",
  * "end"; stacked bars' labels are inside, centered by default).
  */
-export interface BarLabelPlaceSpec {
-  attachment?: "start" | "center" | "end";
-  outside?: boolean;
-}
+export type BarLabelPlaceSpec =
+  | {
+      attachment?: "start" | "end";
+      outside?: boolean;
+      /**
+       * Pixels between the label and the edge of its bar it stands at: past
+       * the end, from the end outward; inside, from the end or the root
+       * inward. Labels centered in their bar take none, nor do stacked
+       * bars' unless attached at "start" or "end". @minimum 0 @default 4
+       */
+      offset?: number;
+    }
+  | { attachment: "center"; outside?: boolean; offset?: never };

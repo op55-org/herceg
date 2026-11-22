@@ -11,9 +11,14 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import { contrastingText } from "../../src/scale/color.ts";
 import type { LabelsGeometry, RectGeometry, Scene, TextGeometry } from "../../src/scene/scene.ts";
+import type { BarLabelPlaceSpec } from "../../src/spec/encoding.ts";
+import { SPEC_VERSION } from "../../src/spec/spec.ts";
+import { validateSpec } from "../../src/spec/validate.ts";
+import { cssFont } from "../../src/style/style.ts";
 import { DARK, LIGHT } from "../../src/theme.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { keysOf, legendOf } from "../helpers/guides.ts";
-import { yScale } from "../helpers/scales.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600) {
   const model = new ChartModel(
@@ -434,6 +439,195 @@ describe("bar value labels", () => {
     ).toThrow(
       "bar labels.place.outside: stacked bars' labels go inside their segments; drop outside",
     );
+  });
+
+  contractTest("bar.labels.offset", () => {
+    // A fixed domain keeps the bars where they are whatever room labels take.
+    const signed = table({ zone: ["a", "b", "c"], gain: [80, -60, 2] });
+    const half = LIGHT.fontSize / 2;
+    const placed = (place: BarLabelPlaceSpec, domain: [number, number] = [-100, 100]) => {
+      const { scene } = build({
+        y: { domain },
+        marks: [bar(signed, { x: "zone", y: "gain", labels: { place } })],
+      });
+      const [bars] = rects(scene);
+      const [labels] = texts(scene);
+      // Each label's middle beside its bar's tip and root (y grows down).
+      return labels!.labels.map((text, i) => {
+        const k = ["80", "-60", "2"].indexOf(text);
+        const [top, height] = [bars!.rects[k * 4 + 1]!, bars!.rects[k * 4 + 3]!];
+        const up = k !== 1;
+        return {
+          text,
+          y: labels!.coords[i * 2 + 1]!,
+          tip: up ? top : top + height,
+          root: up ? top + height : top,
+          up,
+        };
+      });
+    };
+    // Past the end, from the end outward: up above positive bars, down below negative ones.
+    for (const offset of [0, 4, 10])
+      for (const { y, tip, up } of placed({ offset }))
+        expect(y).toBeCloseTo(up ? tip - offset - half : tip + offset + half, 3);
+    // 4 pixels by default.
+    expect(placed({}).map(({ y }) => y)).toEqual(placed({ offset: 4 }).map(({ y }) => y));
+    // Inside at the end, from the end inward; at the start, from the root inward.
+    for (const offset of [0, 6])
+      for (const { y, tip, up } of placed({ outside: false, offset }))
+        expect(y).toBeCloseTo(up ? tip + offset + half : tip - offset - half, 3);
+    for (const { y, root, up } of placed({ outside: false, attachment: "start", offset: 6 }))
+      expect(y).toBeCloseTo(up ? root - 6 - half : root + 6 + half, 3);
+    // Where past the end would leave the plot, just inside, from the end.
+    const edge = placed({ offset: 7 }, [-60, 80]);
+    for (const { text, y, tip, up } of edge.filter((label) => label.text !== "2"))
+      expect(y, text).toBeCloseTo(up ? tip + 7 + half : tip - 7 - half, 3);
+  });
+
+  it("fit inside where their text and offset do, and keep room past the ends for them", () => {
+    const short = table({ zone: ["a", "b"], gain: [100, 7] });
+    const inside = (offset: number) =>
+      build({
+        y: { domain: [0, 100] },
+        marks: [
+          bar(short, { x: "zone", y: "gain", labels: { place: { outside: false, offset } } }),
+        ],
+      }).scene;
+    const length = rects(inside(4))[0]!.rects[7]!;
+    const size = LIGHT.fontSize;
+    // The bar of 7 holds its label 4 px in, and 1 px less than its length allows; not 1 px more.
+    expect(texts(inside(4))[0]!.labels).toEqual(["100", "7"]);
+    expect(texts(inside(Math.floor(length - size)))[0]!.labels).toEqual(["100", "7"]);
+    expect(texts(inside(Math.floor(length - size) + 1))[0]!.labels).toEqual(["100"]);
+    // Horizontal bars fit a label's width and its offset.
+    const across = (offset: number) =>
+      texts(
+        build({
+          x: { domain: [0, 100] },
+          marks: [
+            bar(table({ zone: ["a", "b"], gain: [100, 9] }), {
+              x: "gain",
+              y: "zone",
+              labels: { place: { outside: false, offset } },
+            }),
+          ],
+        }).scene,
+      )[0]!.labels;
+    expect(across(4)).toEqual(["100", "9"]);
+    expect(across(60)).toEqual(["100"]);
+    // Past the ends, the axis keeps room for the label and its offset.
+    for (const offset of [4, 30]) {
+      const { model, scene } = build({
+        marks: [bar(short, { x: "zone", y: "gain", labels: { place: { offset } } })],
+      });
+      const room = yScale(model)!.map(100) - scene.panels[0]!.plot.y;
+      expect(room).toBeGreaterThan(size + offset + 2 - 1e-6);
+      expect(texts(scene)[0]!.labels).toEqual(["100", "7"]);
+    }
+  });
+
+  it("fall back just inside where past the end leaves the plot, where their text and offset fit", () => {
+    const font = cssFont(LIGHT.font, LIGHT.fontSize);
+    for (const horizontal of [false, true])
+      for (const sign of [1, -1]) {
+        const data = table({ zone: ["a"], gain: [10 * sign] });
+        const domain: [number, number] = sign > 0 ? [0, 10] : [-10, 0];
+        const at = (offset: number) => {
+          // A small chart: the bar runs from the axis to the plot's edge.
+          const model = new ChartModel(
+            {
+              locale: "en-US",
+              [horizontal ? "x" : "y"]: { domain },
+              marks: [
+                bar(
+                  data,
+                  horizontal
+                    ? { x: "gain", y: "zone", labels: { place: { offset } } }
+                    : { x: "zone", y: "gain", labels: { place: { offset } } },
+                ),
+              ],
+            },
+            undefined,
+            staticCompilers(),
+          );
+          model.setSize(horizontal ? 160 : 300, horizontal ? 300 : 80, 1);
+          return model.scene(estimateText);
+        };
+        const [rect] = rects(at(4));
+        const length = rect!.rects[horizontal ? 2 : 3]!;
+        const text = sign > 0 ? "10" : "-10";
+        const need = horizontal ? estimateText(text, font) : LIGHT.fontSize;
+        const shown = (offset: number) => texts(at(offset)).flatMap((g) => g.labels);
+        const fits = Math.floor(length - need);
+        expect(fits, `${horizontal} ${sign}`).toBeGreaterThan(4);
+        expect(shown(fits), `${horizontal} ${sign}`).toHaveLength(1);
+        expect(shown(fits + 1), `${horizontal} ${sign}`).toEqual([]);
+      }
+  });
+
+  it("keep 4 px between neighbors' labels whatever their offset", () => {
+    // Labels wider than their neighbors' spacing less 4 px are left out.
+    const many = table({
+      zone: Array.from({ length: 20 }, (_, i) => `z${i}`),
+      gain: Array.from({ length: 20 }, () => 88888),
+    });
+    const label = estimateText("88,888", `${LIGHT.fontSize}px ${LIGHT.font}`);
+    const chart = (offset: number, width: number) =>
+      build({ marks: [bar(many, { x: "zone", y: "gain", labels: { place: { offset } } })] }, width);
+    // The chart width whose bars stand 4 to 5 px further apart than a label is wide.
+    const spacing = (width: number) => {
+      const x = xScale(chart(4, width).model)!;
+      return x.map(1) - x.map(0);
+    };
+    let width = 600;
+    while (spacing(width) < label + 4) width++;
+    expect(spacing(width) - label).toBeLessThan(5);
+    for (const offset of [0, 4, 30])
+      expect(texts(chart(offset, width).scene)[0]!.labels).toHaveLength(20);
+    expect(texts(chart(4, width - 2).scene)).toEqual([]);
+  });
+
+  it("refuse an offset for centered labels, stacked bars' by default, and negative ones", () => {
+    const refused = (options: object, message: string) => {
+      // Refused as the bar's other options are, with the option's path.
+      expect(() => bar(big, { x: "zone", y: "gain", ...options })).toThrow(
+        expect.objectContaining({
+          code: "invalid-option",
+          path: "labels.place.offset",
+          message: `bar labels.place.offset: ${message}`,
+        }),
+      );
+      // Specs say where, as the spec spells it.
+      expect(() =>
+        validateSpec({
+          version: SPEC_VERSION,
+          data: { t: { columns: { zone: ["a"], gain: [1] } } },
+          marks: [{ type: "bar", data: "t", x: "zone", y: "gain", ...options }],
+        } as never),
+      ).toThrow(`marks[0].labels.place.offset: ${message}`);
+    };
+    const centered =
+      'centered labels, stacked bars\' by default, take no offset; attach them at "start" or "end"';
+    refused({ labels: { place: { attachment: "center", outside: false, offset: 6 } } }, centered);
+    refused({ stack: true, labels: { place: { offset: 6 } } }, centered);
+    // Pixels, in the words of the bar's other pixels and the spec's lengths.
+    refused({ labels: { place: { offset: -2 } } }, "expected a number of at least 0; received -2");
+    refused(
+      { labels: { place: { offset: Number.POSITIVE_INFINITY } } },
+      "expected a number of at least 0; received Infinity",
+    );
+    refused(
+      { labels: { place: { offset: "6px" } } },
+      'expected a number of at least 0; received "6px"',
+    );
+    // Stacked bars' labels at a segment's end or root take one.
+    const stacked = bar(big, {
+      x: "zone",
+      y: "gain",
+      stack: true,
+      labels: { place: { attachment: "end", offset: 6 } },
+    });
+    expect(texts(build({ marks: [stacked] }).scene)[0]!.labels).toEqual(["80", "60"]);
   });
 
   it("write values in a pattern, or a field's values", () => {

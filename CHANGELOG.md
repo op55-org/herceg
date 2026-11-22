@@ -521,3 +521,23 @@ its main-thread work fell from 1.85 to 1.3 ms a move. The chart makes that
 data's the first time something draws there, so a chart nothing draws over
 keeps no more nodes than before. See [Layers in the
 browser](docs/architecture/rendering.md#layers-in-the-browser).
+
+Bars' labels take `place.offset`, the pixels between a label and the bar's
+edge it stands at (4 by default, as before): past the end, inside at the
+end or root, and just inside where past would leave the plot. A label fits
+inside where its text and offset do, the axis keeps room past the bars'
+ends for both, and neighbors' labels keep 4 px apart. Centered labels
+(stacked bars' by default) and negative offsets are refused, in
+TypeScript's types for an explicit `"center"`, at run time, in specs, and
+in Python (`hg.BarLabels(place=hg.LabelPlace(outside=False, offset=6))`;
+the chart's bar builder refuses a stack's centered default). Legends take
+`room`, the type axes' rooms have, now named `Room`: a fixed depth on
+their side, or `{ min, max }` bounds on what their entries measure, so
+plots line up whether a legend wraps or not; the gap and `place.offset`
+come on top. A legend deeper than its room is drawn whole at its side's
+edge, reaching toward the plots; a legend inside a plot refuses it.
+Python's rooms, of axes and legends alike, take `None` for an open end
+(`room=(40, None)`), and one check reads axes' and legends' rooms with
+the axes' messages. See
+[Bars](docs/guide/marks.md#bars) and
+[Legends](docs/guide/axes-and-legends.md#legends).

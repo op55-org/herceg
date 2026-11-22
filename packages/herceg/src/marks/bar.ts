@@ -365,6 +365,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           `bar ${name}: expected ${name === "strokeWidth" ? "0 or more pixels" : "a number from 0 to 1"}; received ${value}`,
         );
     const labels = typeof spec.labels === "object" ? spec.labels : {};
+    const place = labels.place;
+    if (place?.offset !== undefined)
+      checkOption(
+        isPixels(place.offset),
+        "bar",
+        "labels.place.offset",
+        "a number of at least 0",
+        place.offset,
+      );
     if (labels.minLength !== undefined && !(labels.minLength >= 0))
       throw new RangeError(
         `bar labels.minLength: expected 0 or more pixels; received ${labels.minLength}`,
@@ -382,10 +391,20 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
         message:
           'bar labels.content: expected a list of parts, such as ["Peak: ", { value: true }]',
       });
-    if (spec.stack && labels.place?.outside)
+    if (spec.stack && place?.outside)
       throw new Error(
         "bar labels.place.outside: stacked bars' labels go inside their segments; drop outside",
       );
+    if (
+      place?.offset !== undefined &&
+      (place.attachment ?? (spec.stack ? "center" : "end")) === "center"
+    )
+      throw new ChartError({
+        code: "invalid-option",
+        path: "labels.place.offset",
+        message:
+          'bar labels.place.offset: centered labels, stacked bars\' by default, take no offset; attach them at "start" or "end"',
+      });
 
     this.#labelOptions = { ...labels, pattern: lazyFormat(labels.format) };
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "bar series");
@@ -1092,19 +1111,21 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
 
   /** Room past the bars' ends for their labels; stacked labels, and those placed inside, sit inside. */
   headroom(series: readonly Series[], context: BandContext): number {
-    const inside = this.#labelOptions.place?.outside === false;
-    if (!this.spec.labels || this.spec.stack || inside || series.length === 0) return 0;
+    const place = this.#labelOptions.place;
+    if (!this.spec.labels || this.spec.stack || place?.outside === false || series.length === 0)
+      return 0;
+    const offset = place?.offset ?? LABEL_GAP;
     const paint = labelPaint(context.theme, this.#labelOptions.style);
     // Labels in boxes take their boxes' room.
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
     if (!this.#horizontal)
-      return (paint.background ? paint.lineHeight + top + bottom : paint.size) + LABEL_GAP + 2;
+      return (paint.background ? paint.lineHeight + top + bottom : paint.size) + offset + 2;
     // Horizontal labels are as wide as their text: judge by the extremes.
     const extent = this.xExtent(series, false);
     if (!extent) return 0;
     const format = this.#format(context);
     const widest = Math.max(...extent.map((value) => estimateText(format(value), paint.css)));
-    return widest + left + right + LABEL_GAP + 2;
+    return widest + left + right + offset + 2;
   }
 
   /** The value formatter for labels, kept while the locale and features stay the same. */
@@ -1173,7 +1194,7 @@ function lengthExtent(
   return min <= max ? [min, max] : undefined;
 }
 
-/** Pixels between a bar's end and its label. */
+/** Pixels between a bar's end and its label (`place.offset`'s default), and between neighbors' labels. */
 const LABEL_GAP = 4;
 /** The text anchor of each alignment of a label's lines, and how far along its width each anchor is. */
 const ANCHORS = { start: "start", center: "middle", end: "end" } as const;
@@ -1256,6 +1277,8 @@ class ValueLabels {
   readonly #size: number;
   /** Room a label's box adds beside its text. */
   readonly #padding: number;
+  /** Pixels between a label and the edge of its bar it stands at (`place.offset`). */
+  readonly #offset: number;
   /** What text inside a bar contrasts with: the background, or a page of the theme's kind. */
   readonly #backdrop: string;
   /** With `overlap` "hide", the labels placed so far, as painted, which later ones may not cover. */
@@ -1305,6 +1328,7 @@ class ValueLabels {
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
     this.#size = paint.background ? paint.lineHeight + top + bottom : paint.size;
     this.#padding = left + right;
+    this.#offset = options.place?.offset ?? LABEL_GAP;
     this.#backdrop = surface(theme);
     const field = options.field;
     if (field !== undefined) this.#field = (row) => fieldText(table, field, row, format);
@@ -1400,6 +1424,7 @@ class ValueLabels {
     cap: number,
   ) {
     if (Math.abs(tip - root) < this.#minLength) return;
+    const offset = this.#offset;
     if (!this.#horizontal) {
       if (!this.#inPlot(middle, tip)) return;
       const text = label();
@@ -1408,16 +1433,16 @@ class ValueLabels {
       // Wider labels would run into the neighboring bars' labels.
       if (width + LABEL_GAP > spacing) return;
       const up = tip <= root;
-      const past = up ? tip - LABEL_GAP - size / 2 : tip + LABEL_GAP + size / 2;
+      const past = up ? tip - offset - size / 2 : tip + offset + size / 2;
       if (this.#fits(middle - width / 2, past - size / 2, width, size, true)) {
         this.#add("middle", this.#color ?? this.#frame.theme.text, true, middle, past, text);
         return;
       }
       // Text wider than the flat part of a rounded end starts below the corners.
-      const clear = LABEL_GAP + (width > thickness - 2 * cap ? cap : 0);
+      const clear = offset + (width > thickness - 2 * cap ? cap : 0);
       const inside = up ? tip + clear + size / 2 : tip - clear - size / 2;
       if (
-        Math.abs(tip - root) >= size + LABEL_GAP + clear &&
+        Math.abs(tip - root) >= size + clear &&
         this.#fits(middle - width / 2, inside - size / 2, width, size, this.#unread(fill, opacity))
       )
         this.#inside("middle", fill, opacity, middle, inside, text);
@@ -1429,7 +1454,7 @@ class ValueLabels {
     const size = this.#height(text);
     if (!this.#thick(text, size, thickness)) return;
     const forward = tip >= root;
-    const past = forward ? tip + LABEL_GAP : tip - LABEL_GAP;
+    const past = forward ? tip + offset : tip - offset;
     const top = middle - size / 2;
     if (this.#fits(forward ? past : past - width, top, width, size, true)) {
       this.#add(
@@ -1442,10 +1467,10 @@ class ValueLabels {
       );
       return;
     }
-    const clear = LABEL_GAP + (size > thickness - 2 * cap ? cap : 0);
+    const clear = offset + (size > thickness - 2 * cap ? cap : 0);
     const inside = forward ? tip - clear : tip + clear;
     if (
-      Math.abs(tip - root) >= width + LABEL_GAP + clear &&
+      Math.abs(tip - root) >= width + clear &&
       this.#fits(forward ? inside - width : inside, top, width, size, this.#unread(fill, opacity))
     )
       this.#inside(forward ? "end" : "start", fill, opacity, inside, middle, text);
@@ -1473,23 +1498,27 @@ class ValueLabels {
     const a = Math.max(min, Math.min(root, tip));
     const b = Math.min(max, Math.max(root, tip));
     const length = b - a;
+    // Labels at the root or tip stand `offset` in from it, and fit where
+    // their text and offset do; centered ones keep clear of both ends.
+    const centered = attachment === "center";
+    const offset = this.#offset;
+    const gap = centered ? 2 : offset;
     // Labels of parts are as large as their parts: measured once written.
-    if (length <= 0 || (!this.#horizontal && !this.#styled && length < this.#size + 2)) return;
+    if (length <= 0 || (!this.#horizontal && !this.#styled && length < this.#size + gap)) return;
     const text = label();
     const textWidth = this.#width(text);
     const size = this.#height(text);
     if (this.#horizontal && !this.#thick(text, size, width)) return;
-    const room = this.#horizontal ? length - LABEL_GAP : width - 2;
-    if (textWidth > room || (!this.#horizontal && length < size + 2)) return;
-    // From the visible root or tip, the gap and half the text along the bar.
+    const room = this.#horizontal ? length - (centered ? LABEL_GAP : offset) : width - 2;
+    if (textWidth > room || (!this.#horizontal && length < size + gap)) return;
+    // From the visible root or tip, the offset and half the text along the bar.
     const toward = tip >= root ? 1 : -1;
-    const inset = LABEL_GAP + (this.#horizontal ? textWidth : size) / 2;
-    const along =
-      attachment === "center"
-        ? (a + b) / 2
-        : attachment === "start"
-          ? (toward > 0 ? a : b) + toward * inset
-          : (toward > 0 ? b : a) - toward * inset;
+    const inset = offset + (this.#horizontal ? textWidth : size) / 2;
+    const along = centered
+      ? (a + b) / 2
+      : attachment === "start"
+        ? (toward > 0 ? a : b) + toward * inset
+        : (toward > 0 ? b : a) - toward * inset;
     const [x, y] = this.#horizontal ? [along, middle] : [middle, along];
     if (this.#fits(x - textWidth / 2, y - size / 2, textWidth, size, this.#unread(fill, opacity)))
       this.#inside("middle", fill, opacity, x, y, text);

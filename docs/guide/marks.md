@@ -281,7 +281,7 @@ bar(sales, {
   x: "month",
   y: "units",
   stroke: "#1b3a6b",
-  labels: { format: { number: ",.0f" }, minLength: 24, place: { outside: false } },
+  labels: { format: { number: ",.0f" }, minLength: 24, place: { outside: false, offset: 6 } },
 });
 ```
 
@@ -290,6 +290,7 @@ hg.bar(sales, x="region", y=["q1", "q2"])
 hg.bar(sales, x="q1", y="region")
 hg.bar(brands, x="value", y="rank", orient="y")
 hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"}, min_length=24))
+hg.bar(sales, x="month", y="units", labels=hg.BarLabels(place=hg.LabelPlace(outside=False, offset=6)))
 ```
 
 - **Grouping.** `series` stands bars side by side unless `dodge: false` or
@@ -318,10 +319,12 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
 | `format` | Intl options, or `{ number: ",.0f" }` / `{ time }` patterns. |
 | `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. `align` lines up the lines of a label of several lines (`"\n"` in `content`) at their start, center, or end; the block stays where `place` puts it. |
 | `minLength` | Bars shorter than this many pixels get no label. |
-| `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. |
+| `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. `offset` is the pixels between a label and the bar's edge it stands at, 4 by default: past the end, from the end outward; inside, from the end or the root inward (ECharts' `label.distance`). Centered labels, stacked bars' by default, take none; attach them at `"start"` or `"end"` to give one. |
 | `overlap` | `"show"` (default) or `"hide"`: a label that would cover an earlier one goes inside its bar, or is left out where it does not fit there. |
 
-Labels that do not fit are left out. With `animation: { values: true }`,
+Labels that do not fit are left out: inside, a label fits where its text
+and its offset do; past the ends, the axis keeps room for both. Neighbors'
+labels keep 4 px apart whatever their offset. With `animation: { values: true }`,
 labels writing the value, alone or as a `{ value: true }` part, count
 through the values between ([counting
 labels](interaction.md#counting-labels)).

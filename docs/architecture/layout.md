@@ -79,7 +79,11 @@ edge. `model.#furniture` makes the title's and legends' requests
   that whitespace. Tick lengths and label gaps stay in both.
 - A legend's place is a side (`SidePlace`) or inside a plot
   (`InsidePlace`). Legends above or below wrap in rows
-  (`model/legend.ts`, `measureLegends`); inside legends take no room.
+  (`model/legend.ts`, `measureLegends`); inside legends take no room. A
+  legend's `room` is the guide compiler's: it hands the model the
+  measured legend as deep as its room holds it, drawn at its side's edge
+  of its track (`inRoom`), so tracks and panels' legends need no rule of
+  their own.
 - Axis room, tick planning, and widening margins for labels at the plot's
   ends are monotonic passes bounded by a quarter of the chart's width.
   Margins grow freely but shrink only on resizes and option changes, so

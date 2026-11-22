@@ -1210,6 +1210,9 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         raise ChartError(
             f'{role} action: expected "hide", "select", or False; received {shown(action)}'
         )
+    place = _built(builder.place, Place, f"{role} place")
+    if builder.room is not None and place is not None and place.inside is not None:
+        raise ChartError(f"{role} room: a legend inside a plot takes no room; place it on a side")
     entries = builder.entries
     if entries is not None and (not listlike(entries)):
         raise ChartError(
@@ -1221,7 +1224,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         else None
     )
     spec = {
-        "place": _spec(_built(builder.place, Place, f"{role} place")),
+        "place": _spec(place),
         "columns": builder.columns,
         "rows": builder.rows,
         "order": builder.order,
@@ -1229,6 +1232,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         "include": include_spec(builder.include, f"{role} include"),
         "entries": made,
         "swatches": builder.swatches,
+        "room": room_spec(builder.room, f"{role} room"),
         "style": style_spec(builder.style, f"{role} style", LEGEND_ROLES),
         "action": action,
     }
@@ -1256,7 +1260,7 @@ class AxisGuide:
     layers: Sequence[TickLayer | Mapping[str, Any]] | None = None
     show: bool | None = None
     repeat: Literal["outer", "all"] | None = None
-    room: float | tuple[float, float] | None = None
+    room: Room | None = None
     style: Style | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -1337,24 +1341,32 @@ def axis_place(place: Any, role: str, scale: str | None) -> Place | None:
     return built
 
 
+#: A guide's room beside the plots: pixels, or ``(least, most)``, None for no bound.
+Room = float | tuple[float | None, float | None]
+
+
 def room_spec(room: Any, role: str) -> Any:
-    """An axis' ``room`` as the spec takes it: pixels, or ``(least, most)``
-    as ``{"min": least, "max": most}``."""
+    """An axis' or legend's ``room`` as the spec takes it: pixels, or
+    ``(least, most)`` as ``{"min": least, "max": most}``, an end of None
+    left out (``(40, None)`` is ``{"min": 40}``)."""
     if room is None:
         return None
     bounds = room if isinstance(room, tuple) else (room, room)
+    given = [b for b in bounds if b is not None] if isinstance(room, tuple) else [room]
     if (
         len(bounds) != 2
         or not all(
-            is_number(b) and not isinstance(b, bool) and math.isfinite(b) and b >= 0 for b in bounds
+            is_number(b) and not isinstance(b, bool) and math.isfinite(b) and b >= 0 for b in given
         )
-        or bounds[0] > bounds[1]
+        or (len(given) == 2 and given[0] > given[1])
     ):
         raise ChartError(
-            f"{role}: expected finite pixels of at least 0, or (least, most); "
+            f"{role}: expected finite pixels of at least 0, or (least, most), None for no bound; "
             f"received {shown(room)}"
         )
-    return {"min": room[0], "max": room[1]} if isinstance(room, tuple) else room
+    if not isinstance(room, tuple):
+        return room
+    return {key: end for key, end in zip(("min", "max"), room, strict=True) if end is not None}
 
 
 @refuses
@@ -1394,7 +1406,7 @@ def axis(scale: str, **options: Any) -> AxisGuide:
     ``layers`` adds layers of ticks; ``line`` draws its line; ``repeat``
     says where panels sharing its scale draw it (``"outer"`` or ``"all"``, as
     ``hg.AxisOptions``); ``room`` holds its ticks and labels in that many
-    pixels beside the plot, or ``(least, most)``: a y axis shortens labels
+    pixels beside the plot, or ``(least, most)``, None for no bound: a y axis shortens labels
     wider than it with an ellipsis, and an x axis leaves out rows of labels
     that do not fit, the farthest from the plot first (unset, it is the
     ``room`` of ``x=``, ``y=``, or ``y_right=``)::
@@ -1422,7 +1434,11 @@ class LegendOptions:
     default) hides and shows what it stands for, ``"select"`` selects
     those series (Shift adds or removes one; see the chart's ``select``),
     and ``False`` nothing of the chart's own (``on_click`` still hears of
-    it)."""
+    it). ``room`` is the pixels it takes on its side in place of what its
+    entries measure, so that plots line up whether it wraps or not
+    (``room=30``), or bounds on what they measure (``room=(40, None)``);
+    the 8 px gap and ``place``'s offset come on top. A legend deeper than
+    its room is drawn whole, toward the plots."""
 
     place: Place | Mapping[str, Any] | None = None
     columns: int | None = None
@@ -1432,6 +1448,7 @@ class LegendOptions:
     include: Sequence[ScaleRef | MarkRef | Mapping[str, Any]] | None = None
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
+    room: Room | None = None
     style: Style | Mapping[str, Any] | None = None
     action: Literal["hide", "select", False] | None = None
 
@@ -1463,6 +1480,7 @@ class LegendGuide:
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
     show: bool | None = None
+    room: Room | None = None
     style: Style | Mapping[str, Any] | None = None
     panel: str | None = None
     action: Literal["hide", "select", False] | None = None
@@ -1493,7 +1511,7 @@ def legend(**options: Any) -> LegendGuide:
     chart's series stand for, whichever marks and panels show it. With
     ``panel``, it lists what that panel draws (above the panel by default),
     and its entries hide and show it there; ``action`` says what clicking an
-    entry does (see ``hg.LegendOptions``)."""
+    entry does, and ``room`` what it takes on its side (see ``hg.LegendOptions``)."""
     _known_options("legend", options, LegendGuide)
     return LegendGuide(**options)
 
