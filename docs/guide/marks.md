@@ -727,8 +727,12 @@ draws has no place.
   they are kept at; those that move stay in the plot as before (in the
   chart for a point outside the plot). Through a [value
   transition](interaction.md#animation), labels stay inside on every
-  frame, a counting label by its number's shape (a pixel or so off the
-  painted number).
+  frame, a counting label by its numbers' shapes (a pixel or so off the
+  painted numbers).
+- **Counting.** Through a value transition, a text label counts the
+  numbers it writes: a label of a number field, and each part of one in a
+  label of parts, each in its format; its other parts show the new text
+  at once ([counting labels](interaction.md#counting-labels)).
 - **Overlap.** Labels that would cover another are drawn anyway by
   default; see [labels that would overlap](#labels-that-would-overlap).
   Text is meant for a few hundred labels.
@@ -883,9 +887,12 @@ hg.Chart(sales).bar(
 
 Each part is drawn as a text of its own, the halos of all of a label's
 parts before any part's text, so one part's halo never covers its
-neighbor. A series label inside the plot that is too wide shortens the
-part that runs past the plot with an ellipsis and leaves out the parts
-after it. Tick labels take no parts.
+neighbor. A line aligned to its end is drawn from its end, and a centered
+line of one part from its middle, so the part at the edge meets it
+whatever widths the renderer gives the text; a part's spaces at its ends
+keep their room in every output. A series label inside the plot that is
+too wide shortens the part that runs past the plot with an ellipsis and
+leaves out the parts after it. Tick labels take no parts.
 
 ### Labels that would overlap
 

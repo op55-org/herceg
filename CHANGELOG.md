@@ -440,6 +440,25 @@ and so do bars' value labels written through the chart's field displays,
 which showed each new value at once. See [Counting
 labels](docs/guide/interaction.md#counting-labels).
 
+Text labels made of parts count. Through a value transition, a text
+mark's label of parts counts each part of a number field between its two
+values, each in its part's format, and so does a text label of one field
+written through the chart's field displays; both showed each new value at
+once. Literal text, `{ label }` parts, categories, and a part whose value
+is missing at either end show the new scene's text at once while the
+label's other numbers count. Labels of parts are drawn from the edge their
+lines align to at rest too: a line aligned to its end from its end, a
+centered line of one part from its middle, so the part at the edge meets
+it whatever the renderer's text widths (WebKit's SVG text is about a pixel
+wider than its canvas measures), and nothing moves as a transition ends.
+Static SVG writes those parts with `text-anchor` `end` or `middle`. See
+[Counting labels](docs/guide/interaction.md#counting-labels).
+
+Fixed: SVG left out the spaces at the ends of a label's part, so a part
+after a space (`[{ value: true }, " kg"]`) touched the one before it, and a
+part before one drawn from its end lost its room. Parts are drawn without
+their edge spaces, which keep their room, in every output.
+
 Fixed: inspection could read the later of two observations midway between
 them, as `snap: "each"` should not ("ties to the earlier"): distances on
 screen differ by rounding, so 31 of 260 exact midpoints between 500

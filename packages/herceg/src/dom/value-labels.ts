@@ -3,7 +3,9 @@
 // mark's labels: a text mark's, or a bar series' across the groups its
 // labels are drawn in, which a label changes as it moves inside or outside
 // its bar. A matched label moves its place on the frame's scales and counts
-// the number it writes through the values between. A label without a match
+// the numbers it writes through the values between: a bar's label its
+// value, a text label each part of a number field in its content (or the
+// one field it labels with). A label without a match
 // comes or goes with its bar, keeping its place on it (between its root and
 // tip, or past its tip), or else shows or goes at once. Between the two
 // scenes, a counting number is laid out by its shape (`shapeOf`), so frames
@@ -18,8 +20,8 @@ type Labeled = TextGeometry | LabelsGeometry;
 
 /**
  * One geometry's labels as drawn, owned: per label its name, place (x and
- * y alternating), the number it writes, and its text (text geometry) or
- * items (labels geometry).
+ * y alternating), the numbers it writes (one per field `fields` names, else
+ * one), and its text (text geometry) or items (labels geometry).
  */
 export interface ShownLabels {
   kind: "labels";
@@ -31,6 +33,7 @@ export interface ShownLabels {
   generation: number;
   of: string | undefined;
   at: Float32Array;
+  fields: readonly string[] | undefined;
   values: Float64Array | undefined;
   /** Bars' labels: where each one's text starts along x. */
   starts: Float32Array | undefined;
@@ -77,8 +80,9 @@ function itemsOf(mark: LabelsGeometry): TextItem[][] {
 
 /** A copy of a geometry's named labels, a scene's or a frame's. */
 export function copyLabels(mark: Labeled): ShownLabels {
-  const { names, table, generation, of, values } = mark.named!;
+  const { names, table, generation, of, fields, values } = mark.named!;
   const count = names.length;
+  const numbers = count * (fields?.length ?? 1);
   const text = mark.kind === "text";
   const at = text ? mark.coords : mark.named!.at!;
   const starts = mark.named!.starts;
@@ -91,7 +95,8 @@ export function copyLabels(mark: Labeled): ShownLabels {
     generation,
     of,
     at: Float32Array.from({ length: count * 2 }, (_, k) => at[k]!),
-    values: values && Float64Array.from({ length: count }, (_, i) => values[i]!),
+    fields,
+    values: values && Float64Array.from({ length: numbers }, (_, k) => values[k]!),
     starts: starts && Float32Array.from({ length: count }, (_, i) => starts[i]!),
     texts: text ? mark.labels.slice(0, count) : undefined,
     items: text ? undefined : itemsOf(mark),
@@ -113,17 +118,21 @@ export interface MovingLabels {
   count: number;
   from: Float32Array;
   to: Float32Array;
+  /** How many numbers each label writes. */
+  stride: number;
   /**
-   * Per label, the numbers it writes at both ends where it counts; where it
+   * Per label, each of its numbers at both ends where it counts; where it
    * does not, the number it shows at both (NaN for none), which frames keep.
    */
   values: Float64Array;
+  /** Per label, whether one of its numbers counts between two: frames write it again. */
+  counting: boolean[];
   write: LabelItems["write"];
   /** Labels going: their texts or items, and the new scene's labels' items (labels geometry). */
   texts: readonly string[];
   items: readonly (readonly TextItem[])[];
   names: (string | number)[];
-  /** A frame's places and numbers. */
+  /** A frame's places and numbers (`stride` per label). */
   at: Float32Array;
   numbers: Float64Array;
   /** Bars' labels: how far each one's place is past where its text starts (NaN: not known). */
@@ -235,24 +244,29 @@ export function moveLabels(
   const matched = new Set<string>();
   const moving: MovingLabels[] = [];
   let moves = false;
-  const make = (index: number, mark: Labeled, count: number, kept: number): MovingLabels => ({
-    index,
-    mark,
-    side,
-    kept,
-    count,
-    from: new Float32Array(count * 2),
-    to: new Float32Array(count * 2),
-    values: new Float64Array(count * 2).fill(Number.NaN),
-    write: kept > 0 ? mark.named!.write : undefined,
-    texts: [],
-    items: [],
-    names: [],
-    at: new Float32Array(count * 2),
-    numbers: new Float64Array(count),
-    offsets: new Float32Array(count).fill(Number.NaN),
-    shaped: [],
-  });
+  const make = (index: number, mark: Labeled, count: number, kept: number): MovingLabels => {
+    const stride = mark.named!.fields?.length ?? 1;
+    return {
+      index,
+      mark,
+      side,
+      kept,
+      count,
+      from: new Float32Array(count * 2),
+      to: new Float32Array(count * 2),
+      stride,
+      values: new Float64Array(count * stride * 2).fill(Number.NaN),
+      counting: [],
+      write: kept > 0 ? mark.named!.write : undefined,
+      texts: [],
+      items: [],
+      names: [],
+      at: new Float32Array(count * 2),
+      numbers: new Float64Array(count * stride),
+      offsets: new Float32Array(count).fill(Number.NaN),
+      shaped: [],
+    };
+  };
   // Labels going, by the geometry they were drawn in.
   const going = new Map<ShownLabels, number[]>();
   const leave = (labels: ShownLabels, i: number) => {
@@ -264,6 +278,7 @@ export function moveLabels(
     const labels = mark.named!;
     const kept = labels.names.length;
     const record = make(at, mark, kept, kept);
+    const { stride, values } = record;
     const places = mark.kind === "text" ? mark.coords : labels.at!;
     const place = (i: number) => [places[i * 2]!, places[i * 2 + 1]!] as const;
     if (mark.kind === "labels") record.items = itemsOf(mark);
@@ -279,32 +294,49 @@ export function moveLabels(
         const [set, j] = found;
         const old = shown[set]!;
         matched.add(`${set}:${j}`);
-        const a = old.values?.[j] ?? Number.NaN;
-        const b = labels.values?.[i] ?? Number.NaN;
-        // Only finite numbers at both ends count; others show the new one.
-        const counts = Number.isFinite(a) && Number.isFinite(b) && !!labels.write;
-        record.values[i * 2] = counts ? a : b;
-        record.values[i * 2 + 1] = b;
+        const was = old.fields?.length ?? 1;
+        let counts = false;
+        let changes = false;
+        for (let k = 0; k < stride; k++) {
+          // A number counts from the old label's at its place among its
+          // numbers, of the same field; only finite numbers at both ends
+          // count, others show the new one.
+          const a =
+            old.fields?.[k] === labels.fields?.[k]
+              ? (old.values?.[j * was + k] ?? Number.NaN)
+              : Number.NaN;
+          const b = labels.values?.[i * stride + k] ?? Number.NaN;
+          const moves = Number.isFinite(a) && Number.isFinite(b) && !!labels.write;
+          values[(i * stride + k) * 2] = moves ? a : b;
+          values[(i * stride + k) * 2 + 1] = b;
+          counts ||= moves;
+          // (Zeros of either sign are written apart.)
+          changes ||= moves && !Object.is(a, b);
+        }
         // (A frame's record of them is its own, never written again.)
         record.shaped[i] = counts && !!old.mark.named?.shaped?.[j];
+        record.counting[i] = changes;
         // Frames lay a label out by its number's shape as it counts: its
-        // text starts as far before its place as they write it.
-        const written = counts && (a !== b || record.shaped[i]) && labels.offset;
-        if (written) record.offsets[i] = written(i, b, count);
+        // text starts as far before its place as they write it. (Bars'
+        // labels tell it, of one number each, from `values[i * 2]` to the next.)
+        const written = (changes || record.shaped[i]) && labels.offset;
+        if (written) record.offsets[i] = written(i, values[i * 2 + 1]!, count);
         record.from[i * 2] = old.at[j * 2]!;
         record.from[i * 2 + 1] = old.at[j * 2 + 1]!;
         // Anchored otherwise now (moving inside or outside its bar), its text
         // starts where it did, before its place by as much as frames write it.
         if (anchorOf(old.mark, old.items?.[j]) !== anchorOf(mark, record.items[i])) {
           const start =
-            (old.starts?.[j] ?? Number.NaN) + (written ? written(i, a, count) : record.offsets[i]!);
+            (old.starts?.[j] ?? Number.NaN) +
+            (written ? written(i, values[i * 2]!, count) : record.offsets[i]!);
           if (Number.isFinite(start)) record.from[i * 2] = start;
         }
-        moves ||= (counts && a !== b) || record.from[i * 2] !== px || record.from[i * 2 + 1] !== py;
+        moves ||= changes || record.from[i * 2] !== px || record.from[i * 2 + 1] !== py;
         continue;
       }
       moves = true;
-      record.values[i * 2] = record.values[i * 2 + 1] = labels.values?.[i] ?? Number.NaN;
+      for (let k = i * stride; k < (i + 1) * stride; k++)
+        values[k * 2] = values[k * 2 + 1] = labels.values?.[k] ?? Number.NaN;
       // With its bar, or at once where its values are on the scales before.
       const by = shared(name) ? undefined : follow(name, 1, px!, py!);
       record.from[i * 2] = by ? by[0] : before(x, px!);
@@ -320,6 +352,7 @@ export function moveLabels(
       if (barsGoing.has(name)) leave(labels, i);
     }
   });
+  // (Labels going are bars', of one number each.)
   for (const [labels, exits] of going) {
     moves = true;
     // Drawn in their geometry where the new scene has it, else in one of their own.
@@ -381,27 +414,28 @@ export function labelsAt(
   y: Blend,
   measure: MeasureText,
 ): Labeled {
-  const { mark, kept, count, from, to, values, at, numbers, write } = moving;
+  const { mark, kept, count, from, to, stride, values, at, numbers, write } = moving;
   for (let i = 0; i < count; i++) {
     at[i * 2] = blend(x, from[i * 2]!, to[i * 2]!);
     at[i * 2 + 1] = blend(y, from[i * 2 + 1]!, to[i * 2 + 1]!);
-    const [a, b] = [values[i * 2]!, values[i * 2 + 1]!];
-    numbers[i] = a + (b - a) * t;
+  }
+  // Each end as it is (and a number that does not count, an infinity among
+  // them, always), and between them a blend that stays within its ends.
+  for (let k = 0; k < count * stride; k++) {
+    const a = values[k * 2]!;
+    const b = values[k * 2 + 1]!;
+    numbers[k] = t <= 0 ? a : t >= 1 || Object.is(a, b) ? b : a * (1 - t) + b * t;
   }
   // Labels whose numbers change count, and those a frame before drew by
   // their shapes; labels going keep their items, laid out as they were.
   const shaped: boolean[] = [];
   const counts = (i: number) => {
-    const writes =
-      i < kept &&
-      !!write &&
-      Number.isFinite(numbers[i]!) &&
-      (values[i * 2] !== values[i * 2 + 1] || !!moving.shaped[i]);
+    const writes = i < kept && !!write && (moving.counting[i] || !!moving.shaped[i]);
     shaped[i] = writes || !!moving.shaped[i];
     return writes;
   };
-  // Text labels stay inside the chart, as their scene keeps them: each
-  // moved in once it is written, counting ones by their numbers' shapes.
+  // Text labels stay inside the chart, as their scene keeps them: those
+  // written again by what they write, others by their scene's blocks.
   const { stayInside } = mark.named!;
   const record: LabelItems = { ...mark.named!, names: moving.names, values: numbers, shaped };
   if (record.starts)
@@ -410,14 +444,10 @@ export function labelsAt(
   const clip = record.of !== undefined && mark.clip === undefined ? "plot" : mark.clip;
   if (mark.kind === "text") {
     const labels = Array.from({ length: count }, (_, i) => {
-      const counting = counts(i);
-      const text = counting
-        ? (write!(i, numbers[i]!, at[i * 2]!, at[i * 2 + 1]!, measure) as string)
-        : i < kept
-          ? mark.labels[i]!
-          : moving.texts[i]!;
-      if (i < kept) stayInside?.(i, at, counting ? text : undefined, measure);
-      return text;
+      if (counts(i)) return write!(i, numbers, at, measure) as string;
+      if (i >= kept) return moving.texts[i]!;
+      stayInside?.(i, at);
+      return mark.labels[i]!;
     });
     return { ...mark, coords: at, labels, count, named: record, clip };
   }
@@ -426,21 +456,15 @@ export function labelsAt(
   const items: TextItem[] = [];
   const own = mark.named!.at!;
   for (let i = 0; i < count; i++) {
-    const [lx, ly] = [at[i * 2]!, at[i * 2 + 1]!];
-    const counting = counts(i);
-    let made = counting
-      ? (write!(i, numbers[i]!, lx, ly, measure) as readonly TextItem[])
-      : moving.items[i]!.map((item) =>
-          moved(
-            item,
-            lx - (i < kept ? own[i * 2]! : from[i * 2]!),
-            ly - (i < kept ? own[i * 2 + 1]! : from[i * 2 + 1]!),
-          ),
-        );
-    if (stayInside && i < kept) {
-      stayInside(i, at, counting ? made[0]?.text : undefined, measure);
-      const [dx, dy] = [at[i * 2]! - lx, at[i * 2 + 1]! - ly];
-      if (dx || dy) made = made.map((item) => moved(item, dx, dy));
+    let made: readonly TextItem[];
+    if (counts(i)) made = write!(i, numbers, at, measure) as readonly TextItem[];
+    else {
+      if (i < kept) stayInside?.(i, at);
+      const [dx, dy] = [
+        at[i * 2]! - (i < kept ? own[i * 2]! : from[i * 2]!),
+        at[i * 2 + 1]! - (i < kept ? own[i * 2 + 1]! : from[i * 2 + 1]!),
+      ];
+      made = moving.items[i]!.map((item) => moved(item, dx, dy));
     }
     for (const item of made) {
       items.push(item);

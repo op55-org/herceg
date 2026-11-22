@@ -49,6 +49,17 @@ function items(scene: Scene): TextItem[] {
 
 const fills = (list: TextItem[]) => list.filter((item) => item.paint.color !== "transparent");
 
+/**
+ * Where an item's text is painted along x, by its anchor: a line aligned
+ * to its end is drawn from its end, a centered line's only part from its
+ * middle, other parts from their start.
+ */
+function extent(item: TextItem) {
+  const width = estimateText(item.text, item.paint.css);
+  const left = item.x - { start: 0, middle: 0.5, end: 1 }[item.anchor] * width;
+  return { left, middle: left + width / 2, right: left + width };
+}
+
 describe("labels of styled parts", () => {
   contractTest("label.parts.styled", () => {
     const scene = build({
@@ -65,19 +76,23 @@ describe("labels of styled parts", () => {
       x: { domain: [0, 10] },
     });
     const drawn = items(scene);
-    // Halos of both parts first, then both fills.
+    // Halos of both parts first, then both fills; a part is drawn without
+    // the spaces at its ends, which keep their room.
     expect(drawn.map(({ text, paint }) => [text, paint.color === "transparent"])).toEqual([
-      ["SLO ", true],
+      ["SLO", true],
       ["50", true],
-      ["SLO ", false],
+      ["SLO", false],
       ["50", false],
     ]);
     expect(drawn.slice(0, 2).every((item) => item.halo)).toBe(true);
     const [first, second] = fills(drawn);
-    // One baseline; the second part starts where the first ends.
+    // One baseline; the second part starts where the first ends, both
+    // drawn from their ends on a line aligned to its end.
     expect(first!.baseline).toBe("alphabetic");
     expect(second!.y).toBe(first!.y);
-    expect(second!.x).toBeCloseTo(first!.x + estimateText("SLO ", first!.paint.css), 6);
+    expect([first!.anchor, second!.anchor]).toEqual(["end", "end"]);
+    const space = estimateText("SLO ", first!.paint.css) - estimateText("SLO", first!.paint.css);
+    expect(extent(second!).left).toBeCloseTo(extent(first!).right + space, 6);
     expect(second!.paint).toMatchObject({ weight: 700, color: "#c00000" });
     expect(first!.paint).toMatchObject({ weight: 400, color: scene.theme.muted });
     // The label is placed above its rule's end, as its plain text would be.
@@ -88,7 +103,8 @@ describe("labels of styled parts", () => {
     });
     const ruled = plain.panels[0]!.marks.find((g) => g.kind === "rule") as RuleGeometry;
     const end = ruled.x2;
-    expect(second!.x + estimateText("50", second!.paint.css)).toBeCloseTo(end - 4, 0);
+    expect(second!.x).toBeCloseTo(end - 4, 0);
+    expect(extent(second!).right).toBeCloseTo(end - 4, 0);
   });
 
   it("read parts' colors as the chart reads label colors, in PDF too", () => {
@@ -184,9 +200,10 @@ describe("labels of styled parts", () => {
       tall / 2 + short / 2 + (value!.paint.size - name!.paint.size) * 0.27,
       6,
     );
-    // Centered on the point, line by line.
-    const middle = (item: TextItem) => item.x + estimateText(item.text, item.paint.css) / 2;
-    expect(middle(name!)).toBeCloseTo(middle(value!), 6);
+    // Centered on the point, line by line, each line's only part drawn from its middle.
+    expect([name!.anchor, value!.anchor]).toEqual(["middle", "middle"]);
+    expect(extent(name!).middle).toBeCloseTo(extent(value!).middle, 6);
+    expect(name!.x).toBeCloseTo(value!.x, 6);
   });
 
   it("map each part's item to its label's row for picking", () => {
@@ -199,10 +216,10 @@ describe("labels of styled parts", () => {
     const labels = scene.panels[0]!.marks.find((g) => g.kind === "labels") as LabelsGeometry;
     expect(labels.items.map(({ text }) => text)).toEqual([
       "deploy",
-      " at ",
+      "at",
       "2",
       "rollback",
-      " at ",
+      "at",
       "8",
     ]);
   });
@@ -261,10 +278,8 @@ describe("labels of styled parts", () => {
     const rects = scene.panels[0]!.marks.find((g) => g.kind === "rect") as RectGeometry;
     const end = rects.rects[0]! + rects.rects[2]!;
     // Inside the bar's end, the lines centered in their block.
-    const right = (item: TextItem) => item.x + estimateText(item.text, item.paint.css);
-    const middle = (item: TextItem) => (item.x + right(item)) / 2;
-    expect(middle(drawn[0]!)).toBeCloseTo(middle(drawn[1]!), 6);
-    expect(Math.max(right(drawn[0]!), right(drawn[1]!))).toBeLessThan(end);
+    expect(extent(drawn[0]!).middle).toBeCloseTo(extent(drawn[1]!).middle, 6);
+    expect(Math.max(extent(drawn[0]!).right, extent(drawn[1]!).right)).toBeLessThan(end);
     expect(drawn[1]!.y).toBeGreaterThan(drawn[0]!.y);
   });
 
@@ -546,7 +561,14 @@ describe("labels of styled parts", () => {
       ],
       y: { domain: [0, 10] },
     });
-    expect(fills(items(scene)).map(({ text }) => text)).toEqual(["a", " ", "4", "b", " ", "8"]);
+    const drawn = fills(items(scene));
+    expect(drawn.map(({ text }) => text)).toEqual(["a", " ", "4", "b", " ", "8"]);
+    // Each label's parts side by side, as their line aligns them.
+    for (const k of [0, 3]) {
+      const [name, gap, value] = drawn.slice(k, k + 3).map(extent);
+      expect(gap!.left).toBeCloseTo(name!.right, 6);
+      expect(value!.left).toBeCloseTo(gap!.right, 6);
+    }
   });
 
   it("shorten the part that runs past the room with an ellipsis", () => {
@@ -561,10 +583,18 @@ describe("labels of styled parts", () => {
       paint,
       estimateText,
     );
-    const bold = estimateText("Revenue ", GUIDE_KIT.cssFont(paint.font, paint.size, 700, false));
+    const boldCss = GUIDE_KIT.cssFont(paint.font, paint.size, 700, false);
+    const bold = estimateText("Revenue ", boldCss);
     const fitted = parts.fit(bold + 20)!;
     expect(fitted.lines.lines[0]).toMatch(/^Revenue 1.*…$/);
     expect(fitted.lines.width).toBeLessThanOrEqual(bold + 20);
+    // Fitted, a line aligned to its end is still drawn from its end, its
+    // parts side by side, the name's space keeping its room.
+    const box = fitted.box(200, 50, "end", paint);
+    const [name, number] = fitted.items(box, "end", paint, undefined).map(extent);
+    const space = estimateText("Revenue ", boldCss) - estimateText("Revenue", boldCss);
+    expect(number!.right).toBeCloseTo(200, 6);
+    expect(number!.left).toBeCloseTo(name!.right + space, 6);
     // Where nothing but the ellipsis would be left, the label is left out.
     expect(parts.fit(4)).toBeUndefined();
     // Where the ellipsis does not fit after the parts before it, the part before takes it.

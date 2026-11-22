@@ -361,7 +361,8 @@ item: bars (`BarItems`: each bar's name, its pixel root and tip, and for
 bars keyed by `itemKey` where the position axis ends), points
 (`PointItems`: the table generation and row identity, or an `itemKey`
 field's values), labels (`LabelItems`: each label's name, the bar series
-it belongs to, and the number it writes, with how to write another), a
+it belongs to, and the numbers it writes, one or a text label's one per
+part of a number field, with how to write others), a
 sunburst's sectors (`SunburstSectors`: the nodes drawn, with the mark's
 own arrays of angles, depths, and paint, each node's label as drawn, and
 where the sunburst is drawn), pie slices (`PieSlices`), gauge dials
@@ -458,9 +459,12 @@ bar, keeping its place on it (between root and tip, or past the tip), cut
 to the plot as scenes leave out labels outside it; one moving inside or
 outside its bar keeps where its text starts (`LabelItems.starts`); a
 text mark's label without a match shows or goes at once (labels are not
-attached to other marks' items by equal names). Labels writing a
-finite number at both ends write the values between through their own
-format each frame, measured again. A sunburst's sectors move their angles
+attached to other marks' items by equal names). Labels writing finite
+numbers at both ends write the values between through their own formats
+each frame, the numbers laid out by their shapes (`dom/value-labels.ts`
+`shapeOf`), and a text label's parts of number fields matched by their
+place among its numbers and their field; other parts are written as the
+new scene writes them. A sunburst's sectors move their angles
 and depths; radii follow depths through each frame's shape (the center
 disc is depth 0 to 1): its center, outer radius, middle, and ring width,
 between the two scenes' (breadcrumbs coming or going move it). Through a

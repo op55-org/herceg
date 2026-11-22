@@ -269,7 +269,7 @@ export interface TextGeometry extends Geometry {
   coords: Float32Array;
   labels: string[];
   count: number;
-  /** In scenes of charts that animate changed values: what names each label, and the number it writes. */
+  /** In scenes of charts that animate changed values: what names each label, and the numbers it writes. */
   named?: LabelItems | undefined;
 }
 
@@ -281,7 +281,7 @@ export interface LabelsGeometry extends Geometry {
   kind: "labels";
   draw: Drawing<LabelsGeometry>;
   items: readonly TextItem[];
-  /** In scenes of charts that animate changed values: what names each label, and the number it writes. */
+  /** In scenes of charts that animate changed values: what names each label, and the numbers it writes. */
   named?: LabelItems | undefined;
 }
 
@@ -289,7 +289,7 @@ export interface LabelsGeometry extends Geometry {
  * What a value transition (`animation.values`) needs of labels (a text
  * mark's rows, a bar's value labels), which marks give only in scenes of
  * charts that ask for it: per label its name, which matches it between
- * scenes, where it stands, and the number it writes, which frames count
+ * scenes, where it stands, and the numbers it writes, which frames count
  * through.
  */
 export interface LabelItems {
@@ -318,40 +318,52 @@ export interface LabelItems {
   offset?: ((label: number, value: number, count: MeasureText) => number) | undefined;
   /** For bars' labels: how their text is anchored at their places, which the runs of parts do not say. */
   anchor?: "start" | "middle" | "end" | undefined;
-  /** For labels geometry: each label's place (x, y), and the label each of its items draws. */
+  /**
+   * For labels geometry: each label's place (x, y; a text mark's label,
+   * its block's middle), and the label each of its items draws.
+   */
   at?: ArrayLike<number> | undefined;
   owners?: ArrayLike<number> | undefined;
   /**
-   * Per label, the number it writes (NaN, or none: other text), and its
-   * text, or its items placed at (x, y), writing `value`: in a value
-   * transition's frames, which measure the number with `count` (by its
-   * shape: dom/value-labels.ts `shapeOf`) and other text as scenes do.
+   * For a text mark's labels: the fields their numbers are of, one per
+   * part writing a number or time field (a label of one such field, that
+   * field), in the order its content writes them.
+   */
+  fields?: readonly string[] | undefined;
+  /**
+   * Per label, the numbers it writes (NaN, or none: other text): one, or
+   * one per field `fields` names, label after label.
    */
   values?: ArrayLike<number> | undefined;
+  /**
+   * In a value transition's frames, label `label`'s text, or its items,
+   * writing its numbers in `numbers` (every label's, as `values` holds
+   * them), at its place in `at` (x and y alternating), its numbers
+   * measured with `count` (by their shapes: dom/value-labels.ts `shapeOf`)
+   * and other text as scenes measure it. A text mark's label without a
+   * clip is moved in `at` inside the chart first, as its scene keeps it,
+   * by the bounds of what it writes.
+   */
   write?:
     | ((
         label: number,
-        value: number,
-        x: number,
-        y: number,
+        numbers: ArrayLike<number>,
+        at: Float32Array,
         count: MeasureText,
       ) => string | readonly TextItem[])
     | undefined;
   /**
    * In a value transition's frames, per label, whether it is laid out by
-   * its number's shape: a transition interrupting goes on laying it out so.
+   * its numbers' shapes: a transition interrupting goes on laying it out so.
    */
   shaped?: readonly boolean[] | undefined;
   /**
    * For a text mark's labels without a clip: moves label `label`'s place in
    * `at` (x and y alternating) inside the chart in a value transition's
-   * frame, as its scene keeps it there, by as little as it reaches past: by
-   * its box's width in the scene, or for a counting label, the number it
-   * writes there (`written`), measured with `count`.
+   * frame that does not write it again, as its scene keeps it there, by as
+   * little as its scene's block reaches past.
    */
-  stayInside?:
-    | ((label: number, at: Float32Array, written: string | undefined, count: MeasureText) => void)
-    | undefined;
+  stayInside?: ((label: number, at: Float32Array) => void) | undefined;
 }
 
 /** Line segments of one series, such as error bars: x1, y1, x2, y2 per segment. */

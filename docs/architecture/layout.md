@@ -638,8 +638,11 @@ axis, their painted block goes to its mirror image across their point
 where that reaches less far past the chart's edge, then moves in
 (`shiftWithin`, the one axis of `shiftInside`). That is "show" labels'
 place and the first place of those that hide or move. A value
-transition's frames keep them inside through the text mark's
-`LabelItems.stayInside`, counting labels by their numbers' shapes.
+transition's frames keep them inside too: a label written again by the
+bounds of what it writes (`LabelItems.write`, its numbers by their
+shapes), others by their scene's (`LabelItems.stayInside`); labels in
+items stand by their blocks' middles, so lines changing between the ends
+grow about it.
 
 ## Themes and styles
 
