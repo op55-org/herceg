@@ -1,5 +1,6 @@
 // What tests read of a scene's guides.
 import {
+  type AxisGuide,
   guidesOf,
   type HeaderGuide,
   type KeyGuide,
@@ -12,6 +13,27 @@ import {
 /** The series legend's entries; none without a legend. */
 export function legendOf(scene: Pick<Scene, "guides">): LegendItem[] {
   return [...(guidesOf(scene, "legend")[0]?.entries ?? [])];
+}
+
+/**
+ * An axis' tick marks in order along it: the pixel each stands on (its
+ * stroke runs down that pixel's middle) and its length across the axis.
+ */
+export function tickMarksOf(guide: AxisGuide): { at: number; length: number }[] {
+  const across = guide.side === "top" || guide.side === "bottom";
+  const marks: { at: number; length: number }[] = [];
+  for (const item of guide.items)
+    if (item.type === "segments")
+      for (let k = 0; k + 3 < item.coords.length; k += 4) {
+        const [x1, y1, x2, y2] = item.coords.slice(k, k + 4) as [number, number, number, number];
+        // The axis' line runs along it; tick marks cross it.
+        if (across ? x1 === x2 : y1 === y2)
+          marks.push({
+            at: (across ? x1 : y1) - 0.5,
+            length: Math.abs(across ? y2 - y1 : x2 - x1),
+          });
+      }
+  return marks.sort((a, b) => a.at - b.at);
 }
 
 /** The chart's title, if drawn. */

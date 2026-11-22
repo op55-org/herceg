@@ -298,7 +298,7 @@ beside each row's last panel needs rows that share y.
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |
 | `inside` | Labels inside the plot beside their ticks, taking no room outside. Not on colorbars. |
 | `gap` | Pixels from the labels to their tick's end. |
-| `ends` | What the first and last labels do where they would cross the chart's edge: `"room"` (default) widens the margin for them, `"hide"` leaves them out ([Labels at the chart's edge](#labels-at-the-charts-edge)). Axes and their layers; not on colorbars. |
+| `ends` | What the first and last labels do where they would cross the chart's edge: `"room"` (default) widens the margin for them, `"hide"` leaves them out with their tick marks ([Labels at the chart's edge](#labels-at-the-charts-edge)). Axes and their layers; not on colorbars. |
 
 Flat labels stand at their ticks as `style.tickLabel` aligns them (`align`
 on x, `verticalAlign` on y). Category labels longer than 30% of the
@@ -325,7 +325,11 @@ chart's edge, and does not widen the margin for it:
   text's halo past the box's padding on each side.
 - A label that fits in the room the chart has anyway (the y labels'
   margin, `padding`, the room marks' labels outside the plots take) stays.
-- Its tick mark and grid line stay, and its row of labels keeps its depth.
+- Its tick mark goes with it, so nothing is left half cut at the edge. Its
+  grid line stays, as does another layer's tick mark at the same place,
+  and its row of labels keeps its depth. Labels blank for other reasons
+  (thinned out by `overlap`, `duplicates`, a row a room leaves out) keep
+  their tick marks.
 - Between facets and subplots, a label crossing its plot's side into the
   gap beside it counts as crossing.
 - y labels that would cross the chart's top or bottom (an inset's box,

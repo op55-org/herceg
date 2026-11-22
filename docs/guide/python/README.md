@@ -106,7 +106,7 @@ ys}`.
 | `fig.colorbar(m, label="°C")` | `guides=[hg.colorbar(title="°C")]` |
 | `HourLocator(interval=6)`, `MultipleLocator(10)` | `hg.AxisOptions(ticks=hg.Ticks(every="6 hours"))`, `hg.Ticks(every=10)` |
 | `DateFormatter("%H:%M")`, `StrMethodFormatter("{x:,.2f}")` | `hg.Format(time="%H:%M")`, `hg.Format(number=",.2f")` |
-| `MaxNLocator(prune="both")` | `guides=[hg.axis("x", labels=hg.TickLabels(ends="hide"))]`: end labels crossing the chart's edge are left out, their ticks kept |
+| `MaxNLocator(prune="both")` | `guides=[hg.axis("x", labels=hg.TickLabels(ends="hide"))]`: end labels crossing the chart's edge are left out with their tick marks, their grid lines kept |
 | `ax.set_xlim(...)` | `hg.Chart(data, x=hg.AxisOptions(domain=(low, high)))`; helpers use `x_axis` |
 | `fig.savefig(path)` | `chart.save(path)` |
 | `linewidth`, `linestyle`, `alpha` | `stroke_width`, `dash` (`"-"`, `"--"`, `":"`, `"-."`), `opacity` |

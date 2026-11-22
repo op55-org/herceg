@@ -106,8 +106,10 @@ edge. `model.#furniture` makes the title's and legends' requests
   labels are otherwise moved into. Blanking comes after rooms, overlap
   thinning, and priorities have placed every label, so it changes none of
   them, and rows and lanes keep the depths their labels gave them
-  (`Placed.sized`); value transitions' frames place their labels the same
-  way.
+  (`Placed.sized`). A blanked label's tick mark goes with it: `drawn`
+  tells it by its label in `sized`, so labels blank for other reasons
+  keep their marks, and another layer's mark at the same place stays.
+  Value transitions' frames place their labels the same way.
 - Marks labelling outside their plots ask for room (`Mark.room`), the
   widest per side a track of its own, innermost, and between columns room
   in the gap. Their labels stand a gap (`GAP`, 6 px) and their offset past

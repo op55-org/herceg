@@ -17,6 +17,7 @@ import type { TickEnds } from "../../src/spec/guides.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
+import { tickMarksOf } from "../helpers/guides.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
 
@@ -32,6 +33,8 @@ const axisOn = (panel: Panel, side: AxisGuide["side"]) => panel.axes.find((a) =>
 /** The labels an axis draws, in order. */
 const labels = (guide: AxisGuide | undefined) =>
   (guide?.items ?? []).filter((item): item is TextItem => item.type === "text").map((t) => t.text);
+/** Where an axis draws tick marks along it. */
+const marksAt = (guide: AxisGuide | undefined) => tickMarksOf(guide!).map((mark) => mark.at);
 const right = (scene: Scene, i = 0) => {
   const { plot } = scene.panels[i]!;
   return plot.x + plot.width;
@@ -86,9 +89,10 @@ describe("end labels on x", () => {
       const bottom = axisOn(panel, "bottom")!;
       expect(labels(bottom)).toEqual(["250", "500", "750"]);
       expect(bottom.ticks.map((t) => t.position)).toEqual([0, 200, 400, 600, 800]);
+      expect(marksAt(bottom)).toEqual([200, 400, 600]);
       expect(gridAt(panel, "x")).toEqual([0, 200, 400, 600, 800]);
     },
-    "are left out with their tick marks and grid lines kept, the margins not widened",
+    "are left out with their tick marks, their grid lines kept, the margins not widened",
   );
 
   contractTest(
@@ -572,8 +576,14 @@ describe("end labels between panels", () => {
       const gap = (scene: Scene) => scene.panels[1]!.plot.x - right(scene, 0);
       expect(gap(room)).toBeGreaterThan(gap(hide));
       expect(gap(hide)).toBe(16);
-      // Each panel's labels at the gap and at the chart's edges are left out.
-      for (const panel of hide.panels) expect(labels(axisOn(panel, "bottom"))).toEqual(["500"]);
+      // Each panel's labels at the gap and at the chart's edges are left
+      // out, with their tick marks.
+      for (const panel of hide.panels) {
+        expect(labels(axisOn(panel, "bottom"))).toEqual(["500"]);
+        expect(marksAt(axisOn(panel, "bottom"))).toEqual([
+          Math.round(panel.plot.x + panel.plot.width / 2),
+        ]);
+      }
     },
     "are left out where they cross into the gap between facets' columns",
   );
@@ -609,12 +619,196 @@ describe("end labels between panels", () => {
       for (const each of hide.panels) {
         expect(labels(axisOn(each, "bottom"))).toEqual(["500"]);
         expect(axisOn(each, "bottom")!.ticks).toHaveLength(3);
+        expect(marksAt(axisOn(each, "bottom"))).toEqual([
+          Math.round(each.plot.x + each.plot.width / 2),
+        ]);
       }
       expect(hide.panels[2]!.plot).toMatchObject({ x: 0, width: 800 });
       // The inset's labels end at its own plot's sides, inside the chart.
       expect(hide.panels[3]!.plot.x).toBeGreaterThan(0);
     },
     "are left out where they cross a subplot's plot beside another, or an inset's",
+  );
+});
+
+describe("tick marks of end labels", () => {
+  // Values from 0 to 1 down a chart without padding or an x axis, so the
+  // labels of 0 and 1, in two lines, cross the chart's bottom and top.
+  const upright = (side: "left" | "right"): ChartConfig => ({
+    padding: 0,
+    marks: [line(values, { x: "x", y: "v" })],
+    x: { show: false, grid: false },
+    y: { domain: [0, 1], nice: false },
+    guides: [
+      axis({
+        scale: "y",
+        ...(side === "right" && { place: { side } }),
+        ticks: { values: [0, 0.5, 1] },
+        format: (v) => (v === 0.5 ? "half" : `${v}\nof all`),
+        tick: { length: 4 },
+        labels: { ends: "hide" },
+      }),
+    ],
+  });
+
+  contractTest(
+    "axis.tick-labels.ends.marks",
+    () => {
+      // Below the plot and above it, in one line and in two.
+      for (const config of [
+        edgeToEdge("hide"),
+        edgeToEdge(undefined, {
+          guides: [
+            axis({
+              scale: "x",
+              place: { side: "top" },
+              ticks: { values: [0, 250, 500, 750, 1000] },
+              format: (v) => `${v}\nunits`,
+              grid: true,
+              labels: { ends: "hide" },
+            }),
+          ],
+        }),
+      ]) {
+        const panel = build(config).scene.panels[0]!;
+        const guide = panel.axes.find((axis) => axis.ticks.length > 0)!;
+        expect(labels(guide)).toHaveLength(3);
+        expect(marksAt(guide)).toEqual([200, 400, 600]);
+        expect(gridAt(panel, "x")).toEqual([0, 200, 400, 600, 800]);
+      }
+      // Beside the plot on the left and the right.
+      for (const side of ["left", "right"] as const) {
+        const panel = build(upright(side), 400, 200).scene.panels[0]!;
+        const guide = axisOn(panel, side)!;
+        expect(labels(guide)).toEqual(["half"]);
+        const middle = panel.plot.y + panel.plot.height / 2;
+        expect(tickMarksOf(guide)).toEqual([{ at: Math.round(middle), length: 4 }]);
+        expect(gridAt(panel, "y")).toHaveLength(3);
+      }
+    },
+    "take their tick marks with them on every side, their grid lines kept",
+  );
+
+  contractTest(
+    "axis.tick-labels.ends.marks-kept",
+    () => {
+      // A layer of marks alone at the same places: its own marks stay, 2 px
+      // long, where the major layer's 5 px ones go.
+      const minor = build(
+        edgeToEdge("hide", {
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { values: [0, 250, 500, 750, 1000] },
+              labels: { ends: "hide" },
+              layers: [
+                {
+                  id: "minor",
+                  ticks: { values: [0, 500, 1000] },
+                  tick: { length: 2 },
+                  labels: false,
+                },
+              ],
+            }),
+          ],
+        }),
+      ).scene.panels[0]!;
+      expect(tickMarksOf(axisOn(minor, "bottom")!)).toEqual([
+        { at: 0, length: 2 },
+        { at: 200, length: 5 },
+        { at: 400, length: 5 },
+        { at: 600, length: 5 },
+        { at: 800, length: 2 },
+      ]);
+      // A layer whose labels at the ends stay keeps its marks there.
+      const days = build(
+        edgeToEdge(undefined, {
+          guides: [
+            axis({
+              scale: "x",
+              ticks: { values: [0, 1000] },
+              format: (v) => `a much longer label ${v}`,
+              labels: { ends: "hide" },
+              layers: [
+                {
+                  id: "days",
+                  ticks: { values: [0, 1000] },
+                  format: (v) => `day ${v}`,
+                  tick: { length: 3 },
+                  labels: { row: 1 },
+                },
+              ],
+            }),
+          ],
+        }),
+      ).scene.panels[0]!;
+      expect(labels(axisOn(days, "bottom"))).toEqual(["day 0", "day 1000"]);
+      expect(days.plot.x).toBeGreaterThan(0);
+      expect(tickMarksOf(axisOn(days, "bottom")!)).toEqual([
+        { at: Math.round(days.plot.x), length: 3 },
+        { at: Math.round(days.plot.x + days.plot.width), length: 3 },
+      ]);
+      const blank = (guide: AxisGuide) =>
+        guide.ticks.filter(({ label }) => !label).map(({ position }) => position);
+      // Every other label thinned out, "0" and "1,000" kept, then left out
+      // at the ends: the thinned ones keep their marks.
+      const thinned = axisOn(
+        build(
+          edgeToEdge(undefined, {
+            guides: [
+              axis({
+                scale: "x",
+                ticks: { values: Array.from({ length: 41 }, (_, k) => k * 25) },
+                labels: { overlap: "hide", ends: "hide" },
+              }),
+            ],
+          }),
+        ).scene.panels[0]!,
+        "bottom",
+      )!;
+      expect(blank(thinned)).toHaveLength(22);
+      expect(marksAt(thinned)).toEqual(Array.from({ length: 39 }, (_, k) => 20 + k * 20));
+      // Duplicates blank, the last at the chart's edge: "low" goes with its mark, they keep theirs.
+      const duplicates = axisOn(
+        build(
+          edgeToEdge(undefined, {
+            guides: [
+              axis({
+                scale: "x",
+                ticks: { values: [0, 250, 500, 750, 1000] },
+                format: (v) => (v < 600 ? "low" : "high"),
+                labels: { ends: "hide" },
+              }),
+            ],
+          }),
+        ).scene.panels[0]!,
+        "bottom",
+      )!;
+      expect(labels(duplicates)).toEqual(["high"]);
+      expect(marksAt(duplicates)).toEqual([200, 400, 600, 800]);
+      // A row a room leaves out keeps its layer's marks.
+      const roomed = axisOn(
+        build(
+          edgeToEdge(undefined, {
+            guides: [
+              axis({
+                scale: "x",
+                place: { side: "top" },
+                room: 24,
+                line: false,
+                ticks: { values: [0, 500, 1000] },
+                labels: { gap: 0, ends: "hide" },
+                layers: [{ id: "second", ticks: { values: [250, 750] }, labels: { row: 1 } }],
+              }),
+            ],
+          }),
+        ).scene.panels[0]!,
+        "top",
+      )!;
+      expect(labels(roomed)).toEqual(["500"]);
+      expect(marksAt(roomed)).toEqual([200, 400, 600]);
+    },
+    "leave other layers' marks at the same places, and marks of labels other rules leave blank",
   );
 });
 
