@@ -5,6 +5,7 @@ import {
   bar,
   boxplot,
   type ChartSelection,
+  type ColumnInput,
   type CustomMark,
   candlestick,
   category,
@@ -91,6 +92,17 @@ fromRows([{ at: new Date(), value: 1 }]);
 fromRows([{ at: 0, status: 200 }], { types: { at: "time", status: "category" } });
 const encoded = table({ host: encodedCategory(new Int32Array([0, -1]), ["web"]), v: [1, 2] });
 line(encoded, { x: "v", y: "v", series: "host" });
+
+// Columns built by name: reads typed by what the record allows.
+const columns: Record<string, ColumnInput> = { time: time([0, 3_600_000]) };
+columns.band0 = new Float64Array([1, 2]);
+const folded = table(columns);
+area(folded, { x: "time", y: "band0" });
+const read: string | number | null = folded.value("band0", 0);
+// @ts-expect-error any field may be a category, so a read may be a string
+const readNumber: number | null = folded.value("band0", 0);
+const band: number | undefined = folded.numbers("band0")[0];
+void [read, readNumber, band];
 
 const live = table(
   { time: time([]), cpu: [] as number[], mem: [] as number[] },

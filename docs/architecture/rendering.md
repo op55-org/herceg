@@ -91,12 +91,12 @@ controls over it.
   writes no node of the data's SVG. A browser repaints the SVG whose
   content changed, so the overlay is apart from the marks: in Chrome, a
   hover over 4,000 SVG paths paints 0.08 ms a move (0.2 ms with the CPU
-  idle) where, with the overlay inside the data's SVG, it painted every
-  path again, 0.3-0.4 ms (2 ms idle). The browser may still raster again
-  the tiles under what changed, marks included. The overlay has no
-  compositing layer of its own: with `will-change: transform` it had one,
-  and Chrome's GPU process held 18 MB more for 10 synced charts with their
-  cursors shown, and 285 MB more for 100.
+  idle), where an overlay inside the data's SVG would paint every path
+  again, 0.3-0.4 ms (2 ms idle). The browser may still raster again the
+  tiles under what changed, marks included. The overlay has no
+  compositing layer of its own: `will-change: transform` would give it
+  one, and Chrome's GPU process would hold 18 MB more for 10 synced charts
+  with their cursors shown, and 285 MB more for 100.
 - The overlay is made the first time something draws there (a cursor, a
   selection, a lasso), right after the data's SVG, and kept until the chart
   goes: a chart nothing draws over has none, which saves about 3.4 KB of
@@ -149,7 +149,7 @@ the keyboard, descriptions, and tooltips keep.
   (`eachPainted`).
 - Panels paint one after another, each with its background and then its
   plan, so insets paint over their parents. The chart background is under
-  every panel; plot borders, axes, and pointer overlays are over all.
+  every panel; plot borders, axes, and the pointer overlay are over all.
 - Rules, text, and labels have canvas painters, so a canvas paints the plan
   on one plane without a second backing store for annotations.
 

@@ -134,7 +134,15 @@ right.panel("share", title="By region").pie("region", "requests")
   beside the plots ([Axes](axes-and-legends.md#axes)): charts in a row
   with `x: { room: 28 }` end their plots at one line, and a panel's own
   `x: { room }` or `y: { room }` holds its axis, panels without one taking
-  the chart's (plots across a track still line up, at the deepest).
+  the chart's (plots across a track still line up, at the deepest). A
+  legend's `room` holds its depth the same way, a panel's legend beside
+  its subplot too ([Legends](axes-and-legends.md#legends)).
+- **Labels beside the plots.** Series and rule labels outside the plot
+  (`place: { outside: true }`) stand `place.offset` pixels, after a 6 px
+  gap, past what stands beside each panel's plot ([Labels that follow
+  series](marks.md#labels-that-follow-series)). In a gutter between
+  subplots, from the plot: y labels, y title, the marks' labels, then
+  legends.
 - **Marks** name their panel with `panel`, or `"*"` for all. In a chart
   with panels, a mark without one is an error.
 - **Ids** may be left out (`"panel-1"`, `"panel-2"`, ...); give ids where

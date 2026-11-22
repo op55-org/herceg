@@ -324,9 +324,9 @@ hg.bar(sales, x="month", y="units", labels=hg.BarLabels(place=hg.LabelPlace(outs
 
 Labels that do not fit are left out: inside, a label fits where its text
 and its offset do; past the ends, the axis keeps room for both. Neighbors'
-labels keep 4 px apart whatever their offset. With `animation: { values: true }`,
-labels writing the value, alone or as a `{ value: true }` part, count
-through the values between ([counting
+labels keep 4 px apart whatever their offset. With `animation: { values:
+true }`, labels writing the value, alone or as a `{ value: true }` part,
+count through the values between ([counting
 labels](interaction.md#counting-labels)).
 
 ## Points
@@ -700,7 +700,7 @@ draws has no place.
 | `place.attachment` | Where along a rule or region side: `"start"`, `"center"`, `"end"` (default). |
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
-| `place.offset` | Pixels away from its place; outside the plot, pixels past the plot's edge and its y axis (after a 6 px gap). |
+| `place.offset` | Pixels away from its place; outside the plot, pixels past what stands beside the plot on that side, such as its y axis and title (after a 6 px gap; see [labels that follow series](#labels-that-follow-series)). |
 | `overlap`, `overlapGroup`, `leader`, `priority` | How it keeps apart from other labels (Python `overlap_group`); see [labels that would overlap](#labels-that-would-overlap). |
 
 - **Domains.** Annotations count toward the axes' domains only with
@@ -714,24 +714,25 @@ draws has no place.
   cuts: `false` draws everything, `"chart"` and `"plot"` cut to the chart
   or plot. Regions are cut to the plot unless `clip` is `"chart"` or
   `false`.
-- **Staying inside.** Labels in the plot stay inside it in every output: a
-  label at the edge flips to the rule's other side or moves in. Labels of
-  rules and regions outside the plot stay inside the chart. Text labels
-  stay inside the chart: a label whose painted block (its box, halo, and
-  outline) would reach past the chart's edge goes to the other side of its
-  point along that axis (14 px above becomes 14 px below; a start-aligned
-  label at the right edge goes to its point's left), and where that
-  reaches past too, it moves in as little as stays inside; a label larger
-  than the chart starts at its left or top edge. Labels in the margins
-  are inside the chart and stay where they are put, so an annotation at
-  the plot's top needs no padding. With `clip` (`"plot"`, `"chart"`, or
-  `false`) text is drawn exactly where told, and a label of a point
-  outside the chart is too. Labels that hide or move start from the place
-  they are kept at; those that move stay in the plot as before (in the
-  chart for a point outside the plot). Through a [value
-  transition](interaction.md#animation), labels stay inside on every
-  frame, a counting label by its numbers' shapes (a pixel or so off the
-  painted numbers).
+- **Staying inside.** Labels stay inside the chart in every output:
+  - **Rule and region labels** in the plot stay inside it: a label at the
+    edge flips to the rule's other side or moves in. Outside the plot,
+    they stay inside the chart.
+  - **Text labels** stay inside the chart. A label whose painted block
+    (its box, halo, and outline) would reach past the chart's edge goes to
+    the other side of its point along that axis (14 px above becomes
+    14 px below; a start-aligned label at the right edge goes to its
+    point's left), and where that reaches past too, moves in as little as
+    stays inside; a label larger than the chart starts at its left or top
+    edge. Labels in the margins are inside the chart and stay where they
+    are put, so an annotation at the plot's top needs no padding. Labels
+    that hide or move start from the place they are kept at; those that
+    move stay in the plot (in the chart for a point outside the plot).
+    Through a [value transition](interaction.md#animation) they stay
+    inside on every frame, a counting label by its numbers' shapes (a
+    pixel or so off the painted numbers).
+  - **Exactly where told:** text with `clip` (`"plot"`, `"chart"`, or
+    `false`), and a label of a point outside the chart.
 - **Counting.** Through a value transition, a text label counts the
   numbers it writes: a label of a number field, and each part of one in a
   label of parts, each in its format; its other parts show the new text
@@ -834,11 +835,12 @@ hg.Chart(df, legend=False).line(
   plot on their side as drawn: the plot's edge, the y axis' labels there
   (listed axes' too), its title, a grid's row headers, and a legend beside
   a subplot at the layout's side (between subplots, the legend stands
-  past the names). So the names keep their place at every zoom. The chart keeps
-  room for them (unless `reserve: false`); the x axis' first or last tick
-  label may stand under that room rather than narrow the plot (see
-  [labels at the chart's edge](axes-and-legends.md#labels-at-the-charts-edge)).
-  Rules' labels outside the plot stand in the same column.
+  past the names). So the names keep their place at every zoom. The chart
+  keeps room for them (unless `reserve: false`); the x axis' first or
+  last tick label may stand under that room rather than narrow the plot
+  (see [labels at the chart's
+  edge](axes-and-legends.md#labels-at-the-charts-edge)). Rules' labels
+  outside the plot stand in the same column.
 - **What it writes.** `{ field }` parts read the observation's row, and
   `{ value: true }` the value drawn there (a stack's top). At a crossing,
   `{ value: true }` writes the value where the line crosses, and `{ field }`
