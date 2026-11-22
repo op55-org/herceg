@@ -11,8 +11,10 @@
 // the place. Anchors that fit (`fit`, "flip" by default) stay inside the
 // chart's box: one ResizeObserver per chart measures their wrappers, so a
 // frame places them by their last size, reading no layout, and a size
-// change slides one without a frame. A wrapper whose place is out of
-// view is not displayed; focus inside it moves to the chart's root first.
+// change slides one without a frame; its wrapper says how far it slid, in
+// two custom properties for the element's CSS. A wrapper whose place is
+// out of view is not displayed; focus inside it moves to the chart's root
+// first.
 // Options the chart cannot place keep their anchor hidden, and are told of
 // once.
 
@@ -82,7 +84,12 @@ export interface AnchorOptions {
    * "center" never flips. A fitted element is measured by a
    * ResizeObserver: as it shows, it is laid out unseen on its side until
    * measured, before the browser paints it; where its size takes another
-   * side, it is measured there and shown in the next frame.
+   * side, it is measured there and shown in the next frame. Its wrapper
+   * says how far fitting slid it from where `side`, `align`, and `offset`
+   * put it on the side it took, for its CSS (an arrow kept over the place):
+   * `--hg-anchor-slide-x` and `--hg-anchor-slide-y`, in pixels right and
+   * down (negative: left and up; right-to-left text too), 0px where it did
+   * not slide. "none" sets neither.
    * @default "flip"
    */
   fit?: AnchorFit | undefined;
@@ -102,7 +109,9 @@ export interface Anchor {
   /**
    * The side the element is on after fitting ("center" for a centred one),
    * which the wrapper's `data-side` attribute also says, for the element's
-   * CSS (`[data-side="bottom"] .arrow`). Undefined while hidden, and
+   * CSS (`[data-side="bottom"] .arrow`), beside how far it slid
+   * (`--hg-anchor-slide-x` and `-y`; see `AnchorOptions.fit`): a flip is
+   * not a slide, but a change of side. Undefined while hidden, and
    * while a fitted element that is showing waits to be measured: its side
    * is then known before the browser paints it, after the frame's
    * `render`.
@@ -162,6 +171,8 @@ const SIDES = ["top", "right", "bottom", "left", "center"] as const;
 const ALIGNS = ["start", "center", "end"] as const;
 const FITS = ["flip", "shift", "none"] as const;
 const OPPOSITE = { top: "bottom", bottom: "top", left: "right", right: "left" } as const;
+/** The custom properties a fitted anchor's wrapper tells its slide in, right and down. */
+const SLIDES = ["--hg-anchor-slide-x", "--hg-anchor-slide-y"] as const;
 
 /** Options as checked: a point's coordinates or an item, and how the element sits there. */
 interface Checked {
@@ -218,6 +229,8 @@ interface Fitted {
   box: Rect;
   width: number;
   height: number;
+  /** The slide last written (`SLIDES`), right and down; none before the first. */
+  slid: [x?: number, y?: number];
 }
 
 /** One chart's anchors: their wrappers, in a layer of the chart's, and their placing. */
@@ -398,6 +411,7 @@ export class Anchors {
           box,
           width,
           height,
+          slid: [],
         };
         const { fitted } = held;
         const { state } = fitted;
@@ -448,8 +462,8 @@ export class Anchors {
    * of the places its options try (see `stepOf`) that fits, else on the one
    * crossing the chart's edge least, which at one size is the one with the
    * most room (the first of equals); else on the place it takes. Then slid
-   * to stay inside the chart. Returns the side, without writing it, where
-   * `write` is false.
+   * to stay inside the chart, the slide written with the transform.
+   * Returns the side, without writing it, where `write` is false.
    */
   #place(held: Held, choose = true, write = true): Placed {
     const fitted = held.fitted!;
@@ -474,6 +488,16 @@ export class Anchors {
       const dy = slide(top, h, height, false) - top;
       fitted.step = step;
       this.#write(held, transform(x + dx, y + dy, sx, sy), on);
+      // With the move, so that CSS reading the slide paints with it; a
+      // frame that leaves it allocates and writes nothing.
+      const { slid } = fitted;
+      for (let k = 0; k < 2; k++) {
+        const moved = k ? dy : dx;
+        if (moved !== slid[k]) {
+          slid[k] = moved;
+          held.wrapper.style.setProperty(SLIDES[k]!, `${moved}px`);
+        }
+      }
     }
     return on;
   }
@@ -564,6 +588,7 @@ export class Anchors {
     if (!held.fitted) return;
     held.fitted = undefined;
     this.#observer?.unobserve(held.wrapper);
+    for (const name of SLIDES) held.wrapper.style.removeProperty(name);
     this.#seen(held);
     for (const other of this.#held.values()) if (other.fitted) return;
     this.#observer?.disconnect();

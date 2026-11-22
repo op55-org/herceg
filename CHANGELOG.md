@@ -299,7 +299,9 @@ the other side of its place where its side has no room, just inside an
 item's edge where neither side has (a popover over a band as tall as the
 plot), then slid along to stay inside, a place it fits on kept while it
 fits; `"shift"` keeps its side and slides, `"none"` places it as told. The side used is `anchor.side` and
-its wrapper's `data-side`, for CSS; a `ResizeObserver` measures fitted
+its wrapper's `data-side`, for CSS, and how far it slid its wrapper's
+`--hg-anchor-slide-x` and `--hg-anchor-slide-y`, in pixels, so that a
+popover's arrow can stay over its place; a `ResizeObserver` measures fitted
 elements, so frames read no layout. An empty anchor with `fit: "none"`
 is the reference for the application's own popovers. React's, Vue's, and Svelte's `<Anchor>` render their content into it
 through a portal, a teleport, and the component's children. It is a

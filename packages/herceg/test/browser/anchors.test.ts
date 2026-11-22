@@ -93,6 +93,16 @@ function expectAbove(chart: Chart, element: Element, x: number, y: number, offse
   near(box.y + box.height, y - offset, "y");
 }
 
+/** The slide `element`'s wrapper tells, in pixels: undefined for a property it does not carry. */
+function slideOf(element: Element) {
+  const { style } = element.parentElement!;
+  const read = (name: string) => {
+    const value = style.getPropertyValue(name);
+    return value === "" ? undefined : Number.parseFloat(value);
+  };
+  return { x: read("--hg-anchor-slide-x"), y: read("--hg-anchor-slide-y") };
+}
+
 /** What a pointer resting at (x, y) of the chart's root is on, once drawn. */
 async function hovered(chart: Chart, x: number, y: number): Promise<ItemTarget | undefined> {
   const events: InputEvent[] = [];
@@ -1068,7 +1078,13 @@ describe("anchors that fit", () => {
     expect(spy.made).toHaveLength(1);
     const probe = block(1, 1);
     document.body.append(probe);
-    const painted: { side: string | undefined; top: number; bottom: number }[] = [];
+    const painted: {
+      side: string | undefined;
+      left: number;
+      top: number;
+      bottom: number;
+      slide: ReturnType<typeof slideOf>;
+    }[] = [];
     const seen: boolean[] = [];
     const watcher = new ResizeObserver(() => {
       const wrapper = element.parentElement;
@@ -1076,7 +1092,13 @@ describe("anchors that fit", () => {
       seen.push(wrapper.style.opacity !== "0");
       if (!seen.at(-1)) return;
       const box = boxIn(chart, element);
-      painted.push({ side: wrapper.dataset.side, top: box.y, bottom: box.y + box.height });
+      painted.push({
+        side: wrapper.dataset.side,
+        left: box.x,
+        top: box.y,
+        bottom: box.y + box.height,
+        slide: slideOf(element),
+      });
     });
     watcher.observe(probe);
     let resizing = true;
@@ -1465,6 +1487,340 @@ describe("anchors that fit", () => {
     await frame();
     expect(spy.observed()).toEqual([]);
     expect([errors, reported]).toEqual([[], []]);
+  });
+
+  /**
+   * That `element`'s wrapper tells the slide it took: how far its box is
+   * from where the side it took (`held.side`), centred, `offset` px from
+   * `place` puts it.
+   */
+  function expectSlid(
+    chart: Chart,
+    held: ReturnType<typeof anchor>,
+    place: readonly [number, number],
+    offset = 0,
+  ) {
+    const { x, y, width, height } = boxIn(chart, held.element);
+    const [px, py] = place;
+    const [left, top] = {
+      top: [px - width / 2, py - offset - height],
+      bottom: [px - width / 2, py + offset],
+      left: [px - offset - width, py - height / 2],
+      right: [px + offset, py - height / 2],
+      center: [px - width / 2, py - height / 2],
+    }[held.side!];
+    const slide = slideOf(held.element);
+    near(slide.x!, x - left!, `${held.side} slide x`);
+    near(slide.y!, y - top!, `${held.side} slide y`);
+  }
+
+  it("tell how far they slid, along and across their side, centred, and back to 0", async () => {
+    const chart = await fixed();
+    const { width, height } = chart.root.getBoundingClientRect();
+    const cases = [
+      // Along the top at the left edge, and the bottom at the right.
+      [{ at: at(4, 150), side: "top" }, [4, 150], 0, "top", [16, 0]],
+      [{ at: at(width - 4, 150), side: "bottom" }, [width - 4, 150], 0, "bottom", [-16, 0]],
+      // Beside its place at the top: down along its side.
+      [{ at: at(300, 4), side: "left", offset: 4 }, [300, 4], 4, "left", [0, 6]],
+      // Flipped below at the top-left corner: the flip is no slide; along is.
+      [{ at: at(4, 6), side: "top", offset: 4 }, [4, 6], 4, "bottom", [16, 0]],
+      // Shifted up across its side, over its place.
+      [
+        { at: at(300, height - 6), side: "bottom", fit: "shift" },
+        [300, height - 6],
+        0,
+        "bottom",
+        [0, -14],
+      ],
+      // Centred, both ways.
+      [{ at: at(2, 3), side: "center" }, [2, 3], 0, "center", [18, 7]],
+      // Inside: no slide.
+      [{ at: at(300, 150) }, [300, 150], 0, "top", [0, 0]],
+    ] as const;
+    const held = cases.map(([options]) => anchor(chart, button(), options));
+    await settle(chart);
+    for (const [k, [, place, offset, side, [sx, sy]]] of cases.entries()) {
+      expect(held[k]!.side).toBe(side);
+      expect(slideOf(held[k]!.element)).toEqual({ x: sx, y: sy });
+      expectSlid(chart, held[k]!, place, offset);
+    }
+    // Inherited: the element's own CSS reads them.
+    expect(getComputedStyle(held[0]!.element).getPropertyValue("--hg-anchor-slide-x")).toBe("16px");
+    // Moved inside, it tells 0 again.
+    held[0]!.set({ at: at(300, 150), side: "top" });
+    await settle(chart);
+    expect(slideOf(held[0]!.element)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("tell their slide right and down in right-to-left text, and larger than the chart", async () => {
+    const chart = await fixed();
+    const wide = block(800, 40);
+    const start = button();
+    const options = [
+      { at: at(300, 150), side: "bottom" },
+      { at: at(10, 100), side: "top", align: "start" },
+    ] as const;
+    const [large, started] = [anchor(chart, wide, options[0]), anchor(chart, start, options[1])];
+    await settle(chart);
+    // Wider than the chart: from its left edge, 100 px right of centred on its place.
+    near(boxIn(chart, wide).x, 0);
+    expect(slideOf(wide)).toEqual({ x: 100, y: 0 });
+    // Its start at its place: inside.
+    expect(slideOf(start)).toEqual({ x: 0, y: 0 });
+    chart.root.parentElement!.dir = "rtl";
+    large.set(options[0]);
+    started.set(options[1]);
+    await settle(chart);
+    // From the chart's right edge: 100 px left, still told as a move right.
+    near(boxIn(chart, wide).x + 800, 600);
+    expect(slideOf(wide)).toEqual({ x: -100, y: 0 });
+    // Its start, the right, at its place would cross the left edge: slid right.
+    near(boxIn(chart, start).x, 0);
+    expect(slideOf(start)).toEqual({ x: 30, y: 0 });
+  });
+
+  it("tell their slide changing where their place moves under a box held at the edge", async () => {
+    const chart = await fixed();
+    const tag = button();
+    const held = anchor(chart, tag, { at: at(4, 150), side: "top" });
+    await settle(chart);
+    const wrapper = tag.parentElement!;
+    const transform = wrapper.style.transform;
+    expect(slideOf(tag).x).toBe(16);
+    const writes = vi.spyOn(wrapper.style, "setProperty");
+    held.set({ at: at(12, 150), side: "top" });
+    await settle(chart);
+    // At the chart's edge still, by the same transform, but slid less: across only.
+    expect(wrapper.style.transform).toBe(transform);
+    expect(slideOf(tag)).toEqual({ x: 8, y: 0 });
+    expect(writes.mock.calls).toEqual([["--hg-anchor-slide-x", "8px"]]);
+    // Moved without sliding: nothing written.
+    writes.mockClear();
+    held.set({ at: at(300, 150), side: "top" });
+    await settle(chart);
+    held.set({ at: at(320, 140), side: "top" });
+    await settle(chart);
+    expect(writes.mock.calls).toEqual([["--hg-anchor-slide-x", "0px"]]);
+  });
+
+  it("tell their slide in the first paint they show in, a flip measured unseen reset", async () => {
+    const errors = windowErrors();
+    const chart = await fixed();
+    const wide = block(160, 40);
+    const { painted, seen } = await paints(chart, wide);
+    // 30 px below the chart's top near its left edge: no room above, so below, slid right.
+    const held = anchor(chart, wide, { at: at(10, 30), offset: 8 });
+    for (let k = 0; k < 6; k++) await frame();
+    expect(held.side).toBe("bottom");
+    // Measured above it unseen, shown below in the next frame.
+    expect(seen.indexOf(true)).toBe(1);
+    expect(painted.length).toBeGreaterThan(2);
+    for (const shown of painted) {
+      expect(shown.side).toBe("bottom");
+      near(shown.left, 0);
+      expect(shown.slide).toEqual({ x: 70, y: 0 });
+    }
+    expect(errors).toEqual([]);
+  });
+
+  it("reset their slide across their side as they flip", async () => {
+    const chart = await fixed();
+    const tag = button();
+    const held = anchor(chart, tag, { at: at(300, 6), side: "top", fit: "shift" });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual({ x: 0, y: 14 });
+    held.set({ at: at(300, 6), side: "top" });
+    await settle(chart);
+    expect(held.side).toBe("bottom");
+    expect(slideOf(tag)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("carry no slide with fit none, which removes it, shown or hidden", async () => {
+    const chart = await fixed();
+    const tag = button();
+    const none = { x: undefined, y: undefined };
+    const inherited = () => getComputedStyle(tag).getPropertyValue("--hg-anchor-slide-x");
+    const held = anchor(chart, tag, { at: at(4, 150), fit: "none" });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual(none);
+    expect(inherited()).toBe("");
+    held.set({ at: at(4, 150) });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual({ x: 16, y: 0 });
+    held.set({ at: at(4, 150), fit: "none" });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual(none);
+    expect(inherited()).toBe("");
+    // Hidden, then set to none: removed though it shows nowhere.
+    held.set({ at: at(4, 150) });
+    await settle(chart);
+    held.set({ at: { x: 30, y: 5 } });
+    await settle(chart);
+    expect(held.shown).toBe(false);
+    held.set({ at: { x: 30, y: 5 }, fit: "none" });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual(none);
+    // Fitted and shown again: told afresh.
+    held.set({ at: at(4, 150) });
+    await settle(chart);
+    expect(slideOf(tag)).toEqual({ x: 16, y: 0 });
+  });
+});
+
+describe("the interaction guide's popover arrow", () => {
+  /** The guide's pattern: the arrow centred less the slide, off the rounded corners, turned by the side. */
+  const GUIDE = `
+    .guide-popover { position: relative; box-sizing: border-box; width: 160px; height: 40px;
+      border: 1px solid #c9ced8; border-radius: 6px; background: white }
+    .guide-popover::before { content: ""; position: absolute; width: 10px; height: 10px; bottom: -6px;
+      left: clamp(8px, calc(50% - var(--hg-anchor-slide-x, 0px) - 5px), calc(100% - 18px));
+      transform: rotate(45deg); background: inherit }
+    [data-side="bottom"] .guide-popover::before { top: -6px; bottom: auto }`;
+
+  /** A1's chart: lines over a band of downtime, its popover anchored by item at the band's top. */
+  async function bandChart(width: number, data = values()) {
+    const sheet = document.createElement("style");
+    sheet.textContent = GUIDE;
+    document.head.append(sheet);
+    onTestFinished(() => sheet.remove());
+    const chart = await mount(
+      {
+        marks: [
+          line(data, { x: "x", y: "y" }),
+          region(table({ id: ["a"], start: [3], end: [5] }), {
+            id: "downtime",
+            x1: "start",
+            x2: "end",
+            itemKey: "id",
+          }),
+        ],
+        y: { domain: [0, 10] },
+        interaction: { zoom: "x" },
+      },
+      host(width, 300),
+    );
+    const popover = document.createElement("div");
+    popover.className = "guide-popover";
+    const held = anchor(chart, popover, {
+      at: { item: { mark: "downtime", item: ["a"] } },
+      side: "top",
+      offset: 8,
+    });
+    await settle(chart);
+    return { chart, popover, held };
+  }
+
+  /**
+   * That the arrow's centre (its tip, turned 45 degrees about it) stands
+   * over the centre of the band's part in view, within a pixel, or at its
+   * nearest within the popover's `clamp` where the place is nearer its edge.
+   */
+  function expectOverBand(chart: Chart, popover: HTMLElement, what: string) {
+    const { plot } = chart.getPanels()[0]!;
+    const from = Math.max(plot.x, chart.toPixel(3, { axis: "x" })!);
+    const to = Math.min(plot.x + plot.width, chart.toPixel(5, { axis: "x" })!);
+    const box = boxIn(chart, popover);
+    const arrow =
+      box.x +
+      popover.clientLeft +
+      Number.parseFloat(getComputedStyle(popover, "::before").left) +
+      5;
+    const place = (from + to) / 2;
+    const reach = Math.min(Math.max(place, box.x + 14), box.x + box.width - 14);
+    near(arrow, reach, `${what}: the arrow over ${from.toFixed(1)}..${to.toFixed(1)}`);
+    return { arrow, place, reach };
+  }
+
+  it("stays over its place at the plot's left and right edges while panning", async () => {
+    for (const width of [600, 360]) {
+      const { chart, popover, held } = await bandChart(width);
+      const unit = chart.getPanels()[0]!.plot.width / 2;
+      let over = 0;
+      // A view 2 wide panning 2 px a frame: the band's start coming in at
+      // the plot's right edge, then its end going out at the left, its part
+      // in view from 1 to 60 px.
+      for (let px = 1; px <= 60; px += 2) {
+        for (const start of [1 + px / unit, 5 - px / unit]) {
+          chart.setViewport([start, start + 2]);
+          await frame();
+          expect(held.shown).toBe(true);
+          const { arrow, place } = expectOverBand(chart, popover, `${width} px, ${px} px in view`);
+          if (Math.abs(arrow - place) <= 1) over++;
+        }
+      }
+      // Over the place itself wherever it is 14 px or more inside the popover.
+      expect(over).toBeGreaterThan(40);
+    }
+  });
+
+  it("stays over its place aligned at start or end, on each kind of edge, in either direction", async () => {
+    const sheet = document.createElement("style");
+    // The arrow's place by the guide: `--at`, 0% or 100%, less the slide on its axis.
+    sheet.textContent = `
+      .edge-arrow { position: relative; width: 60px; height: 60px }
+      .edge-arrow::before { content: ""; position: absolute; width: 10px; height: 10px }
+      .edge-arrow.x::before { top: -6px; left: clamp(8px, calc(var(--at) - var(--hg-anchor-slide-x, 0px) - 5px), calc(100% - 18px)) }
+      .edge-arrow.y::before { left: -6px; top: clamp(8px, calc(var(--at) - var(--hg-anchor-slide-y, 0px) - 5px), calc(100% - 18px)) }`;
+    document.head.append(sheet);
+    onTestFinished(() => sheet.remove());
+    const chart = await mount({
+      marks: [line(values(), { x: "x", y: "y" })],
+      x: { domain: [0, 10] },
+      y: { domain: [0, 10] },
+    });
+    const { width, height } = chart.root.getBoundingClientRect();
+    const px = (x: number, y: number) => ({
+      x: { px: x, frame: "chart" as const },
+      y: { px: y, frame: "chart" as const },
+    });
+    for (const dir of ["ltr", "rtl"] as const) {
+      chart.root.parentElement!.dir = dir;
+      for (const align of ["start", "end"] as const) {
+        // Top and bottom: the element's start is the left, the right in right-to-left text.
+        const left = (align === "start") === (dir === "ltr");
+        const across = { place: [left ? width - 20 : 20, 150], at: left ? "0%" : "100%" } as const;
+        // Beside: start is the top either way.
+        const down = {
+          place: [300, align === "start" ? height - 20 : 20],
+          at: align === "start" ? "0%" : "100%",
+        } as const;
+        for (const [side, axis, { place, at: base }] of [
+          ["top", "x", across],
+          ["right", "y", down],
+        ] as const) {
+          const element = document.createElement("div");
+          element.className = `edge-arrow ${axis}`;
+          element.style.setProperty("--at", base);
+          const held = anchor(chart, element, { at: px(place[0], place[1]), side, align });
+          await settle(chart);
+          const box = boxIn(chart, element);
+          const arrow = getComputedStyle(element, "::before");
+          const what = `${dir} ${align} on ${side}`;
+          // Slid 40 px to stay inside, its arrow over its place.
+          expect(Math.abs(slideOf(element)[axis]!), what).toBe(40);
+          if (axis === "x") near(box.x + Number.parseFloat(arrow.left) + 5, place[0], what);
+          else near(box.y + Number.parseFloat(arrow.top) + 5, place[1], what);
+          held.remove();
+        }
+      }
+    }
+  });
+
+  it("stays over its place as streamed rows move the view, and its band leaves at the left", async () => {
+    const data = table({ x: [0, 1, 2, 3, 4, 5], y: [1, 3, 2, 8, 4, 5] });
+    const { chart, popover, held } = await bandChart(600, data);
+    let shown = 0;
+    for (let x = 5.05; x <= 7.2; x += 0.02) {
+      data.append({ x: [x], y: [5 + Math.sin(x)] });
+      chart.setViewport([x - 2, x]);
+      await frame();
+      if (!held.shown) continue;
+      shown++;
+      expectOverBand(chart, popover, `streamed to ${x.toFixed(2)}`);
+    }
+    expect(shown).toBeGreaterThan(50);
+    expect(held.shown).toBe(false);
   });
 });
 

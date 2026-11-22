@@ -48,6 +48,19 @@ function arrowTurned() {
   return () => getComputedStyle(host.querySelector(".popover")!, "::before").transform !== "none";
 }
 
+/**
+ * The guide's arrow kept over the place, on a 200 px element: its computed
+ * `left` within `.slid`, which reads the wrapper's slide through what the
+ * adapter mounts it in (100 px where the element did not slide).
+ */
+function slidArrow() {
+  const style = document.head.appendChild(document.createElement("style"));
+  style.textContent =
+    '.slid { display: block; position: relative; width: 200px; height: 20px } .slid::before { content: ""; position: absolute; left: calc(50% - var(--hg-anchor-slide-x, 0px)) }';
+  onTestFinished(() => style.remove());
+  return () => Number.parseFloat(getComputedStyle(host.querySelector(".slid")!, "::before").left);
+}
+
 /** The middle of `element`'s bottom edge, from the chart's root. */
 function bottomOf(chart: HercegChart, element: Element) {
   const root = chart.root.getBoundingClientRect();
@@ -136,6 +149,32 @@ describe("<Anchor>", () => {
     await settle(chart);
     expect(side()).toBe("top");
     expect(Math.abs(top())).toBeLessThanOrEqual(1);
+  });
+
+  it("tells its children how far it slid, through the portal, to their CSS", async () => {
+    const left = slidArrow();
+    const ref: { current: HercegChart | null } = { current: null };
+    // At the plot's left edge: slid right to stay inside the chart.
+    const draw = (fit?: "flip" | "none") =>
+      act(() =>
+        root.render(
+          <Chart ref={ref}>
+            <Line data={metrics} x="t" y="a" />
+            <Anchor at={{ x: 0, y: 2 }} side="top" offset={8} fit={fit}>
+              <b className="slid">slid</b>
+            </Anchor>
+          </Chart>,
+        ),
+      );
+    draw();
+    const chart = ref.current!;
+    await settle(chart);
+    // At the chart's left edge, its arrow over its place.
+    expect(Math.abs(left() - chart.toPixel(0, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    expect(left()).toBeLessThan(100);
+    draw("none");
+    await settle(chart);
+    expect(left()).toBe(100);
   });
 
   it("removes what it holds once unmounted, and anchors again once mounted", async () => {

@@ -80,6 +80,19 @@ function arrowTurned() {
   return () => getComputedStyle(host.querySelector(".popover")!, "::before").transform !== "none";
 }
 
+/**
+ * The guide's arrow kept over the place, on a 200 px element: its computed
+ * `left` within `.slid`, which reads the wrapper's slide through what the
+ * adapter mounts it in (100 px where the element did not slide).
+ */
+function slidArrow() {
+  const style = document.head.appendChild(document.createElement("style"));
+  style.textContent =
+    '.slid { display: block; position: relative; width: 200px; height: 20px } .slid::before { content: ""; position: absolute; left: calc(50% - var(--hg-anchor-slide-x, 0px)) }';
+  onTestFinished(() => style.remove());
+  return () => Number.parseFloat(getComputedStyle(host.querySelector(".slid")!, "::before").left);
+}
+
 /** The middle of `element`'s bottom edge, from the chart's root. */
 function bottomOf(chart: HercegChart, element: Element) {
   const root = chart.root.getBoundingClientRect();
@@ -155,6 +168,26 @@ describe("<Anchor>", () => {
     await settle(chart);
     expect(side()).toBe("top");
     expect(Math.abs(top())).toBeLessThanOrEqual(1);
+  });
+
+  it("tells its slot how far it slid, through the teleport, to its CSS", async () => {
+    const left = slidArrow();
+    const fit = ref<"flip" | "none" | undefined>(undefined);
+    // At the plot's left edge: slid right to stay inside the chart.
+    const chart = await mount(
+      `<Chart ref="chart">
+        <Line :data="metrics" x="t" y="a" />
+        <Anchor :at="{ x: 0, y: 2 }" side="top" :offset="8" :fit="fit"><b class="slid">slid</b></Anchor>
+      </Chart>`,
+      () => ({ fit }),
+    );
+    // At the chart's left edge, its arrow over its place.
+    expect(Math.abs(left() - chart.toPixel(0, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    expect(left()).toBeLessThan(100);
+    fit.value = "none";
+    await nextTick();
+    await settle(chart);
+    expect(left()).toBe(100);
   });
 
   it.each([

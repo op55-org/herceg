@@ -60,9 +60,9 @@ made per data point.
   false }}` leaves the built-in box's heading out.
 - **Anchors**: `<Anchor at={{ x, y }} side="top">` among the chart's
   children holds its children at a place in the data, moving with every
-  frame, kept inside the chart (`fit`; its wrapper's `data-side` tells
-  your CSS the side used), and hidden out of view, with your component's
-  contexts.
+  frame, kept inside the chart (`fit`; its wrapper's `data-side` and
+  `--hg-anchor-slide-x` and `-y` tell your CSS the side used and how far
+  it slid), and hidden out of view, with your component's contexts.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are
   thrown to the nearest `<svelte:boundary>`.
 - **Server rendering**: `initial={hydration(snapshot)}` adopts markup from

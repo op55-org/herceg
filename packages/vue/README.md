@@ -64,9 +64,9 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   false }"` leaves the built-in box's heading out.
 - **Anchors**: `<Anchor :at="{ x, y }" side="top">` in the chart's slot
   holds its slot's content at a place in the data, moving with every
-  frame, kept inside the chart (`:fit`; its wrapper's `data-side` tells
-  your CSS the side used), and hidden out of view, teleported with your
-  app's provides.
+  frame, kept inside the chart (`:fit`; its wrapper's `data-side` and
+  `--hg-anchor-slide-x` and `-y` tell your CSS the side used and how far
+  it slid), and hidden out of view, teleported with your app's provides.
 - **Errors** show in the chart's place, or with `error-mode="throw"` are
   thrown for `onErrorCaptured` or the app's `errorHandler`.
 - **Server rendering**: `:initial="hydration(snapshot)"` adopts markup
