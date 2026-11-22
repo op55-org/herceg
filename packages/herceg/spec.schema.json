@@ -8591,9 +8591,14 @@
       "additionalProperties": false
     },
     "TextSpec": {
-      "description": "Text at a place (`at`, or `x` and `y`): constant `label` text, or each row's `label.field`. Labels are drawn above the data and left out when their place is outside the plot.",
+      "description": "Text at a place (`at`, or `x` and `y`): constant `label` text, or each row's `label.field`. Labels are drawn above the data, left out when their place is outside the plot, and kept inside the chart unless `clip` says otherwise.",
       "type": "object",
       "properties": {
+        "clip": {
+          "title": "Clip",
+          "description": "What the text is cut to: \"plot\", \"chart\", or false for nothing, labels drawn exactly where told. Without it, labels are drawn whole and stay inside the chart: one reaching past its edge goes to the other side of its point along that axis, else moves in as little as stays inside (a label larger than the chart starts at its left or top); a label of a point outside the chart is drawn where told.",
+          "$ref": "#/$defs/Clip"
+        },
         "halo": {
           "title": "Halo",
           "description": "The outline that keeps the mark's text readable over what it is drawn on: \"auto\" (the default), false for none, or a color of its own.",
@@ -8620,11 +8625,6 @@
         "label": {
           "title": "Label",
           "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/TextLabelSpec" }]
-        },
-        "clip": {
-          "title": "Clip",
-          "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
-          "$ref": "#/$defs/Clip"
         },
         "data": {
           "title": "Data",

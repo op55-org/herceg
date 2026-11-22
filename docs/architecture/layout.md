@@ -618,7 +618,15 @@ chart for labels in the margin, or the region's box. Boxes are filed in
 a grid (`layout/label-boxes.ts`), so each check reads its neighbours: n
 labels among m placed boxes cost O(n·m) at worst and about O(n) when
 spread out. Plain rule labels without boxes, groups, or overlap rules are
-placed as they are drawn (`draw/rule.ts`), following moving rules.
+placed as they are drawn (`draw/rule.ts`), following moving rules. Text
+labels of points in the chart, without a `clip`, are kept inside the
+chart before they are drawn or asked for (`marks/text.ts`): along each
+axis, their painted block goes to its mirror image across their point
+where that reaches less far past the chart's edge, then moves in
+(`shiftWithin`, the one axis of `shiftInside`). That is "show" labels'
+place and the first place of those that hide or move. A value
+transition's frames keep them inside through the text mark's
+`LabelItems.stayInside`, counting labels by their numbers' shapes.
 
 ## Themes and styles
 

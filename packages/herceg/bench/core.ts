@@ -117,6 +117,26 @@ function measure(name: string, run: () => void, { warmup = 20, samples = 50, rep
   console.log(`${name.padEnd(48)} ${unit}`);
 }
 
+/**
+ * Text measured as a page's canvas measurer does, each string once per
+ * font (here by the estimate, which costs far less than a canvas), so that
+ * scenes and frames pay for what they measure anew.
+ */
+function pageMeasurer(): MeasureText {
+  return canvasMeasurer({
+    font: "",
+    measureText(text: string) {
+      const width = estimateText(text, this.font);
+      return {
+        width,
+        actualBoundingBoxAscent: 0,
+        fontBoundingBoxAscent: 0,
+        fontBoundingBoxDescent: 0,
+      };
+    },
+  });
+}
+
 const N = 1_000_000;
 // A chart's scene of 2,000 horizontal bars: on a category y, and standing on
 // a number y (ranks) with orient "y", whose bands come from the ranks' spacing.
@@ -1147,6 +1167,45 @@ drawsLabels(grouped, 1, true);
 measure("labels: 200 rule labels of an overlap group, moved apart", () =>
   grouped.scene(estimateText),
 );
+
+// Text kept inside the chart measures each label it draws (a page's
+// measurer's hit for a string it measured before): 200 notes at their
+// points, none near the chart's edge, a scene drawn again; and 200 notes
+// streaming, a row with a new string arriving and the first dropped each
+// scene, which measures that string.
+{
+  const notesOf = () =>
+    table({
+      x: Float64Array.from({ length: 200 }, (_, i) => i),
+      y: Float64Array.from({ length: 200 }, (_, i) => 20 + ((i * 37) % 60)),
+      note: Array.from({ length: 200 }, (_, i) => `note ${i}`),
+    });
+  const notesChart = (notes: Table, x?: { domain: [number, number] }) => {
+    const model = new ChartModel(
+      {
+        ...(x && { x }),
+        y: { domain: [0, 100] },
+        marks: [text(notes as never, { x: "x", y: "y", label: { field: "note" } } as never)],
+      },
+      undefined,
+      staticCompilers(),
+    );
+    model.setSize(1100, 400, 1);
+    return model;
+  };
+  const measureText = pageMeasurer();
+  const still = notesChart(notesOf() as unknown as Table, { domain: [-20, 220] });
+  measure("text: 200 notes shown, none near the chart's edge", () => still.scene(measureText));
+  const live = notesOf();
+  const streaming = notesChart(live as unknown as Table);
+  let next = 200;
+  measure("text: 200 notes streaming, a new string each scene", () => {
+    live.appendRow({ x: next, y: 20 + ((next * 37) % 60), note: `note ${next}` });
+    live.dropFirst(1);
+    next++;
+    streaming.scene(measureText);
+  });
+}
 
 // The same rows as two lines per panel, both on the left axis, or one on
 // each with the right axis' scale shared by every panel or each panel's own.
@@ -2852,25 +2911,13 @@ for (const rows of [100_000, 1_000_000]) {
   }
   // B6's race: 12 bars keyed by brand on ranks, each labeled by its brand
   // above its value, which counts. Text is measured as a page's canvas
-  // measurer does, each string once (here by the estimate, which costs far
-  // less than a canvas), so frames pay for what they measure anew.
+  // measurer does (`pageMeasurer`), so frames pay for what they measure anew.
   const brands = table({
     brand: category(Array.from({ length: 12 }, (_, i) => `Brand ${String.fromCharCode(65 + i)}`)),
     rank: Float64Array.from({ length: 12 }, (_, i) => i),
     v: Float64Array.from({ length: 12 }, (_, i) => 60_000 - i * 3_917.3),
   });
-  const page = canvasMeasurer({
-    font: "",
-    measureText(text: string) {
-      const width = estimateText(text, this.font);
-      return {
-        width,
-        actualBoundingBoxAscent: 0,
-        fontBoundingBoxAscent: 0,
-        fontBoundingBoxDescent: 0,
-      };
-    },
-  });
+  const page = pageMeasurer();
   transition(
     "12 bars' counting labels of parts",
     animating({
@@ -2896,6 +2943,32 @@ for (const rows of [100_000, 1_000_000]) {
     }),
     swapped(brands as unknown as Table, (v) => v * 1.37 + 2_711),
     600,
+    page,
+    true,
+  );
+  // 200 text labels counting their values as they move, start-aligned, the
+  // last fifth by the chart's right edge: frames keep them inside it.
+  const counted = table({
+    id: category(Array.from({ length: 200 }, (_, i) => `n${i}`)),
+    x: Float64Array.from({ length: 200 }, (_, i) => i),
+    v: Float64Array.from({ length: 200 }, (_, i) => 100 + ((i * 37) % 1700)),
+  });
+  transition(
+    "200 counting text labels",
+    animating({
+      marks: [
+        text(counted, {
+          x: "x",
+          y: "v",
+          itemKey: "id",
+          label: { field: "v", format: { number: ",.2f" }, style: { align: "start" } },
+        }),
+      ],
+      x: { domain: [0, 200] },
+      y: { domain: [0, 2000] },
+    }),
+    swapped(counted as unknown as Table, (v) => 1900 - v * 0.93),
+    640,
     page,
     true,
   );

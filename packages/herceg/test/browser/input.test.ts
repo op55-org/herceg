@@ -11,12 +11,14 @@ import type { Chart } from "../../src/dom/chart.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { graph } from "../../src/marks/graph.ts";
+import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { line } from "../../src/marks/line.ts";
 import type { Mark } from "../../src/marks/mark.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { treemap } from "../../src/marks/treemap.ts";
+import { facet } from "../../src/model/facet.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { ChartError } from "../../src/spec/errors.ts";
@@ -498,6 +500,136 @@ describe("context menus", () => {
     await frame();
     expect(menus.map(({ pointer }) => pointer.inPlot)).toEqual([true, false]);
     expect(menus[0]!.pointer.values.x).toBeGreaterThan(0);
+  });
+});
+
+describe("pointer categories at band axes' edges", () => {
+  /** A right-click at (x, y) of the chart's root, as A4's annotating app takes them. */
+  const menu = (chart: Chart, x: number, y: number) => {
+    const rect = chart.root.getBoundingClientRect();
+    chart.root.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: rect.left + x,
+        clientY: rect.top + y,
+      }),
+    );
+  };
+  /** The pointer's categories and in-plot flag at each of `places`, by right-clicks. */
+  const named = async (chart: Chart, places: readonly (readonly [number, number])[]) => {
+    const menus = heard(chart, "contextMenu");
+    for (const [x, y] of places) menu(chart, x, y);
+    await frame();
+    expect(menus).toHaveLength(places.length);
+    return menus.map(({ pointer }) => pointer.categories);
+  };
+  const regions = () => table({ region: ["N", "E", "S", "W"], v: [10, 40, 25, 30] });
+
+  it("name the outer bands 2 px inside each edge of the plot, on x and on y", async () => {
+    const columns = await mount({ marks: [bar(regions(), { x: "region", y: "v" })] });
+    const { plot } = columns.getPanels()[0]!;
+    const middle = plot.y + plot.height / 2;
+    const menus = heard(columns, "contextMenu");
+    expect(
+      await named(columns, [
+        [plot.x + 2, middle],
+        [plot.x + plot.width - 2, middle],
+      ]),
+    ).toEqual([{ x: "N" }, { x: "W" }]);
+    // Beside the first and last bands, past half a gap: in the room the axis keeps there.
+    expect(menus[0]!.pointer.values.x).toBeLessThan(-0.5);
+    expect(menus[1]!.pointer.values.x).toBeGreaterThan(3.5);
+
+    const rows = await mount({ marks: [bar(regions(), { y: "region", x: "v" })] });
+    const plotY = rows.getPanels()[0]!.plot;
+    const centre = plotY.x + plotY.width / 2;
+    expect(
+      await named(rows, [
+        [centre, plotY.y + 2],
+        [centre, plotY.y + plotY.height - 2],
+      ]),
+    ).toEqual([{ y: "N" }, { y: "W" }]);
+  });
+
+  it("name the nearer band between two", async () => {
+    const chart = await mount({ marks: [bar(regions(), { x: "region", y: "v" })] });
+    const { plot } = chart.getPanels()[0]!;
+    const middle = plot.y + plot.height / 2;
+    // Between E (1) and S (2): the middle of their gap, and pixels either side.
+    const gap = chart.toPixel(1.5, { axis: "x" })!;
+    const hovers = heard(chart, "hover");
+    for (const x of [Math.floor(gap) - 1, gap, Math.ceil(gap) + 1]) {
+      pointer(chart, "pointermove", x, middle);
+      await frame();
+    }
+    const read = hovers.map(({ pointer }) => [pointer!.values.x!, pointer!.categories.x] as const);
+    expect(read.map(([, name]) => name)).toEqual(["E", read[1]![1], "S"]);
+    // At the middle (a whole pixel in some engines), as near one as the
+    // other: the band its fractional index rounds to, which values keep.
+    const [at, name] = read[1]!;
+    expect(Math.abs(at - 1.5)).toBeLessThan(0.05);
+    expect(name).toBe(["N", "E", "S", "W"][Math.round(at)]);
+  });
+
+  it("name bands on a y axis of numbers rising upward, first at the bottom", async () => {
+    const cells = table({ x: ["a", "a", "a"], y: [1, 2, 3], v: [1, 2, 3] });
+    const chart = await mount({
+      marks: [heatmap(cells, { x: "x", y: "y", color: "v", yBanded: true })],
+    });
+    const { plot, y } = chart.getPanels()[0]!;
+    expect(chart.toPixel(0, { axis: "y" })).toBeGreaterThan(chart.toPixel(2, { axis: "y" })!);
+    const centre = plot.x + plot.width / 2;
+    const [top, bottom] = await named(chart, [
+      [centre, plot.y + 2],
+      [centre, plot.y + plot.height - 2],
+    ]);
+    expect([top!.y, bottom!.y]).toEqual([y!.categories![2], y!.categories![0]]);
+  });
+
+  it("name a panel's own outer bands in facets", async () => {
+    const sales = table({
+      region: ["N", "S", "N", "S"],
+      product: ["b", "a", "d", "c"],
+      units: [1, 2, 3, 4],
+    });
+    const chart = await mount({
+      marks: [bar(sales, { x: "product", y: "units" })],
+      facet: facet("region"),
+      x: { scope: "panel" },
+    });
+    const places = chart.getPanels().flatMap(({ plot }) => {
+      const middle = plot.y + plot.height / 2;
+      return [
+        [plot.x + 2, middle],
+        [plot.x + plot.width - 2, middle],
+      ] as const;
+    });
+    const categories = await named(chart, places);
+    const panels = chart.getPanels().map((panel) => panel.x!.categories);
+    expect(categories).toEqual(panels.flatMap((names) => [{ x: names![0] }, { x: names!.at(-1) }]));
+  });
+
+  it("name the band over the axis' labels, and none beyond the plot's span", async () => {
+    const chart = await mount({ marks: [bar(regions(), { x: "region", y: "v" })] });
+    const { plot } = chart.getPanels()[0]!;
+    const menus = heard(chart, "contextMenu");
+    const below = plot.y + plot.height + 12;
+    for (const [x, y] of [
+      [plot.x + 2, below],
+      [plot.x + plot.width - 2, below],
+      [plot.x - 4, plot.y + plot.height / 2],
+    ] as const)
+      menu(chart, x, y);
+    await frame();
+    expect(menus.map(({ pointer }) => [pointer.inPlot, pointer.categories])).toEqual([
+      [false, { x: "N" }],
+      [false, { x: "W" }],
+      [false, {}],
+    ]);
+    // The y axis' labels are beside the plot's span along x: none.
+    expect(menus[2]!.pointer.values.x).toBeLessThan(-0.5);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   type LabelPlacement,
   type LabelRequest,
   placePanel,
+  shiftWithin,
 } from "../layout/placer.ts";
 import { lineCount, type MeasureText } from "../layout/text.ts";
 import { type Geometry, type LabelItems, NAMELESS, type Rect } from "../scene/scene.ts";
@@ -62,8 +63,11 @@ interface TextStyle {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
-   * What the text is cut to: "plot", "chart", or false for nothing. Without
-   * it, text is drawn whole, and left out while a place in data (a value,
+   * What the text is cut to: "plot", "chart", or false for nothing, labels
+   * drawn exactly where told. Without it, text is drawn whole and stays
+   * inside the chart (a label reaching past its edge goes to the other side
+   * of its point, else moves in; a label of a point outside the chart is
+   * drawn where told), and is left out while a place in data (a value,
    * field, or category) is out of the plot's view; text at pixels or a
    * share of a frame is drawn wherever it is.
    */
@@ -400,13 +404,8 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
     if (this.#placed) return [];
     const labels = this.#labels(frame, key, panelRows);
-    const drawn: PlacedLabel[] = [];
-    const rows: number[] = [];
-    for (const item of labels.items) {
-      drawn.push(labels.at(item, item.cx - item.shift, item.cy));
-      rows.push(item.row);
-    }
-    return this.#drawn(frame, key, labels, drawn, rows, []);
+    const drawn = labels.items.map((item) => labels.at(item, item.cx - item.shift, item.cy));
+    return this.#drawn(frame, key, labels, drawn, labels.items, []);
   }
 
   /**
@@ -437,17 +436,17 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         ? asked.labels
         : this.#labels(frame, key, panelRows);
     const drawn: PlacedLabel[] = [];
-    const rows: number[] = [];
+    const items: TextItemLabel[] = [];
     const leaders: number[] = [];
     labels.items.forEach((item, k) => {
       const placement = placements[k];
       if (!placement) return;
       // Its middle, placed from its point.
       drawn.push(labels.at(item, item.px + placement.dx - item.shift, item.py + placement.dy));
-      rows.push(item.row);
+      items.push(item);
       if (placement.leader) leaders.push(...placement.leader);
     });
-    return this.#drawn(frame, key, labels, drawn, rows, leaders);
+    return this.#drawn(frame, key, labels, drawn, items, leaders);
   }
 
   /** Whether the panel's placer places its labels. */
@@ -472,8 +471,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     const anchor = { x: px - reach, y: py - tall };
     const moving = overlap === "move";
     const { plot } = labels;
-    const inPlot =
-      px >= plot.x && px <= plot.x + plot.width && py >= plot.y && py <= plot.y + plot.height;
+    const inPlot = holds(plot, px, py);
     return {
       mark: key,
       index,
@@ -527,12 +525,25 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     const plain = !styled && plainText(paint, theme);
     const align = label.style?.align;
     const anchor = align === "start" ? "start" : align === "end" ? "end" : "middle";
+    // The share of a label's width before its anchor.
+    const share = anchor === "start" ? 0 : anchor === "end" ? 1 : 0.5;
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
     const font = paint.css;
     const haloOption = label.style?.halo ?? this.spec.halo;
     const halo = labelHalo(haloOption, frame);
+    // How far halos and box outlines paint past a label's box.
+    const reach = paintedReach(paint, halo);
     // Room around each label, which wider halos and box outlines reach past.
-    const room = Math.max(LABEL_GAP, paintedReach(paint, halo) + 0.5);
+    const room = Math.max(LABEL_GAP, reach + 0.5);
+    const chart = frame.chart ?? plot;
+    // How far a label drawn from x, its box `width` wide, moves along x to
+    // stay inside the chart, and one drawn from y, its painted block `up`
+    // and `down` from it, along y: across `at` where given and where that
+    // reaches less far past the chart's edge, then in.
+    const alongX = (x: number, width: number, at?: number) =>
+      shiftWithin(x - share * width - reach, width + 2 * reach, chart.x, chart.width, at);
+    const alongY = (y: number, up: number, down: number, at?: number) =>
+      shiftWithin(y - up, up + down, chart.y, chart.height, at);
     // Half a label's height, with the room kept around it: of a box (its
     // line height and padding) for labels in boxes.
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
@@ -573,10 +584,29 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       // Labels that write nothing (none, or only breaks) take no room.
       if (placed && !/[^\n]/.test(text)) return;
       const parts = styled?.(row, "", Number.NaN, undefined, paint, frame);
+      // Without a clip, labels of points in the chart stay inside it.
+      const kept = spec.clip === undefined && holds(chart, px, py);
       const width =
-        parts || placed ? (parts?.lines.width ?? frame.measure(text, font)) + left + right : 0;
+        parts || placed || kept
+          ? (parts?.lines.width ?? frame.measure(text, font)) + left + right
+          : 0;
+      const lines = paint.lineHeight + more({ text, parts });
+      // Where it is drawn from (labels in items, their first line's middle),
+      // and how far its painted block (its box, and what halos and outlines
+      // paint past it) reaches above and below that.
+      const from = plain ? 0 : (lines - paint.lineHeight) / 2;
+      const painted = (lines + top + bottom) / 2 + reach;
+      const [up, down] = [painted - from, painted + from];
+      let lx = px + dx;
+      let ly = py + dy + lift(lines) - from;
+      if (kept) {
+        // Across its point where that reaches less far past the chart's
+        // edge (14 px above becomes 14 px below), then moved in.
+        lx += alongX(lx, width, px);
+        ly += alongY(ly, up, down, py);
+      }
       // From the anchor to the label's middle.
-      const shift = anchor === "start" ? width / 2 : anchor === "end" ? -width / 2 : 0;
+      const shift = (0.5 - share) * width;
       items.push({
         row,
         text,
@@ -584,9 +614,12 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         py,
         width,
         shift,
-        cx: px + dx + shift,
-        cy: py + dy + lift(paint.lineHeight + more({ text, parts })),
+        cx: lx + shift,
+        cy: ly + from,
         parts,
+        kept,
+        up,
+        down,
       });
     });
     return {
@@ -594,8 +627,11 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       write,
       styled: content !== undefined,
       plot,
-      chart: frame.chart ?? plot,
+      chart,
       room,
+      padding: left + right,
+      alongX,
+      alongY,
       // Labels of parts are as tall as their lines and their box's padding,
       // whatever the base text's size.
       halfOf: ({ text, parts }) =>
@@ -621,16 +657,17 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     };
   }
 
-  /** The geometry of `drawn`, labels of `rows`, and their `leaders`. */
+  /** The geometry of `drawn`, the labels of `items`, and their `leaders`. */
   #drawn(
     frame: Frame,
     key: MarkKey,
-    { paint, plain, haloOption, write, styled }: TextLabels,
+    { paint, plain, haloOption, write, styled, padding, alongX, alongY }: TextLabels,
     drawn: PlacedLabel[],
-    rows: number[],
+    items: readonly TextItemLabel[],
     leaders: number[],
   ): Geometry[] {
     if (drawn.length === 0) return [];
+    const rows = items.map((item) => item.row);
     const id = seriesKey(key, "text");
     const out: Geometry[] = [];
     if (leaders.length > 0)
@@ -673,6 +710,17 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         }),
         write: (i, value, x, y, count) =>
           labels.kind === "text" ? text(value) : again(i, value, x, y, count),
+        // Frames keep the labels the scene keeps inside the chart there
+        // too: by their boxes' widths here, a counting label's by its number.
+        ...(this.spec.clip === undefined && {
+          stayInside: (i, at, written, count) => {
+            const item = items[i]!;
+            if (!item.kept) return;
+            const width = written === undefined ? item.width : count(written, paint.css) + padding;
+            at[i * 2]! += alongX(at[i * 2]!, width);
+            at[i * 2 + 1]! += alongY(at[i * 2 + 1]!, item.up, item.down);
+          },
+        }),
       };
     }
     out.push(labels);
@@ -719,6 +767,12 @@ interface TextLabels {
   readonly plot: Rect;
   readonly chart: Rect;
   readonly room: number;
+  /** A box's padding across. */
+  readonly padding: number;
+  /** How far a label drawn from x, its box `width` wide, moves along x to stay inside the chart (`#labels`). */
+  alongX(x: number, width: number): number;
+  /** How far a label drawn from y, its painted block `up` and `down` from it, moves along y to stay inside the chart. */
+  alongY(y: number, up: number, down: number): number;
   halfOf(item: TextItemLabel): number;
   readonly paint: TextPaint;
   readonly plain: boolean;
@@ -728,8 +782,11 @@ interface TextLabels {
 
 /**
  * An item's label: its row, text (and its parts, where they have looks of
- * their own), point, width (measured where placed, and for parts), how
- * far its middle is from its anchor along x, and its middle at its place.
+ * their own), point, width (its box's: measured where placed or kept
+ * inside, and for parts), how far its middle is from its anchor along x,
+ * and its middle at its place, kept inside the chart where it is `kept`;
+ * and how far its painted block reaches above and below the point it is
+ * drawn from.
  */
 interface TextItemLabel {
   readonly row: number;
@@ -741,6 +798,14 @@ interface TextItemLabel {
   readonly shift: number;
   readonly cx: number;
   readonly cy: number;
+  readonly kept: boolean;
+  readonly up: number;
+  readonly down: number;
+}
+
+/** Whether `box` holds (x, y), its edges included. */
+function holds(box: Rect, x: number, y: number): boolean {
+  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
 }
 
 /**
