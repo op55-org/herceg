@@ -347,11 +347,11 @@ describe("trees through the displays", () => {
         boss: { mappings: [{ value: "a", text: "Manager Ana" }] },
       },
     });
-    // Labels of parts draw each part apart.
+    // Labels of parts draw each part apart, without the spaces at its ends (which keep their room).
     const parts = scene.panels[0]!.marks.flatMap((m) =>
       m.kind === "labels" ? (m as LabelsGeometry).items.map(({ text }) => text) : [],
     );
-    expect(parts.join("")).toContain("Bo under Manager Ana");
+    expect(parts.join(" ")).toContain("Bo under Manager Ana");
   });
 
   it("write a tree's names once per view, so caches keyed by views keep", () => {

@@ -2768,7 +2768,8 @@ for (const rows of [100_000, 1_000_000]) {
 // the change to the next scene, and a frame half way, for 2,000 bars, 10,000
 // keyed points, A2's comets (custom marks, which keep their declared fields
 // and draw again each frame): 300 on a band y and 2,000 on two number axes,
-// a fifth of their ends moving, and B6's 12 bars whose labels of parts count.
+// a fifth of their ends moving, B6's 12 bars whose labels of parts count,
+// and 200 text labels counting one number each or two parts.
 {
   const transition = (
     name: string,
@@ -2968,6 +2969,51 @@ for (const rows of [100_000, 1_000_000]) {
       y: { domain: [0, 2000] },
     }),
     swapped(counted as unknown as Table, (v) => 1900 - v * 0.93),
+    640,
+    page,
+    true,
+  );
+  // The same 200 labels made of parts: their name in bold, then two
+  // numbers counting together, each in its format and the second in a look
+  // of its own, aligned to their end.
+  const shares = table({
+    id: category(Array.from({ length: 200 }, (_, i) => `n${i}`)),
+    x: Float64Array.from({ length: 200 }, (_, i) => i),
+    v: Float64Array.from({ length: 200 }, (_, i) => 100 + ((i * 37) % 1700)),
+    share: Float64Array.from({ length: 200 }, (_, i) => ((i * 53) % 100) / 100),
+  });
+  transition(
+    "200 text labels of two counting parts",
+    animating({
+      marks: [
+        text(shares, {
+          x: "x",
+          y: "v",
+          itemKey: "id",
+          label: {
+            content: [
+              { field: "id", style: { fontWeight: 700 } },
+              " ",
+              { field: "v", format: { number: ",.2f" } },
+              " · ",
+              { field: "share", format: { number: ".1%" }, style: { opacity: 0.7 } },
+            ],
+            style: { align: "end" },
+          },
+        }),
+      ],
+      x: { domain: [0, 200] },
+      y: { domain: [0, 2000] },
+    }),
+    (() => {
+      const v = swapped(shares as unknown as Table, (v) => 1900 - v * 0.93);
+      const back = Float64Array.from(shares.numbers("share"));
+      const forth = back.map((s) => 1 - s * 0.9);
+      return (on: boolean) => {
+        v(on);
+        shares.setColumn("share", on ? forth : back);
+      };
+    })(),
     640,
     page,
     true,

@@ -1348,7 +1348,7 @@ chart from drawing or failing `chart.ready`.
 | Mark | Moves |
 | --- | --- |
 | Bars (stacked, labeled, histograms') | Matched within their series by `itemKey`, else by position (a category's name, a number, a time). Bars move between places on a category axis whose categories change order (its labels move with them) and along a continuous position axis. Bars keyed by `itemKey` come in and go out past the end of the position axis (below the last rank above); others grow from and shrink to their base. A bar changing sign passes through the baseline. |
-| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing a number count through the values between, in their format ([counting labels](#counting-labels)). |
+| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing numbers count through the values between, each in its format ([counting labels](#counting-labels)). |
 | Pie slices, gauges | Slices turn to new sizes, always making a whole pie; a gauge turns its dial. |
 | Sunbursts | Sectors matched by path move their angles and rings, new ones growing out of their parent; drilling moves the rings to the new root ([drilling](hierarchy-and-flow.md#drilling-into-trees)). Labels fade in and out where they are drawn at one end only. |
 | Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). |
@@ -1399,11 +1399,19 @@ the drawing moves: data, tooltips, and events have the new values at once
 
 ### Counting labels
 
-A label counts where it writes a number at both ends: bars' value labels,
-and their labels of parts with a `{ value: true }` part, styled or not;
-text marks' labels of one number field. Text labels of parts show each new
-value at once, as do bars' labels of a `field` and labels whose number is
-missing at either end.
+A label counts the numbers it writes, where both ends have them:
+
+- **Bars:** their value labels, and their labels of parts with a
+  `{ value: true }` part, styled or not. Bars' labels of a `field`, and
+  their `{ field }` parts, show each new value at once.
+- **Text:** a label of one number field, and each part of a number field
+  in a label of parts, styled or not, each in its own format, through the
+  chart's [field displays](fields.md) too. A part of a time field (which
+  specs and Python can give) counts through its timestamps.
+- **What shows at once:** literal text, `{ label }` parts, categories, and
+  a number missing at either end (a time beyond what dates hold among
+  them), as the new scene writes them; the label's other numbers count
+  on.
 
 - **The number is exact** in every frame, in its format: signs, digits,
   units, prefixes, and mapped text as a still chart writes them.
@@ -1413,15 +1421,17 @@ missing at either end.
   such as a mapping's words, is measured as it is. A format writes few
   shapes, so a race measures its keyframes' text and a few shapes, however
   long it runs.
-- **The number meets the edge its line aligns to.** Mid-transition, lines
-  aligned to their end are drawn from it, and a centered line of one part
-  from its middle, so a race's value stays under its brand's right edge.
+- **The number meets the edge its line aligns to.** Labels of parts draw
+  lines aligned to their end from it, and a centered line of one part from
+  its middle, mid-transition and at rest, so a race's value stays under
+  its brand's right edge whatever the renderer's text widths.
 - **Off by the shape until the transition ends:** with proportional
   digits, a run after the number on a line aligned to its start (a unit),
-  a box behind the number (`style.background`), and the block's width
-  where the number's line is its widest are off by the number's width less
-  its shape's, about a pixel per narrow digit ("1" against "0" in system
-  fonts). With tabular digits, nothing is.
+  the runs of a centered line of several, a box behind the number
+  (`style.background`), the block's width where the number's line is its
+  widest, and how far a text label moves to stay inside the chart are off
+  by the number's width less its shape's, about a pixel per narrow digit
+  ("1" against "0" in system fonts). With tabular digits, nothing is.
 - **The ends are laid out exactly,** as a chart without animation lays
   them out, and so is the far end of a change that interrupts another.
   Where a label fits (inside its bar or not) is decided at the ends.

@@ -1570,7 +1570,8 @@ class ValueLabels {
             ...record,
             at: group.items.flatMap(({ x, y }) => [x, y]),
             owners,
-            write: (i, value, x, y, count) => itemsAt(write(i, value, count), x, y, count),
+            write: (i, numbers, at, count) =>
+              itemsAt(write(i, numbers[i]!, count), at[i * 2]!, at[i * 2 + 1]!, count),
           };
         out.push(labels);
         continue;
@@ -1593,7 +1594,8 @@ class ValueLabels {
         labels: group.items.map((item) => item.text as string),
         count: group.items.length,
       };
-      if (record) text.named = { ...record, write: (i, value) => write(i, value) as string };
+      if (record)
+        text.named = { ...record, write: (i, numbers) => write(i, numbers[i]!) as string };
       out.push(text);
     }
     this.#groups = new Map();

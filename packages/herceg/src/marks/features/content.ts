@@ -18,12 +18,16 @@ import { type PartText, partText } from "./part-text.ts";
 
 /**
  * A label's text at row `row` of the series named `series`, where the
- * value drawn is `value`, a time where `time` says; with parts in looks of
- * their own, `styled` writes it in `paint`, each part in its look, its
- * colors read as `frame` reads styles (without `read`, for measuring only;
- * see `PartText`), and in a value transition's frames the value's parts
- * measured with `count` (dom/value-labels.ts `byShape`). `counts`: a part
- * writes the value, which labels count through in value transitions.
+ * value drawn is `value`, a time where `time` says; in a value
+ * transition's frames, its parts of number fields write `numbers` from
+ * `at` on (one each, in the order of `fields`) rather than the row's. With
+ * parts in looks of their own, `styled` writes it in `paint`, each part in
+ * its look, its colors read as `frame` reads styles (without `read`, for
+ * measuring only; see `PartText`), and in a value transition's frames the
+ * parts writing the value, or `numbers`, measured with `count` (by their
+ * shapes: dom/value-labels.ts `shapeOf`). `counts`: a part writes the
+ * value, which labels count through in value transitions. `fields`: the
+ * number and time fields its `{ field }` parts write, one per part.
  */
 export type ContentWriter = ((
   row: number,
@@ -31,8 +35,11 @@ export type ContentWriter = ((
   value: number,
   time?: boolean,
   field?: string,
+  numbers?: ArrayLike<number>,
+  at?: number,
 ) => string) & {
   readonly counts?: boolean;
+  readonly fields?: readonly string[];
   readonly styled?: (
     row: number,
     series: string,
@@ -42,6 +49,8 @@ export type ContentWriter = ((
     frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
     field?: string,
     count?: MeasureText,
+    numbers?: ArrayLike<number>,
+    at?: number,
   ) => PartText;
 };
 
@@ -84,8 +93,10 @@ export function writeContent(
     return time ? kit.timeFormatter(TIME, zone, locale) : (v) => kit.formatNumber(v, locale);
   };
   const styles: (PartStyle | undefined)[] = [];
-  /** The parts writing the value. */
+  /** The parts writing the value, and those writing a number field's numbers (frames give them). */
   const values: boolean[] = [];
+  const numbered: boolean[] = [];
+  const numberFields: string[] = [];
   const writers = content.map((part: LabelPart, i): ContentWriter => {
     const at = path(i);
     if (typeof part === "string") return () => part;
@@ -160,7 +171,8 @@ export function writeContent(
       const label = shown?.label ?? field;
       return () => label;
     }
-    const time = table.kind(field as never) === "time";
+    const kind = table.kind(field as never);
+    const time = kind === "time";
     const own = part.format && format(part.format, at, time);
     const fallback = format(undefined, at, time);
     // The part's format over the display's; mappings and missing text stay the field's.
@@ -168,12 +180,19 @@ export function writeContent(
       shown?.writer(own, fallback, "") ??
       ((read: number | string | null) =>
         read === null ? "" : typeof read === "number" ? (own || fallback)(read) : String(read));
-    return (row) => write(table.value(field as never, row));
+    if (!time && kind !== "number") return (row) => write(table.value(field as never, row));
+    // The number frames give; where they give none (NaN: missing, or a
+    // time beyond what dates hold, which does not count), the row's.
+    const slot = numberFields.push(field) - 1;
+    numbered[i] = true;
+    return (row, _series, _v, _time, _field, numbers, from = 0) => {
+      const given = numbers?.[from + slot] ?? Number.NaN;
+      return write(Number.isNaN(given) ? table.value(field as never, row) : given);
+    };
   });
   const write: ContentWriter = Object.assign(
-    (row: number, series: string, v: number, time?: boolean, field?: string) =>
-      writers.map((part) => part(row, series, v, time, field)).join(""),
-    { counts: values.length > 0 },
+    (...args: Parameters<ContentWriter>) => writers.map((part) => part(...args)).join(""),
+    { counts: values.length > 0, fields: numberFields },
   );
   if (styles.length === 0) return write;
   // Parts' styles as the last frame read them: a frame is a panel's in one scene.
@@ -189,6 +208,8 @@ export function writeContent(
       frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
       field?: string,
       count?: MeasureText,
+      numbers?: ArrayLike<number>,
+      at?: number,
     ) => {
       if (frame.read && readIn !== frame) {
         readIn = frame;
@@ -197,9 +218,9 @@ export function writeContent(
       return partText(
         kit,
         writers.map((part, i) => ({
-          text: part(row, series, v, time, field),
+          text: part(row, series, v, time, field, numbers, at),
           style: frame.read ? read[i] : styles[i],
-          counts: values[i],
+          counts: values[i] || (numbers && numbered[i]),
         })),
         paint,
         frame.measure,

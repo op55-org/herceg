@@ -259,15 +259,18 @@ describe("counting labels' frames", () => {
       });
       const { tween } = change(model, () => data.reset(rows([91_111, 81_111, 71_111])), spy, seen);
       const [number, unit] = [...labelItems(frameAt(tween, 100)).values()][0]!;
+      // The unit is drawn without its space, which keeps its room.
+      expect(unit!.text).toBe("kg");
+      const space = proportional(" kg", unit!.paint.css) - proportional("kg", unit!.paint.css);
       const gap = painted(unit!).left - painted(number!).right;
       const error =
         proportional(shapeOf(number!.text), number!.paint.css) -
         proportional(number!.text, number!.paint.css);
       expect(error).toBeGreaterThan(1);
-      expect(gap).toBeCloseTo(align === "start" ? error : 0, 3);
+      expect(gap).toBeCloseTo(space + (align === "start" ? error : 0), 3);
       // At the ends, exact either way.
       const [a, b] = [...labelItems(tween.scene).values()][0]!;
-      expect(painted(b!).left - painted(a!).right).toBeCloseTo(0, 3);
+      expect(painted(b!).left - painted(a!).right).toBeCloseTo(space, 3);
     }
   });
 
@@ -587,5 +590,483 @@ describe("counting labels' frames", () => {
     const [still] = labelItems(end).get("A")!;
     expect(still!.box!.width).toBeLessThan(before[0]!.box!.width - 1);
     expect(renderSvg(end, { idPrefix: "c" })).toBe(renderSvg(scene, { idPrefix: "c" }));
+  });
+});
+
+/**
+ * A text chart of `columns`, 400 x 300 on 0 to 10 both ways, each row
+ * labeled as `label` says and keyed by its `id`.
+ */
+function notes(columns: object, label: object, config: Partial<ChartConfig> = {}) {
+  const data = table(columns as never) as unknown as Table;
+  const model = new ChartModel(
+    {
+      locale: "en-US",
+      timeZone: "UTC",
+      legend: false,
+      animation: { duration: 200, values: true, easing: "linear" },
+      marks: [text(data as never, { itemKey: "id", x: "x", y: "y", label } as never)],
+      x: { domain: [0, 10] },
+      y: { domain: [0, 10] },
+      ...config,
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(400, 300, 1);
+  return { data, model };
+}
+
+/** Each text label's numbers in a frame or scene, by its name. */
+function numbersOf(scene: Scene): Map<string | number, number[]> {
+  const out = new Map<string | number, number[]>();
+  for (const mark of scene.panels[0]!.marks) {
+    const named = (mark as TextGeometry).named;
+    if (!named?.values) continue;
+    const stride = named.fields?.length ?? 1;
+    named.names.forEach((name, i) => {
+      out.set(
+        name,
+        Array.from({ length: stride }, (_, k) => named.values![i * stride + k]!),
+      );
+    });
+  }
+  return out;
+}
+
+/** Each text label's text in a frame or scene, by its name: its items' texts (not their halos'), one per part. */
+function partsOf(scene: Scene): Map<string | number, string[]> {
+  const out = new Map<string | number, string[]>();
+  for (const [name, items] of labelItems(scene))
+    out.set(
+      name,
+      items.filter((item) => item.paint.color !== "transparent").map((item) => item.text),
+    );
+  for (const mark of scene.panels[0]!.marks)
+    if (mark.kind === "text" && (mark as TextGeometry).named) {
+      const { named, labels } = mark as TextGeometry;
+      named!.names.forEach((name, i) => {
+        out.set(name, [labels[i]!]);
+      });
+    }
+  return out;
+}
+
+const percent = (v: number) => `${(v * 100).toFixed(1)}%`;
+/** Between `a` and `b` at `ms` of a 200 ms tween, eased as plans ease without the chart's easing (cubic-out). */
+const blended = (a: number, b: number, ms: number) => {
+  const t = 1 - (1 - ms / 200) ** 3;
+  return a * (1 - t) + b * t;
+};
+
+/** A name in bold, then revenue and share, each in its format, the share in a look of its own. */
+const SHARES = [
+  { field: "name", style: { fontWeight: 700 } },
+  " $",
+  { field: "revenue", format: { number: ",.0f" } },
+  " · ",
+  { field: "share", format: { number: ".1%" }, style: { opacity: 0.7 } },
+];
+
+const stores = (revenue: number[], share: number[], name: string[]) => ({
+  id: category(["a", "b"]),
+  x: [3, 6],
+  y: [3, 6],
+  name: category(name),
+  revenue,
+  share,
+});
+
+describe("text labels of parts in a value transition's frames", () => {
+  it("write each number field's part in its format, counting together, and the rest as the new scene does", () => {
+    const { spy, seen } = spying();
+    const { data, model } = notes(stores([1_000, 2_000], [0.1, 0.5], ["North", "South"]), {
+      content: SHARES,
+      style: { halo: false },
+    });
+    // a counts both its numbers; b its share, its revenue still, its name new at once.
+    const { tween, scenes } = change(
+      model,
+      () => data.reset(stores([5_000, 2_000], [0.3, 0.2], ["North", "Southeast"]) as never),
+      spy,
+      seen,
+    );
+    for (const ms of [20, 77, 150]) {
+      const frame = frameAt(tween, ms);
+      const numbers = numbersOf(frame);
+      const [revenue, share] = numbers.get("a")!;
+      expect(revenue).toBeCloseTo(blended(1_000, 5_000, ms), 6);
+      expect(share).toBeCloseTo(blended(0.1, 0.3, ms), 9);
+      const [still, moving] = numbers.get("b")!;
+      expect(still).toBe(2_000);
+      expect(moving).toBeCloseTo(blended(0.5, 0.2, ms), 9);
+      const parts = partsOf(frame);
+      // (Parts are drawn without the spaces at their ends, which keep their room.)
+      expect(parts.get("a")).toEqual(["North", "$", grouped(revenue!), "·", percent(share!)]);
+      expect(parts.get("b")).toEqual(["Southeast", "$", "2,000", "·", percent(moving!)]);
+    }
+    // Frames measure their numbers' shapes and what the scenes measured, nothing else.
+    const measured = framesMeasure(tween, seen, scenes);
+    expect(measured.length).toBeGreaterThan(0);
+    expect(measured.every((text) => shapeOf(text) === text)).toBe(true);
+    expect(renderSvg(tween.scene, { idPrefix: "c" })).toBe(
+      renderSvg(model.scene(proportional), { idPrefix: "c" }),
+    );
+  });
+
+  it("draw lines aligned to their end from it, and a centred line's only part from its middle", () => {
+    const content = [
+      { field: "name", style: { fontWeight: 700 } },
+      "\n",
+      { field: "revenue", format: { number: ",.0f" } },
+      " / ",
+      { field: "share", format: { number: ".1%" }, style: { opacity: 0.7 } },
+    ];
+    for (const align of ["end", "center"] as const) {
+      const { spy, seen } = spying();
+      const label = {
+        content: align === "end" ? content : [content[2]!],
+        style: { halo: false, align },
+      };
+      const { data, model } = notes(stores([1_111, 2_111], [0.11, 0.51], ["N", "S"]), label);
+      const { tween } = change(
+        model,
+        () => data.reset(stores([91_111, 81_111], [0.91, 0.21], ["N", "S"]) as never),
+        spy,
+        seen,
+      );
+      for (const ms of [30, 90, 150]) {
+        const frame = frameAt(tween, ms);
+        for (const [name, items] of labelItems(frame)) {
+          if (align === "center") {
+            // Drawn from its middle at its place, whatever its shape's width.
+            expect(items.map((item) => item.anchor)).toEqual(["middle"]);
+            expect(painted(items[0]!).middle).toBeCloseTo(name === "a" ? 120 : 240, 3);
+            continue;
+          }
+          // The name's line and the numbers' end at the same edge.
+          const [title, , , last] = items;
+          expect(items.every((item) => item.anchor === "end")).toBe(true);
+          expect(painted(last!).right, `${name} ${ms}`).toBeCloseTo(painted(title!).right, 3);
+        }
+      }
+    }
+  });
+
+  it("keep a label of parts inside the chart by its numbers' shapes as they grow by its edge", () => {
+    const rows = (revenue: number[]) => ({
+      id: category(["a"]),
+      x: [9.6],
+      y: [5],
+      name: category(["Kiosk"]),
+      revenue,
+      share: [0.5],
+    });
+    const { spy, seen } = spying();
+    const { data, model } = notes(rows([2]), {
+      content: SHARES,
+      style: { halo: false, align: "start", background: { fill: "#eeeeee" }, padding: 2 },
+    });
+    const { tween } = change(model, () => data.reset(rows([9_999_999]) as never), spy, seen);
+    let reach = 0;
+    for (let ms = 10; ms < 200; ms += 19) {
+      const [box, ...parts] = labelItems(frameAt(tween, ms)).get("a")!;
+      // In its box, kept inside by its shapes, which are as wide as its digits or wider.
+      const right = box!.box!.x + box!.box!.width;
+      expect(right).toBeLessThanOrEqual(400 + 1e-3);
+      for (const part of [box!, ...parts]) expect(painted(part).right).toBeLessThanOrEqual(400);
+      reach = Math.max(reach, right);
+    }
+    // Wider than the room right of its point as it grows (its scene then puts
+    // it left of its point), it is pressed against the chart's edge on its way.
+    expect(reach).toBeCloseTo(400, 2);
+  });
+
+  it("write literal text, categories, missing values, and infinities as the new scene does, counting the rest", () => {
+    const content = [
+      "Q3 ",
+      { field: "count", format: { number: ",.0f" } },
+      " ",
+      { field: "low" },
+      " ",
+      { field: "high" },
+      " ",
+      { field: "kind" },
+    ];
+    const rows = (count: number[], low: number[], kind: string[]) => ({
+      id: category(["p", "q"]),
+      x: [3, 6],
+      y: [3, 6],
+      count,
+      low,
+      high: [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+      kind: category(kind),
+    });
+    // Plain text, unstyled in a box, and styled.
+    for (const label of [
+      { content },
+      { content, style: { background: { fill: "#eeeeee" } } },
+      {
+        content: content.map((part, i) =>
+          i === 7 ? { field: "kind", style: { fontWeight: 700 } } : part,
+        ),
+      },
+    ]) {
+      const { spy, seen } = spying();
+      const { data, model } = notes(rows([100, 300], [10, Number.NaN], ["x", "x"]), label);
+      const { tween, scenes } = change(
+        model,
+        () => data.reset(rows([200, 900], [Number.NaN, 10], ["y", "z"]) as never),
+        spy,
+        seen,
+      );
+      const frame = frameAt(tween, 77);
+      const numbers = numbersOf(frame);
+      // p's low goes missing, q's comes: each the new scene's at once; the highs stay infinite.
+      expect(numbers.get("p")).toEqual([
+        numbers.get("p")![0],
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+      ]);
+      expect(numbers.get("q")).toEqual([numbers.get("q")![0], 10, Number.POSITIVE_INFINITY]);
+      const [p, q] = [numbers.get("p")![0]!, numbers.get("q")![0]!];
+      expect(p).toBeCloseTo(blended(100, 200, 77), 6);
+      expect(q).toBeCloseTo(blended(300, 900, 77), 6);
+      // The rest as the new scene writes it: "Q3 200  Infinity y", "Q3 900 10 Infinity z".
+      const [now, end] = [partsOf(frame), partsOf(tween.scene)];
+      const join = (parts: Map<string | number, string[]>, name: string) =>
+        parts.get(name)!.join("|");
+      expect(join(now, "p")).toBe(join(end, "p").replace("200", grouped(p)));
+      expect(join(now, "q")).toBe(join(end, "q").replace("900", grouped(q)));
+      // A literal's digits: in one string, laid out with the number's shape; in parts, as measured.
+      expect(framesMeasure(tween, seen, scenes).every((text) => shapeOf(text) === text)).toBe(true);
+    }
+  });
+
+  it("write a zero's sign as each end does, beside a number counting", () => {
+    const rows = (zero: number, v: number) => ({
+      id: category(["a"]),
+      x: [5],
+      y: [5],
+      zero: [zero],
+      v: [v],
+    });
+    const content = [{ field: "zero", format: { signDisplay: "always" } }, " / ", { field: "v" }];
+    for (const [from, to] of [
+      [-0, 0],
+      [0, -0],
+    ] as const) {
+      const { spy, seen } = spying();
+      const { data, model } = notes(rows(from, 1), { content });
+      const { tween } = change(model, () => data.reset(rows(to, 2) as never), spy, seen);
+      const sign = (zero: number) => (Object.is(zero, -0) ? "-0" : "+0");
+      expect(partsOf(frameAt(tween, 0)).get("a")).toEqual([`${sign(from)} / 1`]);
+      expect(partsOf(frameAt(tween, 200)).get("a")).toEqual([`${sign(to)} / 2`]);
+      expect(partsOf(tween.scene).get("a")).toEqual([`${sign(to)} / 2`]);
+    }
+  });
+
+  it("count times through their timestamps in their format, and take a time beyond what dates hold at once", () => {
+    const day = (d: number) => Date.UTC(2026, 0, d);
+    const rows = (at: number[], v: number[]) => ({
+      id: category(["a", "b"]),
+      x: [3, 6],
+      y: [3, 6],
+      at: time(at),
+      v,
+    });
+    const content = [
+      { field: "at", format: { year: "numeric", month: "short", day: "numeric" } },
+      ": ",
+      { field: "v", format: { maximumFractionDigits: 3 } },
+    ];
+    const { spy, seen } = spying();
+    // Displays write a missing time's text, where a format alone would refuse it.
+    const { data, model } = notes(
+      rows([day(1), 9e15], [1, 1]),
+      { content },
+      { fields: { at: { missing: "?" } } },
+    );
+    const { tween } = change(
+      model,
+      () => data.reset(rows([day(31), day(5)], [2, 2]) as never),
+      spy,
+      seen,
+    );
+    const dates = new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    const frame = frameAt(tween, 100);
+    const [at, v] = numbersOf(frame).get("a")!;
+    expect(at).toBeCloseTo(blended(day(1), day(31), 100), 0);
+    expect(partsOf(frame).get("a")).toEqual([`${dates.format(at!)}: ${v}`]);
+    expect(dates.format(at!)).toBe("Jan 27, 2026");
+    // A time past the last date is missing: b's shows its new date at once, its number counting.
+    expect(numbersOf(frame).get("b")![0]).toBe(day(5));
+    expect(partsOf(frame).get("b")).toEqual([`Jan 5, 2026: ${blended(1, 2, 100)}`]);
+  });
+
+  it("write a time beyond what dates hold as its part's format does, beside a number counting", () => {
+    const rows = (v: number) => ({ id: category(["a"]), x: [5], y: [5], at: time([9e15]), v: [v] });
+    for (const style of [undefined, { fontWeight: 700 }]) {
+      const content = [
+        { field: "at", format: { number: ".0f" }, ...(style && { style }) },
+        " / ",
+        { field: "v", format: { number: ".2f" } },
+      ];
+      const { spy, seen } = spying();
+      const { data, model } = notes(rows(1), { content, style: { halo: false } });
+      const { tween } = change(model, () => data.reset(rows(2) as never), spy, seen);
+      const [at, v] = numbersOf(frameAt(tween, 100)).get("a")!;
+      expect(at).toBeNaN();
+      expect(partsOf(frameAt(tween, 100)).get("a")!.join(" ")).toMatch(
+        new RegExp(`^9000000000000000 ?/ ?${v!.toFixed(2)}$`),
+      );
+    }
+  });
+
+  it("show anew a part whose field differs at its place between the ends, parts reordered", () => {
+    const columns = (a: number, b: number, c: number) => ({
+      id: category(["a"]),
+      x: [5],
+      y: [5],
+      a: [a],
+      b: [b],
+      c: [c],
+    });
+    const data = table(columns(10, 20, 30) as never) as unknown as Table;
+    const modelOf = (first: string, second: string) => {
+      const model = new ChartModel(
+        {
+          locale: "en-US",
+          animation: { duration: 200, values: true, easing: "linear" },
+          marks: [
+            text(
+              data as never,
+              {
+                itemKey: "id",
+                x: "x",
+                y: "y",
+                label: { content: [{ field: first }, " ", { field: second }, " ", { field: "c" }] },
+              } as never,
+            ),
+          ],
+          x: { domain: [0, 10] },
+          y: { domain: [0, 10] },
+        },
+        undefined,
+        staticCompilers(),
+      );
+      model.setSize(400, 300, 1);
+      return model;
+    };
+    const [before, after] = [modelOf("a", "b"), modelOf("b", "a")];
+    const shown = snapshot(before.scene(proportional), before.panels(), 0)!;
+    data.reset(columns(14, 24, 70) as never);
+    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+    const { config } = after;
+    const tween = plan(
+      shown,
+      after.scene(proportional),
+      after.panels(),
+      200,
+      builders,
+      sidesOf(config),
+      followedOf(config),
+      positionsOf(config),
+    )!;
+    const frame = frameAt(tween, 100);
+    // b and a at each other's places show the new scene's numbers; c counts at its own.
+    const c = blended(30, 70, 100);
+    expect(numbersOf(frame).get("a")).toEqual([24, 14, c]);
+    expect(partsOf(frame).get("a")).toEqual([`24 14 ${c}`]);
+  });
+
+  it("stand by their blocks' middles as their lines change between the ends", () => {
+    const rows = (kind: string[], v: number[]) => ({
+      id: category(["a"]),
+      x: [5],
+      y: [5],
+      kind: category(kind),
+      v,
+    });
+    for (const style of [undefined, { fontWeight: 700 }]) {
+      const label = {
+        content: [{ field: "kind", ...(style && { style }) }, " ", { field: "v" }],
+        style: { background: { fill: "#eeeeee" }, halo: false },
+      };
+      const { spy, seen } = spying();
+      const { data, model } = notes(rows(["one"], [1]), label);
+      const middle = (scene: Scene) => {
+        const { box } = labelItems(scene).get("a")![0]!;
+        return box!.y + box!.height / 2;
+      };
+      const before = middle(model.scene(spy));
+      const { tween } = change(
+        model,
+        () => data.reset(rows(["one\ntwo"], [3]) as never),
+        spy,
+        seen,
+      );
+      expect(middle(tween.scene)).toBeCloseTo(before, 6);
+      // Its lines the new scene's at once, its middle where it stands at both ends.
+      for (const ms of [10, 100, 190]) expect(middle(frameAt(tween, ms))).toBeCloseTo(before, 6);
+    }
+  });
+
+  it("count a label of one field written through the chart's displays", () => {
+    const rows = (v: number[]) => ({ id: category(["a"]), x: [5], y: [5], v });
+    const { spy, seen } = spying();
+    const { data, model } = notes(
+      rows([1_000]),
+      { field: "v" },
+      { fields: { v: { format: { number: ",.0f" } } } },
+    );
+    const { tween } = change(model, () => data.reset(rows([3_000]) as never), spy, seen);
+    const frame = frameAt(tween, 100);
+    expect(partsOf(frame).get("a")).toEqual([grouped(blended(1_000, 3_000, 100))]);
+  });
+
+  describe("interrupted", () => {
+    it("move on from the numbers, texts, and places on screen, ending as the new scene is laid out", () => {
+      const now = vi.spyOn(performance, "now").mockReturnValue(0);
+      const { data, model } = notes(stores([1_000, 2_000], [0.1, 0.5], ["North", "South"]), {
+        content: SHARES,
+        style: { halo: false, align: "end" },
+      });
+      const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+      const animation = new ValueAnimation(model, null, model.scene(proportional), builders);
+      const reset = { dropped: 0, appended: 0, updated: null, fields: [], reset: true };
+      animation.changed(animation.start(model.scene(proportional), 0), reset, 0);
+      data.reset(stores([5_000, 9_000], [0.3, 0.9], ["North", "South"]) as never);
+      animation.start(model.scene(proportional), 0);
+      now.mockReturnValue(100);
+      const passing = animation.step(0)!;
+      animation.changed(passing, reset, 0);
+      data.reset(stores([1_500, 9_000], [0.05, 0.9], ["North", "South"]) as never);
+      const first = animation.start(model.scene(proportional), 0)!;
+      // The first frame of the change is the frame on screen: its numbers, texts, and items.
+      expect(numbersOf(first)).toEqual(numbersOf(passing));
+      expect(partsOf(first)).toEqual(partsOf(passing));
+      for (const name of ["a", "b"])
+        expect(
+          labelItems(first)
+            .get(name)!
+            .map(({ x, y }) => [x, y]),
+        ).toEqual(
+          labelItems(passing)
+            .get(name)!
+            .map(({ x, y }) => [x, y]),
+        );
+      now.mockReturnValue(1_000);
+      const end = animation.step(0)!;
+      expect(renderSvg(end, { idPrefix: "c" })).toBe(
+        renderSvg(model.scene(proportional), { idPrefix: "c" }),
+      );
+      vi.restoreAllMocks();
+    });
   });
 });

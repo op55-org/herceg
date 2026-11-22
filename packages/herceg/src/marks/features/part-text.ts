@@ -3,10 +3,11 @@
 // per line, each line as tall as its tallest part, and lowered to the text
 // items painters draw already, one per part, halos before any part's fill
 // so no part's halo covers its neighbor. The block's halo, box, and
-// alignment stay the label's. In a value transition's frames, the parts
-// writing a counting number are measured by its shape, and lines are
-// drawn from the edge they align to. Loaded with the feature compiler, which
-// writes labels of parts; marks only call what it hands them (`PartText`).
+// alignment stay the label's. Lines are drawn from the edge they align to,
+// so their parts meet it whatever the renderer's widths; in a value
+// transition's frames, the parts writing a counting number are measured by
+// its shape. Loaded with the feature compiler, which writes labels of
+// parts; marks only call what it hands them (`PartText`).
 
 import type { MeasureText, TextLines } from "../../layout/text.ts";
 import type { FeatureKit } from "../../model/features.ts";
@@ -48,12 +49,42 @@ export interface PartText {
   fit(width: number): PartText | undefined;
 }
 
-/** A part on a line: its text, look (its own color, if any), and width. */
+/**
+ * A part on a line: its text, look (its own color, if any), and width; and
+ * what is drawn of it, from `lead` past its start, `inner` wide: its text
+ * without the spaces at its ends, which renderers may leave out (SVG does),
+ * so that they keep their room whatever end the part is drawn from.
+ */
 interface Piece {
   readonly text: string;
   readonly paint: TextPaint;
   readonly color: string | undefined;
   readonly width: number;
+  readonly drawn: string;
+  readonly lead: number;
+  readonly inner: number;
+}
+
+/** A part's `text` on a line in `paint`, measured with `measure` (see `Piece`). */
+function piece(
+  text: string,
+  paint: TextPaint,
+  color: string | undefined,
+  measure: MeasureText,
+): Piece {
+  const width = text ? measure(text, paint.css) : 0;
+  // Text that is all spaces, or has none at its ends, is drawn as it is.
+  const drawn = text.trim() || text;
+  const trimmed = drawn !== text;
+  return {
+    text,
+    paint,
+    color,
+    width,
+    drawn,
+    lead: trimmed ? width - measure(text.trimStart(), paint.css) : 0,
+    inner: trimmed ? measure(drawn, paint.css) : width,
+  };
 }
 
 /** A line of parts, its width, its height, and its largest size. */
@@ -87,14 +118,9 @@ export function partText(
   for (const { text, style, counts } of parts) {
     const look = style ? restyled(kit, paint, style) : { ...paint, background: undefined };
     const by = (counts && count) || measure;
-    text.split("\n").forEach((piece, k) => {
+    text.split("\n").forEach((line, k) => {
       if (k > 0) rows.push([]);
-      rows.at(-1)!.push({
-        text: piece,
-        paint: look,
-        color: style?.color,
-        width: piece ? by(piece, look.css) : 0,
-      });
+      rows.at(-1)!.push(piece(line, look, style?.color, by));
     });
   }
   return set(
@@ -102,7 +128,6 @@ export function partText(
     measure,
     paint,
     rows.map((pieces) => line(pieces, paint)),
-    !!count,
   );
 }
 
@@ -125,16 +150,12 @@ function line(pieces: readonly Piece[], paint: TextPaint): Line {
     : { pieces, width, height: paint.lineHeight, size: paint.size };
 }
 
-/**
- * Lines of parts, as `PartText`; `framed` in a value transition's frames,
- * where a counting part's width is its shape's.
- */
+/** Lines of parts, as `PartText`. */
 function set(
   kit: FeatureKit,
   measure: MeasureText,
   paint: TextPaint,
   rows: readonly Line[],
-  framed?: boolean,
 ): PartText {
   const widths = rows.map(({ width }) => width);
   return {
@@ -167,16 +188,16 @@ function set(
         const baseline = y + row.height / 2 + row.size * DROP;
         for (const piece of row.pieces) {
           if (piece.text) {
-            // In frames, parts of a line aligned to its end are drawn from
-            // their ends, and a centered line's only part from its middle:
-            // so the part at the line's edge meets it, as do those after a
-            // counting part, whatever its shape's width.
-            const from =
-              framed && (anchor === "end" || piece.width === row.width) ? anchor : "start";
+            // Parts of a line aligned to its end are drawn from their ends,
+            // and a centered line's only part from its middle: so the part
+            // at the line's edge meets it, as do those after a counting
+            // part, whatever the renderer's widths, or a counting number's
+            // shape's in frames.
+            const from = anchor === "end" || piece.width === row.width ? anchor : "start";
             const item: TextItem = {
               type: "text",
-              text: piece.text,
-              x: from === "start" ? x : x + piece.width * (anchor === "end" ? 1 : 0.5),
+              text: piece.drawn,
+              x: x + piece.lead + (from === "start" ? 0 : piece.inner * (from === "end" ? 1 : 0.5)),
               y: baseline,
               anchor: from,
               baseline: "alphabetic",
@@ -207,7 +228,7 @@ function set(
         if (!pieces) return undefined;
         fitted.push(line(pieces, paint));
       }
-      return set(kit, measure, paint, fitted, framed);
+      return set(kit, measure, paint, fitted);
     },
   };
 }
@@ -228,21 +249,21 @@ function shortened(
   for (let used = 0; past < pieces.length && used + pieces[past]!.width <= width; past++)
     used += pieces[past]!.width;
   for (let k = past; k >= 0; k--) {
-    const piece = pieces[k];
-    if (!piece?.text) continue;
+    const part = pieces[k];
+    if (!part?.text) continue;
     const before = pieces.slice(0, k);
     const room = width - before.reduce((sum, { width }) => sum + width, 0);
     // A part before the one that runs past fits whole: the ellipsis goes after it.
     const text = kit.fitText(
-      k === past ? piece.text : `${piece.text}…`,
+      k === past ? part.text : `${part.text}…`,
       room,
       measure,
-      piece.paint.css,
+      part.paint.css,
     );
-    const drawn = measure(text, piece.paint.css);
-    if (drawn > room) continue;
+    const cut = piece(text, part.paint, part.color, measure);
+    if (cut.width > room) continue;
     if (text === "…" && before.every(({ text }) => !text)) return undefined;
-    return [...before, { ...piece, text, width: drawn }];
+    return [...before, cut];
   }
   return undefined;
 }

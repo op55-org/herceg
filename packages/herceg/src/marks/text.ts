@@ -8,7 +8,7 @@ import {
   placePanel,
   shiftWithin,
 } from "../layout/placer.ts";
-import { lineCount, type MeasureText } from "../layout/text.ts";
+import { lineCount } from "../layout/text.ts";
 import { type Geometry, type LabelItems, NAMELESS, type Rect } from "../scene/scene.ts";
 import type { LabelLayoutSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -30,6 +30,7 @@ import {
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { ItemKeyed, LabelPartOf } from "./encoding.ts";
+import type { ContentWriter } from "./features/content.ts";
 import type { PartText } from "./features/part-text.ts";
 import { FollowingTextMark } from "./following.ts";
 import { namesBy } from "./item-names.ts";
@@ -537,13 +538,13 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     const room = Math.max(LABEL_GAP, reach + 0.5);
     const chart = frame.chart ?? plot;
     // How far a label drawn from x, its box `width` wide, moves along x to
-    // stay inside the chart, and one drawn from y, its painted block `up`
-    // and `down` from it, along y: across `at` where given and where that
-    // reaches less far past the chart's edge, then in.
+    // stay inside the chart, and one whose block's middle is at y, its
+    // painted block `half` above and below it, along y: across `at` where
+    // given and where that reaches less far past the chart's edge, then in.
     const alongX = (x: number, width: number, at?: number) =>
       shiftWithin(x - share * width - reach, width + 2 * reach, chart.x, chart.width, at);
-    const alongY = (y: number, up: number, down: number, at?: number) =>
-      shiftWithin(y - up, up + down, chart.y, chart.height, at);
+    const alongY = (y: number, half: number, at?: number) =>
+      shiftWithin(y - half, 2 * half, chart.y, chart.height, at);
     // Half a label's height, with the room kept around it: of a box (its
     // line height and padding) for labels in boxes.
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
@@ -560,8 +561,11 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       return verticalAlign === "top" ? block : verticalAlign === "bottom" ? -block : 0;
     };
     // How much taller than a line a label's lines are.
-    const more = ({ text, parts }: Pick<TextItemLabel, "text" | "parts">) =>
+    const more = ({ text, parts }: Written) =>
       parts ? parts.lines.height - paint.lineHeight : (lineCount(text) - 1) * paint.lineHeight;
+    // How far a label's painted block (its box, and what halos and outlines
+    // paint past it) reaches above and below its middle.
+    const painted = (label: Written) => (paint.lineHeight + more(label) + top + bottom) / 2 + reach;
     // Without a clip of its own, text shows while its places in data are in view.
     const shown = (px: number, py: number) =>
       Number.isFinite(px) &&
@@ -590,20 +594,15 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         parts || placed || kept
           ? (parts?.lines.width ?? frame.measure(text, font)) + left + right
           : 0;
-      const lines = paint.lineHeight + more({ text, parts });
-      // Where it is drawn from (labels in items, their first line's middle),
-      // and how far its painted block (its box, and what halos and outlines
-      // paint past it) reaches above and below that.
-      const from = plain ? 0 : (lines - paint.lineHeight) / 2;
-      const painted = (lines + top + bottom) / 2 + reach;
-      const [up, down] = [painted - from, painted + from];
+      const above = painted({ text, parts });
+      // Its anchor along x, and its block's middle.
       let lx = px + dx;
-      let ly = py + dy + lift(lines) - from;
+      let ly = py + dy + lift(paint.lineHeight + more({ text, parts }));
       if (kept) {
         // Across its point where that reaches less far past the chart's
         // edge (14 px above becomes 14 px below), then moved in.
         lx += alongX(lx, width, px);
-        ly += alongY(ly, up, down, py);
+        ly += alongY(ly, above, py);
       }
       // From the anchor to the label's middle.
       const shift = (0.5 - share) * width;
@@ -615,23 +614,24 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         width,
         shift,
         cx: lx + shift,
-        cy: ly + from,
+        cy: ly,
         parts,
         kept,
-        up,
-        down,
+        half: above,
       });
     });
     return {
       items,
       write,
-      styled: content !== undefined,
+      content,
       plot,
       chart,
       room,
       padding: left + right,
       alongX,
       alongY,
+      more,
+      painted,
       // Labels of parts are as tall as their lines and their box's padding,
       // whatever the base text's size.
       halfOf: ({ text, parts }) =>
@@ -661,7 +661,19 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
   #drawn(
     frame: Frame,
     key: MarkKey,
-    { paint, plain, haloOption, write, styled, padding, alongX, alongY }: TextLabels,
+    {
+      paint,
+      plain,
+      haloOption,
+      write,
+      content,
+      padding,
+      alongX,
+      alongY,
+      more,
+      painted,
+      at,
+    }: TextLabels,
     drawn: PlacedLabel[],
     items: readonly TextItemLabel[],
     leaders: number[],
@@ -690,35 +702,58 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       plain ? Uint32Array.from(rows) : Uint32Array.from(owners, (k) => rows[k]!),
     );
     if (frame.keyed) {
-      const text = (value: number) => (write ?? ((v) => formatNumber(v, frame.locale)))(value);
-      // A label placed again for a number between two, in its paint, its box measured with `count`.
-      const again = (i: number, value: number, x: number, y: number, count: MeasureText) =>
-        labelsGeometry(
-          id,
-          [{ ...drawn[i]!, text: text(value), x, y }],
-          paint,
-          haloOption,
-          frame,
-          undefined,
-          count,
-        ).items;
+      const named = this.#named(rows, content);
+      // How many numbers each label writes.
+      const stride = named.fields?.length ?? 1;
       labels.named = {
-        ...this.#named(rows, styled),
+        ...named,
+        // Labels in items stand by their blocks' middles, as frames place them.
         ...(labels.kind === "labels" && {
-          at: drawn.flatMap(({ x, y }) => [x, y]),
+          at: drawn.flatMap((label) => [label.x, label.y + more(label) / 2]),
           owners,
         }),
-        write: (i, value, x, y, count) =>
-          labels.kind === "text" ? text(value) : again(i, value, x, y, count),
-        // Frames keep the labels the scene keeps inside the chart there
-        // too: by their boxes' widths here, a counting label's by its number.
+        // Written again with the frame's numbers, kept inside the chart by
+        // what it writes (its width with its numbers' shapes, and its
+        // lines), then placed there in its paint.
+        write: (i, numbers, places, count) => {
+          const { row, kept } = items[i]!;
+          const k = i * stride;
+          const parts = content?.styled?.(
+            row,
+            "",
+            Number.NaN,
+            undefined,
+            paint,
+            frame,
+            undefined,
+            count,
+            numbers,
+            k,
+          );
+          const label = {
+            text: parts
+              ? ""
+              : content
+                ? content(row, "", Number.NaN, undefined, undefined, numbers, k)
+                : (write ?? ((v) => formatNumber(v, frame.locale)))(numbers[k]!),
+            parts,
+          };
+          if (kept) {
+            const width = parts ? parts.lines.width : count(label.text, paint.css);
+            places[i * 2]! += alongX(places[i * 2]!, width + padding);
+            places[i * 2 + 1]! += alongY(places[i * 2 + 1]!, painted(label));
+          }
+          if (labels.kind === "text") return label.text;
+          const placed = at(label, places[i * 2]!, places[i * 2 + 1]!);
+          return labelsGeometry(id, [placed], paint, haloOption, frame, undefined, count).items;
+        },
+        // Frames keep the labels the scene keeps inside the chart there too.
         ...(this.spec.clip === undefined && {
-          stayInside: (i, at, written, count) => {
+          stayInside: (i, places) => {
             const item = items[i]!;
             if (!item.kept) return;
-            const width = written === undefined ? item.width : count(written, paint.css) + padding;
-            at[i * 2]! += alongX(at[i * 2]!, width);
-            at[i * 2 + 1]! += alongY(at[i * 2 + 1]!, item.up, item.down);
+            places[i * 2]! += alongX(places[i * 2]!, item.width);
+            places[i * 2 + 1]! += alongY(places[i * 2 + 1]!, item.half);
           },
         }),
       };
@@ -730,27 +765,38 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
   /**
    * In charts that animate changed values, the names of the labels of
    * `rows` (their `itemKey` values, else row identities; places' indexes
-   * for text without a table), and the numbers they write, unless written
-   * by parts (`styled`).
+   * for text without a table), and the numbers they write: those of the
+   * number fields `content`'s parts write, or of the field they label with.
    */
-  #named(rows: readonly number[], styled: boolean): LabelItems {
+  #named(rows: readonly number[], content: ContentWriter | undefined): LabelItems {
     const { table } = this;
     const field = this.#data.label?.field;
-    const numbers =
-      !styled && table && field !== undefined && table.kind(field) !== "category"
-        ? table.numbers(field as never)
-        : undefined;
     const name = table
       ? this.spec.itemKey !== undefined
         ? namesBy(table, this.spec.itemKey)
         : (row: number) => NAMELESS + table.identity(row)
       : (row: number) => row;
-    return {
-      names: rows.map(name),
-      table,
-      generation: table?.generation ?? 0,
-      values: numbers && rows.map((row) => numbers[row]!),
-    };
+    const named = { names: rows.map(name), table, generation: table?.generation ?? 0 };
+    const fields = content
+      ? content.fields
+      : field !== undefined && table?.kind(field as never) !== "category"
+        ? [field]
+        : undefined;
+    const stride = fields?.length;
+    if (!table || !stride) return named;
+    // Label after label, each its fields' numbers; times beyond what dates
+    // hold are none (displays write them as missing), so they do not count
+    // and frames write them as scenes do.
+    const values = new Float64Array(rows.length * stride);
+    fields.forEach((field, k) => {
+      const numbers = table.numbers(field as never);
+      const time = table.kind(field as never) === "time";
+      rows.forEach((row, i) => {
+        const value = numbers[row]!;
+        values[i * stride + k] = time && !(Math.abs(value) <= 8.64e15) ? Number.NaN : value;
+      });
+    });
+    return { ...named, fields, values };
   }
 }
 
@@ -761,9 +807,9 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
  */
 interface TextLabels {
   readonly items: readonly TextItemLabel[];
-  /** How numbers in the labels are written, unless the locale's default; whether labels are written by parts. */
+  /** How numbers in the labels are written, unless the locale's default; how labels of parts are. */
   readonly write: Formatter | undefined;
-  readonly styled: boolean;
+  readonly content: ContentWriter | undefined;
   readonly plot: Rect;
   readonly chart: Rect;
   readonly room: number;
@@ -771,13 +817,24 @@ interface TextLabels {
   readonly padding: number;
   /** How far a label drawn from x, its box `width` wide, moves along x to stay inside the chart (`#labels`). */
   alongX(x: number, width: number): number;
-  /** How far a label drawn from y, its painted block `up` and `down` from it, moves along y to stay inside the chart. */
-  alongY(y: number, up: number, down: number): number;
+  /** How far a label whose block's middle is at y, its painted block `half` above and below it, moves along y to stay inside the chart. */
+  alongY(y: number, half: number): number;
+  /** How much taller than a line a label's lines are. */
+  more(label: Written): number;
+  /** How far a label's painted block reaches above and below its middle. */
+  painted(label: Written): number;
   halfOf(item: TextItemLabel): number;
   readonly paint: TextPaint;
   readonly plain: boolean;
   readonly haloOption: Halo | undefined;
-  at(item: TextItemLabel, x: number, y: number): PlacedLabel;
+  /** Where a label goes with its anchor at x and its block's middle at y. */
+  at(label: Written, x: number, y: number): PlacedLabel;
+}
+
+/** A label's text, and its parts where they have looks of their own. */
+interface Written {
+  readonly text: string;
+  readonly parts?: PartText | undefined;
 }
 
 /**
@@ -785,8 +842,7 @@ interface TextLabels {
  * their own), point, width (its box's: measured where placed or kept
  * inside, and for parts), how far its middle is from its anchor along x,
  * and its middle at its place, kept inside the chart where it is `kept`;
- * and how far its painted block reaches above and below the point it is
- * drawn from.
+ * and how far its painted block reaches above and below its middle.
  */
 interface TextItemLabel {
   readonly row: number;
@@ -799,8 +855,7 @@ interface TextItemLabel {
   readonly cx: number;
   readonly cy: number;
   readonly kept: boolean;
-  readonly up: number;
-  readonly down: number;
+  readonly half: number;
 }
 
 /** Whether `box` holds (x, y), its edges included. */
