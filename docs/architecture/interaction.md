@@ -679,8 +679,9 @@ on screen's drawing).
   else the model's. Each wrapper is positioned by two translations, the
   place in pixels and the wrapper's own percentages for its side and
   alignment, so an element changing size keeps its side of the place
-  without a frame. Its `transform` and `data-side` are written only when
-  they change, its `display` only when it shows or hides. `anchor()` and
+  without a frame. Its `transform`, `data-side`, and a fitted one's slide
+  are written only when they change, its `display` only when it shows or
+  hides. `anchor()` and
   `set()` ask for a frame, which draws nothing new when nothing else
   changed: it places, and reports no `render`.
 - **Fitting** (`fit`, "flip" by default) keeps a wrapper inside the
@@ -694,7 +695,10 @@ on screen's drawing).
   `position-try-fallbacks` keeps the last option that fitted the same
   way), else the first step that fits, else the one crossing least, which
   at one size is the one with the most room; then a pixel slide added to
-  the first translation. It starts on its side when it shows and when its
+  the first translation, and written with it, per axis where it changed,
+  as `--hg-anchor-slide-x` and `-y` for the element's CSS (custom
+  properties inherit through the adapters' portals; removed with `fit:
+  "none"`). It starts on its side when it shows and when its
   `side` or `fit` changes. A wrapper showing is laid out at `opacity: 0`
   on its side until the observer's first size, which is delivered before
   paint; where that size takes another side, the wrapper slides on its

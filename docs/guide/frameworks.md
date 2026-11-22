@@ -448,9 +448,13 @@ that uses only `<Chart>` does not load them.
 The region's bands are as tall as the plot, so the chart's top leaves no
 room above one: `fit`, `"flip"` by default, puts the card just below the
 band's top edge, inside the chart, and its wrapper's `data-side` says
-`"bottom"` for the card's CSS (an arrow pointing up at the edge). `fit="shift"`
-keeps it above and slides it down inside; `fit="none"` leaves it where it
-was told, cut by the chart's edge ([Fitting inside the
+`"bottom"` for the card's CSS (an arrow pointing up at the edge). Where
+the card slides along to stay inside, the wrapper's
+`--hg-anchor-slide-x` says how far, so that the arrow's CSS can keep it
+over its place. The wrapper's attribute and properties reach the content
+through React's portal, Vue's teleport, and Svelte's children alike. `fit="shift"` keeps it above and
+slides it down inside; `fit="none"` leaves it where it was told, cut by
+the chart's edge ([Fitting inside the
 chart](interaction.md#fitting-inside-the-chart)).
 
 ```vue

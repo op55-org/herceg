@@ -1585,7 +1585,9 @@ unmounting it removes it.
   change of its data or its view's question, and after an append in the
   rows appended. Fitting adds a few comparisons per anchor per frame and
   one observer callback per change of an element's size. A wrapper's
-  `transform` and `data-side` are written only when they change.
+  `transform`, `data-side`, and slide are written only when they change;
+  a change of the slide restyles the element and what it holds, which a
+  change of the transform alone does not.
 - **No spec or Python.** An anchor holds the application's DOM, which
   neither a spec nor Python has. Python's notebooks place text, rules, and
   pinned tooltips, which are portable.
@@ -1630,6 +1632,56 @@ side the popover went to:
 .popover::before { bottom: -6px } /* above the place, pointing down */
 [data-side="bottom"] .popover::before { top: -6px; bottom: auto; transform: rotate(180deg) }
 ```
+
+How far it slid is on the wrapper too, in two custom properties the
+element's CSS inherits: `--hg-anchor-slide-x` and `--hg-anchor-slide-y`,
+the distance fitting moved it from where its side, `align`, and `offset`
+put it on the side it took, in CSS pixels right and down (negative: left
+and up), in right-to-left text too. They read `0px` where it did not
+slide. A flip is not a slide: it shows in `data-side`. `fit: "none"`
+anchors carry neither, so CSS's fallback reads 0. They are written with
+the wrapper's transform, in the same frame, so what reads them paints with
+the move: an arrow on the popover's top or bottom edge, kept over the
+place by `--hg-anchor-slide-x` (one on its left or right edge reads
+`--hg-anchor-slide-y`, with `top`):
+
+```css
+.popover { position: relative; min-width: 160px; border-radius: 6px }
+/* Centred less the slide: over the place, kept 8 px off the rounded corners. */
+.popover::before {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  bottom: -6px;
+  left: clamp(8px, calc(50% - var(--hg-anchor-slide-x, 0px) - 5px), calc(100% - 18px));
+  transform: rotate(45deg);
+}
+[data-side="bottom"] .popover::before { top: -6px; bottom: auto }
+```
+
+- **The arrow's place** is where `align` puts the element at its place:
+  `50%` for `"center"`. On the top or bottom side, `left` takes `0%` for
+  `"start"` and `100%` for `"end"`, the other way round in right-to-left
+  text. Beside the place (`"left"` or `"right"`), `top` takes `0%` for
+  `"start"` and `100%` for `"end"` in either direction, since start is
+  then the top. The properties are physical; pair them with `left` and
+  `top`, not `inset-inline-start`.
+- **Near the chart's corner**, a place nearer the chart's edge than the
+  `clamp` lets the arrow go keeps the arrow at its limit, beside the place.
+- **For what does not size the element:** an absolutely positioned arrow,
+  a shadow. CSS that sizes the element by them changes the size the chart
+  measures, which slides it again, a frame late
+  (a `ResizeObserver loop` error in the console).
+
+**An element that must stay on its point**, whole, at the plot's edge (a
+button whose bottom centre is its point) needs room past the plot:
+[`padding`](axes-and-legends.md#titles-and-padding) of half its width on
+that side (`padding: { right: 24 }` for a 48 px button), so that fitting
+never slides it off its point. Or `fit: "none"`, where being cut by the
+chart's edge is acceptable. The chart does not make that room itself: it
+measures the element only once it shows, and room appearing with an
+anchor would move every mark.
 
 - **Measuring.** A fitted element's size comes from a `ResizeObserver`,
   one per chart, so frames place it without reading the page's layout,

@@ -15,7 +15,7 @@
     chart = $bindable(null),
   }: {
     data: Table<{ t: "number"; a: "number" }>;
-    shape: "point" | "peak" | "panels";
+    shape: "point" | "peak" | "edge" | "panels";
     x?: number | string | Date;
     shown?: boolean;
     fit?: AnchorFit;
@@ -33,6 +33,9 @@
   {:else if shape === "peak"}
     <Line {data} x="t" y="a" />
     <Anchor at={{ x: 1, y: 4 }} side="top" offset={8} {fit}><b class="popover">peak</b></Anchor>
+  {:else if shape === "edge"}
+    <Line {data} x="t" y="a" />
+    <Anchor at={{ x: 0, y: 2 }} side="top" offset={8} {fit}><b class="slid">slid</b></Anchor>
   {:else}
     <Columns>
       <Panel id="a"><Line {data} x="t" y="a" /><Anchor at={{ x: 1, y: 4 }}><i>a</i></Anchor></Panel>
