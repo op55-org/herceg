@@ -16,7 +16,7 @@ import {
   snapshot,
   type Tween,
 } from "../../src/dom/value-transition.ts";
-import { estimateText } from "../../src/layout/text.ts";
+import { estimateText, shapeOf } from "../../src/layout/text.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
@@ -41,7 +41,14 @@ afterEach(() => {
   clock.frame = 0;
 });
 
-const BUILDERS = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
+const BUILDERS = {
+  planAxis,
+  axisGuide,
+  Polyline,
+  monotonePolyline,
+  measure: estimateText,
+  shapeOf,
+};
 
 /** A chart model drawn at 600 x 300 that animates values. */
 function chart(config: Partial<ChartConfig> & Pick<ChartConfig, "marks">) {

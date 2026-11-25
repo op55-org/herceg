@@ -17,7 +17,7 @@ import {
   type Tween,
   ValueAnimation,
 } from "../../src/dom/value-transition.ts";
-import { estimateText, lineCount, type MeasureText } from "../../src/layout/text.ts";
+import { estimateText, lineCount, type MeasureText, shapeOf } from "../../src/layout/text.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
@@ -308,6 +308,7 @@ const builders = (measure: MeasureText) => ({
   Polyline,
   monotonePolyline,
   measure,
+  shapeOf,
 });
 
 /** The tween from `chart`'s scene to the next after `edit`, measured by `measure`. */

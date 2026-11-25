@@ -125,7 +125,7 @@ channels read by name, and position scales of a mark's own (see
 
 | `ticks` (Python `hg.Ticks`) | Ticks |
 | --- | --- |
-| `6`, `{ count: 6 }` | About six round values (default: a count from the axis' length). |
+| `6`, `{ count: 6 }` | About six round values, fewer where their labels would meet (default: a count from the axis' length). |
 | `{ every: 10, anchor?: 5 }` | One every 10 on a number axis, from `anchor` (0). |
 | `{ every: "6 hours" }`, `{ every: { unit, step? } }` | Calendar steps in the chart's `timeZone` (`"day"`, `"2 weeks"`, `"month"`; millisecond to year), at the same places whatever the view: weeks from a Monday, months within the year. |
 | `{ every: { milliseconds: 21600000 }, anchor? }` | Elapsed time, the same length across daylight saving changes (Python: a `timedelta`). |
@@ -138,6 +138,52 @@ channels read by name, and position scales of a mark's own (see
 - Zoomed far out, steps closer than two pixels give way to coarser ones on
   the same boundaries.
 - Ticks inside time-axis breaks are left out.
+
+### Automatic ticks and their labels
+
+Automatic ticks (no `ticks`, a count, or `{ count }`) take an interval at
+which their labels do not meet, judged as `overlap: "hide"` judges them:
+
+- **x labels** stand at least 4 px apart, by their widths with their
+  boxes' padding. Each digit counts as the widest of its script's ten in
+  the label's font, or a label as drawn where that is wider, so a
+  streamed or panned axis keeps its interval while its digits change; it
+  changes where a label of another shape comes into view (a date at
+  midnight), or the view's span crosses a threshold, as round steps do.
+- **y labels** do not overlap: each label's lines (of the style's
+  `lineHeight`, which keeps their text apart) with its box. Turned x
+  labels are judged as turned: 4 px apart along their text, their lines
+  not overlapping across it.
+- **Which interval.** The axis plans its count; where neighbouring labels
+  meet, each of the eight whole counts below it in turn, keeping the first
+  whose labels fit (on an axis with [breaks](#time-axis-breaks), which
+  thins ticks by the count, the fitting one of the eight with the finest
+  interval, then the most ticks); past those, half the count, and half
+  again, to one tick's count, where labels still meeting the one before
+  them are left blank, their ticks and grid lines kept. So the interval is
+  the finest among the counts tried, not of every interval there is.
+- **Counts** given are whole (2.5 is planned as 3) and at most one for
+  every two pixels of the axis, so a count of `1e20` plans as the axis'
+  length allows.
+- **Chosen ticks** (`every`, `values`, a function) are drawn as given,
+  whatever their labels do. Axes the guides list fit their layers' labels
+  as each layer draws them (aligned, turned a fixed angle, inside the
+  plot, moved inside the chart or an inset where they would cross it), in
+  every panel drawing them. Labels `ends: "hide"` leaves out still count,
+  so an interval can be coarser than the labels drawn need. Layers kept
+  apart their own way (`"hide"`, `"stagger"`, `"wrap"`, rotation
+  `candidates`) keep the count's interval. One limit: an axis' own x
+  labels in a row past the first (`labels: { row: 1 }`) are judged at
+  their ticks, so where the chart's side moves the end ones in they can
+  still meet; a layer of its own in that row fits as drawn.
+- **Static exports** measure text with built-in metrics unless given
+  `measureText`, so an axis just at a threshold may take a coarser
+  interval than the page does; with `measureText: measurer(document)` they
+  agree.
+
+A view of 1.2 seconds on a plot 864 px wide asks for nine ticks: every
+100 ms, 72 px apart, where "05:38:59.400" is about 72 px wide at 12 px. It
+steps every 200 ms instead, 144 px apart.
 
 ### Log axes
 
@@ -319,7 +365,7 @@ beside each row's last panel needs rows that share y.
 | `labels` (Python `hg.TickLabels`) | Means |
 | --- | --- |
 | `rotation` | Degrees clockwise from -90 to 90 (`-45` reads upward to its tick), or `{ candidates: [0, -45, -90] }`: the first at which neighbors do not overlap. x axes. |
-| `overlap` | `"show"` (default), `"hide"` (every n-th label kept, blank ones not counted), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). Category axes keep every n-th by default. |
+| `overlap` | `"show"` (default: every label at its tick, automatic ticks at an interval their labels [fit](#automatic-ticks-and-their-labels)), `"hide"` (every n-th label kept, blank ones not counted), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). The last three keep the count's interval. Category axes keep every n-th by default. |
 | `row` | 0 by the axis line, 1 beyond it: rows for layers. x axes. |
 | `priority` | Which labels of a row stay where they collide: the higher. |
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |

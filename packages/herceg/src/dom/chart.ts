@@ -14,7 +14,7 @@ import type { RowView } from "../data/row-view.ts";
 import type { Table, TableChange } from "../data/table.ts";
 import { checkFonts, type PageFonts, USE_FONTS } from "../fonts/prepared.ts";
 import type { Fonts } from "../fonts/registry.ts";
-import type { MeasureText } from "../layout/text.ts";
+import { type MeasureText, shapeOf } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import { monotonePolyline } from "../marks/curve.ts";
 import { tablesOf, viewOf } from "../marks/layout-mark.ts";
@@ -2853,6 +2853,7 @@ export class MountedChart implements Chart, ExportsScene {
               Polyline,
               monotonePolyline,
               measure: (text: string, font: string) => this.#measure()(text, font),
+              shapeOf,
             },
             () => this.#animation,
           ),

@@ -14,7 +14,7 @@
 // shows at once.
 
 import type { TableChange } from "../data/table.ts";
-import type { MeasureText } from "../layout/text.ts";
+import type { MeasureText, shapeOf } from "../layout/text.ts";
 import type { ItemInfo } from "../marks/layout-mark.ts";
 import type { Mark, MarkKey } from "../marks/mark.ts";
 import type { planAxis } from "../model/axis.ts";
@@ -67,7 +67,6 @@ import {
   moveLabels,
   named,
   type ShownLabels,
-  shapeOf,
 } from "./value-labels.ts";
 import {
   type AxesMotion,
@@ -116,6 +115,8 @@ export interface Builders extends Lines {
   axisGuide: typeof axisGuide;
   /** How the chart measures text, for labels' boxes. */
   measure: MeasureText;
+  /** Text by its shape, as counting labels are laid out between scenes. */
+  shapeOf: typeof shapeOf;
 }
 
 /** How long a change takes without a `duration`, in milliseconds. */
@@ -985,7 +986,7 @@ export function plan(
   };
   const custom = shown.custom?.plan(scene, panels, sides, MOVING_ITEMS);
   // Counting labels' numbers are measured by their shapes in frames.
-  const count: MeasureText = (text, font) => builders.measure(shapeOf(text), font);
+  const count: MeasureText = (text, font) => builders.measure(builders.shapeOf(text), font);
   const tweens: PanelTween[] = [];
   let moves = false;
   for (const [i, drawn] of scene.panels.entries()) {

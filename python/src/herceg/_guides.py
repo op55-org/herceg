@@ -178,11 +178,12 @@ class Fiscal:
 @refuses
 @dataclass
 class Ticks:
-    """Which ticks an axis draws: about ``count`` round values; one ``every``
-    so often (a number on number axes, from ``anchor``; on time axes a
-    calendar interval in the chart's time zone, ``"day"`` or ``"6 hours"``,
-    or a ``timedelta`` of elapsed time); or exactly ``values`` (numbers or
-    datetimes). Category axes take a count only. Give one of them::
+    """Which ticks an axis draws: about ``count`` round values, fewer where
+    their labels would meet; one ``every`` so often (a number on number
+    axes, from ``anchor``; on time axes a calendar interval in the chart's
+    time zone, ``"day"`` or ``"6 hours"``, or a ``timedelta`` of elapsed
+    time); or exactly ``values`` (numbers or datetimes). Category axes take
+    a count only. Give one of them::
 
         hg.Ticks(every="6 hours")
         hg.Ticks(values=[15, 95])

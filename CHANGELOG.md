@@ -506,6 +506,26 @@ styles](docs/guide/styling.md#role-styles) and
   a space unless a listed axis' labels were `overlap: "show"`, against
   "`\n` breaks any label into lines". See [Titles and
   padding](docs/guide/axes-and-legends.md#titles-and-padding).
+- **Automatic ticks fit their labels.** An axis' automatic ticks (no
+  `ticks`, a count, or `{ count }`) take the finest interval, among their
+  count and the eight whole counts below it (then half, and half again),
+  at which neighbouring labels do not meet as `overlap: "hide"` judges
+  them: x labels 4 px apart by their widths, each digit counted as its
+  script's widest so a streamed or panned axis keeps its interval as its
+  digits change; y labels by their lines. On an axis with breaks, the
+  fitting count of the eight with the finest interval. A view of 1.2
+  seconds 864 px wide steps every 200 ms, where its labels ran together
+  every 100 ms. Chosen ticks (`every`, `values`, a function) are drawn as
+  given, listed axes fit each layer's labels as it draws them, and
+  `"hide"`, `"stagger"`, `"wrap"`, and rotation candidates keep the
+  count's interval. Given counts are whole and at most one for every two
+  pixels. No option, on any surface. Fixed: a y axis given a count of
+  1e308 over a fitted domain of [1e12, 1e12 + 1] rounded it to NaN and
+  drew no ticks; and a 1.2-second window in London's repeated hour (01:30
+  GMT on 2026-10-25) drew none, its first tick sought from the hour's
+  earlier instant. Sub-day ticks now step by their interval rather than
+  every unit. See [Automatic ticks and their
+  labels](docs/guide/axes-and-legends.md#automatic-ticks-and-their-labels).
 - **Legends take `room`**, of the type axes' rooms have (`Room`): a fixed
   depth on their side, or `{ min, max }` bounds on what their entries
   measure, so plots line up whether a legend wraps or not; the gap and

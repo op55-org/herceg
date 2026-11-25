@@ -8,6 +8,7 @@ import {
 } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { AxisOptions } from "../guides/options.ts";
+import { type MeasureText, shapedMeasure, textHeight, textWidth } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { AxisBands } from "../marks/mark.ts";
 import {
@@ -26,8 +27,9 @@ import {
   TimeScale,
   type TimeUnit,
 } from "../scale/time.ts";
-import type { Rect, SegmentGeometry } from "../scene/scene.ts";
+import type { AxisTick, Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { XAxisSpec } from "../spec/spec.ts";
+import type { TextPaint } from "../style/style.ts";
 
 export type AxisType = "linear" | "log" | "time" | "band";
 
@@ -61,11 +63,17 @@ export interface AxisContext {
   /**
    * The ticks and labels of `ticker` (the scale over the domain ticks are
    * chosen in) for about `count` ticks, for axes whose ticks or format the
-   * guide compiler plans (forms other than a count and Intl options).
+   * guide compiler plans (forms other than a count and Intl options):
+   * `auto` where the ticks are automatic, which fit their labels as the
+   * model's own do.
    */
-  plan?:
-    | ((ticker: PositionScale, count: number) => { ticks: number[]; labels: string[] })
-    | undefined;
+  plan?: ((ticker: PositionScale, count: number) => TickPlan) | undefined;
+  /**
+   * Whether two neighbouring labels stand too close where they are drawn,
+   * set where their paints are known: automatic ticks then take the finest
+   * interval at which none do (see `planAxis`).
+   */
+  meets?: LabelsMeet | undefined;
   /**
    * How one value is written, where the guide compiler writes them; marked
    * `own` where it is the axis' own `tooltipFormat`, which field displays'
@@ -87,6 +95,21 @@ export interface AxisPadding {
   pad(domain: readonly [number, number], pixels: number): [number, number];
   unpad(domain: readonly [number, number], pixels: number): [number, number];
 }
+
+/** An axis' ticks and their labels; from a planner, `auto` where it chose the ticks. */
+export interface TickPlan {
+  ticks: number[];
+  labels: string[];
+  auto?: boolean | undefined;
+}
+
+/**
+ * Whether neighbouring labels `a` and `b`, in tick order, stand too close
+ * as drawn; their positions are pixels from the low end of the plan's
+ * range (its plot's left or top), so a plan judged once holds wherever its
+ * plot stands.
+ */
+export type LabelsMeet = (a: AxisTick, b: AxisTick) => boolean;
 
 /** A time axis' breaks as axes use them; implemented by scale/breaks.ts. */
 export interface AxisBreaks extends Breaks {
@@ -170,15 +193,137 @@ export function planAxis(
 ): AxisPlan {
   const scale = createScale(context, domain, range);
   const ticker = within === domain ? scale : createScale(context, within, range);
-  if (context.plan) return { scale, ...context.plan(ticker, count), within, context, count };
+  const planned = (n: number) => ticksOf(context, ticker, n);
+  let plan = planned(count);
+  const { meets } = context;
+  if (meets && (!context.plan || plan.auto))
+    plan = fitted(plan, planned, count, scale, meets, ticker);
+  return { scale, ticks: plan.ticks, labels: plan.labels, within, context, count };
+}
+
+/** Pixels kept between neighbouring labels side by side, as "hide" keeps them (guides/axes.ts). */
+const PAD = 4;
+
+/**
+ * Whether neighbouring labels overlap as the model's axes draw them, in any
+ * of `paints`, as "hide" judges them: centred on their ticks, across the
+ * plot by their widths (no narrower than their shapes, `shapedMeasure`),
+ * PAD apart; along it by their blocks' heights, their lines' leading
+ * keeping them apart; with their boxes.
+ */
+export function labelsMeet(
+  paints: readonly TextPaint[],
+  measure: MeasureText,
+  across: boolean,
+): LabelsMeet {
+  const shaped = shapedMeasure(measure);
+  // Each label is the second of one pair and the first of the next.
+  let last = "";
+  let size = 0;
+  const sizeOf = (label: string) => {
+    if (label !== last) {
+      last = label;
+      size = Math.max(
+        ...paints.map((paint) =>
+          across ? textWidth(label, paint, shaped) : textHeight(paint, label),
+        ),
+      );
+    }
+    return size;
+  };
+  const pad = across ? PAD : 0;
+  return (a, b) => {
+    const half = sizeOf(a.label) / 2;
+    return Math.abs(b.position - a.position) < half + sizeOf(b.label) / 2 + pad;
+  };
+}
+
+/**
+ * Automatic ticks whose labels do not meet (`meets`, where `scale` draws
+ * them): `plan`, planned for `count`, where none of its labels do; else the
+ * first plan for each of the eight whole counts below that fits, or on an
+ * axis with breaks, whose thinning can keep a finer interval at a lower
+ * count, the fitting plan of those eight with the finest interval (and of
+ * those the most ticks); past those, plans for half the count, and half
+ * again, until one fits. At one tick's count, or where coarser plans have
+ * no ticks, the last plan with ticks is kept, its labels still meeting the
+ * one kept before them left blank. A plan the same as the last one judged
+ * is not judged again.
+ */
+function fitted(
+  plan: TickPlan,
+  planned: (count: number) => TickPlan,
+  count: number,
+  scale: PositionScale,
+  meets: LabelsMeet,
+  ticker: PositionScale,
+): TickPlan {
+  // Its labels, those meeting the one kept before them blank; undefined where none meet.
+  const low = Math.min(...scale.range);
+  const thinned = ({ ticks, labels }: TickPlan) => {
+    let last: AxisTick | undefined;
+    let out: string[] | undefined;
+    labels.forEach((label, k) => {
+      if (!label) return;
+      const tick = { position: scale.map(ticks[k]!) - low, value: ticks[k]!, label };
+      if (!last || !meets(last, tick)) last = tick;
+      else {
+        out ??= labels.slice();
+        out[k] = "";
+      }
+    });
+    return out;
+  };
+  // The last plan judged, and whether it fits: a plan the same as it is not
+  // judged again. A plan of no ticks (coarser steps can leave the domain
+  // none) fits nothing: the last with ticks is kept, labels blanked.
+  let judged = plan;
+  let apart = false;
+  const fits = (p: TickPlan) => {
+    if (p.ticks.length === 0) return false;
+    const same =
+      p.ticks.length === judged.ticks.length &&
+      p.ticks.every((t, k) => t === judged.ticks[k] && p.labels[k] === judged.labels[k]);
+    if (!same) apart = !thinned(p);
+    judged = p;
+    return apart;
+  };
+  if (!thinned(plan)) return plan;
+  const broken = ticker.breaks !== undefined;
+  let best: TickPlan | undefined;
+  let finest = Number.POSITIVE_INFINITY;
+  let n = count;
+  while (n > Math.max(1, count - 8)) {
+    const p = planned(--n);
+    if (!fits(p)) continue;
+    if (!broken) return p;
+    // The interval its ticks were planned at, which a format's labels may have coarsened.
+    const interval =
+      (ticker as CalendarScale).intervalOf?.(p.ticks)?.duration ?? Number.POSITIVE_INFINITY;
+    if (!best || interval < finest || (interval === finest && p.ticks.length > best.ticks.length)) {
+      best = p;
+      finest = interval;
+    }
+  }
+  if (best) return best;
+  while (n > 1) {
+    n = Math.floor(n / 2);
+    const p = planned(n);
+    if (fits(p)) return p;
+  }
+  return { ticks: judged.ticks, labels: thinned(judged) ?? judged.labels };
+}
+
+/** `ticker`'s ticks and labels for about `count` ticks, as `context` plans them. */
+function ticksOf(context: AxisContext, ticker: PositionScale, count: number): TickPlan {
+  if (context.plan) return context.plan(ticker, count);
   const format = context.spec?.format;
   const time = ticker.type === "time" ? (ticker as CalendarScale) : undefined;
   if (format) {
     const write = time
       ? timeFormatter(format as Intl.DateTimeFormatOptions, context.zone, context.locale)
       : numberFormatter(format as Intl.NumberFormatOptions, context.locale);
-    const written = writtenTicks(ticker, count, (values) => values.map(write));
-    return { scale, ...written, within, context, count };
+    return writtenTicks(ticker, count, (values) => values.map(write));
   }
   const auto = autoTicks(ticker, count);
   const { ticks, labelled } = auto;
@@ -193,7 +338,7 @@ export function planAxis(
         time.tickContexts?.(ticks),
       )
     : numberTickLabels(labelledOf(ticks, labelled), context.locale, !!labelled);
-  return { scale, ticks, labels: spread(auto, blankRepeats(labels)), within, context, count };
+  return { ticks, labels: spread(auto, blankRepeats(labels)) };
 }
 
 /**
@@ -302,15 +447,24 @@ function timeUnitFor(scale: PositionScale): TimeUnit {
 
 /**
  * About how many ticks an axis of `context` takes over `size` pixels,
- * across the plot (x) or along it (y): its count, else one per 80 pixels
- * across (100 for times) or 45 along.
+ * across the plot (x) or along it (y): its count (see `wholeCount`), else
+ * one per 80 pixels across (100 for times) or 45 along.
  */
 export function tickCountOf({ type, spec }: AxisContext, size: number, across: boolean): number {
   // Contexts hold counts: the guide compiler plans the other forms.
-  return (
-    (spec?.ticks as number | undefined) ??
-    Math.max(2, Math.round(size / (across ? (type === "time" ? 100 : 80) : 45)))
-  );
+  const given = spec?.ticks as number | undefined;
+  return given !== undefined
+    ? wholeCount(given, size)
+    : Math.max(2, Math.round(size / (across ? (type === "time" ? 100 : 80) : 45)));
+}
+
+/**
+ * A count of ticks given for an axis `pixels` long, as it is planned and its
+ * domain rounded: whole, and from one to one for every two pixels, so that
+ * plans for counts far past what an axis can show stay bounded.
+ */
+export function wholeCount(count: number, pixels: number): number {
+  return Math.max(1, Math.min(Math.round(count), Math.floor(pixels / 2)));
 }
 
 /**

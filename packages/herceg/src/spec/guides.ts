@@ -47,10 +47,11 @@ export type TimeInterval =
 
 /**
  * Which ticks an axis draws: about `count` round values (a number alone is
- * the same); one every `every` (a number on number axes, from `anchor`, 0 by
- * default; a time interval on time axes; on category axes, every n-th
- * category); or exactly `values` (numbers, epoch milliseconds on time axes,
- * or categories), those inside the axis' domain.
+ * the same), fewer where their labels would meet; one every `every` (a
+ * number on number axes, from `anchor`, 0 by default; a time interval on
+ * time axes; on category axes, every n-th category); or exactly `values`
+ * (numbers, epoch milliseconds on time axes, or categories), those inside
+ * the axis' domain.
  * @exclusiveMinimum 0
  */
 export type TicksSpec =

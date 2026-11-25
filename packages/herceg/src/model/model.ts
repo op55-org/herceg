@@ -94,6 +94,8 @@ import {
   type AxisContext,
   type AxisPlan,
   type AxisType,
+  type LabelsMeet,
+  labelsMeet,
   niceAxisDomain,
   planAxis,
   planBandAxis,
@@ -1737,6 +1739,12 @@ export class ChartModel {
     // With x scales of their own, what panels draw counts within their own x
     // domain, so zooming one group can change a y scale it shares; category
     // x scales show all of theirs.
+    // Rows placed off x (in a frame, on a scale of the chart's own) give x
+    // no data, but y labels them.
+    const offX = marks.some(
+      ({ mark, series }) =>
+        series.length > 0 && offAxis(mark.bound, "x") && !offAxis(mark.bound, "y"),
+    );
     const byX = xGroups && xContexts.some(({ type }) => type !== "band") && xGroups;
     // Each y axis is for the marks on its side: the left one's, or with
     // `axis: "right"` the right one's. A panel has a y axis when one of its
@@ -1843,17 +1851,31 @@ export class ChartModel {
             : [""];
           // What each group draws on this side, and its axis.
           const drawnOn = groups?.drawn ?? [onSide(marks, right)];
-          const contexts = (groups?.axes ?? [{ type: shared!, spec: config[axis] }]).map((scale) =>
+          const unfitted = (groups?.axes ?? [{ type: shared!, spec: config[axis] }]).map((scale) =>
             this.#axisContext({ ...scale, zone, locale }, axis),
           );
           // Each group is planned over its shortest row with the axis, so what
           // marks draw past their values (points, bar labels) fits in every row;
           // a group of panels drawing layout marks only has nothing to fit.
-          const heights = contexts.map(() => Number.POSITIVE_INFINITY);
+          const heights = unfitted.map(() => Number.POSITIVE_INFINITY);
           groupOf.forEach((g, i) => {
             if (drawsAxis[i]) heights[g] = Math.min(heights[g]!, plotHs[i]!);
           });
           const heightOf = (g: number) => (heights[g]! < Infinity ? heights[g]! : plotHeight);
+          // Group `g`'s context, its labels fitting as the panels `drawing` its
+          // plan draw them: its rows of its height, or a row of another.
+          const fitIn = (g: number, drawing: (i: number) => boolean): AxisContext => {
+            const meets =
+              (xHas.includes(true) || offX) &&
+              meetsIn(
+                axis,
+                panelIndexes.filter((i) => groupOf[i] === g && drawing(i)),
+                (i) => labeled[i]!,
+                (i) => plotYs[i]!,
+              );
+            return meets ? { ...unfitted[g]!, meets } : unfitted[g]!;
+          };
+          const contexts = unfitted.map((_, g) => fitIn(g, (i) => plotHs[i] === heightOf(g)));
           const plans: AxisPlan[] = [];
           // Groups of panels with nothing to show along y have no y labels.
           const empty = new Set<number>();
@@ -1899,7 +1921,13 @@ export class ChartModel {
             if (context.type === "band") return planCategories(y, size, i);
             const [d0, d1] = plan.scale.domain;
             const count = tickCount(context.spec, size);
-            const sized = planAxis(context, [d0!, d1!], [y + size, y], count, plan.within);
+            const sized = planAxis(
+              fitIn(g, (k) => k === i),
+              [d0!, d1!],
+              [y + size, y],
+              count,
+              plan.within,
+            );
             return { ...sized, padded: plan.padded };
           });
           // Whether a group shows categories, which may be none.
@@ -2033,8 +2061,42 @@ export class ChartModel {
           : planAxis(context, xDomains[h]!, [0, pixels], xTicks(context, pixels));
       },
     });
+    /**
+     * Whether neighbouring labels of the axis of scale `axis` over `panels`
+     * meet as they are drawn: as an axis the guides list draws the scale's
+     * plan (along y where each panel's plot stands, `plotAt`), else as the
+     * model's axis labels the panels `labeled` says, in each of their
+     * paints; undefined where nothing labels it, whose ticks then keep their
+     * count (see `AxisContext.meets`).
+     */
+    const meetsIn = (
+      axis: ScaleName,
+      panels: readonly number[],
+      labeled: (i: number) => boolean,
+      plotAt?: (i: number) => number,
+    ): LabelsMeet | undefined => {
+      const drawn = guided?.labelsMeet(axis, panels, guidesState!, plotAt);
+      if (drawn !== undefined) return drawn || undefined;
+      const paints: TextPaint[] = [];
+      for (const i of panels) {
+        const paint = labeled(i) && styles.axisText("tickLabel", axis, i);
+        if (paint && !paints.includes(paint)) paints.push(paint);
+      }
+      return paints.length > 0 ? labelsMeet(paints, measure, axis === "x") : undefined;
+    };
+    // What the guides read of the scene before y is planned.
+    const guidesState = guided && axesState(leftSide.labeled, rightSide?.labeled ?? []);
+    xContexts.forEach((context, h) => {
+      const meets = meetsIn(
+        "x",
+        panelIndexes.filter((i) => xGroupAt[i] === h),
+        labelsX,
+      );
+      // Labels are drawn where the group has data: those of empty axes are not measured.
+      if (meets && xHas[h]) xContexts[h] = { ...context, meets };
+    });
     // The guides read which panels label y, for how far their labels reach.
-    const across = guided?.across(axesState(leftSide.labeled, rightSide?.labeled ?? []));
+    const across = guided?.across(guidesState!);
     // Panels' layouts keep room for listed axes above the panels drawing them.
     const top = head.top + (placement ? 0 : (across?.top ?? 0));
     const xLabelHeight = xLineHeight + (across?.bottom ?? 0);
@@ -2208,12 +2270,6 @@ export class ChartModel {
     const leftData =
       !leftY.contexts.every(({ type }) => type === "band") || (bands.y?.keys.length ?? 0) > 0;
     if (!(leftData || rightUsed)) xHas.fill(false);
-    // Rows placed off x (in a frame, on a scale of the chart's own) give x
-    // no data, but y labels them.
-    const offX = marks.some(
-      ({ mark, series }) =>
-        series.length > 0 && offAxis(mark.bound, "x") && !offAxis(mark.bound, "y"),
-    );
     const hasData = xHas.includes(true) || ((leftData || rightUsed) && offX);
     /** Names the scale panel `i` shares on a side: "" when every panel does. */
     const groupKey = (side: typeof leftY, i: number) => side.keys[side.groupOf[i]!]!;

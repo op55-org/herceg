@@ -17,6 +17,7 @@ import {
   drawn,
   extent,
   layered,
+  meetsAs,
   outward,
   resolveLayers,
   rowDepths,
@@ -153,10 +154,20 @@ export function measureColorbar(
     },
     major.labels ? major.labels.duplicates : "hide",
   );
-  const count = countOf(ticks) ?? Math.max(2, Math.round(length / 40));
+  const given = countOf(ticks);
+  const count =
+    given === undefined ? Math.max(2, Math.round(length / 40)) : kit.wholeCount(given, length);
+  // Its own automatic ticks fit its labels, as its layers' do.
+  const meets = meetsAs(
+    kit,
+    axis,
+    major,
+    restyle(kit, read, base.label, major.style?.tickLabel, `${major.path}.style.tickLabel`),
+    measure,
+  );
   const along = (start: number) =>
     kit.planAxis(
-      { ...context, plan: planner },
+      { ...context, plan: planner, meets },
       domain,
       upright ? [start + length, start] : [start, start + length],
       count,

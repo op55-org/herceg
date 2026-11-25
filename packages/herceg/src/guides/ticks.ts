@@ -6,7 +6,7 @@
 import type { Formatter } from "../format/format.ts";
 import { fiscalOf, formatWriter, formOf } from "../format/patterns.ts";
 import { type UnitFormat, unitWriter } from "../format/units.ts";
-import type { AxisBreaks, AxisContext, AxisType } from "../model/axis.ts";
+import type { AxisBreaks, AxisContext, AxisType, TickPlan } from "../model/axis.ts";
 import type { GuideKit } from "../model/guides.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { CalendarScale, TimeInterval, TimeUnit } from "../scale/time.ts";
@@ -27,12 +27,6 @@ const UNIT_MS: Record<TimeUnit, number> = {
   month: 30 * DAY,
   year: 365 * DAY,
 };
-
-/** A layer's ticks and their labels. */
-export interface TickPlan {
-  ticks: number[];
-  labels: string[];
-}
 
 /** Where an axis' settings are, for messages: its ticks' and format's paths. */
 export interface SettingPaths {
@@ -73,10 +67,11 @@ export function tickPlanner(
         : defaultLabels(kit, values, ticker, context, false, generate);
       return { ticks: values, labels: shown(labels) };
     }
-    // Automatic ticks: formats other than functions ask for fewer ticks
-    // where neighbors read alike, unless duplicates are shown.
+    // Automatic ticks, which fit their labels (`TickPlan.auto`): formats
+    // other than functions ask for fewer ticks where neighbors read alike,
+    // unless duplicates are shown.
     if (write && !write.callback && duplicates === "hide")
-      return kit.writtenTicks(ticker, count, write.ticks);
+      return { ...kit.writtenTicks(ticker, count, write.ticks), auto: true };
     // On log axes some are labelled: written alone (a function told each
     // one's place among them all), repeats judged among them.
     const plan = kit.autoTicks(ticker, count);
@@ -87,7 +82,7 @@ export function tickPlanner(
       : write.callback
         ? kit.labelledOf(write.ticks(auto, labelled), labelled)
         : write.ticks(labelledValues);
-    return { ticks: auto, labels: kit.spread(plan, shown(written)) };
+    return { ticks: auto, labels: kit.spread(plan, shown(written)), auto: true };
   };
 }
 

@@ -8,7 +8,7 @@
 
 import { anchorBlock } from "../layout/block.ts";
 import type { MeasureText } from "../layout/text.ts";
-import type { AxisPlan } from "../model/axis.ts";
+import type { AxisPlan, LabelsMeet } from "../model/axis.ts";
 import type { AxesState, CompiledAxes, GuideKit } from "../model/guides.ts";
 import type { ChartConfig, PanelPlans } from "../model/model.ts";
 import type { ScaleName } from "../model/scales.ts";
@@ -783,6 +783,31 @@ export function compiledAxes(
         reach,
       };
     },
+    labelsMeet(scale, panels, state, plotAt) {
+      // The axis drawing the scale's plan, on its default side or moved off it.
+      const axis = listed.find((one) => one.scale === scale && one.layers[0]!.planned);
+      if (!axis || (axis.home && !changed(scale))) return undefined;
+      // Each panel's labels in its paint; along y, moved inside the chart (or
+      // its inset's box) where its plot stands. The model plans x along the
+      // plot, before it stands in the chart: rows past the first, which stay
+      // inside the chart, are judged at their ticks.
+      const paints: TextPaint[] = [];
+      const seen = new Set<string>();
+      const tests: (LabelsMeet | undefined)[] = [];
+      for (const i of panels)
+        if (axis.home ? state.labeled[scale][i] : drawsIn(axis, state, i)) {
+          const paint = baseLabel(kit, axis, state.styles, i);
+          if (!paints.includes(paint)) paints.push(paint);
+          const at = plotAt?.(i) ?? 0;
+          const within = plotAt && (state.cells?.within(i) ?? [0, state.height]);
+          const key = `${paints.indexOf(paint)} ${at} ${within}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          tests.push(meetsAs(kit, axis, axis.layers[0]!, paint, state.measure, { at, within }));
+        }
+      if (!tests[0]) return false;
+      return (a, b) => tests.some((meets) => meets!(a, b));
+    },
     tickLabels(scale, i, styles) {
       const home = changed(scale);
       if (!home) return undefined;
@@ -1191,7 +1216,17 @@ function placedLayers(
   const room = roomIn(axis, i);
   const gap = axis.home && axis.across ? state.xGap(i) : undefined;
   const roomed = room === axis.room && cut === undefined ? axis : { ...axis, room, cut };
-  const placed = layered(kit, roomed, base, styles.read, state.measure, plan, span, gap);
+  const placed = layered(
+    kit,
+    roomed,
+    base,
+    styles.read,
+    state.measure,
+    plan,
+    span,
+    gap,
+    state.width,
+  );
   // Along y, labels stay in the span they are kept inside.
   const [lo, hi] = edges && axis.across ? edges : span;
   for (const p of placed)
@@ -1278,6 +1313,8 @@ export function layered(
    * model's, below the plots); by default the default axes', for their size.
    */
   labelGap?: number,
+  /** The chart's width, which rows of x labels past the first stay inside (see `drawn`). */
+  width?: number,
 ): Placed[] {
   // Labels stand off the line as default axes place them, by the gap for their size.
   const gap = axis.across ? kit.tickLabelGap(base.label.size) : Y_GAP;
@@ -1291,7 +1328,20 @@ export function layered(
     if (plan) {
       // A category axis' own layer labels its categories, on any side.
       const categories = !plan.context && layer.id === "major";
-      const own = layer.planned || categories ? plan : planLayer(kit, layer, axis, plan);
+      const own =
+        layer.planned || categories
+          ? plan
+          : planLayer(
+              kit,
+              layer,
+              axis,
+              plan,
+              meetsAs(kit, axis, layer, label, measure, {
+                at: Math.min(...plan.scale.range),
+                within,
+                width,
+              }),
+            );
       const labels = layer.labels;
       // Turned or kept-apart labels of a category axis choose among all its categories.
       const all =
@@ -1347,8 +1397,6 @@ export function layered(
         labelAt = ticks.map(({ position, label: text }) => {
           if (!text) return position;
           const { height } = boxOf(text, label, measure);
-          // From the tick to its block's middle.
-          const middle = align === "start" ? height / 2 : align === "end" ? -height / 2 : 0;
           if (height > hi - lo + 0.5) {
             // Labels left out where they cross the span's ends stay at their ticks.
             if (labels.ends === "hide") return position;
@@ -1359,7 +1407,7 @@ export function layered(
               message: `${layer.path}: a label ${Math.ceil(height)} px tall does not fit the ${Math.floor(hi - lo)} px down it stays inside; make the chart or inset taller, or its labels smaller or of fewer lines`,
             });
           }
-          return Math.min(Math.max(position + middle, lo + height / 2), hi - height / 2) - middle;
+          return alongWithin(position, text, label, measure, align, within);
         });
       }
       if (overlap === "hide" || overlap === "stagger") {
@@ -1646,8 +1694,39 @@ function boxOf(
   };
 }
 
-/** A layer's own plan over the scale of the axis' plan `plan`: about its own count of ticks, or the axis'. */
-function planLayer(kit: GuideKit, layer: Layer, axis: { scale: string }, plan: AxisPlan): AxisPlan {
+/**
+ * Where a label along y with its tick at `position` is drawn: its block,
+ * aligned at the tick as `align` says, moved inside `[lo, hi]` where it
+ * would cross either end; at its tick where it is taller than the span
+ * (which `layered` refuses, or `ends: "hide"` leaves out).
+ */
+function alongWithin(
+  position: number,
+  label: string,
+  paint: TextPaint,
+  measure: MeasureText,
+  align: Align | undefined,
+  [lo, hi]: readonly [number, number],
+): number {
+  const { height } = boxOf(label, paint, measure);
+  if (height > hi - lo + 0.5) return position;
+  // From the tick to its block's middle.
+  const middle = align === "start" ? height / 2 : align === "end" ? -height / 2 : 0;
+  return Math.min(Math.max(position + middle, lo + height / 2), hi - height / 2) - middle;
+}
+
+/**
+ * A layer's own plan over the scale of the axis' plan `plan`: about its own
+ * count of ticks, or the axis'; automatic ticks fitting its labels as
+ * `meets` says, not the axis' plan's.
+ */
+function planLayer(
+  kit: GuideKit,
+  layer: Layer,
+  axis: { scale: string },
+  plan: AxisPlan,
+  meets: LabelsMeet | undefined,
+): AxisPlan {
   const context = plan.context;
   if (!context || plan.within === undefined || plan.count === undefined)
     throw new Error(
@@ -1662,11 +1741,13 @@ function planLayer(kit: GuideKit, layer: Layer, axis: { scale: string }, plan: A
     { ticks: `${layer.path}.ticks`, format: `${layer.path}.format` },
     layer.labels ? layer.labels.duplicates : "hide",
   );
+  const [from, to] = plan.scale.range as [number, number];
+  const count = countOf(layer.ticks);
   return kit.planAxis(
-    { ...context, plan: planner },
+    { ...context, plan: planner, meets },
     plan.scale.domain as [number, number],
-    plan.scale.range as [number, number],
-    countOf(layer.ticks) ?? plan.count,
+    [from, to],
+    count === undefined ? plan.count : kit.wholeCount(count, Math.abs(to - from)),
     plan.within,
   );
 }
@@ -1770,6 +1851,62 @@ function overlaps(
   if (Math.abs(dy * cos - d * rise) >= (tall + wb.height) / 2) return false;
   const reach = anchor === "middle" ? (wa + wb.width) / 2 : anchor === "start" ? wa : wb.width;
   return d * cos + dy * rise < reach + PAD;
+}
+
+/**
+ * Whether neighbouring labels of `layer` on `axis`, written in `paint`,
+ * overlap as "show" draws them (aligned, turned, inside the plot; with the
+ * plot's low end `at` in the chart, along y moved inside `within`, and in
+ * rows past the first inside the chart's `width`; along y, those `ends`
+ * leaves out at their ticks), judged as "hide" judges them, by widths no
+ * narrower than their shapes; undefined where the layer writes no labels
+ * or keeps them apart its own way, whose automatic ticks keep their count
+ * (see `AxisContext.meets`).
+ */
+export function meetsAs(
+  kit: GuideKit,
+  axis: { across: boolean; above: boolean },
+  layer: Layer,
+  paint: TextPaint,
+  measure: MeasureText,
+  place?: {
+    at: number;
+    within?: readonly [number, number] | undefined;
+    width?: number | undefined;
+  },
+): LabelsMeet | undefined {
+  const labels = layer.labels;
+  if (!labels || (labels.overlap ?? "show") !== "show" || typeof labels.rotation === "object")
+    return undefined;
+  const angle = labels.rotation ?? 0;
+  const run = runOf(axis, layer);
+  const aligned = (axis.across ? paint.align : paint.verticalAlign) !== undefined;
+  const flat = !angle && (labels.inside || aligned) ? alignAt(axis.across, paint) : undefined;
+  const shaped = kit.shapedMeasure(measure);
+  // Where each label is drawn in the chart, as `layered` and `drawn` place
+  // them: along y moved inside the span, those `ends` leaves out (their ink
+  // crossing it at their ticks) kept at their ticks, so that they still part
+  // the labels either side of them (judged, though not drawn, they can only
+  // coarsen the interval); in rows past the first, moved inside the chart.
+  const { within, width } = place ?? {};
+  const moved =
+    run === "along"
+      ? within &&
+        ((t: AxisTick): AxisTick => {
+          if (labels.ends === "hide") {
+            const [from, to] = painted(kit, t, paint, angle, run, measure, flat);
+            if (from < within[0] - 0.5 || to > within[1] + 0.5) return t;
+          }
+          return { ...t, position: alongWithin(t.position, t.label, paint, measure, flat, within) };
+        })
+      : !angle && !flat && labels.row > 0 && width !== undefined
+        ? (t: AxisTick): AxisTick => ({
+            ...t,
+            position: inside(t.position, t.label, paint, measure, labels.row, width),
+          })
+        : undefined;
+  const drawnAt = (t: AxisTick) => (moved ? moved({ ...t, position: t.position + place!.at }) : t);
+  return (a, b) => overlaps(drawnAt(a), drawnAt(b), paint, shaped, angle, run, flat);
 }
 
 /**

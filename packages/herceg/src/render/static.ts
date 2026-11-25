@@ -7,7 +7,7 @@ import { readPage } from "../dom/page-theme.ts";
 import { checkFonts } from "../fonts/prepared.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { type RasterSource, sizedRoot } from "../image/raster.ts";
-import { estimateText, type MeasureText } from "../layout/text.ts";
+import { estimateText, forgetShapes, type MeasureText } from "../layout/text.ts";
 import { describeChart } from "../model/describe.ts";
 import { type ChartConfig, ChartModel, STATIC_RASTER_RATIO } from "../model/model.ts";
 import { isLightColor } from "../scale/color.ts";
@@ -148,6 +148,8 @@ export function drawStatic(
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);
   if (fonts) measure = fonts.measure;
+  // A measurer given to an export measures that export afresh.
+  else if (measure !== estimateText) forgetShapes(measure);
   const scene = drawInState(model, options, () => model.scene(measure, false, NO_PAGE));
   // What the fonts do not cover is refused, as PDF export refuses it.
   if (fonts) checkCoverage(scene, fonts.measure);

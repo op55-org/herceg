@@ -8,8 +8,8 @@
 // one field it labels with). A label without a match
 // comes or goes with its bar, keeping its place on it (between its root and
 // tip, or past its tip), or else shows or goes at once. Between the two
-// scenes, a counting number is laid out by its shape (`shapeOf`), so frames
-// measure only the few shapes a format writes.
+// scenes, a counting number is laid out by its shape (layout/text.ts
+// `shapeOf`), so frames measure only the few shapes a format writes.
 
 import type { MeasureText } from "../layout/text.ts";
 import type { LabelItems, LabelsGeometry, TextGeometry, TextItem } from "../scene/scene.ts";
@@ -39,28 +39,6 @@ export interface ShownLabels {
   starts: Float32Array | undefined;
   texts: readonly string[] | undefined;
   items: readonly (readonly TextItem[])[] | undefined;
-}
-
-const DIGIT = /\p{Nd}/u;
-
-/**
- * `text` with each decimal digit written as the zero of its own digits:
- * "59,268" as "00,000", Arabic-Indic "١٢٣" as "٠٠٠", signs, separators,
- * and units kept. Unicode's decimal digits come in runs of ten from zero,
- * some back to back, so a digit's zero is as far back as its place in its
- * run of runs. Frames measure a counting number by its shape: a format
- * writes few shapes, which the chart's measurer keeps, so a transition
- * measures nothing new after its first frames; the number's text stays
- * exact, and its run is drawn from the edge its line aligns to.
- */
-export function shapeOf(text: string): string {
-  return text.replace(/\p{Nd}/gu, (digit) => {
-    if (digit <= "9") return "0";
-    const code = digit.codePointAt(0)!;
-    let start = code;
-    while (DIGIT.test(String.fromCodePoint(start - 1))) start--;
-    return String.fromCodePoint(code - ((code - start) % 10));
-  });
 }
 
 /** Whether a geometry's labels are named for value transitions. */
