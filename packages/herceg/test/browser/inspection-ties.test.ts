@@ -85,11 +85,17 @@ describe("ties", () => {
       // A cursor shown at a value reads it as the pointer there does (reported once drawn).
       pointer(chart, "pointerleave", 0, 0);
       for (const [k, mid] of found.slice(0, 40)) {
-        const before = hovers.length;
         chart.showCursor({ x: mid });
-        await expect.poll(() => hovers.length).toBeGreaterThan(before);
-        const shown = hovers.at(-1)!;
-        if (shown.cause !== "api" || firstRow(shown.inspection) !== k) later.push(`shown ${k}`);
+        // The hover of this cursor: a frame may first report the one before
+        // it again, where its layout moved what that read.
+        const at = () => {
+          const shown = hovers.at(-1);
+          const value = (shown?.inspection as { value?: number } | undefined)?.value;
+          return shown?.cause === "api" && value !== undefined && Math.abs(value - mid) < 1;
+        };
+        await expect.poll(at).toBe(true);
+        const read = firstRow(hovers.at(-1)!.inspection);
+        if (read !== k) later.push(`shown ${k}: row ${read}`);
       }
       expect(later, `variant ${variant}`).toEqual([]);
       // Out of the page, so that the next chart is in view, where frames are drawn.
