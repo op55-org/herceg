@@ -4,14 +4,13 @@
 import type { DrawnMark, PickQuery } from "../../src/marks/drawn.ts";
 import { lookups } from "../../src/marks/lookups.ts";
 import type { Mark } from "../../src/marks/mark.ts";
-import { lowerPosition, placeAt, rowOf } from "../../src/marks/series.ts";
+import { placeAt, rowOf } from "../../src/marks/series.ts";
 import type { ChartModel } from "../../src/model/model.ts";
 import { Picker, type PickKit } from "../../src/model/pick.ts";
 
 export const pickKit: PickKit = {
   rowOf,
   placeAt,
-  lowerPosition,
 };
 
 /** `model`, picking as its controller would (`model.picker`), with `slop` pixels of reach. */

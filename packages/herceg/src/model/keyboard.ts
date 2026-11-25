@@ -369,7 +369,9 @@ function crossing(
  * The drawn observation of `s` nearest `place` along `axis` (on `scale`,
  * before marks spread rows across their bands), of ties the earliest (see
  * `earliest`), of those at its value (a jump) the nearest `near` across,
- * and its height across; -1 for none drawn.
+ * and its height across; -1 for none drawn. Sorted rows are searched by
+ * value and walked outward from it as the pointer's reading walks them
+ * (`Inspector.walk`).
  */
 function nearest(
   inspector: Inspector,
@@ -386,37 +388,39 @@ function nearest(
   const at = (k: number) => scale.map(value(k)) - place;
   let best = -1;
   let height = Number.NaN;
+  // The drawn points either side of the place's value: the nearer bounds
+  // how far the walks from them go.
+  const [a, b] = sorted ? inspector.around(s, axis, scale, scale.invert(place), value) : [-1, -1];
+  const reach = (k: number) => (k < 0 ? Number.POSITIVE_INFINITY : Math.abs(at(k)));
+  const least = Math.min(reach(a), reach(b));
   earliest((take, limit) => {
     // The winner's value, and how far across of it the nearest is.
     let won = Number.NaN;
     let across = Number.POSITIVE_INFINITY;
-    // The limit changes only as rows are taken.
-    let bound = limit();
     [best, height] = [-1, Number.NaN];
-    const far = (k: number) => Math.abs(at(k)) > bound;
-    const consider = (k: number) => {
-      const d = Math.abs(at(k));
-      const pixels = d > bound ? undefined : inspector.drawn(s, rowOf(s, k));
-      if (!pixels) return;
+    const consider = (k: number, d: number, pixels: readonly [number, number]) => {
       const v = value(k);
       const h = Math.abs(pixels[c] - near);
-      const wins = take(k, d, v);
-      bound = limit();
       // At the winner's value, the nearer across, then the first row.
-      if (wins) won = v;
+      if (take(k, d, v)) won = v;
       else if (v !== won || h > across || (h === across && k > best)) return;
       [best, height, across] = [k, pixels[c], h];
     };
-    // Sorted rows outward from where the place falls, either way, until they
-    // are farther than the best; other rows, every one.
-    let k = 0;
     if (sorted) {
-      const way = at(s.length - 1) >= at(0) ? 1 : -1;
-      k = firstPast(0, s.length, (j) => way * at(j) >= 0);
-      for (let j = k - 1; j >= 0 && !far(j); j--) consider(j);
+      inspector.walk(s, axis, scale, place, a, -1, limit, consider);
+      inspector.walk(s, axis, scale, place, b, 1, limit, consider);
+      return;
     }
-    for (; k < s.length && !(sorted && far(k)); k++) consider(k);
-  });
+    // The limit changes only as rows are taken.
+    let bound = limit();
+    for (let k = 0; k < s.length; k++) {
+      const d = Math.abs(at(k));
+      const pixels = d <= bound ? inspector.drawn(s, rowOf(s, k)) : undefined;
+      if (!pixels) continue;
+      consider(k, d, pixels);
+      bound = limit();
+    }
+  }, least);
   return [best, height];
 }
 

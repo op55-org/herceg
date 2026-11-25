@@ -19,7 +19,7 @@ import { Polyline } from "../lod/polyline.ts";
 import { monotonePolyline } from "../marks/curve.ts";
 import { tablesOf, viewOf } from "../marks/layout-mark.ts";
 import { keepsKey, type Mark, referenceOf } from "../marks/mark.ts";
-import { lowerPosition, placeAt, rowOf, xAt } from "../marks/series.ts";
+import { placeAt, rowOf, xAt } from "../marks/series.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import { planAxis } from "../model/axis.ts";
 import { axisGuide } from "../model/axis-guide.ts";
@@ -240,7 +240,6 @@ export const KIT: InteractionKit = {
   placeAt,
   rowOf,
   earliest,
-  lowerPosition,
   xAt,
   surface,
   tickLabelGap,

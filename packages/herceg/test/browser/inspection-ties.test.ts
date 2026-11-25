@@ -1,8 +1,9 @@
 // Ties in what inspection reads, in the browser: midway between two
 // observations, the earlier is read by every reader (the pointer's tooltip
 // and hover events, the row a line's item names, the chart's `inspect`, a
-// cursor `showCursor` shows, the keyboard and its announcements), on every
-// kind of axis.
+// cursor `showCursor` shows or another chart shares, the keyboard and its
+// announcements), on every kind of axis; and two distances tie only within
+// a ten-thousandth of the nearer, so a near-tie reads the nearer.
 import "./interactive.ts";
 import { describe, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
@@ -41,15 +42,24 @@ const firstRow = (inspection: unknown) =>
 
 describe("ties", () => {
   it("go to the earlier observation through the pointer, what it is on, the chart's API, and showCursor (A7)", async () => {
-    for (const x of [TIMES, TIMES.map((t) => t - T0)]) {
-      const data = table({ x: x === TIMES ? time(TIMES) : x, v: x.map((_, k) => heightOf(k)) });
+    // Times, numbers near 0 and far from it, and times on a reversed range.
+    const variants = [
+      { x: TIMES, time: true },
+      { x: TIMES.map((t) => t - T0), time: false },
+      { x: TIMES.map((t) => t - T0 + 1e12), time: false },
+      { x: TIMES, time: true, reversed: true },
+    ];
+    for (const [variant, { x, time: timed, reversed }] of variants.entries()) {
+      const data = table({ x: timed ? time(x) : x, v: x.map((_, k) => heightOf(k)) });
+      const into = host(1000, 300);
       const chart = await mount(
         {
           marks: [line(data, { x: "x", y: "v" })],
           timeZone: "UTC",
+          ...(reversed && { x: { domain: [x.at(-1)!, x[0]!] as [number, number], nice: false } }),
           inspection: { mode: "nearest-x", snap: "each" },
         },
-        host(1000, 300),
+        into,
       );
       const hovers = heard(chart, "hover");
       const { plot } = chart.getPanels()[0]!;
@@ -81,7 +91,9 @@ describe("ties", () => {
         const shown = hovers.at(-1)!;
         if (shown.cause !== "api" || firstRow(shown.inspection) !== k) later.push(`shown ${k}`);
       }
-      expect(later).toEqual([]);
+      expect(later, `variant ${variant}`).toEqual([]);
+      // Out of the page, so that the next chart is in view, where frames are drawn.
+      into.remove();
     }
   });
 
@@ -151,5 +163,71 @@ describe("ties", () => {
       await press("ArrowDown");
     }
     expect(later).toEqual([]);
+  });
+
+  it("read A7's near-tie as the nearer, through the pointer, the API, showCursor, and a synced cursor", async () => {
+    // Chiller's observations 130 ms apart about 11:32 (study A7); the
+    // cursor 0.48 ms past their midpoint, where the later is nearer by
+    // 0.96 ms of 65, at A7's 30-minute view and at a second's.
+    const T = Date.UTC(2026, 9, 1, 11, 32);
+    const chiller = table({
+      t: time([T - 60_000, T - 65, T + 65, T + 60_000]),
+      v: [500, 500, 500, 500],
+    });
+    for (const domain of [
+      [Date.UTC(2026, 9, 1, 11, 30), Date.UTC(2026, 9, 1, 12)],
+      [T - 500, T + 500],
+    ] as [number, number][]) {
+      const options = {
+        marks: [line(chiller, { x: "t", y: "v" })],
+        timeZone: "UTC",
+        x: { domain, nice: false },
+        y: { domain: [0, 1000] as [number, number] },
+        inspection: {
+          mode: "nearest-x" as const,
+          snap: "each" as const,
+          within: { milliseconds: 30_000 },
+        },
+        interaction: { sync: { cursor: `chiller-${domain[0]}` } },
+      };
+      const hosts = [host(1100, 480), host(1100, 480)];
+      const chart = await mount(options, hosts[0]);
+      const peer = await mount(options, hosts[1]);
+      const hovers = heard(chart, "hover");
+      const shared = heard(peer, "hover");
+      const { plot } = chart.getPanels()[0]!;
+      const y = chart.toPixel(500, { axis: "y" })!;
+      for (const [name, ms, row] of [
+        ["near-tie", 0.48, 2],
+        ["before it", -0.48, 1],
+        ["midpoint", 0, 1],
+      ] as const) {
+        const px = chart.toPixel(T + ms, { axis: "x" })!;
+        const before = shared.length;
+        pointer(chart, "pointermove", px, y);
+        chart.render();
+        await expect.poll(() => shared.length).toBeGreaterThan(before);
+        const hover = hovers.at(-1);
+        const got = [
+          firstRow(hover?.inspection),
+          hover?.target?.kind === "item" ? hover.target.row : undefined,
+          firstRow(chart.inspect(px, plot.y + plot.height / 2)),
+          firstRow(shared.at(-1)?.inspection),
+        ];
+        expect(got, `${name} at ${domain}`).toEqual([row, row, row, row]);
+      }
+      // A cursor shown at the value reads as the pointer there does.
+      pointer(chart, "pointerleave", 0, 0);
+      for (const [ms, row] of [
+        [0.48, 2],
+        [0, 1],
+      ] as const) {
+        const before = hovers.length;
+        chart.showCursor({ x: T + ms });
+        await expect.poll(() => hovers.length).toBeGreaterThan(before);
+        expect(firstRow(hovers.at(-1)!.inspection), `shown ${ms} at ${domain}`).toBe(row);
+      }
+      for (const element of hosts) element.remove();
+    }
   });
 });

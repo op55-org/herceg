@@ -582,7 +582,7 @@ export class Calendar implements Breaks {
     };
   }
 
-  shownFrom(x: NumericArray, k: number, end: number, rows?: Uint32Array): number {
+  shownFrom(x: NumericArray, k: number, end: number, rows?: ArrayLike<number>): number {
     const at = (i: number) => x[rows === undefined ? i : rows[i]!]!;
     while (k < end) {
       const around = this.around(at(k));
@@ -592,7 +592,7 @@ export class Calendar implements Breaks {
     return end;
   }
 
-  shownBefore(x: NumericArray, k: number, rows?: Uint32Array): number {
+  shownBefore(x: NumericArray, k: number, rows?: ArrayLike<number>): number {
     const at = (i: number) => x[rows === undefined ? i : rows[i]!]!;
     while (k >= 0) {
       const around = this.around(at(k));

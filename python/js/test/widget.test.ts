@@ -1652,6 +1652,54 @@ describe("notebook widget", () => {
     expect(later).toEqual([]);
   });
 
+  it("sends Python the nearer observation of a near-tie (A7's chiller)", async () => {
+    // Observations 130 ms apart about 11:32; the pointer 0.48 ms past their
+    // midpoint, where the later is nearer, at A7's 30-minute view.
+    const T = Date.UTC(2026, 9, 1, 11, 32);
+    const times = [T - 60_000, T - 65, T + 65, T + 60_000];
+    const chart = snapshot({
+      inspection: { mode: "nearest-x", snap: "each", within: { milliseconds: 30_000 } },
+      x: { domain: [Date.UTC(2026, 9, 1, 11, 30), Date.UTC(2026, 9, 1, 12)], nice: false },
+      width: 1100,
+    });
+    chart.spec.data = {
+      data: { columns: { t: { type: "time", dtype: "float64", buffer: 0 }, v: number(1) } },
+    };
+    chart.buffers = [
+      new DataView(new Float64Array(times).buffer),
+      new DataView(new Float64Array([5, 5, 5, 5]).buffer),
+    ];
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const model = new MockModel({ _chart: chart, _listening: ["hover"] });
+    const [host] = mount(model);
+    const mounted = listener.mock.instances[0] as MountedChart;
+    for (let loading = mounted.loading; loading; loading = mounted.loading) await loading;
+    mounted.render();
+    const rect = figure(host!).getBoundingClientRect();
+    const { plot } = mounted.getPanels()[0]!;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const read: (number | undefined)[] = [];
+    for (const ms of [0.48, 0, -0.48]) {
+      const px = mounted.toPixel(T + ms, { axis: "x" })!;
+      figure(host!).dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: rect.left + px,
+          clientY: rect.top + plot.y + plot.height / 2,
+          pointerId: MOUSE,
+        }),
+      );
+      mounted.render();
+      vi.runOnlyPendingTimers();
+      const sent = model.messages("hover").at(-1) as
+        | { event: { inspection?: { points: { row: number }[] } } }
+        | undefined;
+      read.push(sent?.event.inspection?.points[0]?.row);
+    }
+    // The later past the midpoint, the earlier at it and before it.
+    expect(read).toEqual([2, 1, 1]);
+  });
+
   it("sends a 3D chart's camera and its points' values when Python listens", async () => {
     const chart = snapshot();
     chart.spec.marks = [{ type: "point3d", x: "t", y: "v", z: "v", data: "data" }];

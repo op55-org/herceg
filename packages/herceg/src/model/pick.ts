@@ -33,7 +33,7 @@ import {
   lookups,
 } from "../marks/lookups.ts";
 import type { Frame, Mark, MarkKey } from "../marks/mark.ts";
-import type { lowerPosition, placeAt, Series } from "../marks/series.ts";
+import type { placeAt, Series } from "../marks/series.ts";
 
 import type {
   AreaGeometry,
@@ -65,7 +65,6 @@ import type { ChartModel } from "./model.ts";
 /** What picking reads series with, handed in (see the top). */
 export interface PickKit extends PartKit, LookupKit {
   placeAt: typeof placeAt;
-  lowerPosition: typeof lowerPosition;
 }
 
 /** The item picked: its mark, its record, and what it is. */
@@ -82,8 +81,14 @@ export interface Picked {
 /** Points a search steps over looking for an observation a path can draw. */
 const GAP_WALK = 1024;
 
-/** Pixels apart that distances to the query tie within (as model/nearest.ts says). */
+/** Drawn points a search walks through while they may tie (as model/inspect.ts says). */
+const TIE_WALK = 1024;
+
+/** Pixels apart that distances to the query tie within, in 2D (as model/nearest.ts says). */
 const TIE = 1e-3;
+
+/** Along an axis, the share of the nearer distance two distances tie within (as model/nearest.ts says). */
+const TIE_RATIO = 1e-4;
 
 /** A geometry of a panel in paint order: its record, its mark, and its index (-1: the mark picks itself). */
 interface Painted {
@@ -604,7 +609,7 @@ export class Picker {
     query: PickQuery,
     sorted: "x" | "y" | undefined,
   ): Extract<DrawnPart, { kind: "row" }> | undefined {
-    const { rowOf, placeAt, lowerPosition } = this.#kit;
+    const { rowOf, placeAt } = this.#kit;
     const { series: s, along, eligible, sameRun, order } = part;
     const [ax, ay, bx, by] = hit.segment!;
     const found = (k: number) => {
@@ -651,12 +656,6 @@ export class Picker {
     const at = (k: number) => placeAt(s, along, rowAt(k));
     // The first position at or past `value` (past it with `after`).
     const first = (value: number, after: boolean) => {
-      // Values searched as stored are no panel's own categories' places.
-      if (!order && !s.places?.[along]) {
-        let k = lowerPosition(s, value, along);
-        while (after && k < length && at(k) <= value) k++;
-        return k;
-      }
       let [a, b] = [0, length];
       while (a < b) {
         const mid = (a + b) >>> 1;
@@ -665,10 +664,23 @@ export class Picker {
       }
       return a;
     };
-    // The first eligible position from `k` stepping `by`, before `end`; -1 for none.
-    const walk = (k: number, by: 1 | -1, end: number) => {
-      for (let n = 0; n < GAP_WALK && k !== end && k >= 0 && k < length; n++, k += by)
+    // Measured on screen from the query, where an axis with breaks shows no break.
+    const far = (k: number) => Math.abs(scale.map(at(k)) - p);
+    // The first eligible position from `k` stepping `by`, before `end` and
+    // no farther than `limit`, as inspections walk: past at most GAP_WALK
+    // not, jumping those a break of the x axis hides (tracing joins over
+    // them); -1 for none.
+    const breaks = along === "x" && frame.x.breaks;
+    const walk = (k: number, by: 1 | -1, end: number, limit = Number.POSITIVE_INFINITY) => {
+      for (let n = 0; n < GAP_WALK; n++, k += by) {
+        if (breaks)
+          k =
+            by < 0
+              ? breaks.shownBefore(s.x, k, order ?? s.rows)
+              : breaks.shownFrom(s.x, k, length, order ?? s.rows);
+        if ((k - end) * by >= 0 || (limit < Number.POSITIVE_INFINITY && far(k) > limit)) break;
         if (eligible(rowAt(k))) return k;
+      }
       return -1;
     };
     const [k0, k1] = [first(lo, false), first(hi, true)];
@@ -676,9 +688,6 @@ export class Picker {
     const t = Math.min(Math.max(first(target, false), k0), k1);
     const right = walk(t, 1, k1);
     const left = walk(t - 1, -1, k0 - 1);
-    // Measured on screen, where an axis with breaks shows no break.
-    const from = scale.map(target);
-    const far = (k: number) => Math.abs(scale.map(at(k)) - from);
     const [within] = closest([left, right], far);
     // And the two bracketing the span.
     const before = walk(k0 - 1, -1, -1);
@@ -686,7 +695,8 @@ export class Picker {
     let candidates: number[];
     if (within >= 0)
       candidates = [
-        within,
+        left,
+        right,
         ...[before, after].filter(
           (k) => k >= 0 && sameRun(rowAt(Math.min(k, within)), rowAt(Math.max(k, within))),
         ),
@@ -696,10 +706,15 @@ export class Picker {
       candidates = [Math.abs(at(before) - lo) <= Math.abs(at(after) - hi) ? before : after];
     else candidates = [before, after];
     let [k, limit] = closest(candidates, far);
-    // As inspections read them, the first eligible of those as near before it
-    // in its run: at its value, or within TIE.
-    for (let j = k - 1; j >= 0 && far(j) <= limit && sameRun(rowAt(j), rowAt(k)); j--)
-      if (eligible(rowAt(j))) k = j;
+    // As inspections read them: of those as near before it in its run, the
+    // earliest, walking through at most TIE_WALK eligible, it among them,
+    // then on through those at its value to the first of them.
+    for (
+      let j = walk(k - 1, -1, -1, limit), n = 1;
+      j >= 0 && sameRun(rowAt(j), rowAt(k)) && (n++ < TIE_WALK || at(j) === at(k));
+      j = walk(k - 1, -1, -1, limit)
+    )
+      k = j;
     return k < 0 ? undefined : found(k);
   }
 }
@@ -760,12 +775,12 @@ function before(
 /**
  * Of positions `ks` (-1 for none) of a series sorted along its axis, the
  * one nearest the query on screen (`far` measures it), the earliest of
- * those within `TIE` of the nearest, as inspections read them; and how far
- * those may be.
+ * those within `TIE_RATIO` of the nearest, as inspections read them; and
+ * how far those may be.
  */
 function closest(ks: readonly number[], far: (k: number) => number): [number, number] {
   let limit = Number.POSITIVE_INFINITY;
-  for (const k of ks) if (k >= 0) limit = Math.min(limit, far(k) + TIE);
+  for (const k of ks) if (k >= 0) limit = Math.min(limit, far(k) * (1 + TIE_RATIO));
   let best = -1;
   for (const k of ks) if (k >= 0 && (best < 0 || k < best) && far(k) <= limit) best = k;
   return [best, limit];
