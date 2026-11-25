@@ -1,17 +1,28 @@
 // Which of the targets near the pointer is read. Distances that should
-// tie differ by rounding: points are placed in 32-bit floats, lines'
-// observations in doubles, and points placed alike about the pointer
-// round apart. So targets within `TIE` of the least distance found are at
-// one distance: of those the one painted last is on top (`Nearest`), and
-// along an axis the earliest is read (`earliest`). Searches hand every
-// target within `limit` to them; `settle` and `earliest` run a search,
-// and again where the first could not tell.
+// tie differ by rounding. In 2D, points are placed in 32-bit floats, whose
+// rounding is about the pixel's size: targets within `TIE` of the least
+// distance found are at one distance, and of those the one painted last is
+// on top (`Nearest`). Along an axis, observations are placed in doubles,
+// whose rounding grows with the numbers mapped, not with the pixel: two
+// distances tie where they differ by at most `TIE_RATIO` of the nearer,
+// and of ties the earliest is read (`earliest`). Searches hand every target
+// within `limit` to them; `settle` and `earliest` run a search, and again
+// where the first could not tell.
 
 import type { Hit, Mark } from "../marks/mark.ts";
 import { litOverSeries } from "../marks/mark.ts";
 
-/** Pixels apart that distances to the pointer tie within. */
+/** Pixels apart that distances to the pointer tie within, in 2D. */
 export const TIE = 1e-3;
+
+/**
+ * Along an axis, the share of the nearer of two distances to the pointer
+ * that they tie within. It covers the rounding of mapping values to pixels
+ * wherever two points stand more than about 1e-8 px apart (2,000 px of a
+ * linear axis), and ties a pointer only within 1/20,000 of the distance
+ * from a midpoint.
+ */
+export const TIE_RATIO = 1e-4;
 
 /**
  * Of targets taken in paint order (marks, series in theirs, rows as
@@ -98,17 +109,22 @@ export type TakeEarliest = (position: number, distance: number, value: number) =
 
 /**
  * Of the positions `search` hands `take`, the one an inspection reads; -1
- * for none. The nearest on screen, those within `TIE` of the least
+ * for none. The nearest on screen, those within `TIE_RATIO` of the least
  * distance tied, and of ties the earliest (the least value along the
  * axis), the first taken of those at one value. Ties are settled as
- * positions come; `limit` says how far a position may be and still tie.
- * As `settle` does, the search runs again, knowing the least distance,
- * only where positions passed over before the winner was left behind may
- * tie with it.
+ * positions come; `limit` says how far a position may be and still tie,
+ * from `least` on where the search will hand a position that near (the
+ * nearer of a sorted series' two around the pointer), so that it walks no
+ * farther. As `settle` does, the search runs again, knowing the least
+ * distance, only where positions passed over before the winner was left
+ * behind may tie with it.
  */
-export function earliest(search: (take: TakeEarliest, limit: () => number) => void): number {
-  let least = Infinity;
-  const limit = () => least + TIE;
+export function earliest(
+  search: (take: TakeEarliest, limit: () => number) => void,
+  least = Infinity,
+): number {
+  // The limit only shrinks as nearer positions come, so the second pass's holds for the first.
+  const limit = () => least * (1 + TIE_RATIO);
   for (let again = false; ; again = true) {
     // The winner, its distance, and its value.
     let best = -1;
@@ -116,11 +132,11 @@ export function earliest(search: (take: TakeEarliest, limit: () => number) => vo
     let near = Infinity;
     let early = Infinity;
     search((position, distance, value) => {
-      if (distance > least + TIE) return false;
+      if (!(distance <= limit())) return false;
       // A nearer one leaving the winner behind wins; else the earlier of ties.
       let wins = value < early;
       if (distance < least) {
-        if (near > distance + TIE) {
+        if (near > distance * (1 + TIE_RATIO)) {
           wins = true;
           passed = least;
         }
@@ -133,6 +149,6 @@ export function earliest(search: (take: TakeEarliest, limit: () => number) => vo
       }
       return wins;
     }, limit);
-    if (again || passed > least + TIE) return best;
+    if (again || best < 0 || passed > limit()) return best;
   }
 }

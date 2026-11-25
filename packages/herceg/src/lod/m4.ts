@@ -40,9 +40,9 @@ export interface Breaks {
    * shown, or `end`; hidden runs are jumped by binary search, however long.
    * Position i is row `rows[i]` when `rows` is given.
    */
-  shownFrom(x: NumericArray, k: number, end: number, rows?: Uint32Array): number;
+  shownFrom(x: NumericArray, k: number, end: number, rows?: ArrayLike<number>): number;
   /** The last of the positions [0, k] of ascending `x` whose value is shown, or -1. */
-  shownBefore(x: NumericArray, k: number, rows?: Uint32Array): number;
+  shownBefore(x: NumericArray, k: number, rows?: ArrayLike<number>): number;
   /**
    * Positions [start, end) of ascending `x` (of `length`), widened where
    * their first or last value is hidden to the nearest shown one past it.

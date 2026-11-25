@@ -13,7 +13,7 @@ import { point } from "../../src/marks/point.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel, type Inspection } from "../../src/model/model.ts";
-import { earliest, TIE } from "../../src/model/nearest.ts";
+import { earliest, TIE_RATIO } from "../../src/model/nearest.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { Snap } from "../../src/spec/spec.ts";
@@ -263,50 +263,67 @@ describe("ties", () => {
     expect(at(model, 5)?.points.map((p) => p.row)).toEqual([0]);
   });
 
-  it("are distances within TIE of the least, the earliest of them read, then the first found", () => {
+  it("are distances within TIE_RATIO of the least, the earliest of them read, then the first found", () => {
     const read = (candidates: [distance: number, value: number][]) =>
       earliest((take) => {
         candidates.forEach(([distance, value], k) => {
           take(k, distance, value);
         });
       });
-    // Within TIE of the least: the least value.
+    // A share of the least distance: 100 px and its ten-thousandth.
+    const at = (share: number) => 100 * (1 + share * TIE_RATIO);
+    // Within it of the least: the least value.
+    expect(
+      read([
+        [at(0), 5],
+        [at(0.5), 3],
+      ]),
+    ).toBe(1);
+    // In proportion to the distance: 0.005 px apart tie at 100 px, 0.0005 px do not at 1 px.
+    expect(
+      read([
+        [100, 5],
+        [100.005, 3],
+      ]),
+    ).toBe(1);
     expect(
       read([
         [1, 5],
-        [1 + TIE / 2, 3],
+        [1.0005, 3],
       ]),
-    ).toBe(1);
+    ).toBe(0);
     // Of values alike, the first.
     expect(
       read([
-        [1, 3],
-        [1, 3],
+        [at(0), 3],
+        [at(0), 3],
       ]),
     ).toBe(0);
-    // Measured from the least, not from one another: 1.0016 does not tie with 1.
+    // Measured from the least, not from one another: 1.6 shares does not tie with the least.
     expect(
       read([
-        [1, 3],
-        [1 + 0.8 * TIE, 2],
-        [1 + 1.6 * TIE, 1],
+        [at(0), 3],
+        [at(0.8), 2],
+        [at(1.6), 1],
       ]),
     ).toBe(1);
     expect(
       read([
-        [1 + 1.6 * TIE, 1],
-        [1 + 0.8 * TIE, 2],
-        [1, 3],
+        [at(1.6), 1],
+        [at(0.8), 2],
+        [at(0), 3],
       ]),
     ).toBe(1);
     // A nearer one leaving the winner behind, where one passed over still ties: searched again.
     expect(
       read([
-        [1 + 1.9 * TIE, 1],
-        [1 + 1.5 * TIE, 2],
-        [1 + 0.8 * TIE, 3],
+        [at(1.9), 1],
+        [at(1.5), 2],
+        [at(0.8), 3],
       ]),
     ).toBe(1);
+    // Nothing that cannot be placed.
+    expect(read([[Number.NaN, 1]])).toBe(-1);
   });
 });
 

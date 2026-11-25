@@ -284,17 +284,45 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 | `"previous"` | its last point at or before the pointer | at the latest point read |
 | `"next"` | its first point at or after the pointer | at the earliest point read |
 
-- **`within`** is measured from the pointer's value: with `"shared"` the
-  shared value must be within it, with the others each series' point.
-- **Ties.** Points are as near as they look: their distances from the
-  pointer are compared on screen (on log axes 10 is midway between 1 and
-  100; breaks leave their time out; bands go by their middles), and
-  distances within a thousandth of a pixel of the nearest tie. Of ties,
-  the earliest is read, the least value along the axis, and of points at
-  one value the first row. `"shared"` snaps to the earliest value tied,
-  whichever series has it. The keyboard's Up and Down land on a series'
-  point the same way; of its points at one value, on the one nearer the
-  cursor.
+- **`within`** is measured from the pointer's value: points farther from
+  it are not read, and of those within it the nearest is (with
+  `"shared"`, the shared value must be within it).
+- **Ties.** Points are as near as they look: their distances are
+  compared on screen, from the pointer's own pixel (a cursor shown or
+  synced at a value, and the keyboard's, from that value's pixel); on log
+  axes 10 is midway between 1 and 100, breaks leave their time out, and
+  bands go by their middles. Two distances tie where they differ by at
+  most a ten-thousandth of the nearer. Of ties, the earliest is read, the
+  least value along the axis, and of points at one value the first row.
+  So a pointer within 1/20,000 of the distance from a midpoint reads the
+  earlier (0.05 px where the points stand 2,000 px apart), and past that
+  the nearer: at a 30-minute view, 0.48 ms past the midpoint of two
+  observations 130 ms apart reads the later. `"shared"` snaps to the
+  earliest value tied over every series' points, whichever series has
+  it. The keyboard's Up and Down land on a series' point the same way,
+  and of its points at one value on the one nearer the cursor; picking a
+  line names the row it reads alike. 2D `"nearest"` and picking points
+  and strokes tie within a thousandth of a pixel instead, as points are
+  drawn in 32-bit floats.
+- **Limits of ties.** A series sorted along the axis is searched by
+  value, then walked outward from its drawn points either side while
+  points may tie with the nearer of those two: at most 1,024 drawn points
+  each way, those two among them, and past at most 1,024 in a row not
+  drawn (missing values, rows a log axis cannot place, rows `where` or
+  `continuity` leaves out; rows a break hides are jumped). So where more
+  than 1,024 points of a series tie (a million within 0.1 px), the
+  earliest of the 1,024 nearest the pointer on each side is read; a drawn
+  point past more than 1,024 rows in a row not drawn is not read, even
+  where it is nearer than the one read; and points nearer each other than
+  about 1e-8 px (on a linear axis 2,000 px long, more on log axes zoomed
+  far in) compare as their distances round, so either may be read. Points
+  at one value are not capped: of those at the value read, the first
+  drawn is read, and at the pointer's own value, the first drawn of a run
+  whose first points are not, each found in time proportional to the
+  run. Measured by `bench:core` in Node, a reading takes a few
+  microseconds where a few points are near the pointer, about 50 µs over
+  1,024 tied points, and about 20 ms in the walk's worst case, 1,024 tied
+  points each after 1,023 rows not drawn.
 - **Gaps.** A series reads nothing at a value inside a gap its
   `continuity` leaves, under every `snap`.
 - **Unsorted series** are read by a scan; `"previous"` and `"next"` leave

@@ -43,15 +43,46 @@ the model's `inspect()`.
   after, by the same binary search, and the crosshair stands at the
   pointer, the latest, or the earliest read. `within` narrows each search
   to the pointer's value plus or minus it (pixels for `nearest`). Along an
-  axis, distances are compared on screen, and those within `TIE` (a
-  thousandth of a pixel, `model/nearest.ts`) of the least tie, as rounding
-  sets them apart: of ties the earliest is read (`earliest`, the least
-  value along the axis, then the first row), by each series' search, the
-  shared value across series, scans of unsorted series, the keyboard's Up
-  and Down (which, of points at one value, then land on the one nearest
-  the cursor across, in `model/keyboard.ts`), and picking's rows of paths;
-  the `nearest` mode gives its ties to the target painted on top. A sorted
-  series reads nothing between two drawn points its path ends between
+  axis, distances are compared on screen from the pointer's own pixel (a
+  value's, where a reading starts from one), and two tie where they
+  differ by at most `TIE_RATIO` (a ten-thousandth) of the nearer
+  (`model/nearest.ts`): mapping a value to a pixel rounds in proportion
+  to the numbers it works with (a linear map's range ends, a log map's
+  logarithm times the pixels a decade takes), not to the pixel it lands
+  on, so a share of the distance covers it wherever two points stand more
+  than about 1e-8 px apart on a 2,000 px axis, and depends on the screen
+  alone, not the data's magnitude or the zoom. Of ties the earliest is
+  read (`earliest`, the least value along the axis, then the first row).
+  A sorted series is searched by value (monotone on every axis, whatever
+  a log axis does with values it cannot place), from its drawn points
+  either side of the pointer's value (`Inspector.around`; at the value,
+  the first drawn of a run whose first points are not drawn, however
+  far), and walked outward both ways while points may tie
+  (`Inspector.walk`). `earliest` starts from the nearer of those two
+  points' distances (the least of any, as pixels follow values), so
+  neither walk goes past the band of ties. A walk jumps what a break
+  hides, stops at the first position ahead of the pointer by more than
+  the band (none past it is nearer), after `GAP_WALK` (1,024) in a row
+  not drawn, or after `TIE_WALK` (1,024) drawn, and is replayed, not
+  stored, for `earliest`'s second pass. Of points at the value read, the
+  first drawn is found by its own search (`#firstAt`), which `inspectAt`
+  shares, so `"each"` and `"shared"` read one row; it and the fallback at
+  the pointer's value are uncapped, linear in the run of equal values.
+  `"shared"` is one `earliest` over every series' candidates, sorted
+  walks and unsorted scans, each in its owner's frame (offset included)
+  and within reach, starting from the least of the sorted series' nearer
+  points, and whose second pass knows the least distance over all. The
+  keyboard's Up and Down walk with the same methods (then, of points at
+  one value, land on the one nearest the cursor across, in
+  `model/keyboard.ts`), and picking's rows of paths walk their run alike
+  (within the band of the nearer of the two around the query, checked
+  before each row, jumping what a break hides, with the same caps);
+  the `nearest` mode gives its ties, within `TIE` (a thousandth of a
+  pixel), to the target painted on top, since 2D targets are float32
+  geometry rounded at the pixel's size. A walk costs one or two positions
+  a side on ordinary data; its worst, 1,024 tied points each after 1,023
+  not drawn, about a million rows a side (about 20 ms in `bench:core`). A sorted series reads nothing
+  between two drawn points its path ends between
   (`SeriesFeatures.pathEnds`: continuity gaps, `where`); unsorted series
   are scanned, and left out by `previous` and `next`. Marks with
   `inspect: false` show no series to read.
@@ -143,10 +174,12 @@ never geometry made again from current data.
   Marks with `pick: false` are passed over.
 - **Paths to rows.** A line's or area's hit segment is resolved in its
   logical series (`drawn-parts.ts` builds the trace part): for sorted
-  series, the eligible observation nearest the pointer along the axis on
-  screen (the earliest of ties) among those inside the segment's span and
-  the two bracketing it, in the run the segment draws (on a panel's own
-  categories, by their places); for unsorted lines and areas, the path
+  series, the eligible observation nearest the query along the axis on
+  screen, from the query's own pixel, among those inside the segment's
+  span and the two bracketing it, in the run the segment draws (on a
+  panel's own categories, by their places), then back through its run
+  while points tie as inspections tie them (at most `TIE_WALK` eligible,
+  on through those at its value to their first); for unsorted lines and areas, the path
   point's own position, which `drawn-parts.ts` finds by walking the series
   as it was traced (rows the trace cannot draw end a run, rows a break
   hides are left out, steps add their corners) when first asked.

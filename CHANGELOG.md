@@ -542,16 +542,31 @@ styles](docs/guide/styling.md#role-styles) and
   axis (in a chart of one panel, over the x axis' labels too); beyond it,
   none. `values` keeps the fractional band index. See
   [Events](docs/guide/interaction.md#events).
-- **Inspection reads the earliest of ties.** Distances within a
-  thousandth of a pixel of the nearest tie, and the earliest is read, by
-  the pointer, hover events, `chart.inspect`, cursors shown or synced at a
-  value, and the keyboard (its tooltip, announcements, and Up and Down),
-  on every axis: `"shared"` snaps to the earliest value tied, whichever
-  series has it, and `"each"` reads the first row of points at one value
-  on either side of it. Fixed: distances on screen differ by rounding, so
-  inspection could read the later of two observations midway between
-  them, against `snap: "each"`'s "ties to the earlier" (31 of 260 exact
-  midpoints between 500 jittered times). See
+- **Inspection ties in proportion to the distance.** Along an axis,
+  distances are compared on screen from the pointer's own pixel (a
+  value's, for cursors shown or synced at one and the keyboard), two tie
+  where they differ by at most a ten-thousandth of the nearer, and the
+  earliest of ties is read, by the pointer, hover events,
+  `chart.inspect`, cursors shown or synced at a value, the keyboard (its
+  tooltip, announcements, and Up and Down), picking a line's row, and the
+  Python widget and Streamlit, on every axis: `"shared"` snaps to the
+  earliest value tied over every series' points, offset series by their
+  offset, and `"each"` reads the first drawn row of points at one value
+  on either side of it. Sorted series are searched by value and walked
+  outward while points may tie, at most 1,024 drawn points each way and
+  past at most 1,024 in a row not drawn. 2D `"nearest"` and picking
+  points and strokes tie within a thousandth of a pixel. No option, on
+  any surface. Fixed: at a 30-minute view a thousandth of a pixel is
+  1.7 ms, so 0.48 ms past the midpoint of two observations 130 ms apart
+  the earlier was read though the later is nearer by 0.96 ms; distances
+  were measured from the pointer's value mapped back to a pixel (0.02 px
+  off at a millisecond per 100 px); a pointer whose value rounded onto a
+  point never compared the point before it (on `[1e15, 1e15 + 1]`); ties
+  past the drawn points either side were missed (0 among 0, 0.00005, and
+  2); `"shared"` compared each series' own nearest, so a point a series
+  passed over could tie with another's and be earlier; and rounding on
+  screen sent exact midpoints to the later observation (31 of 260 between
+  500 jittered times). See
   [Inspection](docs/guide/interaction.md#inspection).
 - **A hover repaints only the pointer overlay.** The crosshair, the points
   read, the item outline, the keyboard's ring, the brush, and controls'
