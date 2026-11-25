@@ -35,7 +35,7 @@ import { fromWall } from "../src/format/zone.ts";
 import { createGridModel } from "../src/grid/model.ts";
 import { axis } from "../src/guides/options.ts";
 import { type AttachedLabel, placeAttached } from "../src/layout/attached.ts";
-import { canvasMeasurer, estimateText, type MeasureText } from "../src/layout/text.ts";
+import { canvasMeasurer, estimateText, type MeasureText, shapeOf } from "../src/layout/text.ts";
 import { grid } from "../src/layout.ts";
 import { m4 } from "../src/lod/m4.ts";
 import { MinMaxIndex } from "../src/lod/minmax-index.ts";
@@ -73,7 +73,7 @@ import { text } from "../src/marks/text.ts";
 import { treemap } from "../src/marks/treemap.ts";
 import { UnionStack } from "../src/marks/union-stack.ts";
 import { violin } from "../src/marks/violin.ts";
-import { planAxis } from "../src/model/axis.ts";
+import { labelsMeet, planAxis } from "../src/model/axis.ts";
 import { axisGuide } from "../src/model/axis-guide.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
@@ -703,6 +703,52 @@ for (const [name, rows, y] of [
     model.setSize(600, 600, 1);
     model.scene(estimateText);
   });
+}
+
+// A streamed axis' plans, one a frame, its labels judged as the model's x
+// axis judges them: a 1.2-second window moving 16.7 ms a frame over 864 px,
+// in UTC and in London's repeated hour (01:30 GMT on 2026-10-25), a
+// 30-minute window moving a second a frame, and `ticks: 50` panning
+// [0, 1000] over 300 px, whose labels meet, so that each frame plans about
+// a dozen counts. One sample plans 600 frames; the intervals they take
+// follow.
+const SUMMER = Date.UTC(2026, 6, 1, 5, 38, 58);
+const LONDON_REPEATED = Date.UTC(2026, 9, 25, 1, 30);
+for (const [name, type, zone, from, span, step, pixels, count] of [
+  ["a 1.2 s window, UTC", "time", "UTC", SUMMER, 1200, 16.7, 864, 9],
+  [
+    "a 1.2 s window, London's repeated hour",
+    "time",
+    "Europe/London",
+    LONDON_REPEATED,
+    1200,
+    16.7,
+    864,
+    9,
+  ],
+  ["a 30-minute window, UTC", "time", "UTC", SUMMER, 30 * 60_000, 1000, 864, 9],
+  ["ticks: 50 over 300 px", "linear", "UTC", 0, 1000, 0.37, 300, 50],
+] as const) {
+  const context = {
+    type,
+    spec: undefined,
+    zone,
+    locale: "en-US",
+    meets: labelsMeet([LIGHT.style.tickLabel], pageMeasurer(), true),
+  };
+  const intervals = new Set<number>();
+  measure(
+    `axes: 600 streamed plans of ${name}`,
+    () => {
+      for (let k = 0; k < 600; k++) {
+        const start = from + k * step;
+        const { ticks } = planAxis(context, [start, start + span], [0, pixels], count);
+        intervals.add(ticks.length > 1 ? Math.round(ticks[1]! - ticks[0]!) : 0);
+      }
+    },
+    { warmup: 3, samples: 15 },
+  );
+  console.log(`  intervals: ${[...intervals].join(", ")}`);
 }
 
 // Small multiples of a layout mark: a pie of eight products per region, 50
@@ -2779,7 +2825,14 @@ for (const rows of [100_000, 1_000_000]) {
     measureText: MeasureText = estimateText,
     across = false,
   ) => {
-    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: measureText };
+    const builders = {
+      planAxis,
+      axisGuide,
+      Polyline,
+      monotonePolyline,
+      measure: measureText,
+      shapeOf,
+    };
     model.setSize(960, height, 1);
     const drawn = model.scene(measureText);
     const copy = () => {

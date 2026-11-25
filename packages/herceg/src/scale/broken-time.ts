@@ -48,6 +48,8 @@ export class BrokenTimeScale implements CalendarScale {
   readonly #factor: number;
   /** The last tick plan, which `interval` and `tickContexts` describe. */
   #plan: TickPlan | undefined;
+  /** Each plan's interval by its ticks (see `intervalOf`). */
+  readonly #intervals = new WeakMap<readonly number[], TimeInterval>();
 
   constructor(
     domain: readonly [number, number],
@@ -105,6 +107,10 @@ export class BrokenTimeScale implements CalendarScale {
     return this.#plan?.ticks === ticks ? this.#plan.contexts : undefined;
   }
 
+  intervalOf(ticks: readonly number[]): TimeInterval | undefined {
+    return this.#intervals.get(ticks);
+  }
+
   /**
    * Ticks for about `count` labels. The interval follows the time shown, so
    * a week of sessions gets hours rather than days. Calendar ticks inside a
@@ -127,6 +133,7 @@ export class BrokenTimeScale implements CalendarScale {
       span = Math.min(longest, span * 2);
     }
     this.#plan = plan;
+    this.#intervals.set(plan.ticks, plan.interval);
     return plan;
   }
 

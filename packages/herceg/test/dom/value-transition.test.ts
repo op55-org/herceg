@@ -24,7 +24,7 @@ import {
 } from "../../src/dom/value-transition.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { axis } from "../../src/guides/options.ts";
-import { estimateText } from "../../src/layout/text.ts";
+import { estimateText, shapeOf } from "../../src/layout/text.ts";
 import { inset, panel } from "../../src/layout.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { area } from "../../src/marks/area.ts";
@@ -93,7 +93,14 @@ afterEach(() => {
 });
 
 const VALUES = { duration: 200, values: true } as const;
-const BUILDERS = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
+const BUILDERS = {
+  planAxis,
+  axisGuide,
+  Polyline,
+  monotonePolyline,
+  measure: estimateText,
+  shapeOf,
+};
 
 /** A chart model drawn at 600 x 300 that animates values. */
 function chart(config: Partial<ChartConfig> & Pick<ChartConfig, "marks">) {

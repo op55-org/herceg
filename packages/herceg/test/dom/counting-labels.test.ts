@@ -7,7 +7,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { category, time } from "../../src/data/column.ts";
 import { type Table, table } from "../../src/data/table.ts";
-import { shapeOf } from "../../src/dom/value-labels.ts";
 import {
   followedOf,
   frameAt,
@@ -18,7 +17,7 @@ import {
   type Tween,
   ValueAnimation,
 } from "../../src/dom/value-transition.ts";
-import { estimateText, type MeasureText } from "../../src/layout/text.ts";
+import { estimateText, type MeasureText, shapeOf } from "../../src/layout/text.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
@@ -106,7 +105,7 @@ function change(
   edit();
   const scene = model.scene(spy);
   const scenes = new Set(seen);
-  const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: spy };
+  const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: spy, shapeOf };
   const { config } = model;
   const tween = plan(
     shown,
@@ -213,10 +212,12 @@ describe("counting labels' frames", () => {
       seen,
     );
     const measured = framesMeasure(tween, seen, scenes);
-    // Shapes only, a few of them, though frames write a new number every time.
-    expect(measured.length).toBeGreaterThan(0);
+    // Shapes only, a few of them, though frames write a new number every
+    // time; the x axis fits its labels by the same shapes ("000,000"), so
+    // the scenes may have measured them all already.
     expect(measured.every((text) => shapeOf(text) === text)).toBe(true);
     expect(measured.length).toBeLessThanOrEqual(3);
+    expect([...seen].some((text) => /^0{2,3},000$/.test(text))).toBe(true);
     const frame = frameAt(tween, 77);
     for (const [, { text, value }] of labelTexts(frame)) {
       const [, number] = text.split("|");
@@ -469,6 +470,7 @@ describe("counting labels' frames", () => {
         Polyline,
         monotonePolyline,
         measure: proportional,
+        shapeOf,
       }),
     ).toBeUndefined();
   });
@@ -481,7 +483,14 @@ describe("counting labels' frames", () => {
   function interrupted(values: number[], to: number[], then: number[], labels = RACE) {
     const now = vi.spyOn(performance, "now").mockReturnValue(0);
     const { data, model, rows } = race(values, labels);
-    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+    const builders = {
+      planAxis,
+      axisGuide,
+      Polyline,
+      monotonePolyline,
+      measure: proportional,
+      shapeOf,
+    };
     const animation = new ValueAnimation(model, null, model.scene(proportional), builders);
     const reset = { dropped: 0, appended: 0, updated: null, fields: [], reset: true };
     animation.changed(animation.start(model.scene(proportional), 0), reset, 0);
@@ -543,7 +552,14 @@ describe("counting labels' frames", () => {
   it("keep the shape of a label going out with its bar, coming back at the number it shows", () => {
     const now = vi.spyOn(performance, "now").mockReturnValue(0);
     const { data, model, rows } = race([11_111, 21_111, 31_111], BOXED);
-    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+    const builders = {
+      planAxis,
+      axisGuide,
+      Polyline,
+      monotonePolyline,
+      measure: proportional,
+      shapeOf,
+    };
     const animation = new ValueAnimation(model, null, model.scene(proportional), builders);
     const reset = { dropped: 0, appended: 0, updated: null, fields: [], reset: true };
     const step = (at: number, rows: object) => {
@@ -966,7 +982,14 @@ describe("text labels of parts in a value transition's frames", () => {
     const [before, after] = [modelOf("a", "b"), modelOf("b", "a")];
     const shown = snapshot(before.scene(proportional), before.panels(), 0)!;
     data.reset(columns(14, 24, 70) as never);
-    const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+    const builders = {
+      planAxis,
+      axisGuide,
+      Polyline,
+      monotonePolyline,
+      measure: proportional,
+      shapeOf,
+    };
     const { config } = after;
     const tween = plan(
       shown,
@@ -1037,7 +1060,14 @@ describe("text labels of parts in a value transition's frames", () => {
         content: SHARES,
         style: { halo: false, align: "end" },
       });
-      const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: proportional };
+      const builders = {
+        planAxis,
+        axisGuide,
+        Polyline,
+        monotonePolyline,
+        measure: proportional,
+        shapeOf,
+      };
       const animation = new ValueAnimation(model, null, model.scene(proportional), builders);
       const reset = { dropped: 0, appended: 0, updated: null, fields: [], reset: true };
       animation.changed(animation.start(model.scene(proportional), 0), reset, 0);

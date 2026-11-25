@@ -1,4 +1,4 @@
-import { fromWall, type TimeZone, toWall } from "../format/zone.ts";
+import { fromWall, type TimeZone, toWall, zoneOffset } from "../format/zone.ts";
 import { LinearScale, type PositionScale } from "./scale.ts";
 import { tickStep } from "./ticks.ts";
 
@@ -157,29 +157,51 @@ export function timeTicks(
     : calendarTicks(lo, hi, interval, zone);
 }
 
+/** `a` modulo `b`, from 0 up to `b`. */
+const mod = (a: number, b: number) => ((a % b) + b) % b;
+
 /**
  * Seconds, minutes, and hours last the same in every zone, so these ticks
- * step through absolute time one unit at a time and keep the instants whose
- * wall time is a multiple of the step. Across a DST change this skips wall
- * times that do not exist and keeps both occurrences of repeated ones, and
- * ticks never go backward.
+ * go through absolute time and keep the instants whose wall time is a
+ * multiple of the step within its parent unit. Across a DST change this
+ * skips wall times that do not exist and keeps both occurrences of repeated
+ * ones, and ticks never go backward. Where the step divides its parent (every
+ * interval axes choose), each tick is the last plus the interval while the
+ * zone's offset stays the same; elsewhere, and across an offset change, the
+ * instants are walked one unit at a time.
  */
 function subDayTicks(lo: number, hi: number, interval: TimeInterval, zone: TimeZone): number[] {
   const unit = UNIT_MS[interval.unit];
   const parent = PARENT_MS[interval.unit]!;
-  const ticks: number[] = [];
-  let wall = Math.floor(toWall(zone, lo) / unit) * unit;
-  let t = fromWall(zone, wall);
-  for (let guard = 0; t <= hi && guard < 100_000; guard++) {
-    wall = toWall(zone, t);
-    if (wall % unit !== 0) {
-      // An offset change by a fraction of the unit: realign to the wall grid.
-      t = fromWall(zone, Math.ceil(wall / unit) * unit);
-      continue;
+  const size = unit * interval.step;
+  const offset = (t: number) => zoneOffset(zone, t);
+  /** The first instant from `t` on, at t's offset, whose wall time is a multiple of `by`. */
+  const ceil = (t: number, by: number) => Math.ceil((t + offset(t)) / by) * by - offset(t);
+  let guard = 0;
+  // The first instant from `t` on whose wall time is a tick's, walked from
+  // `t` in absolute time: seeding from a wall time could name the earlier
+  // instant of a repeated hour, before `lo`.
+  const walk = (t: number) => {
+    for (t = ceil(t, unit); guard < 100_000; guard++) {
+      const wall = t + offset(t);
+      // An offset change by a fraction of the unit: on to the wall grid.
+      if (mod(wall, unit)) t = ceil(t, unit);
+      else if (Math.round(mod(wall, parent) / unit) % interval.step === 0) return t;
+      else t += unit;
     }
-    const withinParent = ((wall % parent) + parent) % parent;
-    if (t >= lo && Math.round(withinParent / unit) % interval.step === 0) ticks.push(t);
-    t += unit;
+    return Number.POSITIVE_INFINITY;
+  };
+  // Where the step divides its parent, the first tick is the first
+  // multiple of the step at lo's offset, while that offset holds.
+  const even = parent % size === 0;
+  const first = ceil(lo, size);
+  const ticks: number[] = [];
+  let t = even && offset(first) === offset(lo) ? first : walk(lo);
+  // The guard bounds the ticks as well as the walk, as the walk alone did.
+  for (; t <= hi && guard < 100_000; guard++) {
+    ticks.push(t);
+    const next = t + size;
+    t = even && offset(next) === offset(t) ? next : walk(t + unit);
   }
   return ticks;
 }
@@ -212,6 +234,12 @@ export interface CalendarScale extends PositionScale {
    * year) that begins in the break.
    */
   tickContexts?(ticks: readonly number[]): readonly (TickContext | undefined)[] | undefined;
+  /**
+   * The interval ticks `ticks(count)` returned were planned at, where it is
+   * not `interval(count)` for every count asked: an axis with breaks thins
+   * ticks by the count and coarsens where breaks crowd them.
+   */
+  intervalOf?(ticks: readonly number[]): TimeInterval | undefined;
 }
 
 /** A linear scale over epoch milliseconds with calendar-aware ticks. */

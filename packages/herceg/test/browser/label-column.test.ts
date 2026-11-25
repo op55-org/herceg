@@ -40,7 +40,10 @@ const options = (view: [number, number], renderer: "svg" | "canvas"): ChartOptio
   legend: false,
   renderer,
   timeZone: "UTC",
-  x: { domain: view },
+  // At 1.2 seconds, ticks every 200 ms, as given, so the last stands at the
+  // view's end and overhangs the plot; automatic ones there would take an
+  // interval their labels fit, its last tick before the end.
+  x: { domain: view, ...(view === SECONDS && { ticks: { every: "200 milliseconds" } }) },
   y: { domain: [0, 1000] },
   marks: [
     line(metrics, {

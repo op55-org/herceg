@@ -23,6 +23,7 @@ import {
   centeredLines,
   fitText,
   type MeasureText,
+  shapedMeasure,
   struckThrough,
   textHalo,
   textHeight,
@@ -51,6 +52,7 @@ import {
   autoTicks,
   blankRepeats,
   createScale,
+  type LabelsMeet,
   labelledOf,
   niceAxisDomain,
   planAxis,
@@ -58,6 +60,7 @@ import {
   tickCountOf,
   tooltipFormatter,
   usableDomain,
+  wholeCount,
   writtenTicks,
 } from "./axis.ts";
 import type { clearDomain } from "./clearance.ts";
@@ -128,6 +131,8 @@ export const GUIDE_KIT = {
   centeredLines,
   textWidth,
   textHeight,
+  shapedMeasure,
+  wholeCount,
   tickLabelGap,
   strokeKey,
   cssFont,
@@ -329,6 +334,22 @@ export interface CompiledAxes {
    * list it with no labels); undefined where the guides do not list it.
    */
   tickLabels(scale: ScaleName, i: number, styles: ChartStyles): readonly TextPaint[] | undefined;
+  /**
+   * Where an axis the guides list draws `scale`'s plan (on its default
+   * side, or with none there, the first listed): whether its neighbouring
+   * labels meet as it draws them in those of `panels` it draws in, along y
+   * each panel's moved inside the chart or its inset's box where its plot
+   * stands, `plotAt` its plot's top; or false where it draws none, writes
+   * none, or keeps them apart its own way ("hide", "stagger", "wrap",
+   * rotation candidates), whose ticks then keep their count; undefined
+   * where the model draws the plan's labels (see `AxisContext.meets`).
+   */
+  labelsMeet(
+    scale: ScaleName,
+    panels: readonly number[],
+    state: AxesState,
+    plotAt?: (i: number) => number,
+  ): LabelsMeet | false | undefined;
   /** Panel `index`'s axes along `plot`: the default ones, `axes`, changed and added to. */
   panel(
     axes: readonly AxisGuide[],

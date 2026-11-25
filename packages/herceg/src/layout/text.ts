@@ -133,6 +133,123 @@ export function canvasMeasurer(
   return measure;
 }
 
+const DIGIT = /\p{Nd}/u;
+
+/**
+ * `text` with each decimal digit written as `digit` writes its run, by the
+ * run's zero: by default the zero itself, "59,268" as "00,000", Arabic-Indic
+ * "١٢٣" as "٠٠٠", signs, separators, and units kept. Unicode's decimal digits
+ * come in runs of ten from zero, some back to back, so a digit's zero is as
+ * far back as its place in its run of runs. Text measured by its shape
+ * measures the same while its digits change: counting labels in value
+ * transitions, and automatic ticks fitting their labels (`shapedMeasure`).
+ */
+export function shapeOf(
+  text: string,
+  digit: (zero: number) => string = (zero) => String.fromCodePoint(zero),
+): string {
+  let zero = -1;
+  let written = "";
+  return text.replace(/\p{Nd}/gu, (d) => {
+    const code = d.codePointAt(0)!;
+    let start = code;
+    if (d <= "9") start = 48;
+    else while (DIGIT.test(String.fromCodePoint(start - 1))) start--;
+    const run = code - ((code - start) % 10);
+    if (run !== zero) {
+      zero = run;
+      written = digit(run);
+    }
+    return written;
+  });
+}
+
+/**
+ * What each measurer measured shaped: the widest digit of a run, by the
+ * run's zero and font; text's widths, by font and text; and how many
+ * widths it holds, of every font.
+ */
+const shapes = new WeakMap<
+  MeasureText,
+  { digits: Map<string, string>; widths: Map<string, Map<string, number>>; size: number }
+>();
+
+/**
+ * `measure`, giving text at least the width of its shape with each digit its
+ * run's widest in the font (see `shapeOf`): ten measures per run and font,
+ * once. A shape is as wide as any text of its digits drawn side by side, so
+ * labels measured this way keep their width while their digits change;
+ * text shaped wider than its digits measures as drawn. Digits a measurer
+ * refuses (fonts registered for a PDF without them) are not drawn, and not
+ * the widest. Widths are kept by measurer, at most 5,000, as a page's
+ * measurer keeps its own: axes plan the same labels scene after scene. So
+ * a measurer gives text the same width for as long as it is used: a page's
+ * is replaced when faces load, and one given to an export is measured
+ * afresh by each export (`forgetShapes`, render/static.ts).
+ */
+export function shapedMeasure(measure: MeasureText): MeasureText {
+  let kept = shapes.get(measure);
+  if (!kept) {
+    kept = { digits: new Map(), widths: new Map(), size: 0 };
+    shapes.set(measure, kept);
+  }
+  const known = kept;
+  const { digits, widths } = known;
+  const widthOf = (text: string, font: string) => {
+    try {
+      return measure(text, font);
+    } catch {
+      return -1;
+    }
+  };
+  const digitOf = (zero: number, font: string) => {
+    const key = `${zero} ${font}`;
+    let digit = digits.get(key);
+    if (digit === undefined) {
+      digit = String.fromCodePoint(zero);
+      let most = widthOf(digit, font);
+      for (let k = 1; k < 10; k++) {
+        const other = String.fromCodePoint(zero + k);
+        const width = widthOf(other, font);
+        if (width > most) [digit, most] = [other, width];
+      }
+      digits.set(key, digit);
+    }
+    return digit;
+  };
+  return (text, font) => {
+    let inFont = widths.get(font);
+    if (!inFont) {
+      inFont = new Map();
+      widths.set(font, inFont);
+    }
+    let width = inFont.get(text);
+    if (width === undefined) {
+      const shape = shapeOf(text, (zero) => digitOf(zero, font));
+      const own = measure(text, font);
+      width = shape === text ? own : Math.max(own, widthOf(shape, font));
+      if (++known.size > 5000) {
+        known.size = 1;
+        digits.clear();
+        widths.clear();
+        inFont = new Map();
+        widths.set(font, inFont);
+      }
+      inFont.set(text, width);
+    }
+    return width;
+  };
+}
+
+/**
+ * Forgets the shaped widths `measure` gave (see `shapedMeasure`), so that
+ * text is measured afresh: for measurers whose widths may change, such as
+ * one given to an export.
+ */
+export function forgetShapes(measure: MeasureText): void {
+  shapes.delete(measure);
+}
+
 /** `text` shortened with an ellipsis, if needed, to at most `width` pixels. */
 export function fitText(text: string, width: number, measure: MeasureText, font: string): string {
   if (measure(text, font) <= width) return text;

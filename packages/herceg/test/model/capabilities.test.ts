@@ -11,7 +11,7 @@ import { type Table, table } from "../../src/data/table.ts";
 import { plan, sidesOf, snapshot } from "../../src/dom/value-transition.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { colorbar, legend } from "../../src/guides/options.ts";
-import { estimateText } from "../../src/layout/text.ts";
+import { estimateText, shapeOf } from "../../src/layout/text.ts";
 import { inset, panel } from "../../src/layout.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { area } from "../../src/marks/area.ts";
@@ -1884,7 +1884,14 @@ describe("capabilities: tooltip fields", () => {
 describe("capabilities: value animation preconditions", () => {
   // Pure snapshots/plans, as in test/dom/value-transition.test.ts; no frame
   // scheduler, timers, reduced-motion media queries, or browser gestures.
-  const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
+  const builders = {
+    planAxis,
+    axisGuide,
+    Polyline,
+    monotonePolyline,
+    measure: estimateText,
+    shapeOf,
+  };
   it.each(all.filter((c) => !c.still))(
     "$name provides only its documented movable geometry",
     (c) => {
