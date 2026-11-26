@@ -229,7 +229,11 @@ export interface TickLabelsSpec {
   /**
    * Pixels from the labels to their tick's end on their side (half a
    * "cross" tick's length; the axis line where the tick does not reach
-   * their side), 0 or more. @minimum 0
+   * their side), 0 or more: below an axis to the line they hang from,
+   * above it to their last line's box, beside it to their near end.
+   * Without it, labels outside the plot stand max(8, round(0.65 em)) px
+   * from the line, and farther by how far outward ticks reach past 5 px,
+   * on x and y alike; inside it, 4 px past the ticks. @minimum 0
    */
   gap?: number;
 }

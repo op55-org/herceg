@@ -144,6 +144,18 @@ renderer draws the items as they are (`render/svg.ts` `itemsMarkup`, PDF
   a closure.
 - Text in a box is placed by its box: the box's edge goes where the text's
   own would, and the text moves in by its padding.
+- Tick labels stand the placement's `gap` from the axis line, one rule on x
+  and y: `tickLabelGap` (`scene/scene.ts`, 8 px, 0.65 em above 12 px) of
+  the tick label paint resolved for the panel, past outward tick marks by
+  what reaches beyond `TICK` (5 px, the default x marks; a cross mark
+  reaches half its length). The model's default axes and the guide
+  compiler's (`firstRow` in `guides/axes.ts`) place labels and keep room
+  for them by that one gap, so a y axis' room is its widest label and the
+  gap. A layer's `labels.gap` counts from the end of the marks on the
+  labels' side, ending at the line labels hang from below an axis, their
+  last line's box above it, their near end beside it; without one, labels
+  inside stand `INSIDE_GAP` (4 px) past the inward marks. Colorbars keep their own spacing (`LABEL_GAP`
+  past the ticks standing).
 - The HTML legend reads the legend guide's entries and draws buttons; the
   guide's items, which only static output draws, are built when first read.
 - Paint order: backgrounds, grid lines, each panel's data cut to its plot,

@@ -404,10 +404,11 @@ What does not fit a room is left out, never drawn past it:
   labels' `lineHeight` (1.25 × the font size by default, rounded), a
   turned label's turned block, or for staggered labels
   (`overlap: "stagger"`) two lanes 2 px apart. Before the first row comes
-  how far labels stand from the axis line:
+  how far labels stand from the axis line, as on y axes:
   - by default 8 px (0.65 × the font size above 12 px), and the length of
     outward tick marks past 5 px;
-  - with `labels.gap`, the outward tick marks and the gap.
+  - with `labels.gap`, the outward tick marks and the gap
+    ([Tick labels](#tick-labels) says where it ends).
 
   Rows after the first add 2 px between them; labels in boxes add their
   padding and outline, haloed labels their halo. At the default 12 px a
@@ -428,7 +429,7 @@ beside each row's last panel needs rows that share y.
 | `priority` | Which labels of a row stay where they collide: the higher. |
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |
 | `inside` | Labels inside the plot beside their ticks, taking no room outside. Not on colorbars. |
-| `gap` | Pixels from the labels to their tick's end. |
+| `gap` | Pixels from the end of the tick marks on the labels' side (outward for labels outside the plot, inward for those inside it; half a `"cross"` mark's length; the axis line where no mark reaches that side) to the labels: below an axis, to the line they hang from, about where their capitals and figures begin; above it, to the bottom of their last line's box; beside it, to their near end. A label's box (`background`) takes the place of its lines, its text moved in by the padding; labels their style aligns end it at their block's edge. By default labels outside the plot stand `max(8, round(0.65 × size))` px from the line, `size` being the tick label paint's font size in the panel, and farther by how far outward marks reach past 5 px, on x and y alike: at 12 px, 8 px from the line beside the default 5 px marks and 9 beside 6 px marks (3 px past them); at 16 px, 10 and 11. Inside the plot, labels stand 4 px past the inward marks. Where these lines sit in the text: [where text sits in its line](styling.md#where-text-sits-in-its-line). Not on colorbars. |
 | `ends` | What the first and last labels do where they would cross the chart's edge: `"room"` (default) widens the margin for them, `"hide"` leaves them out with their tick marks ([Labels at the chart's edge](#labels-at-the-charts-edge)). Axes and their layers; not on colorbars. |
 
 Flat labels stand at their ticks as `style.tickLabel` aligns them (`align`

@@ -1122,7 +1122,11 @@ export interface AxisPlacement {
   readonly start: number;
   readonly end: number;
   readonly tickLength: number;
-  /** Pixels from the line to the near edge of the labels. */
+  /**
+   * Pixels from the line to the labels (to the line they hang from below
+   * it, their last line's box above it, their near end beside it), past
+   * tick marks as long as the default x axes'.
+   */
   readonly gap: number;
   /** What the labels and title are drawn on, for their halos: the chart's background. */
   readonly surface: string;
@@ -1407,9 +1411,10 @@ export interface Scene {
 export const LEGEND_SWATCH = 10;
 
 /**
- * Pixels from an axis line to its tick labels' near edge. Larger text sits
- * further out, so that the lowest y label, centered on the bottom of the
- * plot, clears the x labels hanging below it.
+ * Pixels from an axis line to its tick labels, on x and y alike, past tick
+ * marks as long as the default x axes'. Larger text sits further out, so
+ * that the lowest y label, centered on the bottom of the plot, clears the
+ * x labels hanging below it.
  */
 export function tickLabelGap(fontSize: number): number {
   return Math.max(8, Math.round(fontSize * 0.65));

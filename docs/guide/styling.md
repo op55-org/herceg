@@ -1,7 +1,7 @@
 # Styling
 
 How charts choose colors, and how to change their look: themes, role
-styles, text halos, and paint order.
+styles, text halos, where text sits in its line, and paint order.
 
 - [Colors](#colors)
 - [Colors follow what series stand for](#colors-follow-what-series-stand-for)
@@ -11,6 +11,7 @@ styles, text halos, and paint order.
 - [Role styles](#role-styles)
 - [CSS variables](#css-variables)
 - [Text halos](#text-halos)
+- [Where text sits in its line](#where-text-sits-in-its-line)
 - [Paint order](#paint-order)
 
 ## Colors
@@ -333,6 +334,33 @@ drawn on, so it stays readable over lines.
 labels), and the range navigator take `halo`. Guide text (tick labels,
 titles, legends) takes a style's `halo`, off by default. Halos are the same
 in static SVG and PDF.
+
+## Where text sits in its line
+
+Each line of text takes a box `lineHeight` × the font size tall, rounded
+to whole pixels (15 px for 12 px text at the default 1.25), the text
+centered in it: the leading, the box's height less the font size, is
+split above and below. In that box:
+
+- **The middle** is the box's middle. Text placed by a point at its
+  middle (y tick labels, labels above an x axis, titles) has it there.
+- **The baseline**, where letters sit, is about half the font's x-height
+  below the middle, about 0.26 em in sans-serif fonts: 10 px text in 12 px
+  lines has its baseline about 8.7 px below the line's top and 3.3 px
+  above its bottom. PDF puts it 0.35 em below the middle with its standard
+  fonts, half the cap height below with an embedded font.
+- **The hanging line**, where capitals and figures begin, is about 0.7 em
+  above the baseline. Text hanging from a point (labels below an x axis)
+  has it at the point, its box starting half a leading above: in SVG the
+  browser's hanging baseline, on canvases 0.8 of the font's ascent above
+  the baseline, in PDF 0.72 em with its standard fonts and the cap height
+  with an embedded font.
+
+These are the line's nominal box and lines: where its glyphs reach within
+the box (their ascent and descent) depends on the font and the renderer. A
+box (`background`) takes the place of its text's lines, and its `padding`
+moves the text in. Tick labels' `gap` ends at these lines ([Tick
+labels](axes-and-legends.md#tick-labels)).
 
 ## Paint order
 

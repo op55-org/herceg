@@ -191,8 +191,10 @@ export function measureColorbar(
       const [from, to] = extent(tick, paint, angle, upright ? "along" : "below", measure);
       overhang = Math.max(overhang, -from, to - length);
     }
-  // As axes draw labels: beside the ticks standing, below the default tick length lying.
-  const gap = 1 + (upright ? LABEL_GAP : LABEL_GAP + AXIS_TICK);
+  // Labels stand LABEL_GAP past the ticks standing, and below the default
+  // tick length lying. Axes count marks past that length on top of the
+  // gap, so standing, the gap holds the rest of the ticks' reach.
+  const gap = 1 + LABEL_GAP + (upright ? Math.min(reach, AXIS_TICK) : AXIS_TICK);
   const width = upright
     ? Math.max(
         thickness + reach + (labeled ? LABEL_GAP + widest(kit, probe, measure) : 0),

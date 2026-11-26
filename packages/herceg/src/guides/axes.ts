@@ -39,7 +39,11 @@ const SIDES: Record<ScaleName, string> = {
 };
 /** Whether `scale` is x, y, or yRight, not one of the chart's own (which may be named "constructor"). */
 const builtIn = (scale: string): scale is ScaleName => Object.hasOwn(HOME, scale);
-/** The default x axes' tick marks' length, which their labels' room keeps (axis-guide.ts). */
+/**
+ * The default x axes' tick marks' length (axis-guide.ts), which the labels'
+ * gap holds: on both axes, labels stand past outward marks only by what
+ * reaches further.
+ */
 export const TICK = 5;
 /** Pixels between rows of labels. */
 const ROW_GAP = 2;
@@ -49,8 +53,6 @@ const GAP = 6;
 const PAD = 4;
 /** The most lines a wrapped label takes. */
 const WRAPPED = 3;
-/** Pixels from a y axis' line to its labels, as the default axes draw them. */
-const Y_GAP = 8;
 /** Pixels from labels inside the plot to the ends of the ticks on their side, by default. */
 const INSIDE_GAP = 4;
 
@@ -416,6 +418,7 @@ function roomFit(
   axis: { layers: readonly Layer[]; across: boolean; room?: Bounds | undefined },
   labels: TickLabelsSpec,
   label: TextPaint,
+  gap: number,
   measure: MeasureText,
 ): ((text: string) => string) | undefined {
   const { room } = axis;
@@ -427,11 +430,7 @@ function roomFit(
   const outline = background?.stroke ? (background.strokeWidth ?? 1) / 2 : 0;
   const halo = (kit.textHalo(label, "")?.width ?? 0) / 2 - Math.min(left, right);
   const width =
-    room.max -
-    firstRow(labels, Y_GAP, false, axis.layers) -
-    left -
-    right -
-    Math.max(0, outline, halo);
+    room.max - firstRow(labels, gap, axis.layers) - left - right - Math.max(0, outline, halo);
   return (text) => {
     const lines = text.split("\n").map((line) => {
       const shown = kit.fitText(line, width, measure, css);
@@ -840,7 +839,9 @@ export function compiledAxes(
           const whole = placedLayers(kit, unroomed(home), state, i, state.plan(scale, i, 0));
           const room = roomIn(home, i);
           const takes = within(outsideBreadth(kit, whole, state.measure), room);
-          const keep = Math.ceil(widest(kit, [whole[0]!], state.measure)) + Y_GAP;
+          const keep =
+            Math.ceil(widest(kit, [whole[0]!], state.measure)) +
+            kit.tickLabelGap(whole[0]!.label.size);
           needs.all.push(takes);
           keeps.all.push(keep);
           own[scale === "y" ? "y" : "right"][i] = takes - keep;
@@ -1141,19 +1142,15 @@ function inward(layers: readonly Layer[]): number {
 /**
  * Pixels from the axis line to a layer's first row of labels: past the
  * ticks on their side by their `gap`; without one, as default axes place
- * labels outside (`gap` from the line, and past ticks longer than theirs
- * along x), or inside, a few pixels past the ticks.
+ * labels outside on x and y alike (`gap` from the line, and past outward
+ * ticks longer than the default x axes'), or inside, a few pixels past the
+ * ticks.
  */
-function firstRow(
-  labels: TickLabelsSpec,
-  gap: number,
-  across: boolean,
-  layers: readonly Layer[],
-): number {
+function firstRow(labels: TickLabelsSpec, gap: number, layers: readonly Layer[]): number {
   if (labels.inside) return inward(layers) + (labels.gap ?? INSIDE_GAP);
   const reach = outward(layers);
   if (labels.gap !== undefined) return reach + labels.gap;
-  return gap + (across ? Math.max(0, reach - TICK) : reach);
+  return gap + Math.max(0, reach - TICK);
 }
 
 /** How far tick marks reach out from the axis line. */
@@ -1317,7 +1314,7 @@ export function layered(
   width?: number,
 ): Placed[] {
   // Labels stand off the line as default axes place them, by the gap for their size.
-  const gap = axis.across ? kit.tickLabelGap(base.label.size) : Y_GAP;
+  const gap = kit.tickLabelGap(base.label.size);
   /** `layer` placed, its labels outside the plot within `room` px of where its row starts. */
   const place = (layer: Layer, room: number): Placed => {
     const run = runOf(axis, layer);
@@ -1366,7 +1363,7 @@ export function layered(
     const labels = layer.labels;
     if (labels) {
       // Shortened to a y axis' room first: what is left out hides and reaches nothing.
-      const fit = roomFit(kit, axis, labels, label, measure);
+      const fit = roomFit(kit, axis, labels, label, gap, measure);
       if (fit) ticks = ticks.map((t) => ({ ...t, label: fit(t.label) }));
       // Flat labels stand at their ticks as their style aligns them: inside
       // the plot centered by default, outside it where the style says.
@@ -1453,7 +1450,7 @@ function rowsWithin(
       out[k] = place(layer, Number.POSITIVE_INFINITY);
       continue;
     }
-    let away = firstRow(layer.labels as TickLabelsSpec, gap, true, layers);
+    let away = firstRow(layer.labels as TickLabelsSpec, gap, layers);
     for (let r = 0; r < row; r++) away += (rows[r] ?? 0) + ROW_GAP;
     const placed = place(layer, most - away);
     out[k] = placed;
@@ -1483,7 +1480,7 @@ function rowsKept(
   for (const { layer, label, angle } of placed) {
     const { labels } = layer;
     if (!labels || labels.inside) continue;
-    let end = firstRow(labels, gap, true, layers);
+    let end = firstRow(labels, gap, layers);
     for (let r = 0; r < labels.row; r++) end += (rows[r] ?? 0) + ROW_GAP;
     end += (rows[labels.row] ?? 0) + past(kit, label, angle);
     if (end > most + 0.5) cut = Math.min(cut, labels.row);
@@ -1576,7 +1573,7 @@ function prioritized(
     if (found) return found;
     const run = runOf(axis, of.layer);
     const lane = laneDepth(kit, of, measure);
-    const first = firstRow(of.layer.labels || {}, gap, axis.across, all);
+    const first = firstRow(of.layer.labels || {}, gap, all);
     found = of.ticks.map((tick, k) => {
       if (!tick.label) return undefined;
       const at = of.at ? { ...tick, position: of.at[k]! } : tick;
@@ -2055,7 +2052,7 @@ function outsideDepth(
   for (const { layer, label, angle } of layers) {
     const { labels } = layer;
     if (!labels || labels.inside) continue;
-    let away = firstRow(labels, gap, true, all);
+    let away = firstRow(labels, gap, all);
     for (let row = 0; row < labels.row; row++) away += (rows[row] ?? 0) + ROW_GAP;
     depth = Math.max(depth, away + (rows[labels.row] ?? 0) + past(kit, label, angle));
   }
@@ -2064,15 +2061,18 @@ function outsideDepth(
 
 /**
  * Pixels a y axis' tick marks and labels outside the plot take beside its
- * line: its ticks, and its widest labels past them. Labels inside take none.
+ * line: its ticks, and its widest labels past them, the first `gap` from
+ * the line for the axis' paint unless its layer gives its own. Labels
+ * inside take none.
  */
 function outsideBreadth(kit: GuideKit, layers: readonly Placed[], measure: MeasureText): number {
   const all = layers.map(({ layer }) => layer);
+  const gap = kit.tickLabelGap(layers[0]!.label.size);
   let breadth = outward(all);
   for (const placed of layers) {
     const { labels } = placed.layer;
     if (!labels || labels.inside) continue;
-    const away = firstRow(labels, Y_GAP, false, all);
+    const away = firstRow(labels, gap, all);
     breadth = Math.max(breadth, away + Math.ceil(widest(kit, [placed], measure)));
   }
   return breadth;
@@ -2209,7 +2209,7 @@ function beyond(
     start: above ? plot.x : plot.y + plot.height,
     end: above ? plot.x + plot.width : plot.y,
     tickLength: outward(axis.layers),
-    gap: above ? kit.tickLabelGap(paints.label.size) : Y_GAP,
+    gap: kit.tickLabelGap(paints.label.size),
     surface,
     paints,
   };
@@ -2367,7 +2367,6 @@ export function drawn(
     let away = firstRow(
       labels,
       placement.gap,
-      across,
       layers.map(({ layer }) => layer),
     );
     for (let row = 0; row < labels.row; row++) away += (rows[+inner]![row] ?? 0) + ROW_GAP;

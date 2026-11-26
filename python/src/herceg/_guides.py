@@ -538,13 +538,17 @@ class TickLabels:
     ``style``'s ``tick_label`` aligns them: its ``align`` on x, its
     ``vertical_align`` on y; centered by default. ``gap``
     is the pixels between them and their tick's end on their side (the
-    axis line where the tick does not reach it). ``ends`` says what labels
-    whose painted extent would cross the chart's edge do (or, in panels
-    among others, the gap to a neighbour): ``"room"`` (the default) widens
-    the margin, narrowing the plots, and margins only grow while the
-    chart's size and options stay; ``"hide"`` leaves them out with their
-    tick marks, keeping their grid lines, and widens nothing for them,
-    which suits axes whose domain moves. Colorbars take none of
+    axis line where the tick does not reach it): below an axis to the line
+    they hang from, above it to their last line's box, beside it to their
+    near end. Without it, labels outside the plot stand max(8, round(0.65
+    em)) px from the line, and farther by how far outward ticks reach past
+    5 px, on x and y alike; inside it, 4 px past the ticks. ``ends`` says
+    what labels whose painted extent would cross the chart's edge do (or,
+    in panels among others, the gap to a neighbour): ``"room"`` (the
+    default) widens the margin, narrowing the plots, and margins only grow
+    while the chart's size and options stay; ``"hide"`` leaves them out
+    with their tick marks, keeping their grid lines, and widens nothing for
+    them, which suits axes whose domain moves. Colorbars take none of
     ``inside``, ``gap``, and ``ends``."""
 
     rotation: float | Sequence[float] | None = None

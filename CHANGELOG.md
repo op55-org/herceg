@@ -535,6 +535,23 @@ styles](docs/guide/styling.md#role-styles) and
   earlier instant. Sub-day ticks now step by their interval rather than
   every unit. See [Automatic ticks and their
   labels](docs/guide/axes-and-legends.md#automatic-ticks-and-their-labels).
+- **One tick label gap on x and y.** Tick labels stand 8 px from the axis
+  line (0.65 × the font size above 12 px), and farther by how far outward
+  tick marks reach past 5 px, on x and y alike, the font size read from
+  each panel's tick label paint; the default y axes keep that room for
+  their labels. `labels.gap` still counts from the end of the marks on
+  the labels' side, and the axes guide says where it ends on each side:
+  below an axis at the line the labels hang from, above it at their last
+  line's box, beside it at their near end ([Where text sits in its
+  line](docs/guide/styling.md#where-text-sits-in-its-line) says where
+  those lines are). No option, on any surface. Changed: y labels stood
+  8 px past outward marks, so 6 px marks put them 14 px from the line
+  where x labels stood 9; they stand 9 now, in by the marks' length up to
+  5 px. y labels at fonts above 12 px move out with the font, as x labels
+  do (14 px text by 1 px, 16 px by 2, 20 px by 5), and the crosshair's y
+  boxes with them. Labels inside the plot and colorbars' labels stay
+  where they were. See [Tick
+  labels](docs/guide/axes-and-legends.md#tick-labels).
 - **Legends take `room`**, of the type axes' rooms have (`Room`): a fixed
   depth on their side, or `{ min, max }` bounds on what their entries
   measure, so plots line up whether a legend wraps or not; the gap and
