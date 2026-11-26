@@ -14,6 +14,7 @@ totalling, and pivoting rows without copying them.
 - [Row sets and selection stores](#row-sets-and-selection-stores)
 - [Row groups](#row-groups)
 - [Totals](#totals)
+- [Cross-filtering](#cross-filtering)
 - [Row pivots](#row-pivots)
 - [Data in Python](#data-in-python)
 
@@ -448,7 +449,8 @@ over an ordered table, only the words that hold members); a copy of a set
 from before a reset is empty. Freezing copies nothing. Positions, `size`,
 and `current` still follow the table: a frozen set's rows leave as the table
 drops them, and none are left after a reset. Nothing propagates on its own: the application decides which
-views read which channels. Grids and charts bound to a channel write and
+views read which channels ([Cross-filtering](#cross-filtering) shows a
+dashboard's). Grids and charts bound to a channel write and
 highlight it (see [Selected rows](interaction.md#selected-rows)).
 
 ## Row groups
@@ -556,6 +558,157 @@ out (a filter or restriction) a byte per row saying which rows it showed.
 1,000 rows appended to a million update the totals in about 0.07 ms, and
 drops from a rolling window in about 0.09 ms; one value changed in place
 computes them again, about 10 ms over a million rows (Node, Apple M6).
+
+## Cross-filtering
+
+A cross-filtered dashboard draws one table in several panels, and each
+panel's filter narrows the others: brushing a time range shows only those
+days everywhere else, and clicking a region's bar shows only that region.
+The pieces above make it without rebuilding a table: a selection store
+holds the filters, each panel draws a row view of the rows every other
+filter leaves, and the panels that sum draw groups of their view. As a
+filter changes, the views and groups follow it in place, and the marks keep
+the tables they were given.
+
+The example has four panels over a row a day and region (`time`, `region`,
+`month` as `"2025-03"`, `revenue`, `orders`): revenue per region over time,
+orders a day, revenue per region, and revenue per month.
+
+```ts
+import { bar, col, createChart, groupRows, line, rowView, selectionStore, selectWhere, sum } from "herceg";
+
+// The filters: a channel for each panel that filters the others.
+const filters = selectionStore(sales);
+const channels = ["revenue", "orders", "regions", "months"];
+
+/** The rows a panel shows: those every filter but its own leaves. */
+function rowsFor(panel: string) {
+  const others = channels.filter((channel) => channel !== panel);
+  const view = rowView(sales, { filter: filters.condition(others) });
+  filters.subscribe(({ channel }) => {
+    if (channel !== panel) view.setQuery({ ...view.query, filter: filters.condition(others) });
+  });
+  return view;
+}
+
+// Panels that sum draw groups of their rows, which follow the view.
+const byDay = groupRows(rowsFor("orders"), { by: ["time"], ops: { orders: sum("orders") } });
+const byRegion = groupRows(rowsFor("regions"), {
+  by: ["region"],
+  ops: { revenue: sum("revenue") },
+});
+const byMonth = groupRows(rowsFor("months"), { by: ["month"], ops: { revenue: sum("revenue") } });
+
+const revenueChart = createChart(revenueElement, {
+  marks: [line(rowsFor("revenue"), { x: "time", y: "revenue", series: "region" })],
+  interaction: { brush: "x" },
+});
+const ordersChart = createChart(ordersElement, {
+  // Days a filter empties come back after the others: drawn sorted by time.
+  marks: [line(rowView(byDay.table, { sort: [{ field: "time" }] }), { x: "time", y: "orders" })],
+  interaction: { brush: "x" },
+});
+// Bars keep their places as their groups leave and come back: the axes list them.
+const regionsChart = createChart(regionsElement, {
+  x: { domain: ["North", "South", "East", "West"] },
+  marks: [bar(byRegion.table, { x: "region", y: "revenue", color: "region" })],
+  interaction: { select: "items" },
+});
+const monthsChart = createChart(monthsElement, {
+  x: { domain: [...sales.categories("month").dictionary] }, // in order of time, as the rows came
+  marks: [bar(byMonth.table, { x: "month", y: "revenue" })],
+  interaction: { select: "items" },
+});
+
+// A brush filters the others to its range; a selected bar to its region or month.
+for (const [chart, channel] of [
+  [revenueChart, "revenue"],
+  [ordersChart, "orders"],
+] as const)
+  chart.on("select", ({ selection, phase }) => {
+    if (phase !== "commit") return;
+    const x = selection?.kind === "brush" ? selection.x : undefined;
+    filters.set(channel, x ? selectWhere(col("time").ge(x[0]).and(col("time").le(x[1]))) : null);
+  });
+for (const [chart, channel] of [
+  [regionsChart, "regions"],
+  [monthsChart, "months"],
+] as const)
+  chart.on("select", ({ conditions, phase }) => {
+    if (phase !== "commit") return;
+    filters.set(channel, conditions[0] ? selectWhere(conditions[0].condition) : null);
+  });
+```
+
+- **One store, a channel for each filter.** `filters.condition(others)` is
+  the conjunction of the conditions in every channel but the panel's own
+  (a channel holding rows adds none), and undefined (every row) while none
+  holds one. A panel is never filtered by its own channel: it keeps its
+  brush or its selected bar in place.
+- **Selections become conditions.** A brush commits its range; a selected
+  bar's condition names its group's field (`region`, `month`), which is
+  the table's field too, so it filters the table's rows.
+- **Groups follow their view.** Their tables stay the same objects as the
+  groups change, so the marks keep drawing them. A group a filter empties
+  leaves its table and comes back after the others, so the line of days
+  draws through a view sorted by time, and the bar axes list their
+  categories in `domain` ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)).
+
+**What a filter step costs.** Setting a channel tells the store's
+listeners, which give each other panel's view its new condition. Groups
+follow their view at once: within the `set` call, the view filters every
+row of the table again and the groups compute again from it, then write
+their table in place (the values that differ and the groups added, or the
+whole table when a group leaves). A view no groups follow, as the revenue
+lines', filters when its chart reads it. Each chart draws once, in the
+next frame. No table is made or replaced: the marks hold the same tables
+throughout. Keeping the views and groups up to date takes about 0.2 ms a
+step over 2,924 rows (two years of days in four regions) and 12 ms over
+365,000, before the charts draw (Node, Apple M6).
+
+**Streaming.** Rows appended to the table go through the same path, but
+only the new rows rather than the whole table: each view filters them by
+its condition (a brush's condition holds for rows that arrive later), the
+groups add them to the groups they join or start new ones, and each chart
+draws once a frame. 1,000 rows take about 0.25 ms before drawing, whether
+every view takes them or a brush leaves them out. A new day joins the line
+in its place, and a new month's bar follows the listed months. New months
+keep, among themselves, the order their groups came in, which a filter
+that empties one and its clear can change, so give the axis the months
+again as they arrive:
+`monthsChart.update({ x: { domain: [...sales.categories("month").dictionary] } })`.
+Rows a rolling window drops leave the views and groups the same way.
+
+**Where it stops.**
+
+- A new filter is not incremental: each view filters every row again, and
+  its groups compute again. A step grows with the table and the number of
+  panels.
+- Groups give counts, sums, means, minimums, and maximums. A distinct
+  count, a median, or a quantile per group needs a derived table's
+  aggregate, which takes a table rather than a view: each filter step
+  makes a new table, and each change computes it again whole.
+- Orders by value: groups keep the order they appeared in, so ranked bars
+  need a view of the groups sorted by their value and a new `domain` each
+  step (the [ranked-bars recipe](axes-and-legends.md#how-bands-are-ordered)).
+- A panel's totals (`rowTotals` of its view) follow its filters; a share of
+  the unfiltered total needs a second totals over a view without them.
+- A grid among the panels selects rows of the table it shows (its panel's
+  groups), in a selection store of its own, and `filters.condition` reads
+  conditions only. To filter the others by a selected group, set the
+  grid's channel in `filters` to a condition on the table's fields from
+  the group's values (`col("month").eq(month)`), as a selected bar's
+  condition does. The grid keeps the row at its top in place as groups
+  come back above it, so clearing a filter can leave it scrolled down the
+  list: `model.scrollTo({ top: 0 })` on a filter step shows it from its
+  first row ([how a grid follows its view](grids.md#a-grid)).
+- Drilling into a panel (years, then a year's months) changes what it
+  groups by, which is new groups and a new table for the mark: a drill
+  step rebuilds that panel; a filter step does not.
+
+Python has row views with a fixed filter (`hg.view`), but no selection
+stores or row groups, so this pattern is for TypeScript and the
+framework adapters.
 
 ## Row pivots
 
