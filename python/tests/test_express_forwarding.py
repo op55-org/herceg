@@ -239,7 +239,7 @@ def test_label_options_are_refused_where_the_chart_methods_refuse_them():
             (
                 "labels",
                 'SeriesLabels place: unknown key "bogus"; name one of "attachment", '
-                '"side", "outside", "reserve", or "offset"',
+                '"side", "outside", "reserve", "offset", or "room"',
             ),
         ),
     ):

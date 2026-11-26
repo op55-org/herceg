@@ -17,16 +17,17 @@ import type {
   LabelContent,
   LabelLayoutSpec,
   LabelPart,
-  LabelPlaceSpec,
   LabelSpec,
   LabelTextSpec,
   MarkAnchorSpec,
   MarkStyleSpec,
   NameSpec,
   RowChannelsSpec,
+  RuleLabelSpec,
   SeriesLabelsSpec,
   StackSpec,
   SymbolName,
+  TrackPlaceSpec,
 } from "./encoding.ts";
 import type { FieldDisplaysSpec } from "./fields.ts";
 import type {
@@ -1772,7 +1773,7 @@ interface RuleStyle extends AnnotationBase, RowItems {
   /** Where along the other axis the rule runs, from one place to the other; the plot's whole extent by default. */
   span?: readonly [AnnotationCoordinate, AnnotationCoordinate];
   /** Text drawn by every rule: constant, or each row's `field`, placed and styled as it says. */
-  label?: string | LabelSpec;
+  label?: string | RuleLabelSpec;
 }
 /** A SciPy-layout linkage tree, whose leaves stand on category bands. */
 export interface DendrogramSpec extends Omit<MarkBase, "axis" | keyof SelectionLooks> {
@@ -1856,12 +1857,12 @@ interface RegionStyle extends AnnotationBase, RowItems {
  * layout says (`LabelLayoutSpec`). Text at a place is drawn there, where
  * "move" may move it around its point, and keeps apart from the labels of
  * its `overlapGroup`; text following a series (`from`) is placed as
- * series' labels are (`place`: outside the plot, keeping room or not, and
- * its offset), and takes no group.
+ * series' labels are (`place`: outside the plot, keeping room or not, in
+ * a `room` of its own where given, and its offset), and takes no group.
  */
 export type TextLabelSpec = LabelTextSpec &
   LabelLayoutSpec & {
-    place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
+    place?: TrackPlaceSpec;
   };
 
 /**

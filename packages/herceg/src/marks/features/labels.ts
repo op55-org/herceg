@@ -8,6 +8,7 @@
 // outside the plot (layout/attached.ts), whose room the chart keeps. Hidden series draw nothing, so their labels are left out;
 // labels make no rows.
 
+import type { Bounds } from "../../guides/axes.ts";
 import { type AttachedLabel, type LabelOwner, placeAttached } from "../../layout/attached.ts";
 import type { PanelDrawing } from "../../layout/placer.ts";
 import type { FeatureKit, MarkFeatures } from "../../model/features.ts";
@@ -16,8 +17,9 @@ import type {
   AreaLabelsSpec,
   LabelAt,
   LabelLayoutSpec,
-  LabelPlaceSpec,
+  TrackLabelPlaceSpec,
 } from "../../spec/encoding.ts";
+import type { Room } from "../../spec/guides.ts";
 import type { AreaSpec } from "../../spec/spec.ts";
 import type { TextStyle } from "../../spec/style.ts";
 import type { Frame, Mark } from "../mark.ts";
@@ -133,7 +135,9 @@ export interface Following {
   readonly style: TextStyle | undefined;
   /** The halo of the mark the labels are text of, under their style's. */
   readonly halo?: TextStyle["halo"];
-  readonly place: LabelPlaceSpec | undefined;
+  readonly place: TrackLabelPlaceSpec | undefined;
+  /** The bounds `place.room` gives, checked (`checkPlace`). */
+  readonly room?: Bounds | undefined;
   /** How they keep apart from the panel's other series labels ("move" by default). */
   readonly layout: Omit<LabelLayoutSpec, "overlapGroup"> | undefined;
   /** Names the labels' style in messages: `line "cpu" labels.style`. */
@@ -157,8 +161,7 @@ export function followingLabels(
   // Found as the series drew, as `placing` asked.
   const wanted = following.drawings.want(at, following.edge);
   const style = following.style && frame.read(following.style, following.path);
-  // Labels before their series' start go before their point; others after it.
-  const align = at === "first" || at.endsWith("-start") ? "end" : "start";
+  const align = alignOf(at);
   // Inside, labels are drawn on the plot's fill; outside, on the chart's background.
   const chart = kit.surface(frame.theme);
   const under = place?.outside ? chart : (frame.surface ?? chart);
@@ -191,7 +194,12 @@ export function followingLabels(
       text,
       parts: content.styled?.(anchor.row, s.label, anchor.value, time, paint, frame, field),
       paint,
-      place: { outside: place?.outside, reserve: place?.reserve, offset: place?.offset },
+      place: {
+        outside: place?.outside,
+        reserve: place?.reserve,
+        offset: place?.offset,
+        room: following.room,
+      },
       halo: kit.textHalo({ ...paint, halo: style?.halo ?? following.halo ?? "auto" }, under),
       overlap: layout?.overlap ?? "move",
       priority: layout?.priority ?? 0,
@@ -200,6 +208,11 @@ export function followingLabels(
     });
   }
   return labels;
+}
+
+/** Labels before their series' start go before their point; others after it. */
+function alignOf(at: LabelAt): "start" | "end" {
+  return at === "first" || at.endsWith("-start") ? "end" : "start";
 }
 
 /**
@@ -221,6 +234,13 @@ export function placing(
   following.drawings.want(following.at, following.edge);
   const leader = following.layout?.leader;
   const look = leader === true ? {} : leader || undefined;
+  // Labels in a room keep its least (a fixed room whole) in each panel they
+  // are drawn in, labels drawn or not, on the side their alignment puts them:
+  // the room the chart reads before anything is drawn.
+  const { room, place } = following;
+  const least = room ? room.min + (place?.offset ?? 0) : 0;
+  const left = (following.style?.align ?? alignOf(following.at)) === "end";
+  const floor = (): [number, number] => (left ? [least, 0] : [0, least]);
   const owner: LabelOwner = {
     key,
     attached,
@@ -231,12 +251,12 @@ export function placing(
       dash: kit.dashPattern(look.dash, look.strokeWidth ?? 1),
       opacity: look.opacity,
     },
-    room: [0, 0],
+    room: floor(),
   };
   return {
     labels: (frame) => {
-      // A panel drawing none of its labels keeps no room for them.
-      owner.room = [0, 0];
+      // A panel drawing none of its labels keeps no room for them but its least.
+      owner.room = floor();
       return followingLabels(kit, following, frame, owner);
     },
     room: () => owner.room,
@@ -331,14 +351,14 @@ export function seriesLabels(
   mark: Mark,
   labels: AreaLabelsSpec,
   path: string,
-): { edge: "upper" | "lower" } {
+): { edge: "upper" | "lower"; room: Bounds | undefined } {
   const at = `${path} labels`;
   checkAt(labels.at, `${at}.at`);
   checkContent(labels.content, `${at}.content`);
-  checkPlace(labels.place, `${at}.place`);
+  const room = checkPlace(labels.place, `${at}.place`);
   if (labels.style !== undefined && (typeof labels.style !== "object" || labels.style === null))
     throw new Error(`${at}.style: expected a text style such as { fontSize: 12 }`);
-  return { edge: edgeOf(mark, labels.edge, at) };
+  return { edge: edgeOf(mark, labels.edge, at), room };
 }
 
 /** Checks that a label's `content`, where given, is a list of parts. */
@@ -358,11 +378,18 @@ export function checkAt(at: unknown, path: string): void {
     );
 }
 
-/** Checks a label's `place` where it follows a series: outside the plot or not, its offset. */
-export function checkPlace(place: LabelPlaceSpec | undefined, path: string): void {
+/**
+ * Checks a label's `place` where it follows a series: outside the plot or
+ * not, its offset, and the room of labels outside it that keep one; their
+ * room's bounds.
+ */
+export function checkPlace(
+  place: TrackLabelPlaceSpec | undefined,
+  path: string,
+): Bounds | undefined {
   if (place === undefined) return;
   if (typeof place !== "object" || place === null)
-    throw new Error(`${path}: expected { outside, reserve, offset }`);
+    throw new Error(`${path}: expected { outside, reserve, offset, room }`);
   for (const option of ["attachment", "side"] as const)
     if (place[option] !== undefined)
       throw new Error(
@@ -373,6 +400,43 @@ export function checkPlace(place: LabelPlaceSpec | undefined, path: string): voi
       throw new Error(`${path}.${option}: expected true or false`);
   if (place.offset !== undefined && !Number.isFinite(place.offset))
     throw new Error(`${path}.offset: expected a number of pixels`);
+  return labelRoom(place, path);
+}
+
+/**
+ * The bounds of a `room` labels outside the plot keep beside it, at
+ * `place` (named `path` in messages): refused where no room is kept for
+ * them, and checked as axes' and legends' rooms are (guides/axes.ts
+ * `roomOf`, in the guide compiler, which charts of series labels need not
+ * load). Series labels', text following series', and rules'.
+ */
+export function labelRoom(
+  place: { outside?: boolean; reserve?: boolean; room?: Room },
+  path: string,
+): Bounds | undefined {
+  const { room } = place;
+  if (room === undefined) return undefined;
+  const refused =
+    place.reserve === false
+      ? "labels that keep no room take none; drop room, or reserve"
+      : place.outside !== true
+        ? "labels inside the plot take no room; place them outside"
+        : undefined;
+  const bounds = typeof room === "object" && room !== null && !Array.isArray(room);
+  const { min = 0, max = Number.POSITIVE_INFINITY } =
+    typeof room === "number" ? { min: room, max: room } : bounds ? room : {};
+  // Neither a number nor bounds: no finite max, so refused below.
+  if (
+    !refused &&
+    Number.isFinite(min) &&
+    (Number.isFinite(max) || (bounds && room.max === undefined)) &&
+    min >= 0 &&
+    max >= min
+  )
+    return { min, max };
+  throw new Error(
+    `${path}.room: ${refused ?? `expected finite pixels of at least 0, or { min, max } with min no more than max; received ${bounds ? `{ min: ${room.min}, max: ${room.max} }` : typeof room === "number" ? room : JSON.stringify(room)}`}`,
+  );
 }
 
 /**

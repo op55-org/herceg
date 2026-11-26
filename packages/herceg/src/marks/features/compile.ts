@@ -22,6 +22,7 @@ import {
 import { Rank } from "../../encoding/ranks.ts";
 import type { ChartFields } from "../../fields/chart.ts";
 import { formatWriter, formed } from "../../format/patterns.ts";
+import { fitLabel } from "../../layout/attached.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
 import { clearDomain } from "../../model/clearance.ts";
@@ -49,6 +50,7 @@ import type {
   MarkAnchorSpec,
   OrdinalScaleSpec,
   SymbolName,
+  TrackPlaceSpec,
 } from "../../spec/encoding.ts";
 import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
@@ -71,6 +73,7 @@ import {
   checkPlace,
   Drawings,
   edgeOf,
+  labelRoom,
   panelLabels,
   placing,
   recording,
@@ -796,7 +799,7 @@ function followingText(
   const edge = edgeOf(source, from.edge, at);
   const label = typeof spec.label === "string" ? { text: spec.label } : spec.label;
   checkContent(label.content, `${where.path} label.content`);
-  checkPlace(label.place, `${where.path} label.place`);
+  const room = checkPlace(label.place, `${where.path} label.place`);
   const own = `marks[${where.index}].label`;
   const content: LabelContent = label.content ?? [
     label.field !== undefined
@@ -829,6 +832,7 @@ function followingText(
         style: label.style,
         halo: spec.halo,
         place: label.place,
+        room,
         layout: label,
         path: `${where.path} label.style`,
       },
@@ -1507,11 +1511,13 @@ function labelFeatures(
   const label = (mark.spec as { label?: unknown }).label;
   const own =
     typeof label === "object"
-      ? (label as { format?: FormatSpec; content?: LabelContent })
+      ? (label as { format?: FormatSpec; content?: LabelContent; place?: TrackPlaceSpec })
       : undefined;
   // A format refused is refused now, not when the first label is drawn; Intl options are the chart's.
   if (formed(own?.format)) format(own!.format!, undefined, `${path} label.format`);
   if (own) checkContent(own.content, `${path} label.content`);
+  // A rule's labels outside the plot in a room (rules refuse it on vertical rules, regions everywhere).
+  const bounds = own?.place && labelRoom(own.place, `${path} label.place`);
   // With the chart's displays, a label of a field is written through its display.
   const parts = own?.content ?? shown;
   const content =
@@ -1535,6 +1541,11 @@ function labelFeatures(
     format,
     content,
     steps: placed?.steps,
+    labelRoom: bounds && {
+      bounds,
+      fit: (text, parts, width, font, measure) =>
+        fitLabel(text, parts, width, font, measure, kit.fitText),
+    },
   };
 }
 

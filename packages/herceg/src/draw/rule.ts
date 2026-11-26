@@ -33,7 +33,7 @@ export function ruleLabel(
 }
 
 /** A rule's line, across which its labels may move to stay in the plot (see `shiftInside`). */
-export function ruleLine(rule: RuleGeometry): { axis: "x" | "y"; at: number } {
+function ruleLine(rule: RuleGeometry): { axis: "x" | "y"; at: number } {
   return rule.x1 === rule.x2 ? { axis: "x", at: rule.x1 } : { axis: "y", at: rule.y1 };
 }
 

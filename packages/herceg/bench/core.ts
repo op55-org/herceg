@@ -1068,6 +1068,51 @@ for (const labelled of [false, true]) {
     },
   );
 }
+// The same 30 lines under names too long for a room of 64 px, a row
+// arriving each frame: measured, the names whole and their track as wide
+// as the longest; in the room, each shortened as it is drawn.
+const LONG_NAMES = SERIES_NAMES.map((name) => `${name}-checkout-service-eu-west`);
+for (const room of [undefined, 64] as const) {
+  const ends = table({
+    t: Float64Array.from({ length: 3000 }, (_, t) => t),
+    ...Object.fromEntries(
+      LONG_NAMES.map((name, k) => [
+        name,
+        Float64Array.from({ length: 3000 }, (_, t) => converging(k, t)),
+      ]),
+    ),
+  });
+  const model = new ChartModel(
+    {
+      y: { domain: [0, 1000] },
+      legend: false,
+      marks: [
+        line(ends, {
+          x: "t",
+          y: LONG_NAMES as never,
+          labels: { at: "last", place: { outside: true, ...(room && { room }) }, leader: true },
+        }),
+      ],
+    },
+    undefined,
+    staticCompilers(),
+  );
+  model.setSize(1100, 640, 1);
+  drawsLabels(model, 30, true);
+  let next = 3000;
+  measure(
+    `labels: 30 long names, a row arriving${room ? ", shortened to a room" : ", measured"}`,
+    () => {
+      ends.appendRow({
+        t: next,
+        ...Object.fromEntries(LONG_NAMES.map((name, k) => [name, converging(k, next)])),
+      });
+      ends.dropFirst(1);
+      next++;
+      model.scene(estimateText);
+    },
+  );
+}
 // Labels at the last observation in view while 30 series stream, and where
 // the lines cross the view's end: one mark, a row arriving and the first
 // dropped each frame, the view following 500 rows behind the newest (panned

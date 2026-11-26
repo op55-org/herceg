@@ -710,3 +710,45 @@ custom({
       if (names.length === 1) context.rect(box.x, box.y, box.width, 2);
   },
 });
+// Labels outside the plot that keep room in their track take a room: fixed, or bounds.
+const metrics = table({ t: [0], p50: [1], p99: [2] });
+line(metrics, {
+  x: "t",
+  y: ["p50", "p99"],
+  labels: { at: "visible-end", place: { outside: true, offset: 8, room: 64 }, leader: true },
+});
+line(metrics, {
+  x: "t",
+  y: "p50",
+  labels: { at: "last", place: { outside: true, room: { min: 60 } } },
+});
+area(metrics, {
+  x: "t",
+  y: "p50",
+  labels: { at: "last", place: { outside: true, reserve: true, room: 40 } },
+});
+line(metrics, { id: "m", x: "t", y: "p50" });
+text({
+  from: { mark: "m", at: "last" },
+  label: { text: "now", place: { outside: true, room: 40 } },
+});
+rule({ y: 1, label: { text: "SLO", place: { outside: true, attachment: "start", room: 50 } } });
+line(metrics, {
+  x: "t",
+  y: "p50",
+  // @ts-expect-error labels that keep no room take none
+  labels: { at: "last", place: { outside: true, reserve: false, room: 72 } },
+});
+// @ts-expect-error labels inside the plot take no room
+line(metrics, { x: "t", y: "p50", labels: { at: "last", place: { room: 72 } } });
+// @ts-expect-error labels inside the plot take no room
+line(metrics, { x: "t", y: "p50", labels: { at: "last", place: { outside: false, room: 72 } } });
+text({
+  from: { mark: "m", at: "last" },
+  // @ts-expect-error labels that keep no room take none
+  label: { text: "now", place: { outside: true, reserve: false, room: 4 } },
+});
+// @ts-expect-error a region's labels stand in it, where no track is kept
+region({ y1: 0, y2: 1, label: { text: "Budget", place: { outside: true, room: 64 } } });
+// @ts-expect-error a room is pixels, or bounds
+line(metrics, { x: "t", y: "p50", labels: { at: "last", place: { outside: true, room: "64px" } } });

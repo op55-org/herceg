@@ -18,11 +18,11 @@ import type {
   IdentityScaleSpec,
   LabelAt,
   LabelLayoutSpec,
-  LabelPlaceSpec,
   MarkerStyle,
   PartStyle,
   SeriesStyle,
   SymbolName,
+  TrackLabelPlaceSpec,
 } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { Frame } from "../spec/place.ts";
@@ -185,7 +185,7 @@ export type SeriesName<S extends Schema> =
 export interface SeriesLabels<S extends Schema> extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;
   content?: readonly LabelPartOf<keyof S & string>[];
-  place?: LabelPlaceSpec;
+  place?: TrackLabelPlaceSpec;
   style?: TextStyle;
 }
 

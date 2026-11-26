@@ -117,7 +117,7 @@ interface RegionStyle {
 export type RegionOptions = RegionStyle &
   (RegionRange<PlaceOption<never>> | RegionSteps<PlaceOption<never>, AtThresholds>) & {
     /** Text drawn in the region (its top left corner by default): its text, or a label object. */
-    label?: RuleLabel<never, RegionLabelLayout>;
+    label?: RuleLabel<never, RegionLabelLayout, LabelPlaceSpec>;
   };
 
 /** Regions from a table, one per row; places may also be constants. */
@@ -125,7 +125,7 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
   ItemKeyed<S> &
   RegionRange<PlaceOption<PositionField<S>, CategoryField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
-    label?: RuleLabel<TextField<S>, RegionLabelLayout>;
+    label?: RuleLabel<TextField<S>, RegionLabelLayout, LabelPlaceSpec>;
     /**
      * Each row's paint: `color` (the fill) or `fill`, `stroke`, and
      * `opacity`, which scales the fill's `fillOpacity` and the outline's;
@@ -145,6 +145,9 @@ type RegionLabelLayout = LabelLayoutSpec & { leader?: never };
 
 /** Pixels between a region's edge and its label. */
 const PADDING = 4;
+
+/** Why a region's label takes no `room`. */
+export const REGION_ROOM = "a region's labels stand in it, where no track is kept; drop room";
 
 /** Why a region spec has no range, or half of one, or bands at thresholds and a range along one axis, if it does. */
 export function regionFormError(spec: {
@@ -248,6 +251,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const spec = this.spec;
     this.domainFallback = spec.contributeDomain !== true;
     const label = labelOf(spec.label);
+    // Typed callers cannot give one; others are told why.
+    if (label?.place?.room !== undefined)
+      throw new Error(`region label.place.room: ${REGION_ROOM}`);
     // Channels paint each row of the table, wherever the rows' places are.
     if (spec.encode && !table)
       throw new Error(

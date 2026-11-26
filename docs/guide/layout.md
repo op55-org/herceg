@@ -7,6 +7,7 @@ all three, how panels share scales, and how to address one panel.
 
 - [Small multiples](#small-multiples)
 - [Subplots](#subplots)
+- [What lines up](#what-lines-up)
 - [Sharing scales](#sharing-scales)
 - [Insets](#insets)
 - [Panels' legends](#panels-legends)
@@ -184,6 +185,54 @@ right.panel("share", title="By region").pie("region", "requests")
 React, Vue, and Svelte write layouts as elements (`<Columns>`, `<Rows>`,
 `<Grid>`, `<Cell>`, `<Panel>`, `<Inset>`; see
 [Frameworks](frameworks.md#layouts)).
+
+## What lines up
+
+Subplots of one chart line up exactly: the layout's tracks size their
+plots, and what stands beside each plot takes room around it
+([Subplots](#subplots)).
+
+Separate charts of one width line up on a side where that side holds the
+same parts with the same rooms, offsets, and padding: y axes' `room`
+([Axes](axes-and-legends.md#axes)), legends' `room`
+([Legends](axes-and-legends.md#legends)), and the `room` of marks' labels
+outside the plot ([Labels that follow
+series](marks.md#labels-that-follow-series)). A room is that part's own
+width in place of what it measures, so the plots stay in line as
+labels, names, and legends change.
+
+```ts
+// Two stacked charts that name their lines: one room for the y labels, one for the names.
+const names = { at: "visible-end", place: { outside: true, offset: 8, room: 64 } } as const;
+createChart(upper, {
+  y: { room: 36 },
+  marks: [line(metrics, { x: "time", y: ["auth", "payments"], labels: names })],
+});
+createChart(lower, {
+  y: { room: 36 },
+  marks: [line(errors, { x: "time", y: "errors", labels: names })],
+});
+```
+
+```python
+names = hg.SeriesLabels(at="visible-end", place=hg.LabelPlace(outside=True, offset=8, room=64))
+upper = hg.Chart(metrics, y=hg.AxisOptions(room=36)).line(x="time", y=["auth", "payments"], labels=names)
+lower = hg.Chart(errors, y=hg.AxisOptions(room=36)).line(x="time", y="errors", labels=names)
+```
+
+- **x axes' end labels.** Rooms do not bound an x axis' first and last
+  tick labels: where one would reach past what stands on its side, that
+  side's margin widens for it, by up to a quarter of the chart's width.
+  So charts line up where their x labels end inside their sides' rooms:
+  time axes' labels of a few characters do, and a long last label may
+  not.
+- **A chart without outside labels** beside one with them does not line
+  up with it, and no sum of `padding` stands in for the labels' track:
+  the track stands inside the chart's 8 px edge inset, before the 12 px
+  automatic spacing, and explicit padding moves the bound end tick labels
+  widen margins against, so a padding that lines up at one view can stop
+  lining up as the x axis' last label nears the edge. Charts that must
+  line up whatever stands beside them are subplots of one chart.
 
 ## Sharing scales
 

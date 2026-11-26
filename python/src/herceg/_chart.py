@@ -5389,6 +5389,13 @@ class Chart:
             raise ChartError("rule: needs exactly one of x and y")
         self._check_label_dict(label, "rule", "label", ("content",))
         label_json = self._option("rule label", lambda: label_spec(label, "rule"))
+        place = label_json.get("place") if isinstance(label_json, dict) else None
+        if x is not None and isinstance(place, dict) and place.get("room") is not None:
+            raise ChartError(
+                "rule label place room: a vertical rule's labels stand above or below the plot, "
+                "where no track is kept; drop room",
+                path=self._path("rule", "label.place.room"),
+            )
         if span is not None and (not isinstance(span, (tuple, list)) or len(span) != 2):
             raise ChartError(
                 "rule span: expected two places, such as (hg.Fraction(0.25), 10); "

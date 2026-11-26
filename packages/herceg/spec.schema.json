@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Herceg chart spec",
-  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; an axis' side along its axis (top or bottom for x, left or right for y), once among the guides and the short form's place; a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, an axis' room holds its tick marks, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n- A position scale's domain lists categories on an axis of categories alone, and gives two ends on the others: herceg refuses categories on an axis of numbers or times (marks placing numbers there, a heatmap banding numbers, a 3D chart's z, a scale of the chart's own, which gives its type), two ends on an axis of categories, and subplots listing the same categories in two orders.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; an axis' side along its axis (top or bottom for x, left or right for y), once among the guides and the short form's place; a stack's inside-out order only for shares or a stream; a rule's labels outside the plot only at its start or end, and their room only where the rule is horizontal; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, an axis' room holds its tick marks, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n- A position scale's domain lists categories on an axis of categories alone, and gives two ends on the others: herceg refuses categories on an axis of numbers or times (marks placing numbers there, a heatmap banding numbers, a 3D chart's z, a scale of the chart's own, which gives its type), two ends on an axis of categories, and subplots listing the same categories in two orders.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
   "$ref": "#/$defs/ChartSpec",
   "$defs": {
     "AggregateOp": {
@@ -85,7 +85,7 @@
         "priority": { "title": "Priority", "type": "number" },
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
-        "place": { "title": "Place", "$ref": "#/$defs/LabelPlaceSpec" },
+        "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
         "style": { "title": "Style", "$ref": "#/$defs/TextStyle" }
       },
       "required": ["at"],
@@ -5163,34 +5163,6 @@
       },
       "additionalProperties": false
     },
-    "LabelSpec": {
-      "description": "A label of an annotation (text, rule, region): its text (`LabelTextSpec`), placed as `place` says, kept apart from others as its layout says (\"show\" by default).",
-      "type": "object",
-      "properties": {
-        "text": { "title": "Text", "type": "string" },
-        "field": { "title": "Field", "type": "string" },
-        "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
-        "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
-        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
-        "place": { "title": "Place", "$ref": "#/$defs/LabelPlaceSpec" },
-        "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
-        "overlapGroup": { "title": "Overlap group", "type": "string" },
-        "leader": {
-          "title": "Leader",
-          "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/StrokeStyle" }]
-        },
-        "priority": { "title": "Priority", "type": "number" }
-      },
-      "anyOf": [
-        { "required": ["text"], "properties": { "field": false, "content": false } },
-        { "required": ["field"], "properties": { "text": false, "content": false } },
-        {
-          "required": ["content"],
-          "properties": { "text": false, "field": false, "format": false }
-        }
-      ],
-      "additionalProperties": false
-    },
     "LayoutCellSpec": {
       "description": "A cell of a grid: where it starts (from 0), how many tracks it spans (1 by default), and what it holds.",
       "type": "object",
@@ -7631,6 +7603,34 @@
       ],
       "additionalProperties": false
     },
+    "RuleLabelSpec": {
+      "description": "A rule's label: an annotation's label (`LabelSpec`) whose place is a track's, outside the plot taking a `room`.",
+      "type": "object",
+      "properties": {
+        "text": { "title": "Text", "type": "string" },
+        "field": { "title": "Field", "type": "string" },
+        "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
+        "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
+        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
+        "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
+        "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
+        "overlapGroup": { "title": "Overlap group", "type": "string" },
+        "leader": {
+          "title": "Leader",
+          "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/StrokeStyle" }]
+        },
+        "priority": { "title": "Priority", "type": "number" }
+      },
+      "anyOf": [
+        { "required": ["text"], "properties": { "field": false, "content": false } },
+        { "required": ["field"], "properties": { "text": false, "content": false } },
+        {
+          "required": ["content"],
+          "properties": { "text": false, "field": false, "format": false }
+        }
+      ],
+      "additionalProperties": false
+    },
     "RulePlace": {
       "description": "Where a rule stands: a place, or each step of a field's thresholds.",
       "anyOf": [{ "$ref": "#/$defs/AnnotationPosition" }, { "$ref": "#/$defs/ThresholdPlace" }]
@@ -7669,7 +7669,7 @@
         "label": {
           "title": "Label",
           "description": "Text drawn by every rule: constant, or each row's `field`, placed and styled as it says.",
-          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/LabelSpec" }]
+          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/RuleLabelSpec" }]
         },
         "clip": {
           "title": "Clip",
@@ -7997,12 +7997,12 @@
       "additionalProperties": false
     },
     "SeriesLabelsSpec": {
-      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label displaced more than 6 pixels from its place at its point back to that point, in its series' color unless the leader's look gives a stroke.",
+      "description": "Labels that follow each series of a line: placed at `at`, saying `content` (the series' name by default), placed as `place` says (beside the point within the plot, or `outside` the plot at its edge, in a `room` of their own where given) and styled as `style` says. A panel's series labels keep apart as `overlap` says: \"move\" (the default) moves them along y as little as keeps them apart, in the order of their points, and leaves out those of lowest `priority` (then the last in series order) where the plot is too short for all; \"show\" draws each at its point; \"hide\" leaves out those that would cover one of higher priority. `leader` draws a line from each label displaced more than 6 pixels from its place at its point back to that point, in its series' color unless the leader's look gives a stroke.",
       "type": "object",
       "properties": {
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
-        "place": { "title": "Place", "$ref": "#/$defs/LabelPlaceSpec" },
+        "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
         "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
         "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
         "leader": {
@@ -8588,7 +8588,7 @@
       "additionalProperties": false
     },
     "TextLabelSpec": {
-      "description": "Text's label: its text (`LabelTextSpec`), kept apart from others as its layout says (`LabelLayoutSpec`). Text at a place is drawn there, where \"move\" may move it around its point, and keeps apart from the labels of its `overlapGroup`; text following a series (`from`) is placed as series' labels are (`place`: outside the plot, keeping room or not, and its offset), and takes no group.",
+      "description": "Text's label: its text (`LabelTextSpec`), kept apart from others as its layout says (`LabelLayoutSpec`). Text at a place is drawn there, where \"move\" may move it around its point, and keeps apart from the labels of its `overlapGroup`; text following a series (`from`) is placed as series' labels are (`place`: outside the plot, keeping room or not, in a `room` of its own where given, and its offset), and takes no group.",
       "type": "object",
       "properties": {
         "text": { "title": "Text", "type": "string" },
@@ -8603,16 +8603,7 @@
           "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/StrokeStyle" }]
         },
         "priority": { "title": "Priority", "type": "number" },
-        "place": {
-          "title": "Place",
-          "type": "object",
-          "properties": {
-            "outside": { "title": "Outside", "type": "boolean" },
-            "reserve": { "title": "Reserve", "type": "boolean" },
-            "offset": { "title": "Offset", "type": "number" }
-          },
-          "additionalProperties": false
-        }
+        "place": { "title": "Place", "$ref": "#/$defs/TrackPlaceSpec" }
       },
       "anyOf": [
         { "required": ["text"], "properties": { "field": false, "content": false } },
@@ -9351,6 +9342,60 @@
           "const": false
         }
       },
+      "additionalProperties": false
+    },
+    "TrackLabelPlaceSpec": {
+      "description": "A label place of a side track's labels (`TrackPlaceSpec`), with the places along the geometry that `LabelPlaceSpec` gives: series labels' and rules' (a vertical rule's labels stand above or below the plot, where no track is kept, so they take no `room`).",
+      "type": "object",
+      "properties": {
+        "attachment": {
+          "title": "Attachment",
+          "type": "string",
+          "enum": ["start", "center", "end"]
+        },
+        "side": { "title": "Side", "$ref": "#/$defs/Side" },
+        "outside": { "title": "Outside", "anyOf": [{ "const": true }, { "type": "boolean" }] },
+        "reserve": { "title": "Reserve", "anyOf": [{ "const": true }, { "type": "boolean" }] },
+        "offset": { "title": "Offset", "type": "number" },
+        "room": { "title": "Room", "$ref": "#/$defs/Room" }
+      },
+      "anyOf": [
+        {
+          "required": ["outside"],
+          "properties": { "outside": { "const": true }, "reserve": { "const": true } }
+        },
+        {
+          "properties": {
+            "outside": { "type": "boolean" },
+            "reserve": { "type": "boolean" },
+            "room": false
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "TrackPlaceSpec": {
+      "description": "Where labels in a track beside the plot go (series labels, text following series, rules' labels): inside the plot or `outside` it, at their `offset`; outside, keeping room in their side's track unless `reserve` is false. Labels that keep room may give its `room`: the labels' width in their track, box padding and halo inside it and `offset` on top, in place of what they measure (a fixed room, kept from the first frame, labels drawn or not), or bounds on what they measure (`{ min, max }`). Labels wider than a fixed room, or than `max`, are shortened with an ellipsis; `{ min }` alone never shortens. The track is the most any mark's labels on that side keep, so charts whose sides hold the same rooms line up (see docs/guide/layout.md, \"What lines up\").",
+      "type": "object",
+      "properties": {
+        "outside": { "title": "Outside", "anyOf": [{ "const": true }, { "type": "boolean" }] },
+        "reserve": { "title": "Reserve", "anyOf": [{ "const": true }, { "type": "boolean" }] },
+        "offset": { "title": "Offset", "type": "number" },
+        "room": { "title": "Room", "$ref": "#/$defs/Room" }
+      },
+      "anyOf": [
+        {
+          "required": ["outside"],
+          "properties": { "outside": { "const": true }, "reserve": { "const": true } }
+        },
+        {
+          "properties": {
+            "outside": { "type": "boolean" },
+            "reserve": { "type": "boolean" },
+            "room": false
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "TrackSpec": {

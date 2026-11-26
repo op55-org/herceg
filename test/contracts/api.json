@@ -1239,7 +1239,27 @@
     "settings BarLabelPlaceSpec hg.LabelPlace": {
       "only": {
         "side": "Python's one hg.LabelPlace serves bars' and series' labels; bars' refuse the rest (`BarLabels place: bars' labels take attachment, outside, and offset; drop side`).",
-        "reserve": "As side."
+        "reserve": "As side.",
+        "room": "As side."
+      }
+    },
+    "settings LabelPlaceSpec hg.LabelPlace": {
+      "only": {
+        "room": "Python's one hg.LabelPlace serves regions' labels too, which refuse a room (`region label place room: a region's labels stand in it, where no track is kept; drop room`), as the spec does."
+      }
+    },
+    "settings TrackLabelPlaceSpec hg.LabelPlace": {
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
+      }
+    },
+    "settings TrackPlaceSpec hg.LabelPlace": {
+      "only": {
+        "attachment": "Python's text labels take hg.Label, whose place is hg.LabelPlace, the class other marks' labels take; text refuses its attachment and side (`text label.place.attachment: text is drawn at its place, or at from.at on its series; drop attachment`), as the spec does.",
+        "side": "As attachment."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
     "settings LegendOptionsSpec hg.LegendOptions": {
@@ -1525,12 +1545,6 @@
           "takes": [],
           "reason": "Python's one hg.Channel serves every channel, so its value takes anything; a symbol's is checked when the chart is made."
         }
-      }
-    },
-    "mark text python label place": {
-      "only": {
-        "attachment": "Python's text labels take hg.Label, whose place is hg.LabelPlace, the class other marks' labels take; text refuses a place (`text label: text goes where at says; drop place`), as the spec does.",
-        "side": "As attachment."
       }
     },
     "mark line python continuity maxGap": {
