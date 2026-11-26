@@ -362,6 +362,86 @@ box (`background`) takes the place of its text's lines, and its `padding`
 moves the text in. Tick labels' `gap` ends at these lines ([Tick
 labels](axes-and-legends.md#tick-labels)).
 
+### Placing text by its baseline
+
+A mark's label with `verticalAlign: "baseline"` (Python
+`hg.TextStyle(vertical_align="baseline")`) has its first line's alphabetic
+baseline at its point, whatever the font: text marks, labels of rules,
+regions, and series, and text following series. It is drawn there exactly
+in SVG, on canvases, in PDF, and in static output, and later lines follow
+a line height below it. So a design's baselines are em offsets from where
+the label is placed, with nothing measured: names 1.1 em below a cell's
+top, totals 0.5 em above a column, a line apart.
+
+```ts
+const TEXT = { fontSize: 10, lineHeight: 1.2, verticalAlign: "baseline" } as const;
+// Each cell's name 1.1 em below its top, its value on the next line.
+text(sales, {
+  from: { mark: "cells", item: [{ field: "market" }, { field: "segment" }], at: "top-left", offset: { x: 3, y: 1.1 * 10 } },
+  label: { content: [{ field: "segment" }, "\n", { field: "value" }], style: TEXT },
+});
+// Each column's total 0.5 em above it, its name a line (1.2 em) above that.
+text(markets, {
+  from: { mark: "cells", item: [{ field: "market" }], at: "top-left", offset: { x: 3, y: -1.7 * 10 } },
+  label: { content: [{ field: "market" }, "\n", { field: "total" }], style: TEXT },
+});
+```
+
+```python
+style = hg.TextStyle(font_size=10, line_height=1.2, vertical_align="baseline")
+chart.text(
+    data=sales,
+    from_=hg.ItemAnchor("cells", [hg.col("market"), hg.col("segment")], at="top-left", offset=(3, 11)),
+    label=hg.Label(content=[hg.LabelPart(field="segment"), "\n", hg.LabelPart(field="value")], style=style),
+)
+```
+
+- **Its block.** The label's box (its `background`), halo, and where it
+  stays inside the chart are its lines' boxes, the first line's top half a
+  line and half the font's x-height above the baseline: 8.7 px for 10 px
+  text in 12 px lines, 10.6 px for the default 12 px text in 15 px lines.
+  The x-height is measured from the fonts the chart draws with; static
+  output measuring with built-in estimates takes 0.52 em. A box's
+  `padding` stands above that, so the baseline stays at the point with
+  any padding.
+- **Keeping apart.** Labels keep apart from other labels as they do with
+  the other alignments: by their lines' boxes (a label of parts, by its
+  rows'), except a text mark's labels with neither a background nor parts
+  in styles of their own, which keep apart by their text, 0.6 em above
+  their first line's middle and below their last's, and their room. Text
+  in tall lines can therefore stand closer than its line boxes.
+- **Moved and kept inside.** A label that moves apart from others, or
+  moves to stay inside the plot or chart, moves its block, the baseline
+  with it.
+- **Several lines.** The first line's baseline is at the point. A block
+  whose last line belongs at a point offsets by the lines above it:
+  `(lines − 1) × lineHeight × fontSize` for lines of one size (a whole
+  pixel per line, as line boxes round).
+- **Parts of other sizes.** A label of parts sets each row as tall as its
+  tallest part, its baseline half the row's height and 0.27 of its largest
+  size below the row's top; "baseline" puts the first row's baseline at
+  the point, and each next row's baseline is the rows' heights between
+  them, and the difference of those two offsets, below.
+- **Where it is placed.** "baseline" takes the point the label's natural
+  edge would stand at: above a horizontal rule (4 px and `offset` up),
+  4 px inside a region's edge (outside it, 4 px out), a series label's
+  point (along x, 4 px and `offset` past it), and outside the plot, the
+  height of the rule or point.
+- **Only marks' labels.** Style roles every text inherits from (`text`,
+  `tickLabel`, `legendLabel`, ...), titles, legends, and tick labels keep
+  `"top"`, `"middle"`, and `"bottom"`, and refuse `"baseline"` in
+  TypeScript's types, in specs, and in Python: tick labels align at their
+  ticks (`guides[1].style.tickLabel.verticalAlign:
+  "baseline" places a mark's label by a point; tick labels align "top",
+  "middle", or "bottom" at their ticks`), and a theme's text would place
+  every text (`theme.style.text.verticalAlign: "baseline" places a mark's
+  label by a point; give it in the label's style`). Its type is
+  `LabelStyle`, the style marks' labels take.
+- **Loaded when asked for.** The code that places labels by their
+  baseline comes with the feature compiler: a chart with such a label
+  draws its first frame once that has loaded (`chart.loading` settles
+  then), as with label patterns; static output brings it.
+
 ## Paint order
 
 A panel paints its grid lines and marks in one order in every renderer

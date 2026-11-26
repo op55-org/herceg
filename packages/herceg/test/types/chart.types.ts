@@ -171,3 +171,13 @@ createChart(element, { legend: { room: "auto" }, marks: [] });
 createChart(element, { x: { domain: [0, 10] }, y: { domain: ["low", "mid", "high"] }, marks: [] });
 // @ts-expect-error a domain is ends or names, not a mix
 createChart(element, { x: { domain: ["low", 10] }, marks: [] });
+// Tick labels align at their ticks, and style roles every text inherits from take no "baseline".
+// @ts-expect-error tick labels align top, middle, or bottom
+axis({ scale: "y", style: { tickLabel: { verticalAlign: "baseline" } } });
+// @ts-expect-error a theme's text is every text's, not a mark's label's
+createChart(element, { marks: [], theme: { style: { text: { verticalAlign: "baseline" } } } });
+createChart(element, {
+  marks: [],
+  // @ts-expect-error titles fill rows of their own
+  title: { text: "Latency", style: { verticalAlign: "baseline" } },
+});

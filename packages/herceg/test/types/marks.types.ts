@@ -752,3 +752,21 @@ text({
 region({ y1: 0, y2: 1, label: { text: "Budget", place: { outside: true, room: 64 } } });
 // @ts-expect-error a room is pixels, or bounds
 line(metrics, { x: "t", y: "p50", labels: { at: "last", place: { outside: true, room: "64px" } } });
+// A mark's label takes "baseline": text, rules', regions', and series' labels.
+text({
+  x: 0,
+  y: 1,
+  label: { text: "Peak", style: { verticalAlign: "baseline", lineHeight: 1.2 } },
+});
+rule({ y: 1, label: { text: "SLO", style: { verticalAlign: "baseline" } } });
+region({ y1: 0, y2: 1, label: { text: "Budget", style: { verticalAlign: "baseline" } } });
+line(metrics, { x: "t", y: "p50", labels: { at: "last", style: { verticalAlign: "baseline" } } });
+area(metrics, { x: "t", y: "p50", labels: { at: "last", style: { verticalAlign: "baseline" } } });
+text({
+  from: { mark: "m", at: "last" },
+  label: { text: "now", style: { verticalAlign: "baseline" } },
+});
+// @ts-expect-error "alphabetic" is no alignment: top, middle, bottom, or baseline
+text({ x: 0, y: 1, label: { text: "Peak", style: { verticalAlign: "alphabetic" } } });
+// @ts-expect-error bars' labels fit their bars, placed by no point
+bar(metrics, { x: "t", y: "p50", labels: { style: { verticalAlign: "baseline" } } });

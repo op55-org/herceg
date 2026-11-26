@@ -508,7 +508,19 @@ widest line.
   `layout/block.ts`): aligned by `align` along its lines and
   `verticalAlign` across them, then turned about the point. Text marks,
   rule and region labels with `verticalAlign`, aligned tick labels, and
-  series labels are placed so.
+  series labels are placed so. A mark's label with `"baseline"` is drawn
+  as alphabetic text at its point, its block's top half a line and half
+  the x-height above it, by `layout/baseline.ts`: the feature compiler
+  hands it to text marks, rules, and regions whose label asks for it
+  (`MarkFeatures.baseline`; such a mark is `featured`, so its chart loads
+  the compiler before drawing) and places series labels with it. It
+  reads the x-height from the measuring context's "x" once for each
+  label's paint, 0.52 em without one, and places blocks as `anchorBlock`
+  places them by their tops; labels of parts give their first row's
+  baseline (`PartText.baseline`). Text marks place such labels by their
+  middles, as their other labels, and draw them from their baselines.
+  Text items placed so carry how far their first line's box reaches above
+  them (`TextItem.above`), which picking and anchors read.
 
 **Labels following series.** Lines' and areas' `labels`, and text marks
 with `from: { mark, at, edge }`, put a label per drawn series at an
@@ -619,8 +631,9 @@ asked (`LabelOwner.leader`). Painters draw a middle-aligned line with its
 baseline half an x-height below its middle; `paintedMiddle` takes the same
 font metrics from the measurer's `context` (the canvas' 2D context, or
 PDF's description of Helvetica; Arial's without one) to find the middle of
-the font's box, so the rule and the painter agree. Boxes and labels of
-parts are judged by their blocks. Leaders are segments geometries under the
+the font's box, so the rule and the painter agree. Boxes, labels of parts,
+and labels placed by their baseline (whose lines' x-heights are centered on
+their lines) are judged by their blocks. Leaders are segments geometries under the
 owner's labels: one per color, each leader in its series' color unless
 the leader's look gives a stroke. Annotation leaders (`leadersGeometry`,
 `marks/annotation.ts`) take their rule's stroke or their text's color the

@@ -611,9 +611,10 @@ Legends with `swatches: "mark"` draw each series' look: dash, width, marker,
 fill.
 
 Charts using channels beyond constants and scales of categories, looks by
-value, markers, continuity, `where`, label patterns, or coordinates load a
-feature compiler, once per page, and draw their first frame when it has
-loaded (`chart.loading` settles then). Other charts never load it.
+value, markers, continuity, `where`, label patterns, labels placed by their
+baseline, or coordinates load a feature compiler, once per page, and draw
+their first frame when it has loaded (`chart.loading` settles then). Other
+charts never load it.
 
 ## Placing rows by pixels or fractions
 
@@ -696,7 +697,7 @@ draws has no place.
 | --- | --- |
 | `"text"`, `text`, `field`, `content` | Constant text, each row's value, or parts (`{ value: true }`, `{ field }`, `{ series: true }`, each with a `format` and a [`style`](#parts-with-a-look-of-their-own)). |
 | `format` | Intl options, or `{ number }` / `{ time }` patterns. |
-| `style` | `fontSize`, `fontWeight`, `color`, `halo`, `background` (`fill`, `stroke`, `radius`), `padding`, `align`, `verticalAlign`. |
+| `style` | `fontSize`, `fontWeight`, `color`, `halo`, `background` (`fill`, `stroke`, `radius`), `padding`, `align`, `verticalAlign`: `"top"`, `"middle"`, `"bottom"`, or `"baseline"`, the first line's baseline at the label's place ([placing text by its baseline](styling.md#placing-text-by-its-baseline)). |
 | `place.attachment` | Where along a rule or region side: `"start"`, `"center"`, `"end"` (default). |
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
@@ -861,6 +862,10 @@ hg.Chart(df, legend=False).line(
   Charts whose sides hold the same rooms line up ([What lines
   up](layout.md#what-lines-up)). Refused with `reserve: false` and inside
   the plot.
+- **By their baseline.** `style: { verticalAlign: "baseline" }` puts each
+  label's first baseline on its point's height (beside it inside the
+  plot, in its track outside), drawn exactly there in every output
+  ([placing text by its baseline](styling.md#placing-text-by-its-baseline)).
 - **What it writes.** `{ field }` parts read the observation's row, and
   `{ value: true }` the value drawn there (a stack's top). At a crossing,
   `{ value: true }` writes the value where the line crosses, and `{ field }`

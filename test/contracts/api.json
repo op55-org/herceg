@@ -1262,6 +1262,14 @@
         "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."
       }
     },
+    "settings TextStyle hg.TextStyle": {
+      "choices": {
+        "verticalAlign": {
+          "takes": ["top", "middle", "bottom", "baseline"],
+          "reason": "Python's one hg.TextStyle serves marks' labels (the spec's LabelStyle) and every other text; \"baseline\" is refused where it is given outside a mark's label (`theme.style.text.vertical_align: \"baseline\" places a mark's label by a point; give it in the label's style`), as the spec refuses it."
+        }
+      }
+    },
     "settings LegendOptionsSpec hg.LegendOptions": {
       "untyped": {
         "room": "Python takes a room as pixels or a (least, most) tuple, None for no bound, which it writes as { min, max }."

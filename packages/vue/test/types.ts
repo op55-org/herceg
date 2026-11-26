@@ -52,6 +52,10 @@ Rule({ data: unwrap(deploys), x: "nowhere" });
 // @ts-expect-error with data, text is a field of it, also next to constant positions
 Rule({ data: unwrap(deploys), x: 5, label: { field: "missing" } });
 Text({ x: Date.now(), y: 100, label: { text: "now", style: { align: "end" } } });
+// A mark's label is placed by its baseline.
+Text({ x: Date.now(), y: 100, label: { text: "now", style: { verticalAlign: "baseline" } } });
+// @ts-expect-error "alphabetic" is no alignment
+Text({ x: Date.now(), y: 100, label: { text: "now", style: { verticalAlign: "alphabetic" } } });
 // @ts-expect-error constant text needs a label
 Text({ x: 1, y: 2 });
 // @ts-expect-error text from data needs a label

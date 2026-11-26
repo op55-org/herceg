@@ -95,6 +95,7 @@ import {
   type InsidePlace,
   type InspectionSpec,
   type InteractionSpec,
+  type LabelStyle,
   type LayoutCellSpec,
   type LegendEntrySpec,
   type LegendGuideSpec,
@@ -121,7 +122,6 @@ import {
   type SyncSpec,
   type TextBox,
   type TextLabelSpec,
-  type TextStyle,
   type ThemeSpec,
   type ThemeTokens,
   type ThresholdPlace,
@@ -1388,23 +1388,41 @@ const weight: Check = (w, at) => {
     fail(at, "a whole number from 1 to 1000, such as 400 or 600", w);
 };
 
-const textStyle: Check = (v, path) => {
-  object(v, path);
-  properties(v as Record<string, unknown>, path, {
-    font: string,
-    fontSize: positive,
-    fontWeight: weight,
-    fontStyle: oneOf("normal", "italic"),
-    color: string,
-    opacity: fraction,
-    lineHeight: positive,
-    align: oneOf("start", "center", "end"),
-    verticalAlign: oneOf("top", "middle", "bottom"),
-    halo,
-    background: textBox,
-    padding: insets,
-  } satisfies ChecksOf<TextStyle>);
-};
+/** A text style, its `verticalAlign` checked by `verticalAlign`. */
+function textStyleOf(verticalAlign: Check): Check {
+  return (v, path) => {
+    object(v, path);
+    properties(v as Record<string, unknown>, path, {
+      font: string,
+      fontSize: positive,
+      fontWeight: weight,
+      fontStyle: oneOf("normal", "italic"),
+      color: string,
+      opacity: fraction,
+      lineHeight: positive,
+      align: oneOf("start", "center", "end"),
+      verticalAlign,
+      halo,
+      background: textBox,
+      padding: insets,
+    } satisfies ChecksOf<LabelStyle>);
+  };
+}
+
+const ALIGNS = ["top", "middle", "bottom"];
+const textStyle = textStyleOf(oneOf(...ALIGNS));
+/** A mark's label's style, which places it by its baseline too. */
+const labelStyle = textStyleOf(oneOf(...ALIGNS, "baseline"));
+
+/** A style role's text, which every text inherits from: "baseline" is refused, with where it goes. */
+function roleText(correction: string): Check {
+  return textStyleOf((v, path) => {
+    if (v === "baseline")
+      throw refusal(path, `"baseline" places a mark's label by a point; ${correction}`);
+    oneOf(...ALIGNS)(v, path);
+  });
+}
+const roleStyle = roleText("give it in the label's style");
 
 const strokeChecks = {
   stroke: string,
@@ -1431,13 +1449,13 @@ const paintStyle: Check = (v, path) => {
 
 /** The checks of each style role. */
 const ROLES = {
-  text: textStyle,
-  title: textStyle,
-  panelTitle: textStyle,
-  axisTitle: textStyle,
-  tickLabel: textStyle,
-  legendLabel: textStyle,
-  legendTitle: textStyle,
+  text: roleStyle,
+  title: roleStyle,
+  panelTitle: roleStyle,
+  axisTitle: roleStyle,
+  tickLabel: roleText('tick labels align "top", "middle", or "bottom" at their ticks'),
+  legendLabel: roleStyle,
+  legendTitle: roleStyle,
   plot: (v, path) => {
     object(v, path);
     properties(v as Record<string, unknown>, path, {
@@ -2548,7 +2566,7 @@ function labelOf(place: Check, overlap = "show"): Check {
       field,
       content: labelContent,
       format: axisFormat(undefined),
-      style: textStyle,
+      style: labelStyle,
       place,
       overlap: labelOverlap,
       overlapGroup: string,
@@ -2607,7 +2625,7 @@ function seriesLabels(band: boolean): Check {
       content: labelContent,
       edge: bandEdge,
       place: trackLabelPlace,
-      style: textStyle,
+      style: labelStyle,
       overlap: labelOverlap,
       leader: labelLeader,
       priority: finite,

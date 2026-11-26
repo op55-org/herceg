@@ -23,6 +23,7 @@ import { Rank } from "../../encoding/ranks.ts";
 import type { ChartFields } from "../../fields/chart.ts";
 import { formatWriter, formed } from "../../format/patterns.ts";
 import { fitLabel } from "../../layout/attached.ts";
+import { baseline } from "../../layout/baseline.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
 import { clearDomain } from "../../model/clearance.ts";
@@ -1541,6 +1542,7 @@ function labelFeatures(
     format,
     content,
     steps: placed?.steps,
+    baseline,
     labelRoom: bounds && {
       bounds,
       fit: (text, parts, width, font, measure) =>

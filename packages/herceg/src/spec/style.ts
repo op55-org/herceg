@@ -88,7 +88,8 @@ export interface TextStyle {
    * rules, regions, and series, and flat tick labels along y (at their
    * ticks). Each text has a natural placement when this is left out (a
    * rule's label above it, tick labels centered on their ticks); titles and
-   * legends fill rows of their own, which it does not move them in.
+   * legends fill rows of their own, which it does not move them in. A mark's
+   * label also takes "baseline" (`LabelStyle`).
    */
   verticalAlign?: "top" | "middle" | "bottom";
   halo?: Halo;
@@ -96,6 +97,31 @@ export interface TextStyle {
   background?: TextBox | false;
   /** Room between the text and its box, in pixels. */
   padding?: Insets;
+}
+
+/**
+ * How a mark's label looks (text marks' `label.style`, rules' and regions'
+ * labels, series' `labels.style`): a `TextStyle` whose `verticalAlign` also
+ * takes "baseline", which puts the first line's alphabetic baseline at the
+ * label's point, later lines `lineHeight` below it. Its box, halo, and
+ * where it stays inside the chart are its block's, the first line's box
+ * reaching half a line and half the font's x-height above the baseline. It
+ * keeps apart from other labels as the other alignments do: by its block,
+ * except a text mark's label with neither a background nor parts in styles
+ * of their own, which keeps apart by its text (0.6 em above its first
+ * line's middle and below its last's). Style
+ * roles (`text`, `tickLabel`, ...), titles, legends, and tick labels take
+ * `TextStyle`, so nothing inherits "baseline".
+ */
+export interface LabelStyle extends Omit<TextStyle, "verticalAlign"> {
+  /**
+   * Where the label's block stands across its lines from its point: that
+   * point at its top, middle, or bottom (its box's edge, when it has a
+   * background), or at its first line's alphabetic baseline ("baseline"),
+   * before any turn. Each label has a natural placement when this is left
+   * out (a rule's label above it, a series' label on its point's height).
+   */
+  verticalAlign?: "top" | "middle" | "bottom" | "baseline";
 }
 
 /** How a line looks: its color, width in pixels, dash pattern, and opacity. */

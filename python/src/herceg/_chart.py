@@ -1329,6 +1329,13 @@ def in_python(error: ChartError, chart: Chart) -> ChartError:
     return ChartError.from_info(error.info(), f"{where}: {str(error)[found.end() :]}")
 
 
+#: Where each mark's label takes a style placing it by a point, "baseline" too.
+_LABEL_STYLES = {
+    **dict.fromkeys(("text", "rule", "region"), ("label", "style")),
+    **dict.fromkeys(("line", "area"), ("labels", "style")),
+}
+
+
 def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
     """Keep method signatures while reporting unknown options like helpers do."""
     known = _own_options(function)
@@ -1344,13 +1351,15 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
         if given is None or "self" not in given:
             return function(*args, **kwargs)  # Python says what the call gets wrong
         chart = cast("Chart", given["self"])
-        # Text styles' vertical_align is checked where it is given.
-        # Styles are in dicts and options objects (and the guides' list),
-        # never in data, scales, or other lists, which may be long.
+        # Text styles' vertical_align is checked where it is given, "baseline"
+        # only in the style of a mark's label. Styles are in dicts and options
+        # objects (and the guides' list), never in data, scales, or other
+        # lists, which may be long.
+        label = _LABEL_STYLES.get(function.__name__)
         for name, value in kwargs.items():
             styled = isinstance(value, Mapping) or is_dataclass(value) or name == "guides"
             problem = (
-                vertical_align_problem(value, (name,))
+                vertical_align_problem(value, (name,), label)
                 if styled and name not in ("data", "scales")
                 else None
             )

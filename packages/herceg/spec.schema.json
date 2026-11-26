@@ -86,7 +86,7 @@
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
         "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
-        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" }
+        "style": { "title": "Style", "$ref": "#/$defs/LabelStyle" }
       },
       "required": ["at"],
       "additionalProperties": false
@@ -5163,6 +5163,66 @@
       },
       "additionalProperties": false
     },
+    "LabelStyle": {
+      "description": "How a mark's label looks (text marks' `label.style`, rules' and regions' labels, series' `labels.style`): a `TextStyle` whose `verticalAlign` also takes \"baseline\", which puts the first line's alphabetic baseline at the label's point, later lines `lineHeight` below it. Its box, halo, and where it stays inside the chart are its block's, the first line's box reaching half a line and half the font's x-height above the baseline. It keeps apart from other labels as the other alignments do: by its block, except a text mark's label with neither a background nor parts in styles of their own, which keeps apart by its text (0.6 em above its first line's middle and below its last's). Style roles (`text`, `tickLabel`, ...), titles, legends, and tick labels take `TextStyle`, so nothing inherits \"baseline\".",
+      "type": "object",
+      "properties": {
+        "verticalAlign": {
+          "title": "Vertical align",
+          "description": "Where the label's block stands across its lines from its point: that point at its top, middle, or bottom (its box's edge, when it has a background), or at its first line's alphabetic baseline (\"baseline\"), before any turn. Each label has a natural placement when this is left out (a rule's label above it, a series' label on its point's height).",
+          "type": "string",
+          "enum": ["top", "middle", "bottom", "baseline"]
+        },
+        "font": { "title": "Font", "description": "A CSS font family list.", "type": "string" },
+        "fontSize": {
+          "title": "Font size",
+          "description": "In CSS pixels.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fontWeight": {
+          "title": "Font weight",
+          "description": "100 to 900; 400 is normal, 600 semibold, 700 bold.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "fontStyle": { "title": "Font style", "type": "string", "enum": ["normal", "italic"] },
+        "color": { "title": "Color", "type": "string" },
+        "opacity": {
+          "title": "Opacity",
+          "description": "From 0 to 1.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "lineHeight": {
+          "title": "Line height",
+          "description": "The distance between lines of text, as a multiple of `fontSize`; 1.25 by default.",
+          "type": "number",
+          "default": 1.25,
+          "exclusiveMinimum": 0
+        },
+        "align": {
+          "title": "Align",
+          "description": "Where text sits in the span it is placed in: the chart's width for its title, the plot's for a panel's title, an axis' length for its title; for text placed at a point (text marks, labels of rules, regions, and series, flat tick labels along x), which side of its block, or its middle, is there. Each text has a natural alignment when this is left out (a chart's title starts at the left, an axis title is centered).",
+          "type": "string",
+          "enum": ["start", "center", "end"]
+        },
+        "halo": { "title": "Halo", "$ref": "#/$defs/Halo" },
+        "background": {
+          "title": "Background",
+          "description": "A box behind the text; `false` for none.",
+          "anyOf": [{ "$ref": "#/$defs/TextBox" }, { "const": false }]
+        },
+        "padding": {
+          "title": "Padding",
+          "description": "Room between the text and its box, in pixels.",
+          "$ref": "#/$defs/Insets"
+        }
+      },
+      "additionalProperties": false
+    },
     "LayoutCellSpec": {
       "description": "A cell of a grid: where it starts (from 0), how many tracks it spans (1 by default), and what it holds.",
       "type": "object",
@@ -7073,7 +7133,7 @@
                 "field": { "title": "Field", "type": "string" },
                 "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
                 "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
-                "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
+                "style": { "title": "Style", "$ref": "#/$defs/LabelStyle" },
                 "place": { "title": "Place", "$ref": "#/$defs/LabelPlaceSpec" },
                 "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
                 "overlapGroup": { "title": "Overlap group", "type": "string" },
@@ -7611,7 +7671,7 @@
         "field": { "title": "Field", "type": "string" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
         "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
-        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
+        "style": { "title": "Style", "$ref": "#/$defs/LabelStyle" },
         "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
         "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
         "overlapGroup": { "title": "Overlap group", "type": "string" },
@@ -8003,7 +8063,7 @@
         "at": { "title": "At", "$ref": "#/$defs/LabelAt" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
         "place": { "title": "Place", "$ref": "#/$defs/TrackLabelPlaceSpec" },
-        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
+        "style": { "title": "Style", "$ref": "#/$defs/LabelStyle" },
         "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
         "leader": {
           "title": "Leader",
@@ -8595,7 +8655,7 @@
         "field": { "title": "Field", "type": "string" },
         "content": { "title": "Content", "$ref": "#/$defs/LabelContent" },
         "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
-        "style": { "title": "Style", "$ref": "#/$defs/TextStyle" },
+        "style": { "title": "Style", "$ref": "#/$defs/LabelStyle" },
         "overlap": { "title": "Overlap", "$ref": "#/$defs/Overlap" },
         "overlapGroup": { "title": "Overlap group", "type": "string" },
         "leader": {
@@ -8757,7 +8817,7 @@
         },
         "verticalAlign": {
           "title": "Vertical align",
-          "description": "Where a block of text stands across its lines from the point it is placed at: that point at its top, middle, or bottom (its box's edge, when it has a background), before any turn. For text marks, labels of rules, regions, and series, and flat tick labels along y (at their ticks). Each text has a natural placement when this is left out (a rule's label above it, tick labels centered on their ticks); titles and legends fill rows of their own, which it does not move them in.",
+          "description": "Where a block of text stands across its lines from the point it is placed at: that point at its top, middle, or bottom (its box's edge, when it has a background), before any turn. For text marks, labels of rules, regions, and series, and flat tick labels along y (at their ticks). Each text has a natural placement when this is left out (a rule's label above it, tick labels centered on their ticks); titles and legends fill rows of their own, which it does not move them in. A mark's label also takes \"baseline\" (`LabelStyle`).",
           "type": "string",
           "enum": ["top", "middle", "bottom"]
         },

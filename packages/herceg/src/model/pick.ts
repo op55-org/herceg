@@ -722,7 +722,7 @@ export class Picker {
 /** Text placed as `TextItem` places it, with the parts picking reads. */
 export type TextLike = Pick<
   TextItem,
-  "text" | "x" | "y" | "anchor" | "baseline" | "angle" | "paint"
+  "text" | "x" | "y" | "anchor" | "baseline" | "angle" | "paint" | "above"
 > & {
   readonly box?: Rect | undefined;
 };
@@ -1324,7 +1324,7 @@ export function textBox(item: TextLike, frame: Pick<Frame, "measure">, block = f
     (item.baseline === "middle"
       ? (block ? height : paint.lineHeight) / 2
       : item.baseline === "alphabetic"
-        ? paint.size * 0.8
+        ? (item.above ?? paint.size * 0.8)
         : 0);
   return turned({ x, y, width, height }, item);
 }

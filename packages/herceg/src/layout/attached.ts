@@ -13,7 +13,9 @@
 // label of parts, the part that runs past.
 // Outside, labels before their series ("end") go in the left track, others
 // in the right one, at their point's height, their offset further from the
-// plot. Extents are as painted: halos and boxes' outlines too.
+// plot. "baseline" puts the first line's baseline where "middle" puts its
+// block's middle: along y on the point (beside it inside, or in its track).
+// Extents are as painted: halos and boxes' outlines too.
 //
 // A panel's series labels, of every mark, are placed together, each as its
 // `overlap` says. Labels that "move" keep apart along y from those whose
@@ -30,12 +32,13 @@
 // LEADER_MOVE pixels along y from where it would be painted at its point
 // draws a leader back to its point when asked, in its series' color unless
 // the leader's look gives one: the painted middle of text is where the
-// metrics of the measurer's fonts put it (`paintedMiddle`; a box's, or a
-// label of parts', is its block's). A line's or area's own labels and leaders are `attached`
-// geometry, which paints above grid lines raised over its mark (guides/
-// paint.ts); text following a series paints as text marks do. The feature
-// compiler places labels with it, and hands it the chart's code it uses
-// (`AttachedKit`), so the line chart's first chunk does not load it.
+// metrics of the measurer's fonts put it (`paintedMiddle`; a box's, a
+// label of parts', or one placed by its baseline, is its block's). A line's
+// or area's own labels and leaders are `attached` geometry, which paints
+// above grid lines raised over its mark (guides/paint.ts); text following a
+// series paints as text marks do. The feature compiler places labels with
+// it, and hands it the chart's code it uses (`AttachedKit`), so the line
+// chart's first chunk does not load it.
 
 import { leaderDrawingOf } from "../draw/leaders.ts";
 import type { markupOf, n } from "../draw/markup.ts";
@@ -56,7 +59,8 @@ import type {
 import type { Overlap } from "../spec/encoding.ts";
 import type { ResolvedHalo, TextPaint } from "../style/style.ts";
 import type { surface } from "../theme.ts";
-import { anchorBlock } from "./block.ts";
+import { type Baseline, baseline, measureX } from "./baseline.ts";
+import { anchorBlock, type BlockAnchor } from "./block.ts";
 import { LabelBoxes } from "./label-boxes.ts";
 import { separate } from "./separate.ts";
 import type {
@@ -157,8 +161,7 @@ export interface AttachedLabel {
  */
 export function paintedMiddle(context: MeasuringContext | undefined, paint: TextPaint): number {
   if (!context) return -0.087 * paint.size;
-  if (context.font !== paint.css) context.font = paint.css;
-  const x = context.measureText("x");
+  const x = measureX(context, paint);
   // A browser without fonts' boxes (NaN): by the label's block.
   return (x.actualBoundingBoxAscent + x.fontBoundingBoxDescent - x.fontBoundingBoxAscent) / 2 || 0;
 }
@@ -179,6 +182,8 @@ export function placeAttached(
   const { plot, measure } = frame;
   // Each label's block, unturned.
   const blocks: Block[] = [];
+  // Labels placed by their baseline, by paint: the font read once for each.
+  const baselines = new Map<TextPaint, Baseline>();
   labels.forEach((label, order) => {
     if (!label.at.visible) return;
     const { paint, place, at, halo } = label;
@@ -240,9 +245,18 @@ export function placeAttached(
       from = kept;
     }
     const block = lines.height + top + bottom;
+    const placing = baselines.get(paint) ?? baseline(paint, frame);
+    if (placing) baselines.set(paint, placing);
     // Where the painted top is when the anchor is at `y`.
     const lift =
-      reach + (verticalAlign === "top" ? 0 : verticalAlign === "middle" ? block / 2 : block);
+      reach +
+      (placing
+        ? placing.top(parts)
+        : verticalAlign === "top"
+          ? 0
+          : verticalAlign === "middle"
+            ? block / 2
+            : block);
     blocks.push({
       label,
       order,
@@ -276,11 +290,20 @@ export function placeAttached(
       drawn.set(owner, own);
     }
     const align = paint.align ?? "start";
-    const { at: point, box } = anchorBlock(
-      lines,
-      { x, y: top + lift, align, verticalAlign: paint.verticalAlign ?? "middle", angle: 0 },
-      paint,
-    );
+    const anchor = { x, y: top + lift, align };
+    // Paints placing by their baseline are the ones `baselines` holds.
+    const placing = baselines.get(paint);
+    const { at: point, box } = placing
+      ? placing.block(lines, anchor, parts)
+      : anchorBlock(
+          lines,
+          {
+            ...anchor,
+            verticalAlign: (paint.verticalAlign ?? "middle") as BlockAnchor["verticalAlign"],
+            angle: 0,
+          },
+          paint,
+        );
     if (parts) {
       const [from, to] = extent;
       const inner = {
@@ -296,9 +319,11 @@ export function placeAttached(
     }
     boxes.push({ x: extent[0], y: top, width: extent[1] - extent[0], height });
     const look = owner.leader;
-    // How far below its block's middle its text is painted: a box, and parts
-    // of their own sizes, are painted where the block is.
-    const drop = look && !paint.background && !parts ? paintedMiddle(measure.context, paint) : 0;
+    // How far below its block's middle its text is painted: a box, parts of
+    // their own sizes, and lines from their baselines (their x-heights'
+    // middles there) are painted where the block is.
+    const drop =
+      look && !paint.background && !parts && !placing ? paintedMiddle(measure.context, paint) : 0;
     if (look && Math.abs(top - block.wanted + drop) > LEADER_MOVE) {
       const stroke = look.stroke === undefined ? label.color : look.stroke;
       let coords = own.leaders.get(stroke);

@@ -184,6 +184,14 @@ type LineLabelsProp = Exclude<PropsOf<typeof Line<Mixed>>["labels"], boolean | u
 ({ at: "last", place: { outside: true, offset: 8, room: 64 } }) satisfies LineLabelsProp;
 // @ts-expect-error labels inside the plot take no room
 ({ at: "last", place: { offset: 8, room: 64 } }) satisfies LineLabelsProp;
+// A mark's label is placed by its baseline; bars' labels, which fit their bars, are not.
+({ at: "last", style: { verticalAlign: "baseline" } }) satisfies LineLabelsProp;
+({ text: "now", style: { verticalAlign: "baseline", lineHeight: 1.2 } }) satisfies Exclude<
+  PropsOf<typeof Text<Mixed>>["label"],
+  string | undefined
+>;
+// @ts-expect-error bars' labels fit their bars, placed by no point
+({ style: { verticalAlign: "baseline" } }) satisfies BarLabelsProp;
 
 /** <Chart>'s props of its own, which the API audit names (`chart react` in test/contracts/api.json). */
 type Own = "renderTooltip" | "marks" | "children" | "className" | "style" | "ref" | "initial";

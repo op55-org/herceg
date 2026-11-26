@@ -1,6 +1,7 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { type Formatter, formatNumber, lazyFormat } from "../format/format.ts";
+import type { Baseline } from "../layout/baseline.ts";
 import {
   type LabelledMark,
   type LabelPlacement,
@@ -15,7 +16,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { BoxAnchor, ItemAnchor, ItemCoordinate } from "../spec/place.ts";
 import type { AnnotationPosition, Clip, Frozen, TextLabelSpec, TextSpec } from "../spec/spec.ts";
-import type { Halo, TextStyle as TextStyleSpec } from "../spec/style.ts";
+import type { Halo, LabelStyle } from "../spec/style.ts";
 import type { TextPaint } from "../style/style.ts";
 import {
   AnnotationData,
@@ -108,7 +109,7 @@ export type TextLabel<F extends string = string> =
     ) &
       LabelLayoutSpec & {
         format?: FormatSpec;
-        style?: TextStyleSpec;
+        style?: LabelStyle;
       });
 
 /**
@@ -295,7 +296,11 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     );
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "text");
-    this.featured = lazyFormat(label?.format) || label?.content !== undefined;
+    // Labels of patterns and parts, and labels placed by their baseline, need the feature compiler.
+    this.featured =
+      lazyFormat(label?.format) ||
+      label?.content !== undefined ||
+      label?.style?.verticalAlign === "baseline";
   }
 
   get table(): Table | undefined {
@@ -552,17 +557,25 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       Math.ceil(
         paint.background ? paint.lineHeight / 2 + Math.max(top, bottom) : paint.size * 0.6,
       ) + room;
-    // From its point to its block's middle (its box's, which labels in
-    // boxes are placed by): the block's top, middle (by default), or bottom
-    // at the point, as its style's verticalAlign says.
-    const { verticalAlign } = paint;
-    const lift = (lines: number) => {
-      const block = (lines + top + bottom) / 2;
-      return verticalAlign === "top" ? block : verticalAlign === "bottom" ? -block : 0;
-    };
     // How much taller than a line a label's lines are.
     const more = ({ text, parts }: Written) =>
       parts ? parts.lines.height - paint.lineHeight : (lineCount(text) - 1) * paint.lineHeight;
+    const { verticalAlign } = paint;
+    // Placed by their baseline as the feature compiler places them, the font read once.
+    const baseline = frame.features?.of(this)?.baseline?.(paint, frame);
+    // From its point to its block's middle (its box's, which labels in
+    // boxes are placed by): the block's top, middle (by default), bottom, or
+    // first line's baseline at the point, as its style's verticalAlign says.
+    const lift = (label: Written) => {
+      const block = (paint.lineHeight + more(label) + top + bottom) / 2;
+      return verticalAlign === "top"
+        ? block
+        : verticalAlign === "bottom"
+          ? -block
+          : baseline
+            ? block - baseline.top(label.parts)
+            : 0;
+    };
     // How far a label's painted block (its box, and what halos and outlines
     // paint past it) reaches above and below its middle.
     const painted = (label: Written) => (paint.lineHeight + more(label) + top + bottom) / 2 + reach;
@@ -597,7 +610,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       const above = painted({ text, parts });
       // Its anchor along x, and its block's middle.
       let lx = px + dx;
-      let ly = py + dy + lift(paint.lineHeight + more({ text, parts }));
+      let ly = py + dy + lift({ text, parts });
       if (kept) {
         // Across its point where that reaches less far past the chart's
         // edge (14 px above becomes 14 px below), then moved in.
@@ -654,6 +667,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
         };
         return parts ? { ...label, parts, box: parts.box(lx, ly, anchor, paint) } : label;
       },
+      baseline,
     };
   }
 
@@ -673,6 +687,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       more,
       painted,
       at,
+      baseline,
     }: TextLabels,
     drawn: PlacedLabel[],
     items: readonly TextItemLabel[],
@@ -696,7 +711,14 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     const owners: number[] = [];
     const labels = plain
       ? textGeometry(id, drawn, paint.color, haloOption, frame)
-      : labelsGeometry(id, drawn, paint, haloOption, frame, owners);
+      : labelsGeometry(
+          id,
+          baseline ? drawn.map(baseline.drawn) : drawn,
+          paint,
+          haloOption,
+          frame,
+          owners,
+        );
     this.#drawnRows.set(
       labels,
       plain ? Uint32Array.from(rows) : Uint32Array.from(owners, (k) => rows[k]!),
@@ -745,7 +767,15 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
           }
           if (labels.kind === "text") return label.text;
           const placed = at(label, places[i * 2]!, places[i * 2 + 1]!);
-          return labelsGeometry(id, [placed], paint, haloOption, frame, undefined, count).items;
+          return labelsGeometry(
+            id,
+            [baseline ? baseline.drawn(placed) : placed],
+            paint,
+            haloOption,
+            frame,
+            undefined,
+            count,
+          ).items;
         },
         // Frames keep the labels the scene keeps inside the chart there too.
         ...(this.spec.clip === undefined && {
@@ -829,6 +859,8 @@ interface TextLabels {
   readonly haloOption: Halo | undefined;
   /** Where a label goes with its anchor at x and its block's middle at y. */
   at(label: Written, x: number, y: number): PlacedLabel;
+  /** How labels placed by their baseline are drawn from it, given as `at` places them. */
+  readonly baseline: Baseline | undefined;
 }
 
 /** A label's text, and its parts where they have looks of their own. */

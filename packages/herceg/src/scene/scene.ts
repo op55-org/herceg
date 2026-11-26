@@ -1035,6 +1035,12 @@ export interface TextItem {
   readonly baseline: "middle" | "hanging" | "alphabetic";
   readonly angle: number;
   readonly paint: TextPaint;
+  /**
+   * Alphabetic text placed as a block (`verticalAlign: "baseline"`): how
+   * far its first line's box reaches above `y`, before any turn. Without
+   * it, alphabetic text is taken to reach 0.8 em above (a part's run).
+   */
+  readonly above?: number | undefined;
   /** Drawn at this share of the paint's opacity, as a hidden series' legend entry is. */
   readonly opacity?: number | undefined;
   /** The outline drawn under the text, resolved against what it is drawn on. */

@@ -2,7 +2,8 @@ import type { CategoryField, PositionField, Schema, Table } from "../data/table.
 import { labelHalo } from "../draw/label-halo.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import { type Formatter, lazyFormat } from "../format/format.ts";
-import { anchorBlock } from "../layout/block.ts";
+import type { Baseline } from "../layout/baseline.ts";
+import { anchorBlock, type BlockAnchor } from "../layout/block.ts";
 import {
   type LabelledMark,
   type LabelPlacement,
@@ -295,7 +296,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       lazyFormat(label?.format) ||
       label?.content !== undefined ||
       spec.encode !== undefined ||
-      !!stepped;
+      !!stepped ||
+      label?.style?.verticalAlign === "baseline";
   }
 
   get table(): Table | undefined {
@@ -512,6 +514,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const reach = paint
       ? paintedReach(paint, labelHalo(label.style?.halo ?? this.spec.halo, frame))
       : 0;
+    // Placed by their baseline as the feature compiler places them, the font read once.
+    const baseline = frame.features?.of(this)?.baseline?.(paint, frame);
     let count = 0;
     // Regions are cut to the plot, or to the chart with a clip of "chart" or false
     // (a decoration's by default).
@@ -557,7 +561,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
                   anchor: "start",
                   baseline: "middle",
                 }
-              : this.#place(text, across, down, paint, frame.measure, parts);
+              : this.#place(text, across, down, paint, frame.measure, parts, baseline);
           // Its box stays inside the region's where the visible part is too small for it.
           const block = grown(labelBox(label, paint, frame.measure), reach);
           const request: LabelRequest = {
@@ -700,7 +704,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
    * the edge it is beside, and is centered where it is centered. A style's
    * verticalAlign puts the block's top, middle, or bottom, box and all, at
    * the place instead: below a top or bottom edge, on it, or above it; at
-   * the start, middle, or end of a side edge.
+   * the start, middle, or end of a side edge. "baseline" puts its first
+   * line's baseline where its natural edge would be: inside the region from
+   * its side, or outside away from it, as `baseline` places it.
    */
   #place(
     text: string,
@@ -709,6 +715,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     paint: TextPaint,
     measure: MeasureText,
     parts: PartText | undefined,
+    baseline: Baseline | undefined,
   ): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const side = place.side ?? "top";
@@ -725,12 +732,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       anchor: PlacedLabel["anchor"],
       align: NonNullable<TextPaint["verticalAlign"]>,
     ): PlacedLabel => {
-      const { at, box } = anchorBlock(
-        parts?.lines ?? textLines(text, paint, measure),
-        { x, y, align: anchor === "middle" ? "center" : anchor, verticalAlign: align, angle: 0 },
-        paint,
-      );
-      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box, parts };
+      const lines = parts?.lines ?? textLines(text, paint, measure);
+      const along = anchor === "middle" ? "center" : anchor;
+      // By its baseline as the feature compiler places it (`baseline` is
+      // there exactly when the style says "baseline"); else by a side.
+      const { at, box } = baseline
+        ? baseline.block(lines, { x, y, align: along }, parts)
+        : anchorBlock(
+            lines,
+            { x, y, align: along, verticalAlign: align as BlockAnchor["verticalAlign"], angle: 0 },
+            paint,
+          );
+      return { ...at, text, box, parts };
     };
     if (side === "top" || side === "bottom") {
       const [x, anchor]: [number, PlacedLabel["anchor"]] =
@@ -740,8 +753,10 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             ? [right - PADDING, "end"]
             : [(left + right) / 2, "middle"];
       const edge = side === "top" ? top : bottom;
-      // A label of parts goes inside the region from its side, or outside away from it.
-      const align = verticalAlign ?? (parts && ((side === "top") === out > 0 ? "top" : "bottom"));
+      // A label of parts goes inside the region from its side, or outside
+      // away from it, and a label's baseline where that would put its edge.
+      const natural = (side === "top") === out > 0 ? "top" : "bottom";
+      const align = verticalAlign === "baseline" ? natural : (verticalAlign ?? (parts && natural));
       if (align)
         return block(
           x,

@@ -122,10 +122,10 @@ describe("architecture", () => {
   // scales, and rank tests (encoding/), symbols' names and shapes, automatic
   // padding's solver (for lines' markers), the guide compiler's pattern
   // formats, what channels draw (`outputProblem`), the placement of labels
-  // following series and of text blocks, and the boxes bars' labels that
-  // hide keep apart by (layout/label-boxes.ts), and keys' layout. Charts
-  // that import these themselves (grids the first two, points symbols,
-  // padding, and keys) get them in a chunk of their own.
+  // following series, of text blocks, and of text by its baseline, and the
+  // boxes bars' labels that hide keep apart by (layout/label-boxes.ts), and
+  // keys' layout. Charts that import these themselves (grids the first two,
+  // points symbols, padding, and keys) get them in a chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
   it("the feature compiler imports only types from the line chart's modules", () => {
     const features = join(SRC, "marks/features");
@@ -142,6 +142,7 @@ describe("architecture", () => {
       "model/clearance.ts",
       "spec/channels.ts",
       "layout/attached.ts",
+      "layout/baseline.ts",
       "layout/block.ts",
       "layout/label-boxes.ts",
       "draw/text-items.ts",
