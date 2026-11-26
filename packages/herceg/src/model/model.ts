@@ -2324,14 +2324,15 @@ export class ChartModel {
         hasData && (right || leftData) && !side!.empty.has(side!.groupOf[i]!)
           ? side!.plans[i]!.labels
           : [];
-      // Each labeled panel's room for its labels: its widest, and in a box its padding too.
+      // Each labeled panel's room for its labels: its widest, and in a box
+      // its padding too, past the gap for their size, as x labels stand.
       const reach = labeled.map((l, i) => {
         if (!l) return 0;
         const paint = tickPaint(axis, i);
         const boxed = paint.background ? paint.padding[1] + paint.padding[3] : 0;
         // As drawn: labels of several lines as wide as their widest.
         const widest = Math.max(0, ...labelsOf(i).map((label) => measure(label, paint.css)));
-        return Math.ceil(widest + (widest && boxed)) + GAP + 2;
+        return Math.ceil(widest + (widest && boxed)) + tickLabelGap(paint.size);
       });
       const room = Math.max(0, ...reach);
       // Subplots title each panel's axis, other charts it once, beside the
@@ -2614,15 +2615,16 @@ export class ChartModel {
       at: { x: number; span: [number, number] },
     ): AxisGuide => {
       const scale = side === "left" ? "y" : "yRight";
+      const paints = axisPaints(scale, i, !!title);
       const placement: AxisPlacement = {
         side,
         edge: side === "left" ? plot.x : plot.x + plot.width,
         start: plot.y + plot.height,
         end: plot.y,
         tickLength: 0,
-        gap: 8,
+        gap: tickLabelGap(paints.label.size),
         surface: surface(theme),
-        paints: axisPaints(scale, i, !!title),
+        paints,
       };
       const ticks = labels.map((label, k) => ({
         position: plan.scale.map(plan.ticks[k]!),

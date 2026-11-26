@@ -16,6 +16,8 @@ interface AxisLabel {
   at: number;
   /** Where the axis is: the y of the bottom axis, the x of a side axis. */
   edge: number;
+  /** How far the axis' labels stand from it. */
+  gap: number;
   text: string;
 }
 
@@ -108,7 +110,7 @@ export class CrosshairLabels {
       const along = inspection.axis;
       const label = (side: AxisLabel["side"], at: number, text: string) => {
         const axis = axisOf(side);
-        if (axis) labels.push({ side, at, edge: axis.edge, text });
+        if (axis) labels.push({ side, at, edge: axis.edge, gap: axis.gap, text });
       };
       label(along === "x" ? "bottom" : "left", inspection.position, inspection.label);
       if (inspection !== active || !pointer) continue;
@@ -176,11 +178,12 @@ export class CrosshairLabels {
         x = `clamp(0px, calc(${label.at}px - 50%), calc(${width}px - 100%))`;
         y = inside(Math.round(label.edge) + labelGap + theme.fontSize / 2 - boxHeight / 2);
       } else {
-        // Over the tick labels, which end 8 pixels from the axis.
+        // Over the tick labels, its text ending where theirs do, their gap from the axis.
+        const inset = label.gap - PAD;
         x =
           label.side === "left"
-            ? `max(0px, calc(${label.edge - 3}px - 100%))`
-            : `min(${label.edge + 3}px, calc(${width}px - 100%))`;
+            ? `max(0px, calc(${label.edge - inset}px - 100%))`
+            : `min(${label.edge + inset}px, calc(${width}px - 100%))`;
         y = inside(label.at - boxHeight / 2);
       }
       box.style.cssText = `${look};transform:translate(${x}, ${y}px)`;
