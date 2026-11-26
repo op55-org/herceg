@@ -31,7 +31,7 @@ from ._errors import (
     tuplable,
     tupled,
 )
-from ._guides import Format, IdentityScale, format_spec
+from ._guides import Format, IdentityScale, Room, format_spec, room_spec
 from ._style import (
     StrokeStyle,
     TextStyle,
@@ -894,14 +894,30 @@ class LabelPlace:
     """Where a label goes on what it labels: ``attachment`` along it (a rule's
     ``"start"``, ``"center"``, or ``"end"``, left to right or top to bottom;
     along a region's ``side``, top by default), ``outside`` the plot (a
-    rule's label beside the axis, in room the chart keeps for it unless
-    ``reserve=False``), and moved ``offset`` pixels away."""
+    rule's label beside the axis, series labels beside the plot, in room the
+    chart keeps for them in a track on their side unless ``reserve=False``),
+    and moved ``offset`` pixels away.
+
+    Labels outside the plot that keep room take a ``room``: pixels for their
+    width in their track, box padding and halo inside it and ``offset`` on
+    top, kept from the first frame whatever is drawn, so the plot holds still
+    as names stream in; or ``(least, most)`` bounds on what they measure,
+    ``None`` for no bound (``(60, None)``). Labels wider than a fixed room, or
+    than its most, are shortened with an ellipsis (the legend, tooltip, and
+    text alternative still name them whole); a least alone never shortens.
+    Charts whose sides hold the same rooms line up. Series labels, text
+    following series, and horizontal rules' labels take it; regions' and
+    vertical rules' labels, which no track keeps, do not::
+
+        hg.SeriesLabels(at="visible-end", place=hg.LabelPlace(outside=True, offset=8, room=64))
+    """
 
     attachment: Literal["start", "center", "end"] | None = None
     side: Literal["top", "right", "bottom", "left"] | None = None
     outside: bool | None = None
     reserve: bool | None = None
     offset: float | None = None
+    room: Room | None = None
 
     def __post_init__(self) -> None:
         if self.attachment is not None:
@@ -916,6 +932,27 @@ class LabelPlace:
                 )
         if self.offset is not None:
             _offset(self.offset, "LabelPlace")
+        if self.room is not None:
+            if self.reserve is False:
+                raise ChartError(
+                    "LabelPlace room: labels that keep no room take none; drop room, or reserve"
+                )
+            if self.outside is not True:
+                raise ChartError(
+                    "LabelPlace room: labels inside the plot take no room; place them outside"
+                )
+            room_spec(self.room, "LabelPlace room")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {
+            "attachment": self.attachment,
+            "side": self.side,
+            "outside": self.outside,
+            "reserve": self.reserve,
+            "offset": self.offset,
+            "room": room_spec(self.room, "LabelPlace room"),
+        }
+        return {key: value for key, value in spec.items() if value is not None}
 
 
 @refuses
@@ -1335,6 +1372,12 @@ def label_spec(value: Any, role: str, *, places: bool = True, following: bool = 
         raise ChartError(
             "region label leader: region labels slide along their side and draw none; drop leader"
         )
+    place = built.place
+    if role == "region" and isinstance(place, LabelPlace) and place.room is not None:
+        raise ChartError(
+            "region label place room: a region's labels stand in it, where no track is kept; "
+            "drop room"
+        )
     if following and built.overlap_group is not None:
         raise ChartError(
             f"{role} label overlap_group: series labels already keep apart across marks; "
@@ -1387,7 +1430,7 @@ class BarLabels:
         place: LabelPlace | None = _built(self.place, LabelPlace, "BarLabels place")
         self.place = place
         if place is not None:
-            for name in ("side", "reserve"):
+            for name in ("side", "reserve", "room"):
                 if getattr(place, name) is not None:
                     raise ChartError(
                         "BarLabels place: bars' labels take attachment, outside, and offset; "

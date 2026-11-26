@@ -6,7 +6,7 @@
 // lines and areas connect. See docs/architecture/marks.md, "Encodings".
 
 import type { Expression } from "../data/expression.ts";
-import type { FormatSpec } from "./guides.ts";
+import type { FormatSpec, Room } from "./guides.ts";
 import type { Side } from "./place.ts";
 import type { Dash, Field } from "./spec.ts";
 import type { PaintStyle, StrokeStyle, TextStyle } from "./style.ts";
@@ -267,6 +267,31 @@ export interface LabelPlaceSpec {
 }
 
 /**
+ * Where labels in a track beside the plot go (series labels, text
+ * following series, rules' labels): inside the plot or `outside` it, at
+ * their `offset`; outside, keeping room in their side's track unless
+ * `reserve` is false. Labels that keep room may give its `room`: the
+ * labels' width in their track, box padding and halo inside it and
+ * `offset` on top, in place of what they measure (a fixed room, kept from
+ * the first frame, labels drawn or not), or bounds on what they measure
+ * (`{ min, max }`). Labels wider than a fixed room, or than `max`, are
+ * shortened with an ellipsis; `{ min }` alone never shortens. The track is
+ * the most any mark's labels on that side keep, so charts whose sides hold
+ * the same rooms line up (see docs/guide/layout.md, "What lines up").
+ */
+export type TrackPlaceSpec =
+  | { outside: true; reserve?: true; offset?: number; room?: Room }
+  | { outside?: boolean; reserve?: boolean; offset?: number; room?: never };
+
+/**
+ * A label place of a side track's labels (`TrackPlaceSpec`), with the
+ * places along the geometry that `LabelPlaceSpec` gives: series labels'
+ * and rules' (a vertical rule's labels stand above or below the plot,
+ * where no track is kept, so they take no `room`).
+ */
+export type TrackLabelPlaceSpec = Pick<LabelPlaceSpec, "attachment" | "side"> & TrackPlaceSpec;
+
+/**
  * One part of a label's text: literal text, a field's value of the row
  * the label is at (written with `format`, else as the field's display
  * writes it), the name of the series it labels (`{ series: true }`), its
@@ -403,6 +428,9 @@ export interface LabelLayoutSpec {
  */
 export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec } & LabelLayoutSpec;
 
+/** A rule's label: an annotation's label (`LabelSpec`) whose place is a track's, outside the plot taking a `room`. */
+export type RuleLabelSpec = LabelTextSpec & { place?: TrackLabelPlaceSpec } & LabelLayoutSpec;
+
 /**
  * Where along a series a label goes. At an observation, before level of
  * detail, in the series' own order: its first or last drawn ("first",
@@ -425,8 +453,8 @@ export type LabelAt =
 /**
  * Labels that follow each series of a line: placed at `at`, saying
  * `content` (the series' name by default), placed as `place` says (beside
- * the point within the plot, or `outside` the plot at its edge) and styled
- * as `style` says. A panel's series labels keep apart as `overlap` says:
+ * the point within the plot, or `outside` the plot at its edge, in a
+ * `room` of their own where given) and styled as `style` says. A panel's series labels keep apart as `overlap` says:
  * "move" (the default) moves them along y as little as keeps them apart,
  * in the order of their points, and leaves out those of lowest `priority`
  * (then the last in series order) where the plot is too short for all;
@@ -438,7 +466,7 @@ export type LabelAt =
 export interface SeriesLabelsSpec extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;
   content?: LabelContent;
-  place?: LabelPlaceSpec;
+  place?: TrackLabelPlaceSpec;
   style?: TextStyle;
 }
 

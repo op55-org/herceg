@@ -701,6 +701,7 @@ draws has no place.
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
 | `place.offset` | Pixels away from its place; outside the plot, pixels past what stands beside the plot on that side, such as its y axis and title (after a 6 px gap; see [labels that follow series](#labels-that-follow-series)). |
+| `place.room` | Outside the plot, the pixels a horizontal rule's labels take beside it in place of what they measure (`room: 64`, kept from the first frame), or `{ min, max }` bounds on what they measure (Python `(least, most)`), as [series labels'](#labels-that-follow-series) rooms: box padding and halo inside it, `offset` on top; wider labels are shortened with an ellipsis. Refused on vertical rules' labels (above or below the plot) and regions' (in them), where no track is kept, with `reserve: false`, and inside the plot. |
 | `overlap`, `overlapGroup`, `leader`, `priority` | How it keeps apart from other labels (Python `overlap_group`); see [labels that would overlap](#labels-that-would-overlap). |
 
 - **Domains.** Annotations count toward the axes' domains only with
@@ -841,6 +842,25 @@ hg.Chart(df, legend=False).line(
   (see [labels at the chart's
   edge](axes-and-legends.md#labels-at-the-charts-edge)). Rules' labels
   outside the plot stand in the same column.
+- **A room of their own.** `place.room` gives the labels' width in their
+  track beside the plot, in place of what they measure: their box's
+  padding and their halo inside it, `place.offset` on top, as a legend's
+  room (Python `hg.LabelPlace(outside=True, offset=8, room=64)`). A fixed
+  room is kept from the first frame, whatever is drawn: with no data,
+  every series hidden, no point in view, or no label left, so the plot
+  holds still as names stream in, change, or leave. `{ min, max }` bounds
+  what they measure instead (Python `room=(60, None)`, `None` for no
+  bound), which grows as they do within a layout. Labels wider than a
+  fixed room or its `max` are shortened with an ellipsis, as a y axis'
+  labels are: plain labels line by line, labels of parts from their end,
+  each part keeping its look; a label where only the ellipsis would be
+  left is left out. Leaders still go to a label's start, and the legend,
+  tooltip, and text alternative name the series whole. `{ min }` alone
+  never shortens. The side's track is the most any mark's labels keep
+  there, so a rule's label wider than the names widens it for both.
+  Charts whose sides hold the same rooms line up ([What lines
+  up](layout.md#what-lines-up)). Refused with `reserve: false` and inside
+  the plot.
 - **What it writes.** `{ field }` parts read the observation's row, and
   `{ value: true }` the value drawn there (a stack's top). At a crossing,
   `{ value: true }` writes the value where the line crosses, and `{ field }`
@@ -848,6 +868,24 @@ hg.Chart(df, legend=False).line(
   step, the one whose level is drawn there, so at a rise on the edge the
   one after it; where the crossing is beside a cut `where` makes, the
   observation next to the cut).
+
+```ts
+// The names keep 64 px beside the plot, 8 px out, whatever they measure.
+line(metrics, {
+  x: "time",
+  y: ["auth", "payments", "recommendations-engine"],
+  labels: { at: "visible-end", place: { outside: true, offset: 8, room: 64 }, leader: true },
+});
+```
+
+```python
+chart.line(
+    x="time", y=["auth", "payments", "recommendations-engine"],
+    labels=hg.SeriesLabels(
+        at="visible-end", place=hg.LabelPlace(outside=True, offset=8, room=64), leader=True
+    ),
+)
+```
 
 A panel's series labels, and text following series, keep apart as the
 next section describes.

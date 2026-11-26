@@ -18,7 +18,7 @@ import { coordinateAt } from "../layout/position.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Drawing, Rect, SegmentGeometry } from "../scene/scene.ts";
-import type { LabelSpec, Overlap } from "../spec/encoding.ts";
+import type { Overlap, RuleLabelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Coordinate, ItemCoordinate, ItemRef } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen, ThresholdPlace } from "../spec/spec.ts";
@@ -232,11 +232,14 @@ export type Place = { readonly coordinate: Coordinate | ItemCoordinate } & (
   | { readonly kind: "item" }
 );
 
-/** A label's settings, its short form (a string) read as its text. */
-export type Label = Frozen<Exclude<LabelSpec, string>>;
+/**
+ * A label's settings, its short form (a string) read as its text: a
+ * rule's, whose place may hold a `room`, and so every annotation's.
+ */
+export type Label = Frozen<Exclude<RuleLabelSpec, string>>;
 
 /** The label object of a `label` option. */
-export function labelOf(label: string | Frozen<LabelSpec> | undefined): Label | undefined {
+export function labelOf(label: string | Frozen<RuleLabelSpec> | undefined): Label | undefined {
   return typeof label === "string" ? { text: label } : (label as Label | undefined);
 }
 
@@ -361,7 +364,7 @@ export function itemFields(item: Frozen<ItemRef>): string[] {
  */
 export function readsTable(
   positions: readonly (Frozen<AnnotationPosition | ThresholdPlace> | undefined)[],
-  label: string | Frozen<LabelSpec> | undefined,
+  label: string | Frozen<RuleLabelSpec> | undefined,
   encode?: object,
 ): boolean {
   const own = typeof label === "object" ? label : undefined;

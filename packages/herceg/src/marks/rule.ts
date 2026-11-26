@@ -1,6 +1,6 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
-import { ruleDrawing, ruleLine } from "../draw/rule.ts";
+import { ruleDrawing } from "../draw/rule.ts";
 import { type Formatter, lazyFormat } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
 import {
@@ -14,7 +14,7 @@ import {
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { Geometry, Rect, RuleGeometry } from "../scene/scene.ts";
-import type { LabelLayoutSpec, LabelPlaceSpec, LabelSpec } from "../spec/encoding.ts";
+import type { LabelLayoutSpec, RuleLabelSpec, TrackLabelPlaceSpec } from "../spec/encoding.ts";
 import type { Coordinate } from "../spec/place.ts";
 import type {
   AnnotationPosition,
@@ -62,8 +62,15 @@ import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
 import { checkOptionalItemKey, frozen, painted } from "./mark.ts";
 
-/** A rule's label: its text, or each row's `field`; where it goes and how it looks. */
-export type RuleLabel<F extends string = string, Layout = LabelLayoutSpec> =
+/**
+ * A rule's label: its text, or each row's `field`; where it goes (`Place`:
+ * a track's, outside the plot taking a `room`) and how it looks.
+ */
+export type RuleLabel<
+  F extends string = string,
+  Layout = LabelLayoutSpec,
+  Place = TrackLabelPlaceSpec,
+> =
   | string
   | ((
       | { text: string; field?: never; content?: never }
@@ -71,9 +78,9 @@ export type RuleLabel<F extends string = string, Layout = LabelLayoutSpec> =
       | { content: readonly LabelPartOf<F>[]; text?: never; field?: never; format?: never }
     ) &
       Layout & {
-        format?: LabelSpec["format"];
+        format?: RuleLabelSpec["format"];
         style?: TextStyle;
-        place?: LabelPlaceSpec;
+        place?: Place;
       });
 
 /** A rule's look and options; places on items in `span` name category fields `C` of its table. */
@@ -148,6 +155,10 @@ export function ruleFormError(spec: { x?: unknown; y?: unknown }): string | unde
 
 /** Pixels between a rule and its label, and between an outside label and the axis' labels. */
 const LABEL_GAP = 4;
+
+/** Why a vertical rule's label takes no `room`. */
+export const VERTICAL_ROOM =
+  "a vertical rule's labels stand above or below the plot, where no track is kept; drop room";
 
 /**
  * Reference lines, horizontal at `y` or vertical at `x`, across the plot or
@@ -255,9 +266,16 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         !label.format &&
         layout.overlap === "show" &&
         layout.group === undefined);
-    this.featured = lazyFormat(label?.format) || label?.content !== undefined || !!stepped;
     const vertical = spec.x !== undefined;
     const place = label?.place;
+    // A room the feature compiler checks, and fits labels to.
+    this.featured =
+      lazyFormat(label?.format) ||
+      label?.content !== undefined ||
+      !!stepped ||
+      place?.room !== undefined;
+    if (vertical && place?.room !== undefined)
+      throw new Error(`rule label.place.room: ${VERTICAL_ROOM}`);
     if (place?.outside && place.attachment === "center")
       throw new Error(
         `rule label.place: a label outside the plot goes at the rule's start or end; give attachment "start" or "end"`,
@@ -394,7 +412,9 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
 
   /**
    * Room the rules' labels outside the plot keep beside it, in pixels: the
-   * widest label at each side's end of horizontal rules.
+   * widest label at each side's end of horizontal rules; with a `room`,
+   * that (halos and boxes too) within its bounds, or a fixed one from the
+   * options alone. Their offset comes on top.
    */
   room(
     measure: MeasureText,
@@ -406,22 +426,38 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     const place = label?.place;
     if (!label || this.spec.y === undefined || !place?.outside || place.reserve === false)
       return [0, 0];
-    // As the labels are drawn: written by their format, in their boxes, moved by their offset.
-    const paint = this.#paint({ theme });
-    const write = this.#data.writer(locale, features?.of(this)?.format);
-    const content = features?.of(this)?.content;
-    const data = this.#items(features).data;
-    const at = data.place(this.#positions.y!);
-    let widest = 0;
-    data.each(undefined, (i) => {
-      const value = data.value(at, i);
-      const parts = content?.styled?.(i, "", value, undefined, paint, { measure });
-      const text = data.text(i, locale, write, content, value);
-      widest = Math.max(widest, parts ? parts.lines.width : measure(text, paint.css));
-    });
-    const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
-    const room = Math.ceil(widest + left + right + (place.offset ?? 0));
+    const offset = place.offset ?? 0;
+    let room = typeof place.room === "number" ? place.room + offset : undefined;
+    if (room === undefined) {
+      // As the labels are drawn: written by their format, in their boxes, moved by their offset.
+      const paint = this.#paint({ theme });
+      const write = this.#data.writer(locale, features?.of(this)?.format);
+      const content = features?.of(this)?.content;
+      const data = this.#items(features).data;
+      const at = data.place(this.#positions.y!);
+      let widest = 0;
+      data.each(undefined, (i) => {
+        const value = data.value(at, i);
+        const parts = content?.styled?.(i, "", value, undefined, paint, { measure });
+        const text = data.text(i, locale, write, content, value);
+        widest = Math.max(widest, parts ? parts.lines.width : measure(text, paint.css));
+      });
+      const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
+      const bounds = features?.of(this)?.labelRoom?.bounds;
+      room = bounds
+        ? Math.min(
+            Math.max(Math.ceil(widest + left + right + this.#reach(paint, { theme })), bounds.min),
+            bounds.max,
+          ) + offset
+        : Math.ceil(widest + left + right + offset);
+    }
     return (place.attachment ?? "end") === "end" ? [0, room] : [room, 0];
+  }
+
+  /** How far its labels' painting reaches past their blocks: a halo, or a box's outline. */
+  #reach(paint: TextPaint, frame: Pick<Frame, "theme"> & Partial<Pick<Frame, "paint">>): number {
+    const halo = this.#data.label?.style?.halo ?? false;
+    return paintedReach(paint, labelHalo(halo, { paint: (color) => color, ...frame }));
   }
 
   /**
@@ -552,8 +588,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         x2: vertical ? at : b,
         y1: vertical ? a : at,
         y2: vertical ? b : at,
-        // Labels of several lines are placed as a block, as styled ones are.
-        label: plain(text) ? text : undefined,
+        // Labels of several lines are placed as a block, as styled ones are,
+        // and those of a horizontal rule along no length, whose ends tell
+        // no direction (x1 === x2 too).
+        label: plain(text) && (vertical || a !== b) ? text : undefined,
       };
       if (spec.strokeOpacity !== undefined) rule.opacity = spec.strokeOpacity;
       // Labels stay in the plot, or in the chart for a rule outside the plot.
@@ -566,7 +604,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       rules.push(rule);
       if (keys) this.#stepKeys.set(rule, [keys[i]!]);
       // A label that writes nothing takes no place, so it hides no other.
-      if (text && /[^\n]/.test(text) && !plain(text))
+      if (text && /[^\n]/.test(text) && !rule.label)
         apart.push({
           row: i,
           rule,
@@ -587,19 +625,31 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
   #labels(frame: Frame, key: MarkKey, drawn: readonly ApartRule[]): ApartLabel[] {
     const paint = this.#paint(frame);
     // Labels keep apart as painted: outlines and halos too.
-    const reach = paintedReach(paint, labelHalo(this.#data.label?.style?.halo ?? false, frame));
+    const reach = this.#reach(paint, frame);
     const place = this.#data.label?.place;
     const outside = place?.outside;
     const { group, overlap, priority, leader } = this.#data.layout;
+    // Outside, labels wider than their room's most are shortened to it, their boxes and halos in it.
+    const room = frame.features?.of(this)?.labelRoom;
+    const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
+    const fits = (room?.bounds.max ?? Number.POSITIVE_INFINITY) - left - right - reach;
+    const vertical = this.spec.x !== undefined;
     const out: ApartLabel[] = [];
-    for (const { row, rule, bounds, text, parts } of drawn) {
+    for (const apart of drawn) {
+      const { row, rule, bounds } = apart;
+      const fitted: [string, PartText | undefined] | undefined =
+        room && fits < Number.POSITIVE_INFINITY
+          ? room.fit(apart.text, apart.parts, fits, paint.css, frame.measure)
+          : [apart.text, apart.parts];
+      if (!fitted) continue;
+      const [text, parts] = fitted;
       const at = this.#place(text, rule, frame, paint, parts);
       // Measured either way, so a placer sees what each label covers; one
       // outside the plot keeps its one place, beside the axis' labels.
       const box = grown(labelBox(at, paint, frame.measure), reach);
-      const line = ruleLine(rule);
-      const places = outside ? [{ dx: 0, dy: 0 }] : mirrorPlaces(box, line);
-      const vertical = line.axis === "x";
+      const places = outside
+        ? [{ dx: 0, dy: 0 }]
+        : mirrorPlaces(box, vertical ? { axis: "x", at: rule.x1 } : { axis: "y", at: rule.y1 });
       const attachment = place?.attachment ?? (vertical ? "start" : "end");
       // The point it labels, where its rule ends (or its middle), which leaders go back to.
       const point = vertical
@@ -712,8 +762,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     paint: TextPaint,
     parts: PartText | undefined,
   ): PlacedLabel {
-    const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
-    const vertical = rule.x1 === rule.x2;
+    const place: Frozen<TrackLabelPlaceSpec> = this.#data.label?.place ?? {};
+    const vertical = this.spec.x !== undefined;
     const attachment = place.attachment ?? (vertical ? "start" : "end");
     const offset = place.offset ?? 0;
     const { size, lineHeight, verticalAlign } = paint;
@@ -794,8 +844,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
 }
 
 /** A label option as specs take it: plain text stays a string. */
-function labelSpec(label: RuleLabel | undefined): string | LabelSpec | undefined {
-  return label as string | LabelSpec | undefined;
+function labelSpec(label: RuleLabel | undefined): string | RuleLabelSpec | undefined {
+  return label as string | RuleLabelSpec | undefined;
 }
 
 /**

@@ -7,7 +7,7 @@
 
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { Frozen, TextSpec } from "../spec/spec.ts";
+import type { Frozen, TextLabelSpec, TextSpec } from "../spec/spec.ts";
 import { checkOptionalItemKey, frozen, type MARK, type Mark } from "./mark.ts";
 
 /** Options of text that labels series elsewhere, and what to do instead. */
@@ -26,7 +26,6 @@ export class FollowingTextMark implements Mark<Frozen<TextSpec>> {
   readonly tooltip = "x";
   /** The feature compiler places its labels. */
   readonly featured = true;
-  readonly roomPlaced = true;
   readonly table = undefined;
 
   constructor(input: TextSpec) {
@@ -68,6 +67,14 @@ export class FollowingTextMark implements Mark<Frozen<TextSpec>> {
   /** Drawn with the chart's features (marks/features/labels.ts), where the source mark is drawn. */
   geometry() {
     return [];
+  }
+
+  /**
+   * Its labels are placed as drawn, and keep what they take then, but for
+   * a fixed `room`, which they keep from their options before anything is drawn.
+   */
+  get roomPlaced(): boolean {
+    return typeof (this.spec.label as TextLabelSpec).place?.room !== "number";
   }
 
   room(...[, , , features]: Parameters<NonNullable<Mark["room"]>>): [number, number] {

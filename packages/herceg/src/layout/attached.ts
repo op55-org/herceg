@@ -41,6 +41,7 @@ import { leaderDrawingOf } from "../draw/leaders.ts";
 import type { markupOf, n } from "../draw/markup.ts";
 import type { textItemMarkup } from "../draw/text.ts";
 import { labelsDrawingOf } from "../draw/text-items.ts";
+import type { Bounds } from "../guides/axes.ts";
 import type { Attachment } from "../marks/attachments.ts";
 import type { PartText } from "../marks/features/part-text.ts";
 import type { Frame } from "../marks/mark.ts";
@@ -58,7 +59,14 @@ import type { surface } from "../theme.ts";
 import { anchorBlock } from "./block.ts";
 import { LabelBoxes } from "./label-boxes.ts";
 import { separate } from "./separate.ts";
-import type { fitText, MeasuringContext, TextLines, textItem, textLines } from "./text.ts";
+import type {
+  fitText,
+  MeasureText,
+  MeasuringContext,
+  TextLines,
+  textItem,
+  textLines,
+} from "./text.ts";
 
 /** The chart's code labels are placed and drawn with (see model/guides.ts `GUIDE_KIT`). */
 export interface AttachedKit {
@@ -125,6 +133,8 @@ export interface AttachedLabel {
     /** Whether outside labels keep room in their track; true by default. */
     readonly reserve?: boolean | undefined;
     readonly offset?: number | undefined;
+    /** Outside, the bounds of what they keep in their track, before `offset`: their `room`. */
+    readonly room?: Bounds | undefined;
   };
   readonly halo: ResolvedHalo | undefined;
   readonly overlap: Overlap;
@@ -170,7 +180,6 @@ export function placeAttached(
   // Each label's block, unturned.
   const blocks: Block[] = [];
   labels.forEach((label, order) => {
-    label.owner.room = [0, 0];
     if (!label.at.visible) return;
     const { paint, place, at, halo } = label;
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
@@ -188,26 +197,33 @@ export function placeAttached(
     let x = at.x;
     let y = at.y;
     let keeps: Block["room"];
+    // What its text takes in its track as measured, before it is shortened.
+    const takes = lines.width + left + right + reach;
+    // Lines wider than their room, shortened to it: inside, the plot's;
+    // outside, the most of their own room, which halos and boxes are in.
+    const { room } = place;
+    const fits = place.outside
+      ? (room?.max ?? Number.POSITIVE_INFINITY) - left - right - reach
+      : plot.width - left - right - 2 * reach;
+    if (lines.width > fits) {
+      const fitted = fitLabel(text, parts, fits, paint.css, measure, fitText);
+      if (!fitted) return;
+      [text, parts] = fitted;
+      lines = parts?.lines ?? textLines(text, paint, measure);
+    }
     if (place.outside) {
       const side = align === "end" ? 0 : 1;
       const edges = frame.outside ?? [plot.x - GAP, plot.x + plot.width + GAP];
       x = side ? edges[1] + offset : edges[0] - offset;
+      // A room holds what they measure within its bounds, `offset` on top.
       if (place.reserve !== false)
-        keeps = [side, Math.ceil(lines.width + left + right + reach + offset)];
+        keeps = [
+          side,
+          room
+            ? Math.min(Math.max(Math.ceil(takes), room.min), room.max) + offset
+            : Math.ceil(takes + offset),
+        ];
     } else {
-      // Lines wider than the plot's room, shortened to it.
-      const room = plot.width - left - right - 2 * reach;
-      if (lines.width > room && parts) {
-        parts = parts.fit(room);
-        if (!parts) return;
-        lines = parts.lines;
-        text = lines.lines.join("\n");
-      } else if (lines.width > room) {
-        const fitted = lines.lines.map((line) => fitText(line, room, measure, paint.css));
-        if (fitted.some((line, k) => line === "…" && line !== lines.lines[k])) return;
-        text = fitted.join("\n");
-        lines = textLines(text, paint, measure);
-      }
       const away = GAP + offset;
       if (align === "start") x += away;
       else if (align === "end") x -= away;
@@ -326,6 +342,35 @@ export function placeAttached(
     geometry.set(owner, parts);
   }
   return { geometry, boxes };
+}
+
+/**
+ * `text`, or its `parts`, at most `width` wide: each line wider shortened
+ * with an ellipsis (`fitText`; a label of parts, the part that runs past,
+ * the parts before it keeping their looks); undefined where a line would
+ * keep no more than the ellipsis, or not even that fits. Labels inside the
+ * plot fit it; outside it, a room's most (rules' labels too).
+ */
+export function fitLabel(
+  text: string,
+  parts: PartText | undefined,
+  width: number,
+  font: string,
+  measure: MeasureText,
+  fit: typeof fitText,
+): [string, PartText | undefined] | undefined {
+  if (parts) {
+    if (parts.lines.width <= width) return [text, parts];
+    const fitted = parts.fit(width);
+    return fitted && [fitted.lines.lines.join("\n"), fitted];
+  }
+  const lines = text.split("\n");
+  // Within it, as most are each frame, they stay as they are.
+  if (lines.every((line) => measure(line, font) <= width)) return [text, undefined];
+  const fitted = lines.map((line) => fit(line, width, measure, font));
+  return fitted.some((line, k) => line === "…" && measure(lines[k]!, font) > width)
+    ? undefined
+    : [fitted.join("\n"), undefined];
 }
 
 /**

@@ -27,8 +27,8 @@ import { errorBarForm } from "../marks/errorbar.ts";
 import { heatmapFormError } from "../marks/heatmap.ts";
 import { histogramFormError, perAxisBins } from "../marks/histogram-input.ts";
 import { pointSizeForm } from "../marks/point.ts";
-import { regionFormError } from "../marks/region.ts";
-import { ruleFormError } from "../marks/rule.ts";
+import { REGION_ROOM, regionFormError } from "../marks/region.ts";
+import { ruleFormError, VERTICAL_ROOM } from "../marks/rule.ts";
 import { treeFormError } from "../marks/tree-data.ts";
 import { Bindings } from "../model/bindings.ts";
 import { GUIDE_KIT } from "../model/guides.ts";
@@ -56,6 +56,7 @@ import type {
   StackSpec,
   StyleMapSpec,
   TitlePart,
+  TrackLabelPlaceSpec,
 } from "./encoding.ts";
 import { ChartError, type ChartErrorCode } from "./errors.ts";
 import type {
@@ -2335,16 +2336,38 @@ const itemAnchor: Check = (v, path) => {
   } satisfies ChecksOf<ItemAnchor>);
 };
 
+/** What a label's place holds: along what it labels, outside the plot or not, its offset. */
+const PLACE = {
+  attachment: oneOf("start", "center", "end"),
+  side: oneOf("top", "right", "bottom", "left"),
+  outside: boolean,
+  reserve: boolean,
+  offset: finite,
+} satisfies ChecksOf<LabelPlaceSpec>;
+
 /** Where a label goes beside what it labels. */
 const labelPlace: Check = (p, at) => {
   object(p, at);
+  properties(p as Record<string, unknown>, at, PLACE);
+};
+
+/** Refuses a `room` of labels that keep none: outside the plot with `reserve: false`, or inside it. */
+function trackRoom(place: Record<string, unknown>, at: string): void {
+  if (place.room === undefined) return;
+  if (place.reserve === false)
+    throw refusal(`${at}.room`, "labels that keep no room take none; drop room, or reserve");
+  if (place.outside !== true)
+    throw refusal(`${at}.room`, "labels inside the plot take no room; place them outside");
+}
+
+/** Where a label of a side track goes (series labels, rules'): as `labelPlace`, with a room outside the plot. */
+const trackLabelPlace: Check = (p, at) => {
+  object(p, at);
+  trackRoom(p as Record<string, unknown>, at);
   properties(p as Record<string, unknown>, at, {
-    attachment: oneOf("start", "center", "end"),
-    side: oneOf("top", "right", "bottom", "left"),
-    outside: boolean,
-    reserve: boolean,
-    offset: finite,
-  } satisfies ChecksOf<LabelPlaceSpec>);
+    ...PLACE,
+    room,
+  } satisfies ChecksOf<TrackLabelPlaceSpec>);
 };
 
 /** A part's look over its label's: the block's halo, box, and alignment are refused. */
@@ -2477,10 +2500,12 @@ const textLabelPlace: Check = (p, at) => {
         `${at}.${option}`,
         `text is drawn at its place, or at from.at on its series; drop ${option}`,
       );
+  trackRoom(place, at);
   properties(place, at, {
     outside: boolean,
     reserve: boolean,
     offset: finite,
+    room,
   } satisfies ChecksOf<NonNullable<TextLabelSpec["place"]>>);
 };
 
@@ -2535,6 +2560,8 @@ function labelOf(place: Check, overlap = "show"): Check {
 }
 
 const label = labelOf(labelPlace);
+/** A rule's label: its place a track's. */
+const ruleLabel = labelOf(trackLabelPlace);
 
 /** Text following a series: placed with series labels, which move by default and meet across marks. */
 const followingLabel: Check = (v, path) => {
@@ -2546,13 +2573,15 @@ const followingLabel: Check = (v, path) => {
   labelOf(textLabelPlace, "move")(v, path);
 };
 
-/** A region's label: leaders are refused, as its labels slide along their side. */
+/** A region's label: leaders and rooms are refused, as its labels slide along their side. */
 const regionLabel: Check = (v, path) => {
   if (typeof v === "object" && v !== null && "leader" in v)
     throw refusal(
       `${path}.leader`,
       "region labels slide along their side and draw none; drop leader",
     );
+  if (isRecord(v) && isRecord(v.place) && v.place.room !== undefined)
+    throw refusal(`${path}.place.room`, REGION_ROOM);
   label(v, path);
 };
 
@@ -2577,7 +2606,7 @@ function seriesLabels(band: boolean): Check {
       at: labelAt,
       content: labelContent,
       edge: bandEdge,
-      place: labelPlace,
+      place: trackLabelPlace,
       style: textStyle,
       overlap: labelOverlap,
       leader: labelLeader,
@@ -2979,7 +3008,7 @@ const MARKS: MarkChecks = {
         if (!Array.isArray(v) || v.length !== 2) fail(path, "two coordinates", v);
         for (const [i, c] of v.entries()) annotationCoordinate(c, `${path}[${i}]`);
       },
-      label,
+      label: ruleLabel,
       contributeDomain: boolean,
       legend: boolean,
     },
@@ -3861,6 +3890,15 @@ const mark: Check = (v, path) => {
     ...(series && { label: followingLabel }),
   };
   required(spec, path, kind.required, [...Object.keys(checks), "type"]);
+  // A vertical rule's labels stand where no track is kept, whatever else their place says.
+  if (
+    spec.type === "rule" &&
+    spec.x !== undefined &&
+    isRecord(spec.label) &&
+    isRecord(spec.label.place) &&
+    spec.label.place.room !== undefined
+  )
+    throw refusal(`${path}.label.place.room`, VERTICAL_ROOM);
   properties(spec, path, checks, ["type"]);
   if (spec.type === "dendrogram" && spec.axis !== undefined)
     throw refusal(

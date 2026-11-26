@@ -233,3 +233,89 @@ def test_labels_name_the_places_they_take():
         hg.ChartError, match=re.escape(f"MarkAnchor at: expected {places}{received}")
     ):
         hg.MarkAnchor(mark="v", at="view-middle")  # type: ignore[arg-type]
+
+
+def _plot_right(chart: hg.Chart) -> float:
+    """Where the chart's plot ends along x, as its SVG clips it."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(chart.to_svg())
+    rect = root.find(".//{http://www.w3.org/2000/svg}clipPath/{http://www.w3.org/2000/svg}rect")
+    assert rect is not None
+    return float(rect.attrib["x"]) + float(rect.attrib["width"])
+
+
+@pytest.mark.contract("labels.attach.room.python")
+def test_names_outside_the_plot_take_a_room():
+    rows = {"t": [0, 1, 2], "auth": [1.0, 2, 3], "recommendations-engine": [3.0, 2, 1]}
+
+    def chart(names: list[str], room: object = 64) -> hg.Chart:
+        place = hg.LabelPlace(outside=True, offset=8, room=room)
+        return hg.Chart(rows, legend=False, width=600).line(
+            x="t", y=names, labels=hg.SeriesLabels(at="last", place=place)
+        )
+
+    # A fixed room holds the plot whatever the names measure, and shortens longer ones.
+    assert _plot_right(chart(["auth"])) == _plot_right(chart(["recommendations-engine"]))
+    written = texts(chart(["auth", "recommendations-engine"]))
+    assert "auth" in written
+    assert "recommendations-engine" not in written
+    assert any(text.startswith("recomm") and text.endswith("…") for text in written)
+    # Bounds: a least alone never shortens.
+    assert "recommendations-engine" in texts(chart(["recommendations-engine"], room=(10, None)))
+    spec, _ = chart(["auth"], room=(60, None)).to_spec()
+    place = spec["marks"][0]["labels"]["place"]
+    assert place == {"outside": True, "offset": 8, "room": {"min": 60}}
+    spec, _ = chart(["auth"]).to_spec()
+    assert spec["marks"][0]["labels"]["place"]["room"] == 64
+    # A dict of the options builds the same place.
+    labels = hg.SeriesLabels(at="last", place={"outside": True, "room": (None, 40)})
+    assert labels._spec()["place"] == {"outside": True, "room": {"max": 40}}
+    # Text following a series and horizontal rules' labels take one too.
+    following = (
+        hg.Chart(rows, legend=False, width=600)
+        .line(x="t", y="auth", id="m")
+        .text(
+            label=hg.Label(
+                text="a long note", place=hg.LabelPlace(outside=True, offset=8, room=64)
+            ),
+            from_=hg.MarkAnchor(mark="m", at="last"),
+        )
+    )
+    assert _plot_right(following) == _plot_right(chart(["auth"]))
+    ruled = (
+        hg.Chart(rows, legend=False, width=600)
+        .line(x="t", y="auth")
+        .rule(y=2, label=hg.Label(text="SLO", place=hg.LabelPlace(outside=True, offset=8, room=64)))
+    )
+    assert _plot_right(ruled) == _plot_right(chart(["auth"]))
+
+
+@pytest.mark.contract("labels.attach.room.refused.python")
+def test_rooms_are_refused_where_no_track_is_kept():
+    refusals = {
+        "LabelPlace room: labels that keep no room take none; drop room, or reserve": lambda: (
+            hg.LabelPlace(outside=True, reserve=False, room=72)
+        ),
+        "LabelPlace room: labels inside the plot take no room; place them outside": lambda: (
+            hg.LabelPlace(room=72)
+        ),
+        "LabelPlace room: expected finite pixels of at least 0, or (least, most), None for no "
+        "bound; received -4": lambda: hg.LabelPlace(outside=True, room=-4),
+        "region label place room: a region's labels stand in it, where no track is kept; "
+        "drop room": lambda: hg.Chart(DATA).region(
+            y1=0, y2=1, label=hg.Label(text="Budget", place=hg.LabelPlace(outside=True, room=64))
+        ),
+        "rule label place room: a vertical rule's labels stand above or below the plot, where "
+        "no track is kept; drop room": lambda: hg.Chart(DATA).rule(
+            x=1, label=hg.Label(text="deploy", place=hg.LabelPlace(outside=True, room=64))
+        ),
+        "BarLabels place: bars' labels take attachment, outside, and offset; drop room": lambda: (
+            hg.BarLabels(place={"outside": True, "room": 64})
+        ),
+    }
+    for message, make in refusals.items():
+        with pytest.raises(hg.ChartError, match=f"^{re.escape(message)}"):
+            make()
+    with pytest.raises(hg.ChartError, match="^LabelPlace room: labels inside the plot"):
+        hg.SeriesLabels(at="last", place={"outside": False, "room": 40})

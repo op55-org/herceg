@@ -1015,9 +1015,13 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     return this.#roles.orient === "x" ? [shift, 0] : [0, shift];
   }
 
-  /** Labels following its series (`labels`) are placed as drawn (marks/features/labels.ts). */
+  /**
+   * Labels following its series (`labels`) are placed as drawn
+   * (marks/features/labels.ts), and keep what they take then, but for a
+   * fixed `room`, which they keep from their options before anything is drawn.
+   */
   get roomPlaced(): boolean {
-    return this.spec.labels !== undefined;
+    return this.spec.labels !== undefined && typeof this.spec.labels.place?.room !== "number";
   }
 
   room(...[, , , features]: Parameters<NonNullable<Mark["room"]>>): [number, number] {

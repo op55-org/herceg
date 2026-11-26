@@ -12,9 +12,11 @@ import type { mappedColors, stepsAt } from "../fields/colors.ts";
 import type { CompiledFields, Steps } from "../fields/display.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { Bounds } from "../guides/axes.ts";
 import type { GuideFields } from "../guides/fields.ts";
 import type { AttachedLabel } from "../layout/attached.ts";
 import type { PanelDrawing } from "../layout/placer.ts";
+import type { MeasureText } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
@@ -23,6 +25,7 @@ import type { ContentWriter } from "../marks/features/content.ts";
 import type { itemLegends } from "../marks/features/item-legends.ts";
 import type { displayedContent } from "../marks/features/label-displays.ts";
 import type { naming } from "../marks/features/names.ts";
+import type { PartText } from "../marks/features/part-text.ts";
 import type { TracedEdge } from "../marks/features/provenance.ts";
 import type { ChartMark, Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
 import type { RowBindings } from "../marks/row-bindings.ts";
@@ -242,8 +245,29 @@ export interface MarkFeatures {
    * (marks/features/labels.ts).
    */
   labels?(frame: Frame): readonly AttachedLabel[];
-  /** What those labels outside the plot took left and right, as last placed (`Mark.room`). */
+  /**
+   * What those labels outside the plot took left and right, as last placed
+   * (`Mark.room`): at least their room's least, and a fixed room whole, before
+   * anything is drawn.
+   */
   room?(): [number, number];
+  /**
+   * A rule's labels outside the plot in a `room`: its bounds, checked, and
+   * how a label wider than its most is shortened to it (layout/attached.ts
+   * `fitLabel`), as series labels are.
+   */
+  readonly labelRoom?:
+    | {
+        readonly bounds: Bounds;
+        fit(
+          text: string,
+          parts: PartText | undefined,
+          width: number,
+          font: string,
+          measure: MeasureText,
+        ): [string, PartText | undefined] | undefined;
+      }
+    | undefined;
   /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
   readonly content?: ContentWriter | undefined;
   /** For rules and regions at a field's thresholds: the steps the chart's displays give it. */

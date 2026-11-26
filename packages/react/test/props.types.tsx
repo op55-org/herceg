@@ -179,6 +179,11 @@ type BarLabelsProp = Exclude<PropsOf<typeof Bar<Mixed>>["labels"], boolean | und
   PropsOf<typeof Chart>["legend"],
   boolean | undefined
 >;
+// Names outside the plot take a room of their own; inside ones take none.
+type LineLabelsProp = Exclude<PropsOf<typeof Line<Mixed>>["labels"], boolean | undefined>;
+({ at: "last", place: { outside: true, offset: 8, room: 64 } }) satisfies LineLabelsProp;
+// @ts-expect-error labels inside the plot take no room
+({ at: "last", place: { offset: 8, room: 64 } }) satisfies LineLabelsProp;
 
 /** <Chart>'s props of its own, which the API audit names (`chart react` in test/contracts/api.json). */
 type Own = "renderTooltip" | "marks" | "children" | "className" | "style" | "ref" | "initial";

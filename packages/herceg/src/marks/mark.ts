@@ -858,7 +858,8 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * Whether `room` is what the mark's last geometry placed (labels that
    * follow series): the chart asks right after drawing it in each panel,
-   * and keeps what each panel's labels took.
+   * and keeps what each panel's labels took. Labels in a fixed `room` are
+   * not: their room is known before anything is drawn.
    */
   readonly roomPlaced?: boolean;
   /**
@@ -870,8 +871,9 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * Pixels the mark's labels outside the plot take beside it, left and
    * right: the chart keeps a track for them on each side, innermost, beside
-   * the y axes (see `Frame.outside`). With `roomPlaced`, what its last
-   * geometry's labels took (see layout/attached.ts).
+   * the y axes (see `Frame.outside`): what they measure, or as their
+   * `place.room` holds it. With `roomPlaced`, what its last geometry's
+   * labels took (see layout/attached.ts).
    */
   room?(
     measure: MeasureText,

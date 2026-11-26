@@ -256,6 +256,20 @@ Bar(internals, {
 });
 // Legends take a room on their side, as axes do.
 export const roomed: ChartProps = { legend: { place: { side: "top" }, room: { min: 40 } } };
+// Names outside the plot take a room of their own; inside ones take none.
+Line(internals, {
+  data: ranked,
+  x: "rank",
+  y: "value",
+  labels: { at: "last", place: { outside: true, offset: 8, room: 64 } },
+});
+Line(internals, {
+  data: ranked,
+  x: "rank",
+  y: "value",
+  // @ts-expect-error labels inside the plot take no room
+  labels: { at: "last", place: { offset: 8, room: 64 } },
+});
 Text(internals, {
   data: ranked,
   from: { mark: "cells", item: [{ field: "brand" }], at: "top-left" },

@@ -566,7 +566,12 @@ annotation labels take the same parts.
 labels sit beside their point and slide along their row to stay within
 the plot, shortened with an ellipsis (`fitText`) when wider than it, or
 left out when only the ellipsis fits. Outside, they go in side tracks
-(`Frame.outside`), reserving room unless `reserve` is false. Extents
+(`Frame.outside`), reserving room unless `reserve` is false: what they
+measure, or held within their `place.room`'s bounds, those wider than its
+most shortened as inside labels are (`fitLabel`, which rules' labels
+outside the plot share). A mark whose labels have a fixed room is not
+placed as drawn (`Mark.roomPlaced`): its compiled features keep the room
+from its options, so the chart reads it before anything is drawn. Extents
 include halos and box outlines. Every series label of a panel (all its
 marks', and text following series) is placed in one call, by its
 `overlap`:

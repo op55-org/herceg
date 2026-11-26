@@ -561,6 +561,30 @@ styles](docs/guide/styling.md#role-styles) and
   for an open end (`room=(40, None)`), and axes' and legends' rooms are
   refused in the same words. See
   [Legends](docs/guide/axes-and-legends.md#legends).
+- **Labels outside the plot take `room`**, of the type axes' and
+  legends' rooms have (`Room`), on series labels, text following series,
+  and horizontal rules' labels: `place: { outside: true, offset: 8, room:
+  64 }` keeps 64 px for their width in their side's track, box padding and
+  halo inside it and `offset` on top, from the first frame whatever is
+  drawn (no data, every series hidden, no point in view, no label left),
+  so a plot holds still as names stream in, change, or leave; `{ min, max
+  }` bounds what they measure instead. The track is the most any mark on
+  its side keeps. Labels wider than a fixed room or its `max` are
+  shortened with an ellipsis as drawn (plain labels line by line, labels
+  of parts from their end, the parts' looks kept; left out where only the
+  ellipsis would remain), their leaders still at their start, and named
+  whole in the legend, the tooltip, and the text alternative; `{ min }`
+  alone never shortens. Refused on vertical rules' and regions' labels,
+  with `reserve: false`, and inside the plot, in TypeScript's types, at
+  run time, in specs, and in Python (`hg.LabelPlace(outside=True,
+  offset=8, room=64)`, `room=(60, None)`). Charts whose sides hold the
+  same rooms line up where their x axes' end labels stay inside them
+  ([What lines up](docs/guide/layout.md#what-lines-up)). Changed: a
+  horizontal rule along no length (both `span` ends at one place) placed
+  its label as a vertical rule's; it is placed as a horizontal rule's.
+  Changed: a label inside the plot whose line is a literal "…" wider than
+  the plot is left out, as lines shortened to the ellipsis are. See
+  [Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
 - **The pointer names the nearest band on category axes.**
   `pointer.categories` (Python `hg.Pointer.categories`) names the first or
   last band in the room a band axis keeps beside them, and the nearer band
