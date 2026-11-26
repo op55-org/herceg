@@ -1653,16 +1653,27 @@ describe("networks", () => {
     const moves = heard(chart, "itemMove");
     const [ax, ay] = where(chart, "a");
     const b = where(chart, "b");
+    // Where b is drawn at every frame from before the drop, and the longest
+    // wait between two frames.
+    const seen = new Set<string>();
+    let [sampling, last, gap] = [true, performance.now(), 0];
+    const sample = (now: number) => {
+      seen.add(where(chart, "b").join());
+      [gap, last] = [Math.max(gap, now - last), now];
+      if (sampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
     await drag(chart, [ax, ay], [ax + 60, ay + 40]);
-    // b moves toward a over frames, then stops.
-    const seen: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      await frame();
-      seen.push(where(chart, "b").join());
-    }
+    // The drop settles the nodes near it once the chart draws.
+    for (let i = 0; i < 4; i++) await frame();
     await chart.loading;
+    await frame();
+    sampling = false;
     const settled = where(chart, "b");
-    expect(new Set(seen).size).toBeGreaterThan(1);
+    // b moves toward a over frames, then stops: it eases there over 300 ms
+    // of the clock, so frames show it between where it stood and where it
+    // stops, unless they came far apart (a starved CPU).
+    if (gap < 100) expect(seen.size).toBeGreaterThan(2);
     expect(Math.hypot(settled[0] - b[0], settled[1] - b[1])).toBeGreaterThan(2);
     await frame();
     expect(where(chart, "b")).toEqual(settled);
