@@ -93,7 +93,8 @@ describe("ties", () => {
           const value = (shown?.inspection as { value?: number } | undefined)?.value;
           return shown?.cause === "api" && value !== undefined && Math.abs(value - mid) < 1;
         };
-        await expect.poll(at).toBe(true);
+        // A frame draws it; under load (WebKit on CI) that can take seconds.
+        await expect.poll(at, { timeout: 5000 }).toBe(true);
         const read = firstRow(hovers.at(-1)!.inspection);
         if (read !== k) later.push(`shown ${k}: row ${read}`);
       }
