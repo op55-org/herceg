@@ -346,6 +346,117 @@ class MarkerStyle:
 
 
 @refuses
+@dataclass(frozen=True)
+class Dot:
+    """A dot about a segment's end, ``radius`` pixels (3 by default)."""
+
+    radius: float | None = None
+
+    def __post_init__(self) -> None:
+        _checked(self, "Dot", widths=("radius",))
+
+    def _spec(self) -> dict[str, Any]:
+        return {"dot": {} if self.radius is None else {"radius": float(self.radius)}}
+
+
+@refuses
+@dataclass(frozen=True)
+class Arrow:
+    """An arrowhead at a segment's end, its tip at the end: ``length``
+    pixels along the segment (10 by default) and ``width`` pixels across its
+    base (8). A segment shorter than its head draws the head alone, its base
+    at the other end; two heads longer than the segment together each take
+    half of it; a segment of no length draws no arrowhead."""
+
+    length: float | None = None
+    width: float | None = None
+
+    def __post_init__(self) -> None:
+        _checked(self, "Arrow", widths=("length", "width"))
+
+    def _spec(self) -> dict[str, Any]:
+        sizes = (("length", self.length), ("width", self.width))
+        return {"arrow": {name: float(size) for name, size in sizes if size is not None}}
+
+
+#: What a segment draws at one end.
+SegmentCap = Literal["dot", "arrow"] | Dot | Arrow
+
+
+@refuses
+@dataclass(frozen=True)
+class Caps:
+    """What a segment draws at its ``start`` and ``end`` (the spec's
+    ``from`` and ``to``): ``"dot"`` or ``"arrow"`` at their default sizes,
+    an ``hg.Dot``, or an ``hg.Arrow``; nothing by default."""
+
+    start: SegmentCap | None = None
+    end: SegmentCap | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("start", "end"):
+            cap = getattr(self, name)
+            if not (cap is None or cap in ("dot", "arrow") or isinstance(cap, (Dot, Arrow))):
+                raise ChartError(
+                    f'Caps {name}: expected "dot", "arrow", an hg.Dot, or an hg.Arrow; '
+                    f"received {shown(cap)}"
+                )
+
+    def _spec(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for name, end in (("start", "from"), ("end", "to")):
+            cap = getattr(self, name)
+            if cap is not None:
+                out[end] = cap if isinstance(cap, str) else cap._spec()
+        return out
+
+
+#: A width of a segment's: pixels, or a channel giving each row's.
+SegmentWidthOption = float | ChannelOption
+
+
+def segment_width_spec(value: Any, role: str) -> Any:
+    """A segment's width at one end as the spec takes it: pixels, or a
+    channel of each row's own (not the series' names)."""
+    if is_number(value) and not isinstance(value, bool):
+        _number(value, role)
+        return float(value)
+    channel = isinstance(value, (Channel, Expr, Condition, Mapping)) or listlike(value)
+    if not channel or isinstance(value, str):
+        raise ChartError(
+            f"{role}: expected pixels or a channel (an hg.Channel or hg.when); "
+            f"received {shown(value)}"
+        )
+    spec = channel_spec(value, role)
+    for i, entry in enumerate(spec if isinstance(spec, list) else [spec]):
+        if "series" in entry:
+            at = f"{role}[{i}]" if isinstance(spec, list) else role
+            raise ChartError(
+                f"{at}: each row has a width of its own; give a field, a value, or a condition"
+            )
+    return spec
+
+
+@refuses
+@dataclass(frozen=True)
+class SegmentWidth:
+    """A segment's width tapering linearly from ``start`` to ``end`` (the
+    spec's ``from`` and ``to``), each pixels or a channel giving each row's
+    (an ``hg.Channel`` through a channel scale, ``hg.when``, or a list of
+    them tried in order). Where an end has an arrowhead, its width is the
+    body's at the head's base."""
+
+    start: SegmentWidthOption
+    end: SegmentWidthOption
+
+    def _spec(self) -> dict[str, Any]:
+        return {
+            "from": segment_width_spec(self.start, "SegmentWidth start"),
+            "to": segment_width_spec(self.end, "SegmentWidth end"),
+        }
+
+
+@refuses
 @dataclass
 class SeriesStyle:
     """How one series looks (for bars, one row): its paint, and its markers

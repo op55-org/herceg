@@ -464,6 +464,14 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   readonly featured?: boolean;
   /**
+   * For marks the custom mark's core draws (custom marks, segments): how
+   * their rows make series, which says how they are read and selected:
+   * points along x, a series per y field ("wide"), rows as items spanning
+   * their fields ("ranges"), or no series ("none"). They draw, pick, and
+   * dim their own items.
+   */
+  readonly shapeLayout?: "points" | "wide" | "ranges" | "none";
+  /**
    * For rules and regions at a field's thresholds: where, as given (the
    * field, and the table whose field it is), which the feature compiler
    * resolves to the steps the chart's displays give it (`MarkFeatures.steps`).

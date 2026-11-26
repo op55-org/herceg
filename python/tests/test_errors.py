@@ -152,6 +152,22 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         {},
     ),
     "Jitter": ("marks[0].jitter", lambda o: hg.Chart(DATA).point(x="s", y="v", jitter=o), {}),
+    "SegmentWidth": (
+        "marks[0].width",
+        lambda o: hg.Chart(DATA).segment(x=("t", "w"), y="v", width=o),
+        {"start": 2.0, "end": 1.0},
+    ),
+    "Caps": ("marks[0].caps", lambda o: hg.Chart(DATA).segment(x=("t", "w"), y="v", caps=o), {}),
+    "Dot": (
+        "marks[0].caps.from.dot",
+        lambda o: hg.Chart(DATA).segment(x=("t", "w"), y="v", caps=hg.Caps(start=o)),
+        {},
+    ),
+    "Arrow": (
+        "marks[0].caps.to.arrow",
+        lambda o: hg.Chart(DATA).segment(x=("t", "w"), y="v", caps=hg.Caps(end=o)),
+        {},
+    ),
     "Encodings": ("marks[0].encode", lambda o: _line(encode=o), {}),
     "MarkStyle": ("marks[0].style", lambda o: _line(style=o), {}),
     "MarkerStyle": (

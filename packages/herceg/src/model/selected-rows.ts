@@ -99,6 +99,7 @@ const SELECTS = new Set([
   "rug",
   "contour",
   "custom",
+  "segment",
 ]);
 
 /** Marks whose drawing summarizes their rows (a contour's bands, of a grid), which clicks select none of. */
@@ -230,12 +231,17 @@ function readingsOf(mark: Mark): Reading[] {
     case "contour":
       return [{ x: field(spec.x as string), y: field(spec.y as string) }];
     // Custom marks of one x field place rows as points and lines do; over
-    // other fields (ranges), each row spans its fields on each axis, and a
-    // brush holds the rows whose spans it meets.
-    case "custom": {
+    // other fields (ranges, and every segment), each row spans its fields
+    // on each axis, and a brush holds the rows whose spans it meets.
+    case "custom":
+    case "segment": {
       if (spec.x === undefined || spec.y === undefined) return [];
       const [xs, ys] = [list(spec.x), list(spec.y)];
-      if (xs.length === 1 && (ys.length === 1 || spec.series === undefined))
+      if (
+        mark.shapeLayout !== "ranges" &&
+        xs.length === 1 &&
+        (ys.length === 1 || spec.series === undefined)
+      )
         return byField(field(xs[0]!), ys);
       const span = (fields: readonly string[]): Place =>
         fields.length === 1

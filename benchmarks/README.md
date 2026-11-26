@@ -285,9 +285,9 @@ could load for some chart, not what its own chart downloads.
   `svelte/compiler`, is measured with it. So do the grid entries of each
   adapter (`herceg-react-grid`, `herceg-vue-grid`, `herceg-svelte-grid`,
   and their `-remote` and `-pivot` entries).
-- `herceg-bar`, `herceg-area`, `herceg-scatter`, `herceg-heatmap`, and
-  `herceg-contour` chart the same data with other marks, to track what each
-  adds. Only the line entries have counterparts among the other libraries.
+- `herceg-bar`, `herceg-area`, `herceg-scatter`, `herceg-heatmap`,
+  `herceg-contour`, and `herceg-segment` (an arrow from each point to the
+  next) chart the same data with other marks, to track what each adds. Only the line entries have counterparts among the other libraries.
 - `herceg-pdf` is one line chart as PDF, `herceg-pdf-fonts` the same with
   embedded-font support (font bytes excluded), `herceg-spec-pdf` a portable
   spec with its loader, and `herceg-pdf-document` a two-chart A4 report.
@@ -324,7 +324,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Thirteen fixtures, each move
+drawing path; it compares no libraries. Fourteen fixtures, each move
 checked for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -333,6 +333,7 @@ checked for its effect:
 | `hover-headings` | `hover-listener`'s chart, its lines' tooltip with heading parts, which every point read writes though the tooltip of eight keeps its place | The rule drawn there |
 | `hover-totals` | `hover-listener`'s chart, its lines' tooltip totalling the eight (`tooltip: { total: true }`) | The rule drawn there |
 | `custom-hover` | One chart of 2,000 custom range items (A2's comets) read `"nearest"`, their tooltip with `content`, `fields`, and a `heading` of the comet's id and category | The tooltip showing the comet under the pointer |
+| `segment-hover` | `custom-hover`'s comets as a segment of the same shape (a tail tapering to a point from a dot, one outline a row), read and checked alike; a baseline tree without segments cannot mount it, and the candidate runs it alone | The tooltip showing the comet under the pointer |
 | `point-hover` | One SVG chart of many marks: 3,500 translucent points in two series, a circle each (under the automatic renderer's canvas threshold), read along x (`"nearest-x"`) with a crosshair, markers, and a tooltip | The hover reported at the move, once drawn |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
 | `pan-view-labels` | `pan-labels`' chart labelled where each line crosses the view's start and end (`view-start`, `view-end`) | A frame of the moved view |
@@ -364,8 +365,8 @@ the SVG export:
   builds that write them; with totals, the reading's total the sum of its
   points and the tooltip's last row (in the candidate; a baseline may write
   none).
-- `custom-hover`: the tooltip showing the comet under the pointer, headed
-  by its own heading in builds that write headings.
+- `custom-hover`, `segment-hover`: the tooltip showing the comet under
+  the pointer, headed by its own heading in builds that write headings.
 - `point-hover`: the crosshair in a screenshot at the points read and
   nowhere else, over the points at every height clear of the tooltip (and
   its shadow) and the markers, and a marker for each point read. The

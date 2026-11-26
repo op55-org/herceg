@@ -49,7 +49,8 @@
 // (an option, or a spread one's setting as `option.setting`, whose settings
 // one side types and the other takes untyped: a dict, Any, an instance). An
 // audit named `mark * <surface>` (or `mark * <surface> <option>`) lists
-// what every mark's audit of that surface shares, and `express *` what
+// what every mark's audit of that surface shares (an audit's own `spelled`
+// entry taking an option the shared one is `without`), and `express *` what
 // every Express function's (but its own options, `only`, which each lists:
 // a shared entry would hold while one function dropped the option). Whatever an audit finds and api.json does not
 // list fails, as does an entry the code no longer needs.
@@ -360,7 +361,8 @@ function settingsAudits(api, audits) {
       queue.push(audit);
     };
     for (const option of Object.keys(reference)) {
-      if (listed("without", option)) continue;
+      // As checkAudit: an audit's own spelling takes an option a shared entry is without.
+      if (!own.spelled?.[option] && listed("without", option)) continue;
       const spread = listed("spread", option);
       if (spread)
         for (const [setting, held] of Object.entries(nested[option]?.nested ?? {})) {
@@ -482,7 +484,8 @@ function checkAudit(
       );
   };
   for (const [option, choices] of Object.entries(reference)) {
-    const without = entryOf("without", option) !== undefined;
+    // An audit's own spelling of an option takes it where a shared entry has it without.
+    const without = !own.spelled?.[option] && entryOf("without", option) !== undefined;
     const spread = entryOf("spread", option);
     const spelling = entryOf("spelled", option)?.as ?? spell(option);
     if (without) {

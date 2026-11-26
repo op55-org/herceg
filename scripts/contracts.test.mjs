@@ -1296,6 +1296,29 @@ test("what every mark's helper shares is listed once, and fails once no helper n
   assert.deepEqual(audited(shared({ color: "the chart's", legend: "the chart's" }), helperless), [
     'api.json audits["mark * helper"].without.legend: no audit needs it; drop it',
   ]);
+  // A helper taking an option as its mark's own (hg.segment's width) spells it so over the shared entry.
+  assert.deepEqual(audited(shared({ color: "the chart's" })), [
+    'mark line helper: takes color, which api.json audits["mark line helper"].without lists; drop it there',
+    'mark line helper: color is not the reference\'s; list it in api.json audits["mark line helper"].only with the reason',
+  ]);
+  const own = { spelled: { color: { as: "color", reason: "the line's" } } };
+  assert.deepEqual(audited({ ...shared({ color: "the chart's" }), "mark line helper": own }), [
+    'api.json audits["mark * helper"].without.color: no audit needs it; drop it',
+  ]);
+  // So are its settings: the helper's label without a place fails where its own spelling takes it.
+  const placeless = surfaces((options) => {
+    delete options.python.nested.helpers.line.label.options.place;
+    delete options.python.nested.helpers.line.label.nested.place;
+    return options;
+  });
+  const label = { spelled: { label: { as: "label", reason: "the line's" } } };
+  assert.deepEqual(
+    audited({ ...shared({ label: "the chart's" }), "mark line helper": label }, placeless),
+    [
+      'mark line helper label: no place for place; add it, or list place in api.json audits["mark line helper label"].without with the reason',
+      'api.json audits["mark * helper"].without.label: no audit needs it; drop it',
+    ],
+  );
 });
 
 test("the check reports what the runs do not prove beside what it cannot read of them", () => {

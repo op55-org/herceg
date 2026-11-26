@@ -43,6 +43,7 @@ import { region } from "../../src/marks/region.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sankey } from "../../src/marks/sankey.ts";
+import { segment } from "../../src/marks/segment.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { surface } from "../../src/marks/surface.ts";
 import { text } from "../../src/marks/text.ts";
@@ -344,6 +345,12 @@ const cartesian: MarkCase[] = [
           }
         },
       }),
+    kind: "shapes",
+    animates: true,
+  },
+  {
+    name: "segment",
+    make: (p) => segment(samples, { x: "x", y: ["low", "high"], series: "group", width: 2, ...p }),
     kind: "shapes",
     animates: true,
   },
@@ -1350,6 +1357,7 @@ describe("capabilities: row selection", () => {
       "rug",
       "contour",
       "custom",
+      "segment",
     ]),
   );
   const highlights = new Set([
@@ -1373,6 +1381,7 @@ describe("capabilities: row selection", () => {
     "boxen",
     "violin",
     "heatmap",
+    "segment",
   ]);
 
   /** A chart of a case bound to a store of `samples`, as a mounted chart binds it. */
@@ -1800,6 +1809,10 @@ describe("capabilities: tooltip fields", () => {
     {
       name: "custom",
       make: () => custom(samples, { x: "x", y: "y", tooltip: fields, draw() {} }),
+    },
+    {
+      name: "segment",
+      make: () => segment(samples, { x: "x", y: ["low", "high"], tooltip: fields }),
     },
     {
       name: "geoshape",
@@ -2248,6 +2261,7 @@ describe("capabilities: color identity in every family", () => {
       (d) => errorbar(d, { x: "day", y1: "v", y2: "v", color: "region", panel: "other" }),
     ],
     ["rug", (d) => rug(d, { x: "v", color: "region", panel: "other" })],
+    ["segment", (d) => segment(d, { x: "day", y: ["v", "v"], color: "region", panel: "other" })],
     ["pie", (d) => pie(d, { category: "region", value: "v", panel: "other" })],
     ["radar", (d) => radar(d, { category: "city", value: "v", series: "region", panel: "other" })],
     ["treemap", (d) => treemap(d, { path: ["region", "city"], value: "v", panel: "other" })],

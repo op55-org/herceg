@@ -220,6 +220,7 @@ export {
 export { type RugOptions, rug } from "./marks/rug.ts";
 export { type RuleDataOptions, type RuleOptions, rule } from "./marks/rule.ts";
 export { type SankeyOptions, sankey } from "./marks/sankey.ts";
+export { type SegmentOptions, type SegmentWidth, segment } from "./marks/segment.ts";
 export { type SunburstOptions, sunburst } from "./marks/sunburst.ts";
 export { type SurfaceOptions, surface } from "./marks/surface.ts";
 export { type TextDataOptions, type TextOptions, text } from "./marks/text.ts";

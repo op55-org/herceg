@@ -56,6 +56,7 @@ import { RegionMark } from "../marks/region.ts";
 import { RugMark } from "../marks/rug.ts";
 import { RuleMark } from "../marks/rule.ts";
 import { SankeyMark } from "../marks/sankey.ts";
+import { segmentMark } from "../marks/segment.ts";
 import { SunburstMark } from "../marks/sunburst.ts";
 import { SurfaceMark } from "../marks/surface.ts";
 import { itemPlaces, TextMark } from "../marks/text.ts";
@@ -656,6 +657,7 @@ const SERIES = new Set([
   "point",
   "heatmap",
   "rug",
+  "segment",
   "errorbar",
   "candlestick",
   "histogram",
@@ -717,6 +719,8 @@ function loadMark(
         return new ContourMark(withScheme(spec), source);
       case "rug":
         return new RugMark(spec, source, view);
+      case "segment":
+        return segmentMark(spec, source, view);
       case "errorbar":
         return new ErrorBarMark(spec, source, view);
       case "candlestick":

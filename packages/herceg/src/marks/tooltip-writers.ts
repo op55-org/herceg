@@ -246,8 +246,8 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
     const refuse = (why: string) => {
       throw new Error(`${type} tooltip.total: ${why}; drop total`);
     };
-    // Bands' series, and custom marks' read alone, which span ranges.
-    if (series.some((s) => s.range) || (type === "custom" && mark.tooltip === "point"))
+    // Bands' series, and custom marks' and segments' read alone, which span ranges.
+    if (series.some((s) => s.range) || mark.shapeLayout === "ranges")
       refuse("its points are ranges, which have no total");
     const values = mark.identity?.values ?? [];
     for (const field of values) {

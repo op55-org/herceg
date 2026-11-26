@@ -2,9 +2,11 @@
 
 import { describe, expect } from "vitest";
 import { estimateText } from "../../src/layout/text.ts";
+import type { InspectedPoint } from "../../src/model/inspect.ts";
 import { guidesOf } from "../../src/scene/scene.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { positionOf, stopsOf } from "../helpers/keyboard.ts";
 import { panelSeries } from "../helpers/scales.ts";
 import {
   build,
@@ -33,7 +35,8 @@ const wordsOf = (text: unknown) => String(text ?? "").split(/[^\p{L}\p{N}]+/u);
  * its marks paint, and the words naming each drawn thing in `color`: a
  * series' label (its scene marks are keyed by series, a custom mark's
  * noted as it draws them), and an item's inspected label and text and,
- * where it is a row, that row's values.
+ * where it is a row, that row's values, and the keyboard's reading of
+ * each row of marks drawn as shapes.
  */
 function showing(row: string, keys: string[], shown: string, color: string) {
   const chart = { marks: [markOf(row)] };
@@ -52,15 +55,23 @@ function showing(row: string, keys: string[], shown: string, color: string) {
   /** A column's value at row `i`: a list's, or a typed column's (time, categories). */
   const cellOf = (column: unknown, i: number) =>
     Array.isArray(column) ? column[i] : (column as { values?: unknown[] }).values?.[i];
+  const name = (point: InspectedPoint) => {
+    if (point.color !== color) return;
+    const values = point.row == null ? [] : columns.map((column) => cellOf(column, point.row!));
+    named.push([...wordsOf(point.label), ...wordsOf(point.text), ...values.map(String)]);
+  };
   for (let key = model.stepItem(undefined, 1); key !== undefined; ) {
-    for (const point of model.inspectItem(key)?.points ?? [])
-      if (point.color === color) {
-        const values = point.row == null ? [] : columns.map((column) => cellOf(column, point.row!));
-        named.push([...wordsOf(point.label), ...wordsOf(point.text), ...values.map(String)]);
-      }
+    for (const point of model.inspectItem(key)?.points ?? []) name(point);
     const next = model.stepItem(key, 1);
     key = next === key ? undefined : next;
   }
+  // Shapes keyed by their mark (a segment's) name their series' rows as the keyboard reads them.
+  if (marks.some(({ kind }) => kind === "shapes"))
+    for (const panel of model.panels())
+      for (const series of stopsOf(model, panel.key))
+        for (let position = 0; position < series.length; position++)
+          for (const point of positionOf(model, series.key, position, panel.key)?.points ?? [])
+            name(point);
   return { painted: paintsOf(marks), named };
 }
 

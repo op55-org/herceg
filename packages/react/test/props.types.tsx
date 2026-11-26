@@ -43,6 +43,7 @@ import type {
   rug,
   rule,
   sankey,
+  segment,
   sunburst,
   surface,
   Table,
@@ -90,6 +91,7 @@ import type {
   Rug,
   Rule,
   Sankey,
+  Segment,
   Sunburst,
   Surface,
   Text,
@@ -130,6 +132,7 @@ true satisfies Takes<PropsOf<typeof Radar<Mixed>>, MarkProps<typeof radar<Mixed>
 true satisfies Takes<First<typeof Region>, RegionOptions>;
 true satisfies Takes<PropsOf<typeof Region<Mixed>>, MarkProps<typeof region<Mixed>>>;
 true satisfies Takes<PropsOf<typeof Rug<Mixed>>, MarkProps<typeof rug<Mixed>>>;
+true satisfies Takes<PropsOf<typeof Segment<Mixed>>, MarkProps<typeof segment<Mixed>>>;
 true satisfies Takes<First<typeof Rule>, RuleOptions>;
 true satisfies Takes<PropsOf<typeof Rule<Mixed>>, MarkProps<typeof rule<Mixed>>>;
 true satisfies Takes<PropsOf<typeof Sankey<Mixed>>, MarkProps<typeof sankey<Mixed>>>;

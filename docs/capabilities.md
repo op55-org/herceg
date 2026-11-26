@@ -14,7 +14,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refused, and 181 not applicable.
+Of 2182 cells: 1425 proved to work, 219 supported but not yet proved, 356 refused, and 182 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Events](#events) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -47,6 +47,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | 30 | 3 | 9 | 10 |
 | text (constant) | 29 | 3 | 2 | 18 |
 | text of a table | 30 | 3 | 9 | 10 |
+| segment | 45 | 3 | 3 | 1 |
 | custom | 45 | 0 | 2 | 5 |
 | pie | 30 | 3 | 17 | 2 |
 | treemap | 30 | 3 | 17 | 2 |
@@ -98,6 +99,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
 | text (constant) | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
+| segment | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
 | pie | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
 | treemap | ✓ | ✓ | ✗1 | ✓ | ✓ | ✓ |
@@ -160,6 +162,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✓ | ✓ | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ·14 | ✗15 | ✗15 |
 | text (constant) | ✓ | ✓ | ✓ | ✓ | ·13 | ·13 | ·13 | ·13 | ·13 | ✓ | ·14 | ·13 | ·13 |
 | text of a table | ✓ | ✓ | ✓ | ✓ | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ·14 | ✗15 | ✗15 |
+| segment | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | pie | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✓ | ✓ | ·17 | ✓ | ✓ |
 | treemap | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✓ | ✓ | ·17 | ✓ | ✓ |
@@ -231,6 +234,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ·28 | ·25 | ✗26 |
 | text (constant) | ✓ | ·28 | ·25 | ✗26 |
 | text of a table | ✓ | ·28 | ·25 | ✗26 |
+| segment | ✓ | ✓ | ·25 | ✗26 |
 | custom | ✓ | ✓ | ·25 | ✗26 |
 | pie | ✓ | ✓ | ✗30 | ✗26 |
 | treemap | ✓ | ✓ | ✓ | ✗26 |
@@ -292,6 +296,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ·55 | ·56 | ✓ | ✓ | ✓ |
 | text (constant) | ·57 | ·58 | ✓ | ✓ | ✓ |
 | text of a table | ·59 | ·60 | ✓ | ✓ | ✓ |
+| segment | ✓ | ✗35 | ✓ | ✓ | ✓ |
 | custom | ✓ | ·61 | ✓ | ✓ | ✓ |
 | pie | ✓ | ✗35 | ✓ | ✓ | ✓ |
 | treemap | ✓ | ✗62 | ✓ | ✓ | ✓ |
@@ -383,6 +388,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ·78 | ·78 | ·78 | ·78 | ·78 | ✓ |
 | text (constant) | ·76 | ·76 | ·76 | ·77 | ·76 | ✓ |
 | text of a table | ·78 | ·78 | ·78 | ·78 | ·78 | ✓ |
+| segment | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | pie | ✗79 | ✗79 | ✓ | ✓ | ✓ | ✓ |
 | treemap | ✗79 | ✗79 | ✓ | ✓ | ✓ | ✓ |
@@ -439,6 +445,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✓ |
 | text (constant) | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✓ |
+| segment | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✓ |
 | pie | ✓ | ✓ | ✓ |
 | treemap | ✓ | ✓ | ✓ |
@@ -490,6 +497,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | text (constant) | ✓ | ·82 | ✓ | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| segment | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | pie | ·83 | ✓ | ✗84 | ✗84 | ✗84 | ✓ |
 | treemap | ·85 | ✗81 | ✗84 | ✗84 | ✗84 | ✓ |
@@ -547,6 +555,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✓ |
 | text (constant) | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✓ |
+| segment | ✓ | ✓ | ✓ |
 | custom | ✓ | ✓ | ✓ |
 | pie | ✓ | ✓ | ✓ |
 | treemap | ✓ | ✓ | ✓ |
@@ -598,6 +607,7 @@ Of 2130 cells: 1380 proved to work, 216 supported but not yet proved, 353 refuse
 | regions of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text (constant) | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
+| segment | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | custom | ✓ | ✓ | ✓ | ·89 | ·89 | ·89 |
 | pie | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | treemap | ✓ | ✓ | ✓ | ○ | ○ | ○ |

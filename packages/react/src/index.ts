@@ -29,6 +29,7 @@ export {
   Rug,
   Rule,
   Sankey,
+  Segment,
   Sunburst,
   Surface,
   Text,

@@ -1798,6 +1798,81 @@
         "separator": "As path."
       }
     },
+    "mark segment helper": {
+      "spelled": {
+        "width": {
+          "as": "width",
+          "reason": "hg.segment's width is the segment's (a number, an hg.Channel, or hg.SegmentWidth), as Chart.segment's is, where the other helpers' width is their chart's; a chart of segments of a set width is hg.Chart(width=...).segment(...)."
+        }
+      }
+    },
+    "mark segment helper options": {
+      "without": {
+        "width": "As mark segment helper's: hg.segment's width is the segment's."
+      }
+    },
+    "mark segment python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
+      }
+    },
+    "mark segment python width": {
+      "spelled": {
+        "from": {
+          "as": "start",
+          "reason": "Python names a segment's ends start and end, as its pairs of columns are (x=(\"start\", \"end\")): from is a Python keyword."
+        },
+        "to": {
+          "as": "end",
+          "reason": "Python names a segment's ends start and end, as its pairs of columns are (x=(\"start\", \"end\")): from is a Python keyword."
+        }
+      },
+      "without": {
+        "condition": "As mark point python color's."
+      },
+      "only": {
+        "series": "Python's one hg.Channel serves every channel; a segment's width refuses series (`segment width: each row has a width of its own; give a field, a value, or a condition`), as the spec's validator does."
+      }
+    },
+    "mark segment python caps": {
+      "spelled": {
+        "from": {
+          "as": "start",
+          "reason": "Python names a segment's ends start and end, as its pairs of columns are (x=(\"start\", \"end\")): from is a Python keyword."
+        },
+        "to": {
+          "as": "end",
+          "reason": "Python names a segment's ends start and end, as its pairs of columns are (x=(\"start\", \"end\")): from is a Python keyword."
+        }
+      }
+    },
+    "mark segment python encode": {
+      "only": {
+        "stroke": "Python's one hg.Encodings serves every mark; a segment, one filled outline per row, refuses stroke (`segment encode: has no stroke channel; give \"color\" or \"opacity\"`)."
+      }
+    },
+    "settings SegmentWidthSpec hg.Channel": {
+      "without": {
+        "condition": "As mark point python color's."
+      },
+      "only": {
+        "series": "Python's one hg.Channel serves every channel; a segment's width refuses series (`segment width: each row has a width of its own; give a field, a value, or a condition`), as the spec's validator does."
+      }
+    },
+    "settings SegmentCap hg.Arrow|hg.Dot": {
+      "spread": {
+        "dot": {
+          "reason": "Python's hg.Dot(radius=...) is the spec's { dot: { radius } }, and \"dot\" its default: the cap's class names its kind."
+        },
+        "arrow": {
+          "reason": "As dot: hg.Arrow(length=..., width=...) is { arrow: { length, width } }."
+        }
+      }
+    },
     "chart python x title": {
       "only": {
         "field": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a title takes text and (label=...) (`AxisOptions title[0]: an axis' title names columns by their labels; give text, or hg.LabelPart(label=...)`), as the spec's validator does.",

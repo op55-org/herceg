@@ -85,7 +85,7 @@ const metrics = table({ time: time(timestamps), p50, p99 });
 ## Marks as components
 
 Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
-`Point`, `Rug`, `Heatmap`, `Contour`, `ErrorBar`, `Candlestick`,
+`Point`, `Rug`, `Heatmap`, `Contour`, `ErrorBar`, `Segment`, `Candlestick`,
 `Histogram`, `BoxPlot`, `Boxen`, `Violin`, `Dendrogram`, `Pie`, `Treemap`,
 `Sunburst`, `Gauge`, `Funnel`, `Radar`, `Sankey`, `Graph`, `GeoShape`,
 `GeoPoint`, `Point3D`, `Line3D`, `Surface`, `Rule`, `Region`, `Text`, and
@@ -94,8 +94,8 @@ Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
 - Each takes the table it reads as `data`, so the type checker (tsc,
   vue-tsc, svelte-check) checks field names against its columns. `Graph`
   takes links as `data` and nodes as `nodes`. Series marks (`Line`,
-  `Area`, `Bar`, `Point`, `Rug`, `Heatmap`, `ErrorBar`, `Candlestick`,
-  `Histogram`, `BoxPlot`, `Boxen`, `Violin`) also take a
+  `Area`, `Bar`, `Point`, `Rug`, `Heatmap`, `ErrorBar`, `Segment`,
+  `Candlestick`, `Histogram`, `BoxPlot`, `Boxen`, `Violin`) also take a
   [row view](data.md#row-views) of a table, checked against its columns
   alike: `<Histogram data={rowView(flights, { filter })} x="distance" />`.
 - Annotations (`Rule`, `Region`, `Text`) take `data` only when they draw

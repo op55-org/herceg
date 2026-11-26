@@ -402,7 +402,7 @@ export class ValueAnimation {
    */
   #keep(scene: Scene | undefined): void {
     const custom = this.#custom;
-    if (custom === undefined && this.#model.config.marks.some((m) => m.spec.type === "custom")) {
+    if (custom === undefined && this.#model.config.marks.some((m) => (m as Mark).shapeLayout)) {
       this.#custom = null;
       this.loading = import("./value-custom.ts").then(
         (loaded) => {

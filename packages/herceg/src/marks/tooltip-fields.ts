@@ -184,6 +184,8 @@ export interface WrittenMark {
 export type TotalingMark = WrittenMark & {
   readonly identity?: { readonly values: readonly string[] } | undefined;
   readonly tooltip: string;
+  /** For marks the custom mark's core draws: how their rows make series (see `Mark.shapeLayout`). */
+  readonly shapeLayout?: string | undefined;
 };
 
 /** A mark whose tooltip totals a reading: its index in the chart's marks, and how its totals are written. */

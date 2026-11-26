@@ -45,6 +45,7 @@ const FIXTURES: FixtureName[] = [
   "hover-headings",
   "hover-totals",
   "custom-hover",
+  "segment-hover",
   "point-hover",
   "pan-labels",
   "pan-view-labels",
@@ -273,21 +274,40 @@ interface Result {
   work: { blocks: Block[]; summary: Summary };
 }
 
+/** The fixtures a build's page can mount: an older tree's lacks those of marks it has not. */
+async function mountable(name: string): Promise<FixtureName[]> {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/${name}/`);
+    await page.waitForFunction(() => window.interaction !== undefined);
+    return await page.evaluate(() => window.interaction.fixtures);
+  } finally {
+    await context.close();
+  }
+}
+
 const results: Result[] = [];
 let missedTotal = 0;
 try {
+  const mounts = new Map<string, FixtureName[]>();
+  for (const [name] of builds) mounts.set(name, await mountable(name));
   for (const fixture of fixtures)
     for (const mode of MODES) {
+      // A fixture runs in the builds that can mount it, compared only where both do.
+      const running = builds.filter(([name]) => mounts.get(name)!.includes(fixture));
+      const left = builds.filter((build) => !running.includes(build)).map(([name]) => name);
+      if (left.length > 0) console.log(`${fixture}: the ${left.join(", ")} build cannot mount it`);
       const runs = new Map(
-        builds.map(([name]) => [name, { latency: [] as Block[], work: [] as Block[] }]),
+        running.map(([name]) => [name, { latency: [] as Block[], work: [] as Block[] }]),
       );
       // Unrecorded, a block of each build first: a session's first pages run
       // slower (5.2 ms against 1.3-1.5 in later blocks), which the block
       // order would charge to the candidate.
-      for (const [name] of builds) await runBlock(name, fixture, mode, false);
+      for (const [name] of running) await runBlock(name, fixture, mode, false);
       for (const work of [false, true])
         for (let block = 0; block < BLOCKS; block++) {
-          const order = block % 2 ? [...builds].reverse() : builds;
+          const order = block % 2 ? [...running].reverse() : running;
           for (const [position, [name]] of order.entries()) {
             const run = await runBlock(name, fixture, mode, work);
             missedTotal += run.missed;
@@ -321,7 +341,8 @@ const comparisons = args.baseline
         const baseline = results.find(
           (r) =>
             r.build === "baseline" && r.fixture === candidate.fixture && r.mode === candidate.mode,
-        )!;
+        );
+        if (!baseline) return [];
         return (["latency", "work"] as const).map((metric) => {
           const value = (block: Block) => summarize(valid(block)).median;
           const ratios = candidate[metric].blocks.map(

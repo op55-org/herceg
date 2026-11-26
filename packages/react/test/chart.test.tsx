@@ -56,6 +56,7 @@ import {
   Region,
   Rule,
   Sankey,
+  Segment,
   Sunburst,
   Surface,
   Text,
@@ -270,6 +271,26 @@ describe("<Chart>", () => {
     );
     expect(host.querySelectorAll('path[stroke="#ff0000"]')).toHaveLength(1);
     expect(host.textContent).toContain("Clustering: 2 leaves, 1 merge. Merge heights 2 to 2.");
+  });
+
+  it("draws segment elements as one outline per row, read as ranges", () => {
+    const forecasts = table({ id: ["F-1", "F-2"], start: [10, 80], end: [40, 30] });
+    act(() =>
+      root.render(
+        <Chart renderer="svg">
+          <Segment
+            data={forecasts}
+            x={["start", "end"]}
+            y="id"
+            color="#ff0000"
+            width={{ from: 4, to: 1 }}
+            caps={{ from: "dot", to: "arrow" }}
+          />
+        </Chart>,
+      ),
+    );
+    expect(host.querySelectorAll('[data-kind="shapes"] path[fill="#ff0000"]')).toHaveLength(2);
+    expect(host.textContent).toContain("start – end: 2 segments in 2 categories, x from 10 to 80");
   });
 
   it("renders marks from child elements, one path per series", () => {
