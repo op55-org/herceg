@@ -324,13 +324,14 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Eleven fixtures, each move checked
-for its effect:
+drawing path; it compares no libraries. Thirteen fixtures, each move
+checked for its effect:
 
 | Fixture | Charts | A move's effect |
 | --- | --- | --- |
 | `hover-listener` | One chart of 8 series x 2,000 minutes, and a rule a `hover` listener moves to the hovered minute | The rule drawn there |
 | `hover-headings` | `hover-listener`'s chart, its lines' tooltip with heading parts, which every point read writes though the tooltip of eight keeps its place | The rule drawn there |
+| `hover-totals` | `hover-listener`'s chart, its lines' tooltip totalling the eight (`tooltip: { total: true }`) | The rule drawn there |
 | `custom-hover` | One chart of 2,000 custom range items (A2's comets) read `"nearest"`, their tooltip with `content`, `fields`, and a `heading` of the comet's id and category | The tooltip showing the comet under the pointer |
 | `point-hover` | One SVG chart of many marks: 3,500 translucent points in two series, a circle each (under the automatic renderer's canvas threshold), read along x (`"nearest-x"`) with a crosshair, markers, and a tooltip | The hover reported at the move, once drawn |
 | `pan-labels` | One chart of 8 series x 5,000 minutes zoomed to a fifth, labelled at each series' first and last observation in view, dragged 20 px right and back | A frame of the moved view |
@@ -338,6 +339,7 @@ for its effect:
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
+| `crosshair-totals` | `crosshair-dashboard`'s charts, each one's lines totalling their fifteen | As `crosshair-dashboard`'s |
 | `pick-crowd` | One chart of 12 crossing lines x 2,160 minutes (A1's crowd) with `select: "series"`, so every move picks for the cursor, and a `hover` listener; each move lands where two lines cross, inside both strokes | The hover reported there, naming the line picked |
 | `rule-drag` | `pick-crowd`'s lines, each named at its last minute in view outside the plot, and a rule at a value with `drag` (A1's threshold), pressed and dragged 6 px up and back; an `itemMove` listener gives each preview's value back with `update` in a task of its own, as a React application holding the value in its state does, so each move draws the preview and then the options | A frame of the options with the rule where the move put it |
 
@@ -356,10 +358,12 @@ comets no move read, views, and brushes), waits for each one's effect,
 and checks what the page then shows against the fixture's data, never
 the SVG export:
 
-- `hover-listener`, `hover-headings`: the rule in a screenshot, at the
-  pointer's minute and nowhere else; with headings, the shared reading
-  headed by its place, its points carrying their headings in builds that
-  write them.
+- `hover-listener`, `hover-headings`, `hover-totals`: the rule in a
+  screenshot, at the pointer's minute and nowhere else; with headings, the
+  shared reading headed by its place, its points carrying their headings in
+  builds that write them; with totals, the reading's total the sum of its
+  points and the tooltip's last row (in the candidate; a baseline may write
+  none).
 - `custom-hover`: the tooltip showing the comet under the pointer, headed
   by its own heading in builds that write headings.
 - `point-hover`: the crosshair in a screenshot at the points read and
@@ -385,8 +389,9 @@ the SVG export:
   brush holds (counted from the data) and faint above. In a screenshot,
   each part in its fill composited over the plot's white, within rounding,
   outside the tooltip and its shadow and the first chart's brush shading.
-- `crosshair-dashboard`: the crosshair in a screenshot of each of the nine
-  other charts, at the first chart's minute and nowhere else.
+- `crosshair-dashboard`, `crosshair-totals`: the crosshair in a screenshot
+  of each of the nine other charts, at the first chart's minute and
+  nowhere else; with totals, the first chart's total as `hover-totals`'.
 - `pick-crowd`: three crossings no move went near, each where one line's
   centre line is the nearest by 0.2 px or more and lines drawn over it
   hold the pointer too. The fixture's `hover` listener selects the series

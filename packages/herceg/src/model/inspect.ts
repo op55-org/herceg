@@ -16,7 +16,12 @@ import {
   valueAt,
   xAt,
 } from "../marks/series.ts";
-import type { ContentRun, InspectedField, TooltipWriter } from "../marks/tooltip-fields.ts";
+import type {
+  ContentRun,
+  InspectedField,
+  TooltipWriter,
+  TotaledMark,
+} from "../marks/tooltip-fields.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { InspectionMode, Snap } from "../spec/spec.ts";
 import { earliest, type Nearest, settle, type TakeEarliest } from "./nearest.ts";
@@ -68,6 +73,25 @@ export interface InspectedPoint {
   names?: readonly string[];
 }
 
+/**
+ * One mark's total in a reading along an axis (its tooltip's `total`):
+ * the sum of the values the reading lists of the mark.
+ */
+export interface InspectedTotal {
+  /** The mark: its index in the chart's `marks`. */
+  mark: number;
+  /** The mark's `id`, when it has one. */
+  markId: string | undefined;
+  /** What the row names the total by: its `label`, "Total" by default. */
+  label: string;
+  /** The sum of the values of the mark's points the reading lists. */
+  value: number;
+  /** The sum as the tooltip writes it. */
+  text: string;
+  /** How many of the reading's points it sums. */
+  count: number;
+}
+
 /** What a tooltip, hover event, or keyboard cursor is on. */
 export type Inspection = AxisInspection | ItemInspection;
 
@@ -85,6 +109,12 @@ export interface AxisInspection {
   position: number;
   label: string;
   points: InspectedPoint[];
+  /**
+   * Each mark's total (`tooltip.total`), in marks' order, for marks whose
+   * tooltip asks for one and that the reading lists points of; absent
+   * where none does, and in mode "nearest", which reads one point.
+   */
+  totals?: InspectedTotal[];
   /**
    * In charts with facets, the key of the panel inspected: its facet value,
    * or with row and column facets both values as a JSON array.
@@ -190,6 +220,8 @@ export class Inspector {
   readonly #formatX: Formatter;
   readonly #formatValue: Formatter;
   readonly #writer: TooltipWriter | undefined;
+  /** The marks whose tooltips total a reading, once the writers are here. */
+  readonly #totaled: TotaledMark[] = [];
   readonly #left: YAxisView;
   readonly #right: DrawnScene["right"];
 
@@ -241,6 +273,11 @@ export class Inspector {
       const visible = series.filter((s) => shown && !hidden.has(s.key) && s.length > 0);
       const owner = { ...entry, series, axis, frame, visible };
       for (const s of series) this.#ownerOf.set(s, owner);
+      const { mark, index } = entry;
+      const text =
+        mark.spec.tooltip?.total &&
+        this.#writer?.total(mark, series, this.#formatOf(owner, mark.tooltip === "y" ? "x" : "y"));
+      if (text) this.#totaled.push({ mark, index, text });
       return owner;
     });
     // By zIndex, ties as declared; the keyboard and descriptions keep `marks`' order.
@@ -426,10 +463,11 @@ export class Inspector {
       if (points.length + cells.length === 0) return undefined;
       // Each series' own point: the crosshair stays at the pointer, or the latest or earliest read.
       const at = side && points.length ? snapped : yAxis.frame[axis].invert(pointer);
-      return this.#inspection(axis, at, [...points, ...cells], yAxis);
+      return this.totaled(this.#inspection(axis, at, [...points, ...cells], yAxis));
     }
     const inspection = this.inspectAt(axis, snapped, series, yAxis);
     inspection.points.push(...cells);
+    this.totaled(inspection);
     // The cursor stands where the series snapped to draws the value.
     return by?.mark.bound?.[axis]
       ? { ...inspection, position: by.frame[axis].map(snapped) }
@@ -680,6 +718,16 @@ export class Inspector {
     }
     // An anchor placed off the axis is headed by its own place.
     return this.#inspection(axis, value, points, yAxis, anchor && this.#ownerOf.get(anchor));
+  }
+
+  /**
+   * Gives `inspection`, a reading along an axis, the totals of its points
+   * of marks whose tooltips ask for one (see `InspectedTotal`), in place;
+   * leaves it as it is where no mark asks.
+   */
+  totaled(inspection: AxisInspection): AxisInspection {
+    if (this.#totaled.length) this.#writer!.totals(this.#totaled, inspection);
+    return inspection;
   }
 
   /** Position of a drawn point of `s` at `value` on `axis`, or -1. */

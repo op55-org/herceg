@@ -4296,7 +4296,8 @@ export class Interaction {
 
   /**
    * `i`: announces every point the keyboard cursor reads, as the tooltip
-   * lists them, again when pressed again.
+   * lists them, each mark's total after its points, again when pressed
+   * again.
    */
   #readAll(event: KeyboardEvent) {
     if (!(this.#keyboard ?? this.#gone)) return;
@@ -4315,10 +4316,14 @@ export class Interaction {
       inspection.axis === "item"
         ? describeInspection(inspection)
         : `${inspection.points.length} series at ${inspection.label}: ${headingSaid(inspection)}${inspection.points
-            .map(
-              (point) =>
-                `${runsText(point.content) ?? `${point.label} ${point.text}`}${fieldsSpoken(point)}`,
-            )
+            .flatMap((point, i, points) => {
+              const said = `${runsText(point.content) ?? `${point.label} ${point.text}`}${fieldsSpoken(point)}`;
+              // A mark's points are listed together; its total closes them.
+              const total =
+                points[i + 1]?.mark !== point.mark &&
+                inspection.totals?.find(({ mark }) => mark === point.mark);
+              return total ? [said, `${total.label} ${total.text}`] : [said];
+            })
             .join("; ")}`;
     this.#say(text);
   }

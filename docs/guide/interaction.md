@@ -372,6 +372,7 @@ where that point is out of view, and in charts following a cursor through
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
 | mark `tooltip: { content }` | Each point's row as one line of parts, in place of its name and value ([Content](#content)). |
 | mark `tooltip: { heading }` | Parts heading a tooltip that shows one of the mark's points alone ([Headings](#headings)). |
+| mark `tooltip: { total }` | A row after the mark's points in a reading along an axis: their sum ([Totals](#totals)). |
 | `renderTooltip` | JavaScript only: content of your own, text or a node. |
 
 ```ts
@@ -459,16 +460,115 @@ chart.line(x="time", y="value", series="series", tooltip=hg.Tooltip(content=row)
   format on `{ series: true }` is reported once, as the chart reports
   errors it draws on through (`onError`, "error" listeners, or the
   console), and the name is written as it is.
-- **Loading.** What writes `fields` and `content` loads with the charts
-  whose marks have them, as their first frame draws, which does not wait
-  for it. `ready` settles once it has loaded, so `chart.inspect()` after
-  `ready` carries both; before that, inspections have neither. Tooltips
-  and announcements wait for it: the pointer and keys that arrive first
-  are played once it is here, as they are while the interaction
-  controller loads. Once a chart takes input, an update that first gives
-  its marks `fields` or `content` on a page where no chart had them draws
+- **Loading.** What writes `fields`, `content`, headings, and totals
+  loads with the charts whose marks have them, as their first frame draws,
+  which does not wait for it. `ready` settles once it has loaded, so
+  `chart.inspect()` after `ready` carries them; before that, inspections
+  have none. Tooltips and announcements wait for it: the pointer and keys
+  that arrive first are played once it is here, as they are while the
+  interaction controller loads. Once a chart takes input, an update that
+  first gives its marks a `tooltip` on a page where no chart had one draws
   at once, and a tooltip shown before the code arrives shows names and
   values until it does. Charts without them never load it.
+
+#### A tree node's levels
+
+Treemaps' and sunbursts' `content` and `heading` take one more part,
+`{ path: true, separator? }`: the node's names from the top of the whole
+tree down to it, each as its level's field's [display](fields.md) writes
+it, joined by `separator` (" / " by default, as the default tooltip names
+the node). A node of the first level writes its own name; the middle of a
+drilled view writes the levels it stands for (the whole tree's middle,
+nothing). The default tooltip's name is the path joined by " / ", so a
+part is for another separator, a prefix of the app's own, or a line of
+its own:
+
+```ts
+createChart(element, {
+  tooltip: { heading: false },
+  marks: [
+    sunburst(classes, {
+      path: ["level1", "level2", "level3"],
+      value: "size",
+      // flare/vis/data
+      // 12,345
+      tooltip: { content: ["flare/", { path: true, separator: "/" }, "\n", { value: true, format: { number: ",d" } }] },
+    }),
+  ],
+});
+```
+
+```python
+chart.sunburst(path=["level1", "level2", "level3"], value="size", tooltip=hg.Tooltip(
+    content=["flare/", hg.LabelPart(path=True, separator="/"), "\n",
+             hg.LabelPart(value=True, format=hg.Format(number=",d"))]))
+```
+
+Every other mark refuses it (pies and funnels too: `{ series: true }`
+names their items): in TypeScript as a property the part does not have,
+in specs `marks[0].tooltip.content[0].path: only treemaps' and sunbursts'
+nodes have levels; give { series: true } or { field }`, in Python `line
+tooltip content[0] path: ...`. Labels' parts do not take it.
+
+### Totals
+
+A series mark's `tooltip.total` adds a row after the mark's points in a
+reading along an axis: **the sum of the values the reading lists of the
+mark**. `true` names it "Total"; `{ label, format }` names it and writes it
+in a number format.
+
+```ts
+line(revenue, { x: "time", y: "revenue", series: "region", tooltip: { total: true } });
+line(revenue, { x: "time", y: "revenue", series: "region", tooltip: { total: { label: "All regions", format: { number: ",.0f" } } } });
+```
+
+```python
+chart.line(x="time", y="revenue", series="region", tooltip=hg.Tooltip(total=True))
+chart.line(x="time", y="revenue", series="region", tooltip=hg.Tooltip(
+    total=hg.TooltipTotal(label="All regions", format=hg.Format(number=",.0f"))))
+```
+
+- **Which marks.** Lines, filled areas, bars, points, and custom marks
+  whose values are numbers: one value field, or several, each a series.
+  Category values (points of a category `y`, which inspections read as
+  band places), times, and ranges (bands of `y1` and `y2`, error bars,
+  candlesticks, custom marks spanning two fields) have no total and are
+  refused, as `point tooltip.total: y "segment" is a category field, whose
+  points have no sum; drop total`. Python refuses them as it builds the
+  chart, and specs refuse bands as they are read; in JavaScript they are
+  refused on the first frame the chart draws with its tooltip code, which
+  it loads for any mark with a `tooltip` (`chart.loading` waits for it),
+  not as the mark is made. Other marks' tooltips do not take it, and
+  summarizing marks (histograms, box plots) take no tooltip at all. The
+  chart's tooltip has no total: marks on two y axes, or a band and its
+  line, would sum unlike values.
+- **What it sums.** The points the tooltip lists, in their source units,
+  one point too. Series the legend hides, and series reading nothing at
+  the place (none there, a missing value, a gap), are left out; `count`
+  says how many were summed. A stack's points carry their own values, so
+  its total is its height (a signed stack's, its net sum); a normalized
+  stack's carry their raw values beside their shares, so its total is the
+  raw sum. Under `snap: "each"` the points may stand at different places,
+  and the total sums them all. Mode `"nearest"` and items read one point,
+  which has no total.
+- **How it is written.** As the mark's points' values are: the axis' own
+  `tooltipFormat`, else the value field's display's format, else as the
+  axis writes values (a normalized stack's, as its raw values are, over the
+  chart's numbers). Where the mark's value fields' displays differ
+  (`y: ["revenue", "units"]`), by the axis' alone. A display's mappings name
+  single values and do not write a sum. `format` replaces all of it; a time
+  format is refused (`totals are numbers; give a number format`). A
+  sum of zeros writes 0, and a sum too large for a number shows no row.
+- **Where it shows.** The built-in box draws it after the mark's points
+  and their fields, label left and value right, in bold, without a swatch.
+  The keyboard's `i` reads it after them ("…; west 70; Total 250").
+- **Inspections carry it** as `inspection.totals` (each mark's `{ mark,
+  markId, label, value, text, count }`, in the marks' order; absent where
+  no mark has one): `chart.inspect()`, hover, click, and context-menu
+  events, `renderTooltip`, `herceg/web` pages, notebook widgets,
+  Streamlit, and Python (`hg.Inspection.totals`, `hg.InspectedTotal`).
+  A link of a reading's own, as a dashboard's "Orders on this day", stays
+  `renderTooltip`'s, which reads the total there.
 
 ### Headings
 

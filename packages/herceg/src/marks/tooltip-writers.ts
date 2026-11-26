@@ -1,8 +1,9 @@
 // What marks' tooltips write of the points they are at besides their names
 // and values, as inspections take them: the fields of their rows
-// (`tooltip.fields`), their rows of parts (`tooltip.content`), and their
-// headings (`tooltip.heading`). Charts whose marks have any load it as
-// their first frame draws, and their
+// (`tooltip.fields`), their rows of parts (`tooltip.content`, a tree
+// node's levels among them), their headings (`tooltip.heading`), and the
+// totals of readings (`tooltip.total`). Charts whose marks have any load
+// it as their first frame draws, and their
 // controllers and `ready` wait for it (dom/chart.ts); SVG titles import
 // it. It imports only
 // types of the chart's modules and writes with the chart's code handed in
@@ -12,9 +13,16 @@ import type { Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
 import { intlWrites } from "../format/intl-options.ts";
 import { formatWriter, formOf } from "../format/patterns.ts";
+import type { InspectedTotal } from "../model/inspect.ts";
 import type { PartStyle } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
-import type { ContentRun, InspectedField, PointText, TooltipWriters } from "./tooltip-fields.ts";
+import type {
+  ContentRun,
+  InspectedField,
+  PointText,
+  TooltipWriter,
+  TooltipWriters,
+} from "./tooltip-fields.ts";
 
 const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
 
@@ -44,7 +52,16 @@ type PartWriter = (row: number | undefined, point: PointText, names?: readonly s
  * time pattern or Intl date options write it as a time); `{ field }` as a
  * field is written, "–" where no one row is the point, and for a layout
  * item named by fields (a pie's category, a tree's path, or its node and
- * parent fields) its name at that field; `{ label }` as the field's label.
+ * parent fields) its name at that field; `{ label }` as the field's label;
+ * `{ path: true }` a tree node's names, each as its level's field writes
+ * it, joined by its separator.
+ *
+ * A reading's total of a mark is the sum of the values it lists of the
+ * mark, written in the total's format, else as the mark's points' values
+ * are where its value fields' displays agree (the axis' own
+ * `tooltipFormat`, else the display's format without its mappings, which
+ * name single values), else as the axis writes values; a normalized
+ * stack's over the chart's numbers, as its raw values are.
  */
 export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, report, times) => {
   const numbers = (value: number) => kit.formatNumber(value, locale);
@@ -120,6 +137,8 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
         value?: true;
         field?: string;
         label?: string;
+        path?: true;
+        separator?: string;
         format?: FormatSpec;
         style?: PartStyle;
       };
@@ -137,6 +156,22 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
           );
         }
         return [(_row, point) => point.label, style];
+      }
+      if (part.path) {
+        // Each level as its field's display writes it: a path's levels by
+        // their fields, the last's below them; a tree of nodes and parents
+        // by its node field.
+        const levels = (spec.path ?? [spec.node!]).map(
+          (field) => fieldText(table!, field, undefined, at).text,
+        );
+        const separator = part.separator ?? " / ";
+        return [
+          (_row, _point, names) =>
+            names
+              ?.map((name, level) => levels[Math.min(level, levels.length - 1)]!(name))
+              .join(separator) ?? MISSING,
+          style,
+        ];
       }
       if (part.value) {
         // A value is what its format writes: a time for a time pattern or Intl date options.
@@ -204,7 +239,73 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
       })
     );
   };
-  return (mark, row, point, names) => {
+  const total: TooltipWriter["total"] = (mark, series, axisText) => {
+    const { type, tooltip } = mark.spec;
+    const axis = mark.tooltip === "y" ? "x" : "y";
+    // As the marks would refuse it, which only detect a total.
+    const refuse = (why: string) => {
+      throw new Error(`${type} tooltip.total: ${why}; drop total`);
+    };
+    // Bands' series, and custom marks' read alone, which span ranges.
+    if (series.some((s) => s.range) || (type === "custom" && mark.tooltip === "point"))
+      refuse("its points are ranges, which have no total");
+    const values = mark.identity?.values ?? [];
+    for (const field of values) {
+      const kind = mark.table!.kind(field);
+      if (kind !== "number")
+        refuse(`${axis} ${JSON.stringify(field)} is a ${kind} field, whose points have no sum`);
+    }
+    const asked = tooltip!.total!;
+    const format = asked === true ? undefined : asked.format;
+    if (format) return write("totals are", "number", format, `${type} tooltip.total.format`);
+    // A normalized stack's axis writes shares; its raw values are written over the chart's numbers.
+    const { stack } = mark.spec as { stack?: { offset?: unknown } | string };
+    const fallback =
+      stack === "fill" || (typeof stack === "object" && stack.offset === "fill")
+        ? numbers
+        : axisText;
+    // As the points' values are where every value field's display writes
+    // them alike, without mappings, which name single values.
+    const [first, ...rest] = values.map((field) => features?.fields?.of(mark.table, field));
+    return (fallback as { own?: true }).own ||
+      !first ||
+      rest.some((one) => one?.formatKey !== first.formatKey)
+      ? fallback
+      : first.amount(fallback);
+  };
+  const totals: TooltipWriter["totals"] = (marks, inspection) => {
+    const out: InspectedTotal[] = [];
+    for (const { mark, index, text } of marks) {
+      // From 0, so that a sum of zeros is 0, never -0.
+      let value = 0;
+      let count = 0;
+      for (const point of inspection.points)
+        if (point.mark === index) {
+          value += point.value;
+          count++;
+        }
+      // A sum past what numbers hold has none to write.
+      if (!count || !Number.isFinite(value)) continue;
+      const { spec } = mark;
+      const asked = spec.tooltip!.total!;
+      out.push({
+        mark: index,
+        markId: spec.id,
+        label: (asked === true ? undefined : asked.label) ?? "Total",
+        value,
+        text: text(value),
+        count,
+      });
+    }
+    if (out.length) inspection.totals = out;
+    else delete inspection.totals;
+  };
+  const writer = (
+    mark: Parameters<TooltipWriter>[0],
+    row: number | undefined,
+    point: PointText,
+    names?: readonly string[],
+  ) => {
     const tooltip = mark?.spec.tooltip;
     if (!tooltip) return undefined;
     const table = mark.table;
@@ -239,4 +340,5 @@ export const tooltipWriters: TooltipWriters = (locale, zone, kit, features, repo
       ? { ...(fields && { fields }), ...(content && { content }), ...(heading && { heading }) }
       : undefined;
   };
+  return Object.assign(writer, { total, totals });
 };

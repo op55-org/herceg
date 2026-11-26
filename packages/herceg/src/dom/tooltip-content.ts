@@ -1,9 +1,10 @@
 // What charts load for tooltips that show more than their marks' names and
 // values: the fields of rows marks' tooltips show (`tooltip.fields`),
-// their rows of parts (`tooltip.content`), and their headings
-// (`tooltip.heading`), which inspections carry, drawn in the tooltip's box,
-// and content of the application's own (`renderTooltip`) in it. It imports
-// only types of the chart's modules.
+// their rows of parts (`tooltip.content`), their headings
+// (`tooltip.heading`), and readings' totals (`tooltip.total`), which
+// inspections carry, drawn in the tooltip's box, and content of the
+// application's own (`renderTooltip`) in it. It imports only types of the
+// chart's modules.
 
 import type { RowLink } from "../fields/links.ts";
 import type { ContentRun } from "../marks/tooltip-fields.ts";
@@ -67,9 +68,9 @@ export function ownContent(
    * The built-in content: its heading (as the controller decided it, none
    * without one), then each point's row (its name and value, or its
    * content's runs, each in its part's style) followed by its fields',
-   * which line up under its label; a field's link is written as its text,
-   * and is a link once the tooltip is pinned (`linked`), when it takes the
-   * pointer.
+   * which line up under its label, and after a mark's points its total, in
+   * bold without a swatch; a field's link is written as its text, and is a
+   * link once the tooltip is pinned (`linked`), when it takes the pointer.
    */
   const builtIn = (
     inspection: Inspection,
@@ -101,7 +102,7 @@ export function ownContent(
       swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${color ?? "none"};flex:none`;
       const label = document.createElement("span");
       label.textContent = name;
-      label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}${bold ? ";font-weight:600" : ""}`;
+      label.style.cssText = `flex:1;color:${field ? theme.muted : theme.text}${bold ? ";font-weight:600" : ""}`;
       if (runs) {
         // The content's runs in place of the name and value, each part in its style.
         label.textContent = "";
@@ -125,10 +126,16 @@ export function ownContent(
       line.append(swatch, label, value);
       element.append(line);
     };
-    for (const [i, point] of inspection.points.entries()) {
+    const { points } = inspection;
+    const totals = inspection.axis === "item" ? undefined : inspection.totals;
+    for (const [i, point] of points.entries()) {
       row(point.label, point.text, point.color, false, undefined, i === own, point.content);
       for (const field of point.fields ?? [])
         row(field.label, field.text, field.color, true, field.link);
+      // A mark's points are listed together; its total closes them.
+      const total =
+        points[i + 1]?.mark !== point.mark && totals?.find(({ mark }) => mark === point.mark);
+      if (total) row(total.label, total.text, undefined, false, undefined, true);
     }
   };
   tooltip.show = (inspection, heading, theme, pointer, bounds, ownRow = -1) => {

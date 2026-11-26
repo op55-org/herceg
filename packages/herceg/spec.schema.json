@@ -252,7 +252,6 @@
           "description": "A category, number, or time field whose value names each row's item. Without it, an item is its row (a bar: its position); rows sharing a value are one item, and a missing value names the row by its identity.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" },
         "x": {
           "title": "X",
           "description": "Positions along x, or with `orient: \"y\"` the values (one field or several, or a coordinate).",
@@ -278,6 +277,10 @@
           "title": "Stack",
           "description": "Pile the areas up: `true`, a mode, or its parts (`offset`, `order`, `gaps`).",
           "anyOf": [{ "$ref": "#/$defs/AreaStack" }, { "$ref": "#/$defs/StackSpec" }]
+        },
+        "tooltip": {
+          "title": "Tooltip",
+          "anyOf": [{ "$ref": "#/$defs/SeriesTooltipSpec" }, { "$ref": "#/$defs/MarkTooltipSpec" }]
         },
         "y1": {
           "title": "Y1",
@@ -317,6 +320,7 @@
               ]
             },
             "series": { "anyOf": [{ "type": "string" }, { "const": false }] },
+            "tooltip": { "$ref": "#/$defs/SeriesTooltipSpec" },
             "y1": false,
             "y2": false,
             "x1": false,
@@ -330,6 +334,7 @@
             "y": false,
             "series": { "anyOf": [{ "type": "string" }, { "const": false }] },
             "stack": false,
+            "tooltip": { "$ref": "#/$defs/MarkTooltipSpec" },
             "x1": false,
             "x2": false
           }
@@ -341,6 +346,7 @@
             "y": { "$ref": "#/$defs/RowPosition" },
             "series": { "anyOf": [{ "type": "string" }, { "const": false }] },
             "stack": false,
+            "tooltip": { "$ref": "#/$defs/MarkTooltipSpec" },
             "y1": false,
             "y2": false
           }
@@ -806,7 +812,7 @@
           "description": "A category, number, or time field whose value names each row's item. Without it, an item is its row (a bar: its position); rows sharing a value are one item, and a missing value names the row by its identity.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" }
+        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/SeriesTooltipSpec" }
       },
       "required": ["type", "x", "y"],
       "additionalProperties": false
@@ -5692,7 +5698,7 @@
           "description": "A category, number, or time field whose value names each row's item. Without it, an item is its row (a bar: its position); rows sharing a value are one item, and a missing value names the row by its identity.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" }
+        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/SeriesTooltipSpec" }
       },
       "required": ["type", "x", "y"],
       "additionalProperties": false
@@ -6458,6 +6464,22 @@
       },
       "additionalProperties": false
     },
+    "PathPart": {
+      "description": "A part naming a tree node's levels, in treemaps' and sunbursts' tooltips: its names from the top of the whole tree down to it, each as its path field's display writes it, joined by `separator` (\" / \" by default, as the default tooltip joins them). A node of the first level writes its own name; the middle of a drilled view writes the levels it stands for.",
+      "type": "object",
+      "properties": {
+        "path": { "title": "Path", "const": true },
+        "separator": { "title": "Separator", "type": "string" },
+        "style": { "title": "Style", "$ref": "#/$defs/PartStyle" },
+        "field": false,
+        "series": false,
+        "value": false,
+        "label": false,
+        "format": false
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
     "PieSpec": {
       "description": "A pie or donut: a slice per category, its angle in proportion to the sum of `value` over the category's rows (or their count). Slices hidden through the legend leave the rest to fill the circle.",
       "type": "object",
@@ -6877,7 +6899,7 @@
           "description": "A category, number, or time field whose value names each row's item. Without it, an item is its row (a bar: its position); rows sharing a value are one item, and a missing value names the row by its identity.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" },
+        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/SeriesTooltipSpec" },
         "size": {
           "title": "Size",
           "description": "A channel through one of the chart's scales (`{ field, scale }`), giving each point's area in square pixels.",
@@ -8120,6 +8142,34 @@
       },
       "additionalProperties": false
     },
+    "SeriesTooltipSpec": {
+      "description": "The tooltip of a mark whose points carry one number each: lines, filled areas, bars, and points.",
+      "type": "object",
+      "properties": {
+        "total": {
+          "title": "Total",
+          "description": "A row after the mark's points in a reading along an axis (any but \"nearest\"), summing the values it lists of the mark, one point too: series hidden or reading nothing there are left out, a stack's points carry their own values (a normalized stack's raw ones), and under `snap: \"each\"` the points may stand at different places. A sum that is not finite shows no row. Category and time values have none. Inspections carry it (`inspection.totals`).",
+          "$ref": "#/$defs/TooltipTotalSpec"
+        },
+        "fields": {
+          "title": "Fields",
+          "description": "Fields of the row the tooltip is at, shown in order under the mark's values: data that is not plotted, such as a request count. The keyboard's announcements and hover events read them too.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TooltipField" }
+        },
+        "content": {
+          "title": "Content",
+          "description": "Each point's row as one line of parts, in place of its name and value (`LabelPart`): text, `{ series: true }` (what the tooltip names the point by), `{ value: true }` (its value as the tooltip writes it, or in `format`, a time where it is a time pattern or Intl date options), `{ field }` of its row (as `fields` write it, or in `format`; \"–\" where no one row is the point), or `{ label }`, each in its `style`. The swatch stays and `fields` follow under it; the keyboard's announcements and hover events read the same text.",
+          "$ref": "#/$defs/LabelContent"
+        },
+        "heading": {
+          "title": "Heading",
+          "description": "The tooltip's heading where it shows one point of this mark alone (inspection \"nearest\", an item, or one series read), in place of the place it reads: parts written from that point's row, as `content`'s are, such as a range item's id or its ends. Tooltips of several points keep the place, and the chart's `tooltip.heading: false` leaves every heading out. Hover events carry it (`point.heading`); the keyboard announces the place, and this heading before the point.",
+          "$ref": "#/$defs/LabelContent"
+        }
+      },
+      "additionalProperties": false
+    },
     "SiFormat": {
       "description": "Numbers with SI prefixes, by thousands from n to E, before the unit `si`: 1500000 with `{ si: \"B\" }` is \"1.5 MB\", 0.45 with `{ si: \"W\" }` \"450 mW\". The prefix is chosen after rounding; values are in the unit already.",
       "type": "object",
@@ -8369,6 +8419,7 @@
       "description": "A sunburst: a tree as rings around a center, each node's angle its share of its parent's, deeper levels further out.",
       "type": "object",
       "properties": {
+        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/TreeTooltipSpec" },
         "type": { "title": "Type", "const": "sunburst" },
         "data": { "title": "Data", "type": "string" },
         "id": { "title": "Id", "type": "string" },
@@ -8413,7 +8464,6 @@
           "description": "With the chart's `panels`, the id of the panel the sunburst has to itself.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" },
         "color": { "title": "Color", "type": "string" },
         "leaf": { "title": "Leaf", "$ref": "#/$defs/TreeLook" },
         "branch": { "title": "Branch", "$ref": "#/$defs/TreeLook" },
@@ -9404,6 +9454,20 @@
       },
       "additionalProperties": false
     },
+    "TooltipTotalSpec": {
+      "description": "A row closing a reading's points of a mark (`tooltip.total`): their sum, under `label` (\"Total\" by default), written as the points' values are (their value fields' display and the axis' `tooltipFormat`; the axis' format alone where the mark's value fields' displays differ), or in `format`, a number format.",
+      "anyOf": [
+        { "const": true },
+        {
+          "type": "object",
+          "properties": {
+            "label": { "title": "Label", "type": "string" },
+            "format": { "title": "Format", "$ref": "#/$defs/NumberFormatSpec" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "TrackLabelPlaceSpec": {
       "description": "A label place of a side track's labels (`TrackPlaceSpec`), with the places along the geometry that `LabelPlaceSpec` gives: series labels' and rules' (a vertical rule's labels stand above or below the plot, where no track is kept, so they take no `room`).",
       "type": "object",
@@ -9594,6 +9658,47 @@
       ],
       "additionalProperties": false
     },
+    "TreeContent": {
+      "description": "A tree node's tooltip row or heading, its parts in order: the parts labels take, and `{ path: true }`.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "field": { "title": "Field", "type": "string" },
+              "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
+              "style": { "title": "Style", "$ref": "#/$defs/PartStyle" },
+              "series": { "title": "Series", "const": true },
+              "value": { "title": "Value", "const": true },
+              "label": { "title": "Label", "type": "string" }
+            },
+            "anyOf": [
+              {
+                "required": ["field"],
+                "properties": { "series": false, "value": false, "label": false }
+              },
+              {
+                "required": ["series"],
+                "properties": { "field": false, "format": false, "value": false, "label": false }
+              },
+              {
+                "required": ["value"],
+                "properties": { "field": false, "series": false, "label": false }
+              },
+              {
+                "required": ["label"],
+                "properties": { "field": false, "format": false, "series": false, "value": false }
+              }
+            ],
+            "additionalProperties": false
+          },
+          { "type": "string" },
+          { "$ref": "#/$defs/PathPart" }
+        ]
+      },
+      "minItems": 1
+    },
     "TreeLook": {
       "description": "A look laid over tree items' paint: of a `Look`, a fill, a fill opacity, and an opacity it is multiplied by.",
       "type": "object",
@@ -9634,6 +9739,29 @@
         }
       ]
     },
+    "TreeTooltipSpec": {
+      "description": "A treemap's or sunburst's tooltip: its content and heading take `{ path: true }` too.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "title": "Content",
+          "description": "As `MarkTooltipSpec.content`, and `{ path: true }`, the node's levels.",
+          "$ref": "#/$defs/TreeContent"
+        },
+        "heading": {
+          "title": "Heading",
+          "description": "As `MarkTooltipSpec.heading`, and `{ path: true }`, the node's levels.",
+          "$ref": "#/$defs/TreeContent"
+        },
+        "fields": {
+          "title": "Fields",
+          "description": "Fields of the row the tooltip is at, shown in order under the mark's values: data that is not plotted, such as a request count. The keyboard's announcements and hover events read them too.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TooltipField" }
+        }
+      },
+      "additionalProperties": false
+    },
     "TreemapLabelsSpec": {
       "description": "A treemap's names: in each rectangle's top-left corner (the default) or its center; `parents: false` names only rectangles drawn without others inside them, and keeps no strip at the top of the others for names.",
       "type": "object",
@@ -9672,6 +9800,7 @@
       "description": "A treemap: nested rectangles for a tree whose leaves' areas are their share of `value` (or of the rows), as the portable spec describes it.",
       "type": "object",
       "properties": {
+        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/TreeTooltipSpec" },
         "type": { "title": "Type", "const": "treemap" },
         "data": { "title": "Data", "type": "string" },
         "id": { "title": "Id", "type": "string" },
@@ -9701,7 +9830,6 @@
           "description": "With the chart's `panels`, the id of the panel the treemap has to itself.",
           "type": "string"
         },
-        "tooltip": { "title": "Tooltip", "$ref": "#/$defs/MarkTooltipSpec" },
         "color": { "title": "Color", "type": "string" },
         "leaf": { "title": "Leaf", "$ref": "#/$defs/TreeLook" },
         "branch": { "title": "Branch", "$ref": "#/$defs/TreeLook" },

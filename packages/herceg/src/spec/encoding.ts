@@ -382,6 +382,32 @@ export type PartStyle = Pick<
 export type LabelContent = readonly LabelPart[];
 
 /**
+ * A part naming a tree node's levels, in treemaps' and sunbursts'
+ * tooltips: its names from the top of the whole tree down to it, each as
+ * its path field's display writes it, joined by `separator` (" / " by
+ * default, as the default tooltip joins them). A node of the first level
+ * writes its own name; the middle of a drilled view writes the levels it
+ * stands for.
+ */
+export interface PathPart {
+  path: true;
+  separator?: string;
+  style?: PartStyle;
+  field?: never;
+  series?: never;
+  value?: never;
+  label?: never;
+  format?: never;
+}
+
+/**
+ * A tree node's tooltip row or heading, its parts in order: the parts
+ * labels take, and `{ path: true }`.
+ * @minItems 1
+ */
+export type TreeContent = readonly (LabelPart | PathPart)[];
+
+/**
  * A label's text: constant `text`, each row's `field` (numbers written with
  * `format`), or `content` made of parts, styled as `style` says.
  */

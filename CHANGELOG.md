@@ -372,6 +372,26 @@ chart and heading parts to their mark, and `herceg.express` takes
 content and headings read along with the data. See
 [Headings](docs/guide/interaction.md#headings).
 
+Treemaps' and sunbursts' tooltip `content` and `heading` take
+`{ path: true, separator? }` (`hg.LabelPart(path=True, separator="/")`):
+a node's names from the top of the whole tree, each as its level's
+field's display writes it, joined by the separator (" / " by default); a
+drilled view's middle writes the levels it stands for. Other marks refuse
+it. A series mark's `tooltip.total` (`hg.Tooltip(total=True)`, or
+`hg.TooltipTotal(label=..., format=...)`) adds a row after its points in a
+reading along an axis, the sum of the values it lists of the mark (one
+point too; hidden series and missing values left out, a normalized
+stack's raw values, every point under `snap: "each"`), written as the
+points' values are or in its number format; lines, filled areas, bars,
+points, and custom marks of number values take it, and category, time,
+and range values are refused (in JavaScript on the first frame drawn with
+the tooltip code, after `chart.loading`, not as the mark is made). The
+built-in box draws it in bold after the mark's points, the keyboard's `i`
+reads it, and inspections carry it (`inspection.totals`) in events,
+`chart.inspect`, `renderTooltip`, `herceg/web` pages, notebook widgets,
+Streamlit, and Python's `hg.Inspection.totals` (`hg.InspectedTotal`). See
+[Totals](docs/guide/interaction.md#totals).
+
 Selections are announced once per gesture, in the same words for the
 pointer and the keyboard. A click or Enter that selects says the item as
 its mark's tooltip writes it (its heading and content line, else its

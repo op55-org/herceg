@@ -1,7 +1,9 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
+
 import { time } from "../../src/data/column.ts";
 import type { GeometryInput } from "../../src/data/geometry.ts";
 import { table } from "../../src/data/table.ts";
+import type { InspectedTotal, SeriesTooltip, TooltipTotal, TreeTooltip } from "../../src/index.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
@@ -98,6 +100,53 @@ line(readings, { x: "at", y: "cpu", tooltip: { heading: [{ field: "stg" }] } });
 line(readings, { x: "at", y: "cpu", tooltip: { heading: false } });
 // @ts-expect-error histogram bins summarize rows, so they have no heading to write
 histogram(readings, { x: "cpu", tooltip: { heading: ["n"] } });
+
+// A tree node's levels are a part of trees' tooltips alone.
+sunburst(readings, {
+  path: ["stage"],
+  value: "cpu",
+  tooltip: { content: ["all/", { path: true, separator: "/" }], heading: [{ path: true }] },
+});
+treemap(readings, { path: ["stage"], value: "cpu", tooltip: { content: [{ path: true }] } });
+// @ts-expect-error only trees' nodes have levels
+line(readings, { x: "at", y: "cpu", tooltip: { content: [{ path: true }] } });
+// @ts-expect-error only trees' nodes have levels
+pie(readings, { category: "stage", value: "cpu", tooltip: { heading: [{ path: true }] } });
+sunburst(readings, {
+  path: ["stage"],
+  value: "cpu",
+  // @ts-expect-error a separator is text
+  tooltip: { content: [{ path: true, separator: 1 }] },
+});
+treemap(readings, {
+  path: ["stage"],
+  value: "cpu",
+  // @ts-expect-error a path is written by its levels' displays, in no format
+  tooltip: { content: [{ path: true, format: { number: ".1f" } }] },
+});
+
+// A reading's total: series marks of numbers, in a number format.
+line(readings, { x: "at", y: "cpu", tooltip: { total: true } });
+// The public entry names the tooltips and the totals inspections carry.
+const lineTooltip: SeriesTooltip<{ cpu: "number" }> = { total: { label: "All" } };
+const treeTooltip: TreeTooltip<{ size: "number" }> = { content: [{ path: true }] };
+const asked: TooltipTotal = true;
+const read = (total: InspectedTotal): number => total.value;
+void [lineTooltip, treeTooltip, asked, read];
+area(readings, { x: "at", y: "cpu", stack: true, tooltip: { total: { label: "All" } } });
+bar(readings, { x: "stage", y: "cpu", tooltip: { total: { format: { number: ",.1f" } } } });
+point(readings, { x: "at", y: "cpu", tooltip: { total: true } });
+custom(readings, { x: "at", y: "cpu", tooltip: { total: true }, draw: () => {} });
+// @ts-expect-error totals are numbers
+line(readings, { x: "at", y: "cpu", tooltip: { total: { format: { time: "%H" } } } });
+// @ts-expect-error a band's points are ranges, which have no total
+area(readings, { x: "at", y1: "cpu", y2: "cpu", tooltip: { total: true } });
+// @ts-expect-error a pie reads one slice at a time
+pie(readings, { category: "stage", value: "cpu", tooltip: { total: true } });
+// @ts-expect-error no total is false: leave it out
+line(readings, { x: "at", y: "cpu", tooltip: { total: false } });
+// @ts-expect-error histogram bins summarize rows, so their tooltips take nothing
+histogram(readings, { x: "cpu", tooltip: { total: true } });
 
 // Gauges show, and funnels sum, numbers: not times or categories.
 gauge(readings, { value: "cpu" });

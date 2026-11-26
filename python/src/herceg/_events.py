@@ -256,6 +256,25 @@ class InspectedPoint:
 
 
 @dataclass(frozen=True)
+class InspectedTotal:
+    """A mark's total in a reading along an axis (``hg.Tooltip(total=...)``):
+    the sum of the values the reading lists of the mark."""
+
+    #: What the row names it by: its ``label``, "Total" by default.
+    label: str
+    #: The sum of the values of the mark's points the reading lists.
+    value: float
+    #: The sum as the tooltip writes it.
+    text: str
+    #: How many of the reading's points it sums.
+    count: int
+    #: The mark: its index among the chart's marks, in the order they were added.
+    mark: int = 0
+    #: The mark's ``id``, when it has one.
+    mark_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Inspection:
     """The data under the pointer, as the tooltip shows it.
 
@@ -275,6 +294,10 @@ class Inspection:
     #: A 3D chart's point by column: numbers (datetimes as epoch milliseconds)
     #: and category labels; None for other charts.
     values: dict[str, float | str] | None = None
+    #: Each mark's total, in the marks' order, for marks whose tooltip asks
+    #: for one (``hg.Tooltip(total=True)``) and that a reading along an axis
+    #: lists points of; empty otherwise, and for mode "nearest" and items.
+    totals: tuple[InspectedTotal, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1520,6 +1543,23 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
         and all(text(key) and (number(v) or text(v)) for key, v in values.items())
     ):
         raise ValueError(f"values map columns to numbers or labels, not {values!r}")
+    totals = payload.get("totals", [])
+    if not isinstance(totals, list):
+        raise ValueError(f"expected a list of totals, not {totals!r}")
+    for i, total in enumerate(totals):
+        if not (
+            isinstance(total, dict)
+            and index(total.get("mark"))
+            and index(total.get("count"))
+            and text(total.get("label"))
+            and text(total.get("text"))
+            and _finite(total.get("value"))
+            and (total.get("markId") is None or text(total["markId"]))
+        ):
+            raise ChartError(
+                f"totals[{i}]: expected mark, label, value, text, and count as the browser "
+                f"writes them, not {total!r}"
+            )
     return payload
 
 
@@ -1622,6 +1662,17 @@ def decode_inspection(payload: Any) -> Inspection | None:
         ),
         panel=payload.get("panel"),
         values=payload.get("values"),
+        totals=tuple(
+            InspectedTotal(
+                label=total["label"],
+                value=total["value"],
+                text=total["text"],
+                count=total["count"],
+                mark=total["mark"],
+                mark_id=total.get("markId"),
+            )
+            for total in payload.get("totals", ())
+        ),
     )
 
 

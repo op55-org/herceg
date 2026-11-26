@@ -31,7 +31,7 @@ import {
 import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
 import { refuseValues } from "./still.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type TreeTooltip } from "./tooltip-fields.ts";
 import { count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
 import { TreeLabels } from "./tree-labels.ts";
 import {
@@ -82,8 +82,12 @@ export type TreemapOptions<S extends Schema> = (
     tile?: "squarify" | "slice-dice";
     /** Pixels between siblings; 2 by default. */
     gap?: number;
-    /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
-    tooltip?: MarkTooltip<S>;
+    /**
+     * What tooltips show besides an item's value: fields of the row it is
+     * (where it is one row), its content and heading, which `{ path: true }`
+     * writes its levels in.
+     */
+    tooltip?: TreeTooltip<S>;
     id?: string;
     /** With the chart's `panels`, the id of the panel the treemap has to itself. */
     panel?: string;

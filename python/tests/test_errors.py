@@ -89,6 +89,11 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
     "Animation": ("animation", lambda o: hg.Chart(DATA, animation=o).line(x="t", y="v"), {}),
     "Title": ("title", lambda o: hg.Chart(DATA, title=o).line(x="t", y="v"), {"text": "T"}),
     "Tooltip": ("tooltip", lambda o: hg.Chart(DATA, tooltip=o).line(x="t", y="v"), {}),
+    "TooltipTotal": (
+        "marks[0].tooltip.total",
+        lambda o: hg.Chart(DATA).line(x="t", y="v", tooltip=hg.Tooltip(total=o)),
+        {},
+    ),
     "InspectionOptions": (
         "inspection",
         lambda o: hg.Chart(DATA, inspection=o).line(x="t", y="v"),
@@ -386,6 +391,7 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
 
 # What Python reads of a chart (its events and inspection), which no chart takes.
 READ = {"InspectedField", "InspectedPoint", "Inspection", "RowSelection", "BrushSelection"}
+READ |= {"InspectedTotal"}
 READ |= {"Viewport", "ViewEdge", "ViewportEvent", "ScaleInstance", "ScaleView"}
 READ |= {"SelectEvent", "SelectionOwner", "VisibilityState", "PanelVisibility"}
 READ |= {"InputEvent", "Pointer", "Box", "ItemTarget", "AxisLabelTarget"}

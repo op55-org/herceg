@@ -891,7 +891,8 @@
     "settings TooltipSpec hg.Tooltip": {
       "only": {
         "fields": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses fields (`Chart tooltip fields: belong to the marks whose rows they show; give them to a mark`).",
-        "content": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses content (`Chart tooltip content: belongs to the marks whose rows it writes; give it to a mark`)."
+        "content": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses content (`Chart tooltip content: belongs to the marks whose rows it writes; give it to a mark`).",
+        "total": "Python's one hg.Tooltip serves the chart and its marks; the chart's refuses total (`Chart tooltip total: belongs to the marks whose points it sums; give it to a mark, as in chart.line(..., tooltip=hg.Tooltip(total=True))`), as marks on two axes, or a band and its line, would sum unlike values."
       },
       "untyped": {
         "heading": "Python's one hg.Tooltip serves the chart and its marks: heading takes False (the chart's) or a mark's parts, which the chart's refuses (`Chart tooltip heading: parts belong to the mark whose points they head; give them to a mark`)."
@@ -952,7 +953,8 @@
     "settings MarkTooltipSpec hg.Tooltip": {
       "only": {
         "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
-        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`)."
+        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`).",
+        "total": "Python's one hg.Tooltip serves the chart and its marks; marks that do not total their points refuse total (`rug tooltip total: only lines, filled areas, bars, and points total their points; drop total`), as the spec's validator does."
       }
     },
     "settings MarkTooltipSpec MarkTooltip": {
@@ -1710,70 +1712,90 @@
       "only": {
         "value": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a name refuses value (`line label[0]: a series' name has no value; use hg.LabelPart(series=True), (field=...), or (label=...)`), as the spec's validator does.",
         "format": "Python's one hg.LabelPart; a name refuses format and style (`line label[0].format: a name is written in the legend's and tooltip's look; drop format`), as the spec's validator does.",
-        "style": "As format."
+        "style": "As format.",
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and a series' name refuses it (`line label[0] path: only treemaps' and sunbursts' nodes have levels; use hg.LabelPart(series=True), (field=...), or (label=...)`), as the spec's validator does.",
+        "separator": "As path."
       }
     },
     "mark area python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark bar python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark point python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark histogram python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark boxplot python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark boxen python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark violin python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark rug python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "mark errorbar python label": {
       "only": {
         "value": "As mark line python label's.",
         "format": "As mark line python label's.",
-        "style": "As mark line python label's."
+        "style": "As mark line python label's.",
+        "path": "As mark line python label's.",
+        "separator": "As path."
       }
     },
     "chart python x title": {
@@ -1782,7 +1804,9 @@
         "series": "As field.",
         "value": "As field.",
         "format": "As field.",
-        "style": "As field."
+        "style": "As field.",
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and an axis' title refuses it (`AxisOptions title[0]: an axis' title names columns by their labels; give text, or hg.LabelPart(label=...)`), as the spec's validator does.",
+        "separator": "As path."
       }
     },
     "chart python y title": {
@@ -1791,7 +1815,9 @@
         "series": "As chart python x title's.",
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
-        "style": "As chart python x title's."
+        "style": "As chart python x title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart update x title": {
@@ -1800,7 +1826,9 @@
         "series": "As chart python x title's.",
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
-        "style": "As chart python x title's."
+        "style": "As chart python x title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart update y title": {
@@ -1809,7 +1837,9 @@
         "series": "As chart python x title's.",
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
-        "style": "As chart python x title's."
+        "style": "As chart python x title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart python yRight title": {
@@ -1818,7 +1848,9 @@
         "series": "As chart python x title's.",
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
-        "style": "As chart python x title's."
+        "style": "As chart python x title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart update yRight title": {
@@ -1827,7 +1859,9 @@
         "series": "As chart python x title's.",
         "value": "As chart python x title's.",
         "format": "As chart python x title's.",
-        "style": "As chart python x title's."
+        "style": "As chart python x title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart python x place": {
@@ -1899,7 +1933,9 @@
         "field": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a guide's axis title takes text and (label=...) (`axis title[0]: an axis' title names columns by their labels; give text, or hg.LabelPart(label=...)`), as the spec's validator does.",
         "series": "As field.",
         "value": "As field.",
-        "format": "As field."
+        "format": "As field.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "chart update guides title": {
@@ -1907,7 +1943,9 @@
         "field": "As chart python guides title's.",
         "series": "As chart python guides title's.",
         "value": "As chart python guides title's.",
-        "format": "As chart python guides title's."
+        "format": "As chart python guides title's.",
+        "path": "As chart python x title's.",
+        "separator": "As path."
       }
     },
     "mark treemap python labels content": {
@@ -1916,6 +1954,10 @@
           "takes": ["*"],
           "reason": "Python's one hg.LabelPart serves every label's content; a tree's refuses label (`TreemapLabels content[0]: tree labels write their items' values, not columns' labels; give text, a column, or the value`), as the spec's types do."
         }
+      },
+      "only": {
+        "path": "As mark line python labels content's.",
+        "separator": "As path."
       }
     },
     "mark sunburst python labels content": {
@@ -1924,6 +1966,10 @@
           "takes": ["*"],
           "reason": "As mark treemap python labels content's (`SunburstLabels content[0]: ...`)."
         }
+      },
+      "only": {
+        "path": "As mark line python labels content's.",
+        "separator": "As path."
       }
     },
     "mark radar helper options": {
@@ -1936,7 +1982,9 @@
         "series": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, and links' parts; a link's part is text, (field=...), or (value=True) (`Link url[1]: a link's part is text, a column (field=), or the value (value=True); give one of them`), as the spec's LinkPart is.",
         "label": "As series.",
         "format": "A link's parts write values raw in its URL and through their displays in its text (`Link url[1] format: URLs take values raw, and text through their displays; drop format`), as the spec's LinkPart has no format.",
-        "style": "As format (`Link url[1] style: ...; drop style`)."
+        "style": "As format (`Link url[1] style: ...; drop style`).",
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and a link's part refuses it (`Link url[1]: a link's part is text, a column (field=), or the value (value=True); give one of them`), as the spec's validator does.",
+        "separator": "As path."
       }
     },
     "chart python fields": {
@@ -1968,6 +2016,112 @@
           "takes": ["*"],
           "reason": "As untyped steps: a step is a pair or a dict."
         }
+      }
+    },
+    "settings SeriesTooltipSpec hg.Tooltip": {
+      "only": {
+        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
+        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`)."
+      }
+    },
+    "mark area python tooltip": {
+      "only": {
+        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
+        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`)."
+      }
+    },
+    "settings TreeTooltipSpec hg.Tooltip": {
+      "only": {
+        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
+        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`).",
+        "total": "Python's one hg.Tooltip serves the chart and its marks; trees do not total their nodes and refuse total (`treemap tooltip total: only lines, filled areas, bars, and points total their points; drop total`), as the spec's validator does."
+      }
+    },
+    "mark line python labels content": {
+      "only": {
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and series' labels refuse it (`SeriesLabels content[0] path: only treemaps' and sunbursts' nodes have levels; give hg.LabelPart(series=True) or (field=...)`), as the spec's validator does.",
+        "separator": "As path."
+      }
+    },
+    "mark line python tooltip content": {
+      "only": {
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and this mark's tooltip refuses it (`line tooltip content[0] path: only treemaps' and sunbursts' nodes have levels; give hg.LabelPart(series=True) or (field=...)`), as the spec's validator does.",
+        "separator": "As path."
+      }
+    },
+    "mark line python tooltip heading": {
+      "only": {
+        "path": "As mark line python tooltip content's.",
+        "separator": "As path."
+      }
+    },
+    "mark area python labels content": {
+      "only": {
+        "path": "As mark line python labels content's.",
+        "separator": "As path."
+      }
+    },
+    "mark area python tooltip content": {
+      "only": {
+        "path": "As mark line python tooltip content's.",
+        "separator": "As path."
+      }
+    },
+    "mark area python tooltip heading": {
+      "only": {
+        "path": "As mark line python tooltip content's.",
+        "separator": "As path."
+      }
+    },
+    "mark bar python labels content": {
+      "only": {
+        "path": "As mark line python labels content's.",
+        "separator": "As path."
+      }
+    },
+    "mark rug python tooltip content": {
+      "only": {
+        "path": "As mark line python tooltip content's.",
+        "separator": "As path."
+      }
+    },
+    "mark rug python tooltip heading": {
+      "only": {
+        "path": "As mark line python tooltip content's.",
+        "separator": "As path."
+      }
+    },
+    "mark rule python label content": {
+      "only": {
+        "path": "As mark text python label content's.",
+        "separator": "As path."
+      }
+    },
+    "mark region python label content": {
+      "only": {
+        "path": "As mark text python label content's.",
+        "separator": "As path."
+      }
+    },
+    "mark text python label content": {
+      "only": {
+        "path": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, links' parts, and tooltips' parts; path names a node's levels in treemaps' and sunbursts' tooltips alone, and a label's content refuses it (`Label content[0] path: only treemaps' and sunbursts' nodes have levels; give hg.LabelPart(series=True) or (field=...)`), as the spec's validator does.",
+        "separator": "As path."
+      }
+    },
+    "settings SeriesTooltipSpec SeriesTooltip": {
+      "untyped": {
+        "fields": "TypeScript types each field's format by the field's kind, through a type over the table's fields: numbers' forms, times', and none for categories."
+      }
+    },
+    "mark area typescript tooltip": {
+      "untyped": {
+        "fields": "TypeScript types each field's format by the field's kind, through a type over the table's fields: numbers' forms, times', and none for categories."
+      }
+    },
+    "settings TreeTooltipSpec TreeTooltip": {
+      "untyped": {
+        "fields": "TypeScript types each field's format by the field's kind, through a type over the table's fields: numbers' forms, times', and none for categories."
       }
     }
   }
