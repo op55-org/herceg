@@ -179,15 +179,6 @@ decimals ("0.2", "1", "1,000", not "1.0" and "1,000.000"). Axes' `overlap:
 room to the labels either side, past blank ticks, and the navigator's strip
 ticks the labelled ones.
 
-Category axes take their bands' order from `domain`: a list of the
-categories (`x: { domain: ["North", "South", "East", "West"] }`, in specs,
-`scales`, subplots' axes, and 3D charts' axes; Python
-`hg.AxisOptions(domain=[...])`). Every listed category keeps its band
-without rows, so bars of row groups stay in place as a filter empties
-groups and brings them back, and categories it leaves out follow. A list
-on an axis of numbers or times, two ends on an axis of categories (which
-they were ignored on), and a category listed twice are refused.
-
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,
@@ -372,44 +363,6 @@ chart and heading parts to their mark, and `herceg.express` takes
 content and headings read along with the data. See
 [Headings](docs/guide/interaction.md#headings).
 
-Treemaps' and sunbursts' tooltip `content` and `heading` take
-`{ path: true, separator? }` (`hg.LabelPart(path=True, separator="/")`):
-a node's names from the top of the whole tree, each as its level's
-field's display writes it, joined by the separator (" / " by default); a
-drilled view's middle writes the levels it stands for. Other marks refuse
-it. A series mark's `tooltip.total` (`hg.Tooltip(total=True)`, or
-`hg.TooltipTotal(label=..., format=...)`) adds a row after its points in a
-reading along an axis, the sum of the values it lists of the mark (one
-point too; hidden series and missing values left out, a normalized
-stack's raw values, every point under `snap: "each"`), written as the
-points' values are or in its number format; lines, filled areas, bars,
-points, and custom marks of number values take it, and category, time,
-and range values are refused (in JavaScript on the first frame drawn with
-the tooltip code, after `chart.loading`, not as the mark is made). The
-built-in box draws it in bold after the mark's points, the keyboard's `i`
-reads it, and inspections carry it (`inspection.totals`) in events,
-`chart.inspect`, `renderTooltip`, `herceg/web` pages, notebook widgets,
-Streamlit, and Python's `hg.Inspection.totals` (`hg.InspectedTotal`). See
-[Totals](docs/guide/interaction.md#totals).
-
-Segments (`segment`, `{ type: "segment" }`, `Chart.segment` and
-`hg.segment` in Python, `<Segment>` in React, Vue, and Svelte) draw each
-row from one place to another: `x` and `y` are each a field, the same at
-both ends, or a pair `[from, to]` of number or time fields
-(`x=("start", "end")` in Python, which names the ends `start` and `end`).
-Their `width` is pixels or a channel by row, one for the whole segment or
-`{ from, to }` tapering between the ends (`hg.SegmentWidth`); `caps` puts
-a dot or an arrowhead at either end (`"dot"`, `"arrow"`, or sized:
-`hg.Caps(start=hg.Dot(radius=3), end=hg.Arrow(length=10, width=8))`);
-`encode` takes each row's `color` and `opacity`. Each row is one filled
-outline, its dots and heads painting once where they overlap; a segment
-shorter than its arrowhead draws the head alone. Segments are drawn by the
-custom mark's core, so they take part as custom marks of ranges do:
-series and legends, picking by shape, tooltips writing ranges, the
-keyboard, selection and dimming, value transitions with `itemKey`, the
-text alternative ("2 segments in 2 categories"), and SVG, canvas, PNG,
-and PDF output. See [Segments](docs/guide/marks.md#segments).
-
 Selections are announced once per gesture, in the same words for the
 pointer and the keyboard. A click or Enter that selects says the item as
 its mark's tooltip writes it (its heading and content line, else its
@@ -516,22 +469,6 @@ styles](docs/guide/styling.md#role-styles) and
   frame of a value transition. `clip` (`"plot"`, `"chart"`, or `false`)
   draws text exactly where told, as does a label of a point outside the
   chart. See [Annotations](docs/guide/marks.md#annotations).
-- **Labels outside the plot stand at their offset from it.** Series and
-  rules' labels with `place: { outside: true, offset }` stand `offset`
-  pixels, after a 6 px gap, past what stands beside the plot as drawn (its
-  y labels, listed axes, its y title, a grid's row headers, a legend
-  beside a subplot), in every panel and output. An x end tick label may
-  stand under the room the chart keeps for them: the margin widens only
-  for one reaching past it, to the chart's edge less padding and side
-  legends, and `labels.ends: "hide"` keeps an end label that fits under
-  it. In subplots' gutters a y title stands beside its axis' labels,
-  before marks' labels. Fixed: the labels stood `offset` past that room,
-  which an x end tick label overhanging the plot pushed out (in a view of
-  1.2 seconds ticked in sub-second steps, names asked to stand 28 px from
-  their lines stood 69 px out, and the plot narrowed); and a subplot
-  whose own listed y axis' labels were narrower than another's kept the
-  subplots' most room beside it rather than its own. See [Labels that
-  follow series](docs/guide/marks.md#labels-that-follow-series).
 - **Bars' labels take `place.offset`**, the pixels between a label and the
   bar's edge it stands at (4 by default): past the end, inside at the end
   or root, and just inside where past would leave the plot. A label fits
@@ -561,35 +498,46 @@ styles](docs/guide/styling.md#role-styles) and
   script's widest so a streamed or panned axis keeps its interval as its
   digits change; y labels by their lines. On an axis with breaks, the
   fitting count of the eight with the finest interval. A view of 1.2
-  seconds 864 px wide steps every 200 ms, where its labels ran together
-  every 100 ms. Chosen ticks (`every`, `values`, a function) are drawn as
-  given, listed axes fit each layer's labels as it draws them, and
-  `"hide"`, `"stagger"`, `"wrap"`, and rotation candidates keep the
+  seconds 864 px wide steps every 200 ms, where its labels would run
+  together every 100 ms. Chosen ticks (`every`, `values`, a function) are
+  drawn as given, listed axes fit each layer's labels as it draws them,
+  and `"hide"`, `"stagger"`, `"wrap"`, and rotation candidates keep the
   count's interval. Given counts are whole and at most one for every two
   pixels. No option, on any surface. Fixed: a y axis given a count of
-  1e308 over a fitted domain of [1e12, 1e12 + 1] rounded it to NaN and
-  drew no ticks; and a 1.2-second window in London's repeated hour (01:30
-  GMT on 2026-10-25) drew none, its first tick sought from the hour's
-  earlier instant. Sub-day ticks now step by their interval rather than
-  every unit. See [Automatic ticks and their
+  1e308 over a fitted domain of [1e12, 1e12 + 1] drew no ticks; a
+  1.2-second window in London's repeated hour (01:30 GMT on 2026-10-25)
+  drew none; and sub-day ticks, which walked every unit, stopped short of
+  a long view's end (500 ms ticks over 120 seconds ended at 99.5 s). They
+  step by their interval where it divides its parent unit and the time
+  zone's offset holds, and walk units elsewhere. See [Automatic ticks and their
   labels](docs/guide/axes-and-legends.md#automatic-ticks-and-their-labels).
-- **One tick label gap on x and y.** Tick labels stand 8 px from the axis
-  line (0.65 × the font size above 12 px), and farther by how far outward
-  tick marks reach past 5 px, on x and y alike, the font size read from
-  each panel's tick label paint; the default y axes keep that room for
-  their labels. `labels.gap` still counts from the end of the marks on
-  the labels' side, and the axes guide says where it ends on each side:
-  below an axis at the line the labels hang from, above it at their last
-  line's box, beside it at their near end ([Where text sits in its
-  line](docs/guide/styling.md#where-text-sits-in-its-line) says where
-  those lines are). No option, on any surface. Changed: y labels stood
-  8 px past outward marks, so 6 px marks put them 14 px from the line
-  where x labels stood 9; they stand 9 now, in by the marks' length up to
-  5 px. y labels at fonts above 12 px move out with the font, as x labels
-  do (14 px text by 1 px, 16 px by 2, 20 px by 5), and the crosshair's y
-  boxes with them. Labels inside the plot and colorbars' labels stay
-  where they were. See [Tick
-  labels](docs/guide/axes-and-legends.md#tick-labels).
+- **One tick label gap on x and y.** Tick labels outside the plot stand
+  8 px from the axis line (0.65 × the font size above 12 px), and farther
+  by how far outward tick marks reach past 5 px, on x and y alike, the
+  font size read from each panel's tick label paint; the default y axes
+  keep that room for their labels. `labels.gap` counts from the end of the
+  marks on the labels' side, and ends below an axis at the line the labels
+  hang from, above it at their last line's box, beside it at their near
+  end ([Where text sits in its
+  line](docs/guide/styling.md#where-text-sits-in-its-line)). No option, on
+  any surface. Changed: y labels stood 8 px past outward tick marks (14 px
+  from the line beside 6 px marks, where x labels stood 9) and stand as x
+  labels do; at fonts above 12 px they stand farther out with the font
+  (14 px text by 1 px, 16 px by 2, 20 px by 5), and the crosshair's y
+  boxes with them. Labels inside the plot and colorbars' labels keep their
+  places. See [Tick labels](docs/guide/axes-and-legends.md#tick-labels).
+- **Category axes take their bands' order from `domain`**: a list of the
+  categories (`x: { domain: ["North", "South", "East", "West"] }`, in
+  specs, `scales`, subplots' axes, and 3D charts' axes; Python
+  `hg.AxisOptions(domain=[...])`). Every listed category keeps its band
+  with rows or without, so bars of row groups stay in place as a filter
+  empties groups and brings them back, and categories it leaves out
+  follow. Refused: a list on an axis of numbers or times, subplots
+  ordering two categories both ways, and in specs and Python a category
+  listed twice. Changed: two ends on an axis of categories, which were
+  ignored, are refused. See
+  [How bands are ordered](docs/guide/axes-and-legends.md#how-bands-are-ordered)
+  and [Cross-filtering](docs/guide/data.md#cross-filtering).
 - **Legends take `room`**, of the type axes' rooms have (`Room`): a fixed
   depth on their side, or `{ min, max }` bounds on what their entries
   measure, so plots line up whether a legend wraps or not; the gap and
@@ -599,30 +547,48 @@ styles](docs/guide/styling.md#role-styles) and
   for an open end (`room=(40, None)`), and axes' and legends' rooms are
   refused in the same words. See
   [Legends](docs/guide/axes-and-legends.md#legends).
-- **Labels outside the plot take `room`**, of the type axes' and
-  legends' rooms have (`Room`), on series labels, text following series,
-  and horizontal rules' labels: `place: { outside: true, offset: 8, room:
-  64 }` keeps 64 px for their width in their side's track, box padding and
-  halo inside it and `offset` on top, from the first frame whatever is
-  drawn (no data, every series hidden, no point in view, no label left),
-  so a plot holds still as names stream in, change, or leave; `{ min, max
-  }` bounds what they measure instead. The track is the most any mark on
-  its side keeps. Labels wider than a fixed room or its `max` are
-  shortened with an ellipsis as drawn (plain labels line by line, labels
-  of parts from their end, the parts' looks kept; left out where only the
-  ellipsis would remain), their leaders still at their start, and named
-  whole in the legend, the tooltip, and the text alternative; `{ min }`
-  alone never shortens. Refused on vertical rules' and regions' labels,
-  with `reserve: false`, and inside the plot, in TypeScript's types, at
-  run time, in specs, and in Python (`hg.LabelPlace(outside=True,
-  offset=8, room=64)`, `room=(60, None)`). Charts whose sides hold the
-  same rooms line up where their x axes' end labels stay inside them
-  ([What lines up](docs/guide/layout.md#what-lines-up)). Changed: a
-  horizontal rule along no length (both `span` ends at one place) placed
-  its label as a vertical rule's; it is placed as a horizontal rule's.
-  Changed: a label inside the plot whose line is a literal "…" wider than
-  the plot is left out, as lines shortened to the ellipsis are. See
-  [Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
+- **Labels outside the plot** (series labels, text following series, and
+  rules' labels with `place: { outside: true }`):
+  - **stand at their offset from it**: `offset` pixels, after a 6 px gap,
+    past what stands beside the plot as drawn (its y labels, listed axes,
+    its y title, a grid's row headers, a legend beside a subplot), in
+    every panel and output; a negative offset moves them back toward it.
+    An x end tick label may stand under the room the chart keeps for them:
+    the margin widens only for one reaching past it, to the chart's edge
+    less padding and side legends, and `labels.ends: "hide"` keeps an end
+    label that fits under it. In subplots' gutters a y title stands beside
+    its axis' labels, before marks' labels.
+  - **take a `room`**, of the type axes' and legends' rooms have (`Room`),
+    on series labels, text following series, and horizontal rules' labels:
+    `place: { outside: true, offset: 8, room: 64 }` keeps 64 px for their
+    width in their side's track, box padding and halo inside it and
+    `offset` on top, from the first frame whatever is drawn (no data,
+    every series hidden, no point in view, no label left), so a plot holds
+    still as names stream in, change, or leave; `{ min, max }` bounds what
+    they measure instead. The track is the most any mark on its side
+    keeps. Labels wider than a fixed room or its `max` are shortened with
+    an ellipsis as drawn (plain labels line by line, labels of parts from
+    their end, the parts' looks kept; left out where only the ellipsis
+    would remain), their leaders still at their start, and named whole in
+    the legend, the tooltip, and the text alternative; `{ min }` alone
+    never shortens. Refused on vertical rules' and regions' labels, with
+    `reserve: false`, and inside the plot, in TypeScript's types, at run
+    time, in specs, and in Python (`hg.LabelPlace(outside=True, offset=8,
+    room=64)`, `room=(60, None)`). Charts whose sides hold the same rooms
+    line up where their x axes' end labels stay inside them ([What lines
+    up](docs/guide/layout.md#what-lines-up)).
+  - Fixed: they stood `offset` past that room, which an x end tick label
+    overhanging the plot pushed out (names asked to stand 28 px from their
+    lines stood 69 px out in a 1.2-second view, and the plot narrowed); and
+    a subplot whose own listed y axis' labels were narrower than another's
+    kept the subplots' most room beside it rather than its own.
+  - Changed: a horizontal rule along no length (both `span` ends at one
+    place) placed its label as a vertical rule's; it is placed as a
+    horizontal rule's. A label inside the plot whose line is a literal "…"
+    wider than the plot is left out, as lines shortened to the ellipsis
+    are.
+
+  See [Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
 - **Marks' labels placed by their baseline**: `verticalAlign: "baseline"`
   (Python `vertical_align="baseline"`) on text marks', rules', regions',
   and series' labels, text following series included, puts the first
@@ -632,14 +598,16 @@ styles](docs/guide/styling.md#role-styles) and
   halo, staying inside the chart, and leaders are its block's, the first
   line's box half a line and half the font's x-height above the baseline
   (as the page's fonts measure "x"; 0.52 em in static output without
-  them), so a reference's baselines are em offsets with nothing measured.
-  It keeps apart from other labels as the other alignments do. Its type is `LabelStyle`, the style marks' labels
-  take: style roles (`text`, `tickLabel`, ...), titles, legends, and tick
-  labels keep `TextStyle`'s three alignments, so nothing inherits it, and
-  refuse it in TypeScript's types, in specs, and in Python
+  them), so a design's baselines are em offsets from its points, with
+  nothing measured. It keeps apart from other labels as the other
+  alignments do, and its chart loads the feature compiler before its
+  first frame. Its type is `LabelStyle`, the style of those labels: style
+  roles (`text`, `tickLabel`, ...), titles, legends, tick labels, and
+  bars' labels keep `TextStyle`'s three alignments, so nothing inherits
+  it, and refuse it in TypeScript's types, in specs, and in Python
   (`theme.style.text.verticalAlign: "baseline" places a mark's label by a
-  point; give it in the label's style`). See [Where text sits in its
-  line](docs/guide/styling.md#where-text-sits-in-its-line).
+  point; give it in the label's style`). See [Placing text by its
+  baseline](docs/guide/styling.md#placing-text-by-its-baseline).
 - **The pointer names the nearest band on category axes.**
   `pointer.categories` (Python `hg.Pointer.categories`) names the first or
   last band in the room a band axis keeps beside them, and the nearer band
@@ -661,18 +629,60 @@ styles](docs/guide/styling.md#role-styles) and
   outward while points may tie, at most 1,024 drawn points each way and
   past at most 1,024 in a row not drawn. 2D `"nearest"` and picking
   points and strokes tie within a thousandth of a pixel. No option, on
-  any surface. Fixed: at a 30-minute view a thousandth of a pixel is
-  1.7 ms, so 0.48 ms past the midpoint of two observations 130 ms apart
-  the earlier was read though the later is nearer by 0.96 ms; distances
-  were measured from the pointer's value mapped back to a pixel (0.02 px
-  off at a millisecond per 100 px); a pointer whose value rounded onto a
-  point never compared the point before it (on `[1e15, 1e15 + 1]`); ties
-  past the drawn points either side were missed (0 among 0, 0.00005, and
-  2); `"shared"` compared each series' own nearest, so a point a series
+  any surface. Fixed: two distances tied within a thousandth of a pixel,
+  1.7 ms at a 30-minute view, so 0.48 ms past the midpoint of two
+  observations 130 ms apart the earlier was read though the later is
+  nearer by 0.96 ms; distances were measured from the pointer's value
+  mapped back to a pixel (0.02 px off at a millisecond per 100 px); a
+  pointer whose value rounded onto a point never compared the point
+  before it; ties past the drawn points either side were missed;
+  `"shared"` compared each series' own nearest, so a point a series
   passed over could tie with another's and be earlier; and rounding on
-  screen sent exact midpoints to the later observation (31 of 260 between
-  500 jittered times). See
+  screen sent exact midpoints to the later observation. See
   [Inspection](docs/guide/interaction.md#inspection).
+- **Tooltips write a tree node's levels.** Treemaps' and sunbursts'
+  tooltip `content` and `heading` take `{ path: true, separator? }`
+  (`hg.LabelPart(path=True, separator="/")`): a node's names from the top
+  of the whole tree, each as its level's field's display writes it,
+  joined by the separator (" / " by default); a drilled view's middle
+  writes the levels it stands for. Other marks refuse it. See [A tree
+  node's levels](docs/guide/interaction.md#a-tree-nodes-levels).
+- **Tooltips total a reading.** A series mark's `tooltip.total`
+  (`hg.Tooltip(total=True)`, or `hg.TooltipTotal(label=..., format=...)`)
+  adds a row after its points in a reading along an axis: the sum of the
+  values it lists of the mark (one point too; hidden series and missing
+  values left out, a normalized stack's raw values, every point under
+  `snap: "each"`), written as the points' values are or in its number
+  format. Lines, filled areas, bars, points, and custom marks of number
+  values take it. The built-in box draws it in bold after the mark's
+  points, the keyboard's `i` reads it, and inspections carry it
+  (`inspection.totals`, `InspectedTotal`) in events, `chart.inspect`,
+  `renderTooltip`, `herceg/web` pages, notebook widgets, Streamlit, and
+  Python (`hg.Inspection.totals`, `hg.InspectedTotal`). Category, time,
+  and range values are refused: by Python as the chart is built, by specs
+  for a band as they are read, and otherwise on the first frame drawn with
+  the tooltip code (`ready` and `chart.loading` wait for it), not as the
+  mark is made. See [Tooltip
+  totals](docs/guide/interaction.md#tooltip-totals).
+- **Segments** (`segment`, `{ type: "segment" }`, `Chart.segment` and
+  `hg.segment` in Python, `<Segment>` in React, Vue, and Svelte) draw each
+  row from one place to another: `x` and `y` are each a field, the same
+  at both ends, or a pair `[from, to]` of number or time fields
+  (`x=("start", "end")` in Python, which names the ends `start` and
+  `end`). Their `width` is pixels or a channel by row, one for the whole
+  segment or `{ from, to }` tapering between the ends
+  (`hg.SegmentWidth`); `caps` puts a dot or an arrowhead at either end
+  (`"dot"`, `"arrow"`, or sized: `hg.Caps(start=hg.Dot(radius=3),
+  end=hg.Arrow(length=10, width=8))`); `encode` takes each row's `color`
+  and `opacity`. Each row is one filled outline, its dots and heads
+  painting once where they overlap; a segment shorter than its arrowhead
+  draws the head alone. Segments are drawn by the custom mark's core, so
+  they take part as custom marks of ranges do: series and legends,
+  picking by shape, tooltips writing ranges, the keyboard, selection and
+  dimming (a brush selects the rows whose span between their ends meets
+  it along each axis it covers), value transitions with `itemKey`, the
+  text alternative ("2 segments in 2 categories"), and SVG, canvas, PNG,
+  and PDF output. See [Segments](docs/guide/marks.md#segments).
 - **A hover repaints only the pointer overlay.** The crosshair, the points
   read, the item outline, the keyboard's ring, the brush, and controls'
   outlines draw in the pointer overlay, an `<svg>` of its own over the

@@ -98,6 +98,7 @@ ys}`.
 | `ax.fill_between(xs, low, high)` | `chart.area(x="x", y1="low", y2="high")` |
 | `ax.axhline(v)` / `ax.axvline(v)` | `chart.rule(y=v)` / `chart.rule(x=v)` |
 | `ax.text(x, y, s)` | `chart.text(x=x, y=y, label=s)` |
+| `ax.arrow(...)`, `ax.hlines(y, xmin, xmax)` | `chart.segment(x=("x0", "x1"), y=("y0", "y1"), caps=hg.Caps(end="arrow"), data=moves)`: a row per arrow or bar, from one place to another ([Segments](../marks.md#segments)) |
 | `plt.subplots(1, 2, width_ratios=[2, 1])` | `left, right = chart.columns([2, 1])`, then `left.panel("a").line(...)` |
 | `plt.subplot_mosaic([["a", "c"], ["b", "c"]])` | `cells = chart.mosaic([["a", "c"], ["b", "c"]])` |
 | `ax.inset_axes(...)`, `indicate_inset_zoom` | `panel.inset("detail", width=hg.Fraction(0.35), height=hg.Fraction(0.35), indicator=True)` |
@@ -117,8 +118,8 @@ ys}`.
 | `zorder` | Marks draw in the order added |
 
 Unknown options that are common matplotlib names suggest the Herceg
-option. There is no pyplot state, format strings (`"ro--"`), annotation
-arrows, second x scale (`twiny`), formatter callbacks (write an
+option. There is no pyplot state, format strings (`"ro--"`), arrows joining
+text to a point, second x scale (`twiny`), formatter callbacks (write an
 `hg.Format` pattern), or artist and transform API.
 
 ## Where to go next

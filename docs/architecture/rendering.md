@@ -576,13 +576,13 @@ point; a transition's buffers and frame records about 67 a bar, 32 a
 point, and with value labels about 150 a bar, released when the change
 ends (a retarget holds one copy and one transition).
 
-Custom marks (A2's comets, Node) cost more a frame, since each frame runs
-their `draw`: keeping their fields after a scene takes about 0.008 ms for
-300 comets and 0.01 ms for 2,000 on two numeric axes; preparing a change
-0.15 and 0.3 ms; a frame 0.25 and 1.8 ms, a little less than an
-application's own frame takes that writes the values between and builds a
-scene (0.44 and 1.9 ms). Copies hold 8 bytes a row for
-each declared number field and 4 for the key and each category field (40
-bytes a row for A2's comets, 56 on two numeric axes); a transition adds 8
-a row for each moving field and 4 for the row matched, the key, and each
+Custom marks (the marks guide's comets, Node) cost more a frame, since
+each frame runs their `draw`: keeping their fields after a scene takes
+about 0.008 ms for 300 comets and 0.01 ms for 2,000 on two numeric axes;
+preparing a change 0.15 and 0.3 ms; a frame 0.25 and 1.8 ms, a little less
+than an application's own frame takes that writes the values between and
+builds a scene (0.44 and 1.9 ms). Copies hold 8 bytes a row for each
+declared number field and 4 for the key and each category field (40 bytes
+a row for those comets, 56 on two numeric axes); a transition adds 8 a row
+for each moving field and 4 for the row matched, the key, and each
 category field (44 and 60), released when it ends.

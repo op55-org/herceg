@@ -775,7 +775,7 @@ draws has no place.
 | `place.attachment` | Where along a rule or region side: `"start"`, `"center"`, `"end"` (default). |
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
-| `place.offset` | Pixels away from its place; outside the plot, pixels past what stands beside the plot on that side, such as its y axis and title (after a 6 px gap; see [labels that follow series](#labels-that-follow-series)). |
+| `place.offset` | Pixels away from its place; outside the plot, pixels past what stands beside the plot on that side, such as its y axis and title, after a 6 px gap; a negative offset moves them back toward it (see [labels that follow series](#labels-that-follow-series)). |
 | `place.room` | Outside the plot, the pixels a horizontal rule's labels take beside it in place of what they measure (`room: 64`, kept from the first frame), or `{ min, max }` bounds on what they measure (Python `(least, most)`), as [series labels'](#labels-that-follow-series) rooms: box padding and halo inside it, `offset` on top; wider labels are shortened with an ellipsis. Refused on vertical rules' labels (above or below the plot) and regions' (in them), where no track is kept, with `reserve: false`, and inside the plot. |
 | `overlap`, `overlapGroup`, `leader`, `priority` | How it keeps apart from other labels (Python `overlap_group`); see [labels that would overlap](#labels-that-would-overlap). |
 
@@ -911,10 +911,12 @@ hg.Chart(df, legend=False).line(
   plot on their side as drawn: the plot's edge, the y axis' labels there
   (listed axes' too), its title, a grid's row headers, and a legend beside
   a subplot at the layout's side (between subplots, the legend stands
-  past the names). So the names keep their place at every zoom. The chart
-  keeps room for them (unless `reserve: false`); the x axis' first or
-  last tick label may stand under that room rather than narrow the plot
-  (see [labels at the chart's
+  past the names). So the names keep their place at every zoom. A negative
+  offset moves them back toward the plot by that many pixels: `offset: -4`
+  stands them 2 px past what stands beside it, and below −6 they reach over
+  it. The chart keeps room for them (unless `reserve: false`); the x
+  axis' first or last tick label may stand under that room rather than
+  narrow the plot (see [labels at the chart's
   edge](axes-and-legends.md#labels-at-the-charts-edge)). Rules' labels
   outside the plot stand in the same column.
 - **A room of their own.** `place.room` gives the labels' width in their
@@ -1136,7 +1138,7 @@ custom(requests, {
 | `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
 | `items(mark)` | Copies of the items a pie, funnel, treemap, or sunburst drew in the panel, as `getItems` gives them; a custom mark beside it without `x` and `y` draws in pixels by them ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 
-Range glyphs, A2's comets for example, take part as items. Per-row shapes
+Range glyphs, such as comets, take part as items. Per-row shapes
 from one place to another (arrows, dumbbells, tapering comets) are
 [segments](#segments), which draw this one with no `draw` and work in a
 spec and in Python:

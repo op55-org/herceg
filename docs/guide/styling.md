@@ -346,7 +346,7 @@ split above and below. In that box:
   middle (y tick labels, labels above an x axis, titles) has it there.
 - **The baseline**, where letters sit, is about half the font's x-height
   below the middle, about 0.26 em in sans-serif fonts: 10 px text in 12 px
-  lines has its baseline about 8.7 px below the line's top and 3.3 px
+  lines has its baseline about 8.6 px below the line's top and 3.4 px
   above its bottom. PDF puts it 0.35 em below the middle with its standard
   fonts, half the cap height below with an embedded font.
 - **The hanging line**, where capitals and figures begin, is about 0.7 em
@@ -398,12 +398,12 @@ chart.text(
 
 - **Its block.** The label's box (its `background`), halo, and where it
   stays inside the chart are its lines' boxes, the first line's top half a
-  line and half the font's x-height above the baseline: 8.7 px for 10 px
-  text in 12 px lines, 10.6 px for the default 12 px text in 15 px lines.
-  The x-height is measured from the fonts the chart draws with; static
-  output measuring with built-in estimates takes 0.52 em. A box's
-  `padding` stands above that, so the baseline stays at the point with
-  any padding.
+  line and half the font's x-height above the baseline: about 8.6 px for
+  10 px text in 12 px lines, 10.6 px for the default 12 px text in 15 px
+  lines, at an x-height of 0.52 em. The x-height is measured from the
+  fonts the chart draws with; static output measuring with built-in
+  estimates takes 0.52 em. A box's `padding` stands above that, so the
+  baseline stays at the point with any padding.
 - **Keeping apart.** Labels keep apart from other labels as they do with
   the other alignments: by their lines' boxes (a label of parts, by its
   rows'), except a text mark's labels with neither a background nor parts
@@ -427,16 +427,18 @@ chart.text(
   4 px inside a region's edge (outside it, 4 px out), a series label's
   point (along x, 4 px and `offset` past it), and outside the plot, the
   height of the rule or point.
-- **Only marks' labels.** Style roles every text inherits from (`text`,
-  `tickLabel`, `legendLabel`, ...), titles, legends, and tick labels keep
-  `"top"`, `"middle"`, and `"bottom"`, and refuse `"baseline"` in
+- **Only these labels.** Style roles every text inherits from (`text`,
+  `tickLabel`, `legendLabel`, ...), titles, legends, tick labels, and
+  bars' labels keep `"top"`, `"middle"`, and `"bottom"`, and refuse
+  `"baseline"` in
   TypeScript's types, in specs, and in Python: tick labels align at their
   ticks (`guides[1].style.tickLabel.verticalAlign:
   "baseline" places a mark's label by a point; tick labels align "top",
   "middle", or "bottom" at their ticks`), and a theme's text would place
   every text (`theme.style.text.verticalAlign: "baseline" places a mark's
   label by a point; give it in the label's style`). Its type is
-  `LabelStyle`, the style marks' labels take.
+  `LabelStyle`, the style of text marks', rules', regions', and series'
+  labels and of text following series.
 - **Loaded when asked for.** The code that places labels by their
   baseline comes with the feature compiler: a chart with such a label
   draws its first frame once that has loaded (`chart.loading` settles

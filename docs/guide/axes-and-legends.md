@@ -90,11 +90,14 @@ settles then); static output brings it along. A chart asks for more with:
 
 It is about 32 KB of gzipped JavaScript, and about 5 KB more of format
 patterns and markers it shares with the feature compiler, field displays,
-and tooltip fields, where none of those loaded them first. Its code keeps
-about 0.2 MB of heap once a page, and a line chart drawn with it keeps
-about 40 KB more than one without. Where that matters and the data's ends
-are known, give the axis a fixed `domain` rather than `padding: 0`: a set
-domain is drawn as given, without padding, and needs no compiler.
+and tooltip fields, where none of those loaded them first. Its code takes
+0.2 to 0.6 MB of heap once a page, more where charts run more of it. A
+chart drawn with it then keeps only what its guides draw: nothing more for
+`padding` alone, about 15 KB for a listed axis of one layer, and about
+76 KB for an axis of four layers, 41 KB of it its labels' SVG elements
+(Chrome). Where that matters and the data's ends are known, give the axis
+a fixed `domain` rather than `padding: 0`: a set domain is drawn as given,
+without padding, and needs no compiler.
 
 ## Scale options
 
@@ -183,7 +186,7 @@ createChart(element, { x: { domain: ranked }, marks: [bar(brands, { x: "brand", 
 
 | `ticks` (Python `hg.Ticks`) | Ticks |
 | --- | --- |
-| `6`, `{ count: 6 }` | About six round values, fewer where their labels would meet (default: a count from the axis' length). |
+| `6`, `{ count: 6 }` | About six round values, fewer where their labels would meet under `overlap: "show"` ([below](#automatic-ticks-and-their-labels)) (default: a count from the axis' length). |
 | `{ every: 10, anchor?: 5 }` | One every 10 on a number axis, from `anchor` (0). |
 | `{ every: "6 hours" }`, `{ every: { unit, step? } }` | Calendar steps in the chart's `timeZone` (`"day"`, `"2 weeks"`, `"month"`; millisecond to year), at the same places whatever the view: weeks from a Monday, months within the year. |
 | `{ every: { milliseconds: 21600000 }, anchor? }` | Elapsed time, the same length across daylight saving changes (Python: a `timedelta`). |
