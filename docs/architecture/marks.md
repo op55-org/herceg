@@ -394,8 +394,9 @@ their paths, and labels know which observation owns each edge point.
 ## Band axes
 
 A categorical field on a position channel puts the axis on a band scale of
-category indices. The labels are the union of what the marks on that axis
-contribute, in order of appearance. Bands are identified by raw value, so
+category indices. The labels are the categories the axis' `domain` lists,
+in that order, then the union of what the marks on that axis contribute, in
+order of appearance (each mark's in its table's dictionary order). Bands are identified by raw value, so
 values whose formatted labels coincide stay separate. Each row's band index
 is computed once per table version (4 bytes per row). Labels thin to every
 k-th band when neighbors would overlap; the widest label is measured once

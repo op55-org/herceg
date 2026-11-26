@@ -43,6 +43,7 @@ import {
   type ScaledConfig,
   type ScaleName,
   type Scopes,
+  unsuitedDomain,
 } from "./scales.ts";
 import type { ChartStyles } from "./styles.ts";
 
@@ -784,6 +785,12 @@ export interface PanelLayout {
   ): HeaderGuide[];
   /** What to do when the panels do not fit, for the error saying so. */
   readonly remedy: string;
+  /**
+   * The first panel of `split` drawing on `axis`' side, whose settings a
+   * scale every panel shares takes (as `groups` takes a group's); facets'
+   * panels share the chart's, so they leave it out.
+   */
+  firstOn?(axis: PanelAxis, split: PanelSplit): number;
   /** Panel `index`'s `axis` settings: the chart's, with the panel's own. */
   panelAxis(
     axis: PanelAxis,
@@ -969,7 +976,7 @@ export function typedGroups(
     const type =
       banded && unplaced
         ? "band"
-        : instanceType(marks, spec?.type, {
+        : instanceType(marks, spec, {
             scale: axis,
             mixed:
               panelOf && ((numbers, categories) => mixedPanels(numbers, categories, axis, panelOf)),
@@ -1121,6 +1128,12 @@ interface GroupBands {
   places: BandPlaces | undefined;
 }
 
+/** The categories a panel's axis lists (its `domain`), and the path naming that domain ("chart x"). */
+export interface ListedBands {
+  categories: readonly string[];
+  path: string;
+}
+
 /**
  * Categories resolved per panel (a scope other than "chart" on a band
  * axis): each group of panels sharing the axis gets the chart's bands that
@@ -1160,13 +1173,19 @@ export class PanelBands {
     bands: ChartBands,
     scopes: Scopes,
     context: BandContext,
+    listed: (axis: "x" | "y", panel: number) => ListedBands | undefined,
   ): void {
     const axes = (["x", "y"] as const).flatMap((axis) => {
       const chart = bands[axis];
       // The chart's scale is one group but where insets have their own.
       const groupOf = chart && groupsOf(scopes[axis], axis);
       if (chart && groupOf && (scopes[axis] !== "chart" || groupOf.some((g) => g !== 0)))
-        return [{ axis, ...this.#placeAxis(split, groupOf, chart, axis, context) }];
+        return [
+          {
+            axis,
+            ...this.#placeAxis(split, groupOf, chart, axis, context, (p) => listed(axis, p)),
+          },
+        ];
       this.#groups[axis].clear();
       return [];
     });
@@ -1213,7 +1232,9 @@ export class PanelBands {
 
   /**
    * The groups of `split`'s panels along `axis`, each panel's `groupOf`, and
-   * each group's bands from the chart's `chart`; sets the panels' band lists.
+   * each group's bands from the chart's `chart`: those its rows hold, and
+   * the categories its axis' domain lists (`listed`), whether rows hold them
+   * or not. Sets the panels' band lists.
    */
   #placeAxis(
     split: PanelSplit,
@@ -1221,6 +1242,7 @@ export class PanelBands {
     chart: AxisBands,
     axis: "x" | "y",
     context: BandContext,
+    listed: (panel: number) => ListedBands | undefined,
   ): { groupOf: number[]; groups: GroupBands[] } {
     const count = chart.keys.length;
     let index: Map<string, number> | undefined;
@@ -1234,6 +1256,15 @@ export class PanelBands {
     const kept = new Map<string, GroupBands>();
     const groups = panelsOf.map((panels) => {
       const found: number[] = [];
+      // Where the group's axis lists categories, which its bands must all be.
+      let listing: string | undefined;
+      for (const p of panels) {
+        const own = listed(p);
+        if (!own?.categories.length) continue;
+        listing ??= own.path;
+        index ??= new Map(chart.keys.map((key, i) => [key, i]));
+        for (const category of own.categories) found.push(index.get(`c:${category}`)!);
+      }
       for (const p of panels)
         split.panels[p]!.forEach(({ mark, series }, m) => {
           if (split.members?.[p]?.[m] === false || mark.channelKind(axis) !== "category") return;
@@ -1249,6 +1280,8 @@ export class PanelBands {
           for (const s of series)
             for (const band of this.#rowBands(s, axis, count)) found.push(band);
         });
+      if (listing && found.some((band) => !chart.keys[band]!.startsWith("c:")))
+        throw unsuitedDomain(listing, true, true);
       const members = JSON.stringify(panels.map((p) => split.keys[p]));
       const group = this.#group(last.get(members), chart, this.#distinct(found).sort());
       kept.set(members, group);

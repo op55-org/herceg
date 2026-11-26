@@ -42,6 +42,7 @@ import type { CompiledFeatures } from "./features.ts";
 import type { InspectedMark, Inspector, MarkSeries } from "./inspect.ts";
 import type { ChartConfig, ChartModel, RangeSource } from "./model.ts";
 import { overviewBars } from "./navigator-bars.ts";
+import { domainEnds } from "./scales.ts";
 import { unpadded } from "./view-padding.ts";
 
 /** The strip's height when the options give none, in CSS pixels. */
@@ -583,15 +584,16 @@ function railPlan(
     ]),
   );
   if (spec?.zero && !log) data = unionExtent([data, [0, 0]]);
-  let domain = usableDomain(spec?.domain ?? data, type);
-  if (breaks) domain = breaks.showing(domain, spec?.domain !== undefined);
-  let full = plan(narrowest, domain, spec?.domain === undefined ? "fit" : "set");
+  const ends = domainEnds(spec?.domain);
+  let domain = usableDomain(ends ?? data, type);
+  if (breaks) domain = breaks.showing(domain, ends !== undefined);
+  let full = plan(narrowest, domain, ends === undefined ? "fit" : "set");
   // A strip wider than the narrowest plot (under columns of panels) keeps
   // that domain, rounded and padded as the plots have it, with ticks for its
   // own width: planned again for the strip, a shown reset could fall short of it.
   const [d0, d1] = full.scale.domain;
   if (width !== narrowest) full = plan(width, [d0, d1], "drawn", full.within);
-  const labeled = data !== undefined || spec?.domain !== undefined;
+  const labeled = data !== undefined || ends !== undefined;
   const [lo, hi] = ascending(full.scale.domain);
   if (shown[0] >= lo && shown[1] <= hi) return { rail: full, labeled };
   const reach: [number, number] = [Math.min(lo, shown[0]), Math.max(hi, shown[1])];
@@ -740,7 +742,7 @@ function yScale(
     }),
   );
   const zero = (spec?.zero ?? stands) && !log && data;
-  const domain = spec?.domain ?? (zero ? unionExtent([data, [0, 0]]) : data);
+  const domain = domainEnds(spec?.domain) ?? (zero ? unionExtent([data, [0, 0]]) : data);
   const context: AxisContext = { type, spec, zone: x.zone, locale: x.locale };
   return createScale(context, usableDomain(domain, type), [
     strip.y + strip.height - PAD,

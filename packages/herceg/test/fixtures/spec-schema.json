@@ -1208,6 +1208,50 @@
           }
         }
       ]
+    },
+    {
+      "id": "category-domains",
+      "text": "A position scale's domain lists categories on an axis of categories alone, and gives two ends on the others: herceg refuses categories on an axis of numbers or times (marks placing numbers there, a heatmap banding numbers, a 3D chart's z, a scale of the chart's own, which gives its type), two ends on an axis of categories, and subplots listing the same categories in two orders.",
+      "matches": [
+        "domain: the axis shows numbers or times; give its two ends",
+        "domain\\[0\\]: expected a finite number",
+        "domain: the axis shows categories; list them in order",
+        "domain: the axis shows bands of numbers or times; drop domain",
+        "domains list \"\\w+\" before \"\\w+\" and after it"
+      ],
+      "witnesses": [
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2], "g": ["a", "b"] } } },
+          "x": { "domain": ["a"] },
+          "marks": [{ "type": "line", "x": "t", "y": "v" }]
+        },
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2], "g": ["a", "b"] } } },
+          "scales": { "lat": { "type": "linear", "domain": ["a"] } },
+          "marks": [{ "type": "line", "x": "t", "y": "v" }]
+        },
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2], "g": ["a", "b"] } } },
+          "x": { "domain": [0, 1] },
+          "marks": [{ "type": "bar", "x": "g", "y": "v" }]
+        },
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2], "g": ["a", "b"] } } },
+          "x": { "domain": ["a"] },
+          "marks": [{ "type": "heatmap", "x": "t", "y": "g", "color": "v", "xBanded": true }]
+        },
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2], "g": ["a", "b"] } } },
+          "panels": [
+            { "id": "p", "x": { "domain": ["a", "b"] } },
+            { "id": "q", "x": { "domain": ["b", "a"] } }
+          ],
+          "marks": [
+            { "type": "bar", "x": "g", "y": "v", "panel": "p" },
+            { "type": "bar", "x": "g", "y": "v", "panel": "q" }
+          ]
+        }
+      ]
     }
   ],
   "stricter": [
@@ -1382,6 +1426,11 @@
       "id": "seams",
       "reason": "An axis' seams without the breaks they go with.",
       "places": ["chart: x\\.seams(\\..*)?"]
+    },
+    {
+      "id": "own-scale-categories",
+      "reason": "A position scale of the chart's own gives its type, so its domain is two ends: lists of categories order x and y alone.",
+      "places": ["chart: scales\\.\\{\\}\\.domain\\[\\]"]
     }
   ]
 }

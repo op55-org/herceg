@@ -375,8 +375,10 @@ line(rowView(requests, { filter: col("service").eq("api") }), { x: "time", y: "l
   something other than x draws as rows out of x order do.
 - Histograms, box plots, and binned heatmaps aggregate the view's rows.
 - Scales and stacks span the view's rows; category colors and legend
-  entries are the table's, so filtering never recolors a series. Give an
-  axis a `domain` to keep it still as the filter changes.
+  entries are the table's, so filtering never recolors a series, and so
+  is the order of a category axis' bands: a sorted view does not reorder
+  bars ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)).
+  Give an axis a `domain` to keep it still as the filter changes.
 - Facets split a view's rows into their panels (`facet: "repeat"` repeats
   them).
 - The mark's table is the view's table, so row selections and selection
@@ -486,7 +488,11 @@ bar(traffic.table, { x: "service", y: "latency", series: "region" }); // the las
   a derived table's plain sum in the last digits.
 - **Order.** Groups come in the order they first appeared. The view's
   filter and restriction choose rows; its sort orders each group's rows,
-  not the groups.
+  not the groups. A group whose rows all leave (a filter, a rolling
+  window) leaves the tables, and comes back after the others when rows
+  return: give a category axis of groups a `domain` to keep its bars in
+  place ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)),
+  and draw a line of groups through a view sorted by its x.
 - **Typing.** `tableOf(field)` is typed by the fields `by` lists, so a chart
   of the regions' table cannot name `service`.
 

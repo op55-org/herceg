@@ -476,7 +476,6 @@ def test_objects_of_options_refuse_at_their_place_in_the_chart():
 # Fixed-length tuples of objects of options: each is read alike from a list,
 # an array, a Series (by position), and an iterator.
 PAIR_FIELDS = {
-    ("AxisOptions", "domain"): (0.0, 10.0),
     ("Projection", "parallels"): (20.0, 50.0),
     ("Projection", "fit"): ((0.0, 0.0), (10.0, 10.0)),
     ("Break", "hours"): ("16:00", "09:30"),
@@ -496,6 +495,7 @@ LIST_FIELDS: dict[tuple[str, str], list[Any]] = {
     ("Break", "dates"): ["2026-01-06"],
     ("DragGesture", "modifiers"): ["shift"],
     ("LegendTarget", "values"): ["a"],
+    ("AxisOptions", "domain"): [0.0, 10.0],
     ("Scale", "domain"): [0.0, 10.0],
     ("OrdinalScale", "domain"): ["a", "b"],
     ("ChannelScale", "range"): [1.0, 4.0],

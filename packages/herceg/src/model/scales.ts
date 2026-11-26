@@ -44,15 +44,40 @@ export interface InstanceOf {
   mixed?: ((numbers: Mark, categories: Mark) => Error) | undefined;
 }
 
+/** The categories a position `domain` lists, in their bands' order; undefined for two ends, or none. */
+export function listedCategories(domain: AxisSpec["domain"]): readonly string[] | undefined {
+  return typeof domain?.[0] === "string" ? (domain as readonly string[]) : undefined;
+}
+
+/** A position `domain`'s two ends; undefined for none, or for categories. */
+export function domainEnds(domain: AxisSpec["domain"]): readonly [number, number] | undefined {
+  return typeof domain?.[0] === "number" ? (domain as readonly [number, number]) : undefined;
+}
+
+/**
+ * The error for the position domain at `path` ("chart x") not of its axis'
+ * form: categories (`listed`) along an axis of numbers or times, or of
+ * bands of them (`banded`), or two ends along one of categories.
+ */
+export function unsuitedDomain(path: string, listed: boolean, banded = false): Error {
+  const [shows, give] = !listed
+    ? ["categories", "list them in order, or "]
+    : banded
+      ? ["bands of numbers or times", ""]
+      : ["numbers or times", "give its two ends, or "];
+  return new Error(`${path}.domain: the axis shows ${shows}; ${give}drop domain`);
+}
+
 /**
  * The type of one instance of a scale, from the marks its panels draw on it
  * and its `declared` type: a band scale when they place categories along it
  * (then every mark placing a field there must), otherwise the declared
- * type, else time when one places times, else linear.
+ * type, else time when one places times, else linear. A declared domain
+ * must suit it: categories for a band scale, two ends for the others.
  */
 export function instanceType(
   marks: readonly Mark[],
-  declared: AxisSpec["type"],
+  declared: Pick<AxisSpec, "type" | "domain"> | undefined,
   where: InstanceOf,
 ): AxisType {
   const { scale } = where;
@@ -70,12 +95,13 @@ export function instanceType(
         new Error(`${numbers.spec.type} ${channel}: numbers cannot share a category axis`)
       );
     }
-    if (declared)
-      throw new Error(`chart ${scale}.type: the axis shows categories; drop "${declared}"`);
+    if (declared?.type)
+      throw new Error(`chart ${scale}.type: the axis shows categories; drop "${declared.type}"`);
+    if (domainEnds(declared?.domain)) throw unsuitedDomain(`chart ${scale}`, false);
     return "band";
   }
-  if (declared) return declared;
-  return kinds.includes("time") ? "time" : "linear";
+  if (listedCategories(declared?.domain)) throw unsuitedDomain(`chart ${scale}`, true);
+  return declared?.type ?? (kinds.includes("time") ? "time" : "linear");
 }
 
 /**

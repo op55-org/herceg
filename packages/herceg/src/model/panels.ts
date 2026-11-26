@@ -46,7 +46,14 @@ import {
   yAxesOf,
 } from "./panel-layout.ts";
 import { PanelLegends, panelVisibility } from "./panel-legends.ts";
-import { mixedPanels, type ScaledConfig, type ScaleName, type Scopes, scopesOf } from "./scales.ts";
+import {
+  listedCategories,
+  mixedPanels,
+  type ScaledConfig,
+  type ScaleName,
+  type Scopes,
+  scopesOf,
+} from "./scales.ts";
 import { titleText } from "./titles.ts";
 
 /** The `panel` that draws a mark in every panel. */
@@ -108,6 +115,10 @@ export class Panels implements PanelLayout {
   /** The layout as the spec writes it, with every panel's id. */
   readonly layout: LayoutSpec | undefined;
   readonly #compiled: CompiledLayout;
+  /** `listed`'s last order of each axis, with the chart settings and marks it was merged for. */
+  #listed: Partial<
+    Record<"x" | "y", [AxisOptions | undefined, readonly Mark[], readonly string[] | undefined]>
+  > = {};
   /** Where its panels go, scene after scene, in the one chart drawing them (see `forChart`). */
   readonly #cells: Cells;
 
@@ -559,12 +570,21 @@ export class Panels implements PanelLayout {
       return mark && { mark, index: mark.indices?.[0] ?? marks.indexOf(mark), rows: undefined };
     });
     if (items.some(Boolean)) split.items = items;
+    const drawing = base.map(({ mark }) => mark);
     placed.place(
       split,
       (scope, axis) => this.groupsOf(scope, axis),
       bands,
       this.scopes(chart.config),
       context,
+      (axis, p) => {
+        if (!this.#draws(axis, this.list[p]!.id, drawing)) return undefined;
+        const categories = listedCategories(this.panelAxis(axis, p, chart.config[axis])?.domain);
+        const own = this.list[p]?.[axis]?.domain !== undefined;
+        return (
+          categories && { categories, path: own ? `${this.path(p)}.${axis}` : `chart ${axis}` }
+        );
+      },
     );
     return split;
   }
@@ -603,6 +623,84 @@ export class Panels implements PanelLayout {
       const y = plot.y - this.#cells.lift(index) - grid.header / 2;
       return [{ text: fit(title, plot.width), x: at, y, anchor, angle: 0 }];
     });
+  }
+
+  /**
+   * The categories the `domain`s of `axis` list, in one order: the chart's
+   * (`chart`), then those the own axes of panels drawing `axis` add (of
+   * `marks`). The order keeps each list's, taking the category listed first
+   * where the lists leave a choice; lists that order two categories both
+   * ways are refused. Merged once for each `chart` and `marks` given.
+   */
+  listed(
+    axis: "x" | "y",
+    chart: AxisOptions | undefined,
+    marks: readonly Mark[],
+  ): readonly string[] | undefined {
+    const kept = this.#listed[axis];
+    if (kept && kept[0] === chart && kept[1] === marks) return kept[2];
+    const lists = [
+      chart,
+      ...this.declared.map((panel) =>
+        this.#draws(axis, panel.id, marks) ? panel[axis] : undefined,
+      ),
+    ]
+      .map((spec) => listedCategories(spec?.domain))
+      .filter((list) => list !== undefined);
+    let order: readonly string[] | undefined = lists[0];
+    if (lists.length > 1) {
+      // Each category, in order of first appearance, with those listed right
+      // after it and how many distinct ones are listed right before it.
+      const next = new Map<string, Set<string>>();
+      const before = new Map<string, number>();
+      for (const list of lists) {
+        let last: string | undefined;
+        for (const category of new Set(list)) {
+          if (!next.has(category)) {
+            next.set(category, new Set());
+            before.set(category, 0);
+          }
+          const after = last === undefined ? undefined : next.get(last)!;
+          if (after && !after.has(category)) {
+            after.add(category);
+            before.set(category, before.get(category)! + 1);
+          }
+          last = category;
+        }
+      }
+      const merged: string[] = [];
+      const pending = [...next.keys()];
+      while (pending.length > 0) {
+        const at = pending.findIndex((category) => before.get(category) === 0);
+        if (at < 0) {
+          const [first, second] = conflict(pending, next);
+          throw new Error(
+            `panels: the ${axis} domains list ${JSON.stringify(first)} before ${JSON.stringify(second)} and after it; list the categories in one order`,
+          );
+        }
+        const [category] = pending.splice(at, 1) as [string];
+        merged.push(category);
+        for (const after of next.get(category)!) before.set(after, before.get(after)! - 1);
+      }
+      order = merged;
+    }
+    this.#listed[axis] = [chart, marks, order];
+    return order;
+  }
+
+  /**
+   * Whether panel `id` draws `axis` with `marks`: every panel draws x, and
+   * those with marks on the left y (categories are on the left only), as
+   * `#agree` reads them.
+   */
+  #draws(axis: "x" | "y", id: string, marks: readonly Mark[]): boolean {
+    if (axis === "x") return true;
+    return yAxesOf(marks.filter(({ spec }) => spec.panel === id || spec.panel === EVERY_PANEL))
+      .left;
+  }
+
+  firstOn(axis: PanelAxis, split: PanelSplit): number {
+    return groups(new Array<number>(split.panels.length).fill(0), split, axis).first[0]!;
   }
 
   /** The chart's `x`, `y`, or `yRight`, with the panel's own settings in place of its. */
@@ -690,4 +788,20 @@ class PanelKeys extends Set<string> {
   override has(key: string): boolean {
     return this.#in(key);
   }
+}
+
+/**
+ * Two categories of a cycle among `pending`, the categories every one of
+ * which has one of them listed right before it (see `Panels.listed`): the
+ * first is listed right before the second, which the cycle lists before it.
+ */
+function conflict(pending: readonly string[], next: Map<string, Set<string>>): [string, string] {
+  const before = new Map<string, string>();
+  let at = pending[0]!;
+  while (!before.has(at)) {
+    const previous = pending.find((category) => next.get(category)!.has(at))!;
+    before.set(at, previous);
+    at = previous;
+  }
+  return [before.get(at)!, at];
 }

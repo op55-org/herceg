@@ -108,6 +108,7 @@ ys}`.
 | `DateFormatter("%H:%M")`, `StrMethodFormatter("{x:,.2f}")` | `hg.Format(time="%H:%M")`, `hg.Format(number=",.2f")` |
 | `MaxNLocator(prune="both")` | `guides=[hg.axis("x", labels=hg.TickLabels(ends="hide"))]`: end labels crossing the chart's edge are left out with their tick marks, their grid lines kept |
 | `ax.set_xlim(...)` | `hg.Chart(data, x=hg.AxisOptions(domain=(low, high)))`; helpers use `x_axis` |
+| Categories in a set order along an axis | `hg.AxisOptions(domain=["North", "South", "East"])`: each listed category keeps its band, the others follow ([How bands are ordered](../axes-and-legends.md#how-bands-are-ordered)) |
 | `fig.savefig(path)` | `chart.save(path)` |
 | `linewidth`, `linestyle`, `alpha` | `stroke_width`, `dash` (`"-"`, `"--"`, `":"`, `"-."`), `opacity` |
 | `marker`, `markersize` | `symbol`, `radius` (CSS pixels); lines take `markers=True` |

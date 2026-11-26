@@ -179,6 +179,15 @@ decimals ("0.2", "1", "1,000", not "1.0" and "1,000.000"). Axes' `overlap:
 room to the labels either side, past blank ticks, and the navigator's strip
 ticks the labelled ones.
 
+Category axes take their bands' order from `domain`: a list of the
+categories (`x: { domain: ["North", "South", "East", "West"] }`, in specs,
+`scales`, subplots' axes, and 3D charts' axes; Python
+`hg.AxisOptions(domain=[...])`). Every listed category keeps its band
+without rows, so bars of row groups stay in place as a filter empties
+groups and brings them back, and categories it leaves out follow. A list
+on an axis of numbers or times, two ends on an axis of categories (which
+they were ignored on), and a category listed twice are refused.
+
 Points, map points, and 3D points take a CSS color in `color` as lines
 do (`color="tomato"` in Python); a column name there still colors by its
 values. Value animation moves every axis `guides` lists with its scale,

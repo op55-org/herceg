@@ -1218,6 +1218,23 @@ describe("<Chart>", () => {
     expect(seen).toEqual(["First", "Second"]);
   });
 
+  it("orders a category axis' bands by its domain, and by a new one", async () => {
+    const sales = table({ region: ["North", "South", "East"], v: [1, 2, 3] });
+    const { view, chart } = chartRef();
+    const x = shallowRef({ domain: ["East", "Central"] });
+    mount(`<Chart ref="view" :x="x"><Bar :data="sales" x="region" y="v" /></Chart>`, () => ({
+      sales,
+      view,
+      x,
+    }));
+    const categories = () => chart().getPanels()[0]!.x!.categories;
+    expect(categories()).toEqual(["East", "Central", "North", "South"]);
+    x.value = { domain: ["South", "North", "East"] };
+    await nextTick();
+    chart().render();
+    expect(categories()).toEqual(["South", "North", "East"]);
+  });
+
   it("treats options written in another key order as unchanged", async () => {
     const { view, chart } = chartRef();
     const axis = shallowRef({ title: "X", grid: true });

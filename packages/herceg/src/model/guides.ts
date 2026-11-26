@@ -76,7 +76,7 @@ import {
 } from "./legend.ts";
 import type { ChartConfig, PanelPlans } from "./model.ts";
 import type { PanelSplit } from "./panel-layout.ts";
-import type { ScaleName } from "./scales.ts";
+import { type ScaleName, unsuitedDomain } from "./scales.ts";
 import type { ChartStyles } from "./styles.ts";
 
 /**
@@ -150,6 +150,7 @@ export const GUIDE_KIT = {
   domainExtent,
   unionExtent,
   usableDomain,
+  unsuitedDomain,
   niceAxisDomain,
   createScale,
   tickCountOf,

@@ -103,7 +103,7 @@ domain is drawn as given, without padding, and needs no compiler.
 | Option | Means |
 | --- | --- |
 | `type` | `"linear"`, `"log"`, `"time"`. A continuous axis is a time axis when a mark places times on it. |
-| `domain` | Fixed ends. |
+| `domain` | Fixed ends; on a category axis, the categories in their bands' order ([How bands are ordered](#how-bands-are-ordered)). |
 | `nice`, `zero` | Round the ends to ticks; include zero (bars' value axes do by default). |
 | `padding` | Room past the data: automatic for markers and bar labels, a share, or pixels (Python `hg.Pixels`). A set `domain` takes none unless given. Category axes refuse it: their bands keep room of their own, a fifth of a band's step at each end as between bands (none where a heatmap's cells are on the axis), in which the pointer names the outer band ([`pointer.categories`](interaction.md#events)). |
 | `scope` | Which panels share the scale ([Layout](layout.md#sharing-scales)). |
@@ -120,6 +120,64 @@ domain is drawn as given, without padding, and needs no compiler.
 channels read by name, and position scales of a mark's own (see
 [Styling](styling.md#scales-of-categories) and
 [Marks](marks.md#placing-rows-by-pixels-or-fractions)).
+
+### How bands are ordered
+
+A category axis has a band for each category its marks place on it. By
+default the bands follow the first table's category dictionary, where
+categories come in the order they first appear, and other marks'
+categories come after them. Views do not reorder bands: bars over a view
+sorted by value stand in dictionary order, and a filter leaves the
+remaining bars where they were. A table whose rows are written anew can
+change the order: a [groups' table](data.md#row-groups) drops a group a
+filter empties, and adds it back after the others when the filter clears.
+
+`domain` lists the categories in the order their bands take:
+
+```ts
+createChart(element, {
+  x: { domain: ["North", "South", "East", "West"] },
+  marks: [bar(byRegion.table, { x: "region", y: "revenue" })],
+});
+```
+
+```python
+hg.Chart(totals, x=hg.AxisOptions(domain=["North", "South", "East", "West"])).bar(
+    x="region", y="revenue"
+)
+```
+
+- **Every listed category keeps its band**, with rows or without, so bars
+  hold their places as filters come and go.
+- **Categories the list leaves out** follow it, in the order they take
+  without it. None is dropped.
+- **Everything on the axis follows the list**: every mark (bars, points,
+  lines, heatmap cells), what the pointer, tooltips, the keyboard, and
+  clicks read, and static exports. Colors and legend entries keep the
+  dictionary order ([Styling](styling.md#colors-follow-what-series-stand-for)).
+- **Panels.** Facet panels share the chart's order. Panels with scales of
+  their own (`scope`) show the bands their rows hold and every listed one,
+  in the listed order. Subplots' own lists join the chart's in one order
+  that keeps every list's, which each subplot's bands take (a category
+  another subplot lists can fall between two of its own); lists ordering
+  two categories both ways are refused.
+- **3D charts'** category axes take a list too.
+- **Refused:** a list on an axis of numbers or times (and on one where a
+  heatmap bands numbers), and two ends on an axis of categories. Specs
+  (`validateSpec`, Python) also refuse a category listed twice and a list
+  mixing names and numbers; TypeScript's types refuse the mix in code.
+
+Ranked bars list their categories in the order of a view sorted by value,
+and give the chart the new list as the values change
+(`chart.update({ x: { domain: ranked } })`):
+
+```ts
+const byValue = rowView(brands, { sort: [{ field: "value", order: "descending" }] });
+const { indices, length } = byValue.read();
+const positions = indices?.subarray(0, length) ?? Array.from({ length }, (_, i) => i);
+const ranked = Array.from(positions).flatMap((row) => brands.value("brand", row) ?? []);
+createChart(element, { x: { domain: ranked }, marks: [bar(brands, { x: "brand", y: "value" })] });
+```
 
 ## Ticks
 
