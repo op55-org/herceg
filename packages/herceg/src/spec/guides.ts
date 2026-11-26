@@ -12,7 +12,7 @@ import type {
   SymbolName,
 } from "./encoding.ts";
 import type { Place, Side } from "./place.ts";
-import type { Dash, ScaleScope } from "./spec.ts";
+import type { CategoryOrder, Dash, ScaleScope } from "./spec.ts";
 import type { AxisStyles, LegendStyles, TextStyle } from "./style.ts";
 
 /** A calendar unit of time, as time axes step through it in their time zone. */
@@ -304,8 +304,12 @@ export type ScalePadding =
 export interface ScaleSpec {
   /** Inferred from the data when omitted: time fields get "time". */
   type?: "linear" | "log" | "time";
-  /** Fixed domain. Time domains are epoch milliseconds. */
-  domain?: readonly [number, number];
+  /**
+   * Fixed domain: its two ends (epoch milliseconds for times), or for x and
+   * y, the categories of an axis of categories in their bands' order (see
+   * the short forms).
+   */
+  domain?: readonly [number, number] | CategoryOrder;
   /** Extend the domain to round values (see the short forms). */
   nice?: boolean;
   /** Include zero in the domain. */

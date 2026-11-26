@@ -23,6 +23,7 @@ import { type Component, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXPORT_SCENE, type ExportsScene } from "../../herceg/src/render/export-scene.ts";
 import Annotations from "./Annotations.svelte";
+import Bands from "./Bands.svelte";
 import Bound from "./Bound.svelte";
 import Channels from "./Channels.svelte";
 import Dendrograms from "./Dendrograms.svelte";
@@ -189,6 +190,21 @@ describe("<Chart>", () => {
     await frame();
     expect(host.textContent).toContain("renamed");
     expect(host.querySelectorAll('path[stroke="#ff0000"]')).toHaveLength(1);
+  });
+
+  it("orders a category axis' bands by its domain, and by a new one", () => {
+    const props = $state({
+      data: table({ region: ["North", "South", "East"], v: [1, 2, 3] }),
+      order: ["East", "Central"],
+      chart: null as HercegChart | null,
+    });
+    render(Bands, props);
+    const categories = () => props.chart!.getPanels()[0]!.x!.categories;
+    expect(categories()).toEqual(["East", "Central", "North", "South"]);
+    props.order = ["South", "North", "East"];
+    flushSync();
+    props.chart!.render();
+    expect(categories()).toEqual(["South", "North", "East"]);
   });
 
   it("draws OHLC bars, and keeps equal breaks without updating", () => {

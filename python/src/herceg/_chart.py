@@ -164,12 +164,12 @@ from ._guides import (
     guides_spec,
     legend_spec,
     padding_spec,
+    position_domain,
     room_spec,
     scales_spec,
     scope_spec,
     ticks_spec,
 )
-from ._guides import _instant as _domain_end
 from ._interaction import (
     SNAPS,
     Binding,
@@ -538,6 +538,14 @@ _TIME_ONLY = (_TIME_FORMAT - _NUMBER_FORMAT) | {"time", "fiscal"}
 class AxisOptions:
     """Scale and axis options for x or y. Unset options use herceg's defaults.
 
+    ``domain`` fixes the axis' ends, ``(low, high)`` (datetimes on a time
+    axis), or on an axis of categories, the categories in the order their
+    bands take. Each listed category keeps its band whether rows hold it or
+    not, so bars stay in place as filters come and go; categories the list
+    leaves out follow, in the order they take without it::
+
+        hg.Chart(sales, x=hg.AxisOptions(domain=["North", "South", "East", "West"]))
+
     ``breaks``, on a time x axis only, leave out spans of time (see ``Break``)::
 
         hg.AxisOptions(
@@ -583,7 +591,7 @@ class AxisOptions:
     """
 
     type: Literal["linear", "log", "time"] | None = None
-    domain: tuple[float | _dt.datetime, float | _dt.datetime] | None = None
+    domain: tuple[float | _dt.datetime, float | _dt.datetime] | Sequence[str] | None = None
     title: str | Sequence[str | LabelPart] | None = None
     nice: bool | None = None
     zero: bool | None = None
@@ -627,22 +635,13 @@ class AxisOptions:
                 "AxisOptions seams: mark the breaks of a time x axis, and the axis has none; "
                 "give breaks or drop seams"
             )
-        if self.domain is not None and (not listlike(self.domain)):
-            raise ChartError(
-                f"AxisOptions domain: expected a list of its ends or categories; "
-                f"received {shown(self.domain)}"
-            )
         if self.breaks is not None and (not listlike(self.breaks)):
             raise ChartError(
                 f"AxisOptions breaks: expected a list of hg.Break; received {shown(self.breaks)}"
             )
         spec = {
             "type": choice_option(self.type, ("linear", "log", "time"), "AxisOptions type"),
-            "domain": (
-                [_domain_end(v, f"AxisOptions domain[{i}]") for i, v in enumerate(self.domain)]
-                if self.domain is not None
-                else None
-            ),
+            "domain": position_domain(self.domain, "AxisOptions domain", self.type),
             "title": axis_title_spec(self.title, "AxisOptions title"),
             "nice": _flag(self.nice, "AxisOptions nice"),
             "zero": _flag(self.zero, "AxisOptions zero"),

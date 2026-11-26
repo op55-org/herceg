@@ -35,6 +35,7 @@ import {
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
+import { domainEnds, listedCategories, unsuitedDomain } from "../model/scales.ts";
 import { TIME_UNIT_MS } from "../scale/time.ts";
 import type { Batch3D, Batches3D, FaceGeometry, Geometry, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -765,9 +766,11 @@ function planAxis3D(
   if (kind === "category") {
     if (spec?.type !== undefined)
       throw new Error(`chart ${name}.type: the axis shows categories; drop "${spec.type}"`);
-    if (spec?.domain !== undefined)
-      throw new Error(`chart ${name}.domain: the axis shows categories; drop domain`);
+    if (domainEnds(spec?.domain)) throw unsuitedDomain(`chart ${name}`, false);
+    // The categories listed first, in order, then the others as they come.
     const index = new Map<string, number>();
+    for (const c of listedCategories(spec?.domain) ?? [])
+      if (!index.has(c)) index.set(c, index.size);
     for (const d of data)
       for (const c of d.categories ?? []) if (!index.has(c)) index.set(c, index.size);
     const labels = [...index.keys()];
@@ -789,6 +792,8 @@ function planAxis3D(
   const type: AxisType = spec?.type ?? (kind === "time" ? "time" : "linear");
   if (type === "time" && kind === "number" && spec?.type === undefined)
     throw new Error(`chart ${name}.type: a time axis needs time fields`);
+  if (listedCategories(spec?.domain)) throw unsuitedDomain(`chart ${name}`, true);
+  const ends = domainEnds(spec?.domain);
   const context: AxisContext = {
     type,
     spec,
@@ -815,8 +820,8 @@ function planAxis3D(
       `chart ${name}: a 3D chart's axes take a number of ticks and Intl formats; give ticks a number and format Intl options`,
     );
   const count = ticks ?? 5;
-  const domain = spec?.domain
-    ? usableDomain(spec.domain, type)
+  const domain = ends
+    ? usableDomain(ends, type)
     : niceAxisDomain(usableDomain(extent, type), context, count, spec?.nice ?? true);
   const plan = planAxis(context, domain, [-1, 1], count);
   const scale = plan.scale;

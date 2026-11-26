@@ -166,3 +166,8 @@ createChart(element, {
 });
 // @ts-expect-error a room is pixels, or { min, max }
 createChart(element, { legend: { room: "auto" }, marks: [] });
+
+// An axis' domain is its two ends, or the categories in their bands' order.
+createChart(element, { x: { domain: [0, 10] }, y: { domain: ["low", "mid", "high"] }, marks: [] });
+// @ts-expect-error a domain is ends or names, not a mix
+createChart(element, { x: { domain: ["low", 10] }, marks: [] });

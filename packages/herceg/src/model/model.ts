@@ -70,6 +70,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { InsidePlace, Place, Side, SidePlace } from "../spec/place.ts";
 import type {
   AnimationSpec,
+  AxisSpec,
   CameraSpec,
   ChartSpec,
   InteractionSpec,
@@ -139,7 +140,13 @@ import type { PanelGrid, PanelLayout, PanelPlacement, PanelSplit } from "./panel
 import type { Panels } from "./panels.ts";
 import type { Picked } from "./pick.ts";
 import type { RowLink, RowSelection } from "./row-selection.ts";
-import { instanceType, type ScaleName } from "./scales.ts";
+import {
+  domainEnds,
+  instanceType,
+  listedCategories,
+  type ScaleName,
+  unsuitedDomain,
+} from "./scales.ts";
 import { type ChartStyles, chartStyles } from "./styles.ts";
 import { titleText } from "./titles.ts";
 
@@ -1129,14 +1136,14 @@ export class ChartModel {
   }
 
   /**
-   * The type of a scale every panel shares, from its declared type
-   * (`declared`, the chart's by default) and the marks of `among` on its
-   * side: a categorical channel gives a band scale, a time field a time scale.
+   * The type of a scale every panel shares, from its declared type and
+   * domain (`declared`, the chart's by default) and the marks of `among` on
+   * its side: a categorical channel gives a band scale, a time field a time scale.
    */
   #sharedType(
     axis: ScaleName,
     among: readonly Mark[] = this.#marks,
-    declared = this.#config[axis]?.type,
+    declared: Pick<AxisSpec, "type" | "domain"> | undefined = this.#config[axis],
   ): AxisType {
     // The y axes take the marks on their side.
     const marks = among.filter(
@@ -1150,18 +1157,34 @@ export class ChartModel {
     });
   }
 
-  /** Union of the marks' bands by key, keeping the previous list while unchanged. */
+  /**
+   * The categories the axis' domains list (the chart's, or its subplots' in
+   * one order: `Panels.listed`), each with its band, then the union of the
+   * marks' bands by key, keeping the previous list while unchanged.
+   */
   #bandList(axis: "x" | "y", context: BandContext): AxisBands {
     const seen = new Set<string>();
     const labels: string[] = [];
+    const add = (key: string, label: string) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      labels.push(label);
+    };
+    const spec = this.#config[axis];
+    for (const category of this.#config.panels?.listed(axis, spec, this.#marks) ??
+      listedCategories(spec?.domain) ??
+      [])
+      add(`c:${category}`, category);
+    // Bands of numbers or times run in their own order, which no list of
+    // categories sets. Checked here where one scale holds the axis' bands;
+    // panels with scales of their own check theirs (`PanelBands`).
+    const checked = seen.size > 0 && this.#scope(axis) === "chart" && !this.#config.panels?.insets;
     for (const mark of this.#marks) {
       const bands = mark.bands?.(axis, context);
       if (!bands) continue;
-      bands.keys.forEach((key, i) => {
-        if (seen.has(key)) return;
-        seen.add(key);
-        labels.push(bands.labels[i]!);
-      });
+      if (checked && bands.keys.some((key) => !key.startsWith("c:")))
+        throw unsuitedDomain(`chart ${axis}`, true, true);
+      for (let i = 0; i < bands.keys.length; i++) add(bands.keys[i]!, bands.labels[i]!);
     }
     const keys = [...seen];
     // Categories as the displays of the fields on the axis write them, where they agree.
@@ -1670,7 +1693,7 @@ export class ChartModel {
       type: this.#sharedType(
         "x",
         marks.map(({ mark }) => mark),
-        xSpec?.type,
+        xSpec,
       ),
       spec: xSpec,
     });
@@ -1723,12 +1746,13 @@ export class ChartModel {
       if ((spec?.zero ?? xMeasures[h]) && !log) dataX = unionExtent([dataX, [0, 0]]);
       xHas[h] = dataX !== undefined;
       const view = shown?.x ?? this.#viewAs("x", xKeys[h]!, type);
+      const ends = domainEnds(spec?.domain);
       xDomains[h] = usableDomain(
-        view ? oriented(view, spec?.domain, xMarks[h]!, "x") : (spec?.domain ?? dataX),
+        view ? oriented(view, ends, xMarks[h]!, "x") : (ends ?? dataX),
         type,
       );
-      if (breaks) xDomains[h] = breaks.showing(xDomains[h]!, !view && spec?.domain !== undefined);
-      xSources[h] = shown?.x ? "drawn" : view || spec?.domain ? "set" : "fit";
+      if (breaks) xDomains[h] = breaks.showing(xDomains[h]!, !view && ends !== undefined);
+      xSources[h] = shown?.x ? "drawn" : view || ends ? "set" : "fit";
     });
     // What y extents read: marks' series within an x scale's domain or view.
     const part = (among: readonly MarkSeries[], h: number): YPart => {
@@ -1810,13 +1834,17 @@ export class ChartModel {
     const sideY = (right: boolean) => {
       const axis: "y" | "yRight" = right ? "yRight" : "y";
       const scope = this.#scope(axis);
-      // A scale every panel shares has one type, from all their marks;
-      // insets have their own.
+      // A scale every panel shares has one type, from all their marks and
+      // the settings of the first panel drawing on its side, which the
+      // others agree with; insets have their own.
       const shared =
         scope === "chart" && !config.panels?.insets
           ? this.#sharedType(
               axis,
               marks.map(({ mark }) => mark),
+              layout
+                ? layout.panelAxis(axis, layout.firstOn?.(axis, split) ?? 0, config[axis])
+                : config[axis],
             )
           : undefined;
       const groups =
@@ -1899,7 +1927,8 @@ export class ChartModel {
             // A change of view playing draws its own range (only in charts of one panel).
             const playing = (!groups && shown?.[axis]) || undefined;
             const view = playing ?? this.#viewAs(axis, keys[g]!, own);
-            const fixed = view ? oriented(view, spec?.domain, among, "y") : spec?.domain;
+            const ends = domainEnds(spec?.domain);
+            const fixed = view ? oriented(view, ends, among, "y") : ends;
             const source = playing ? "drawn" : fixed ? "set" : "fit";
             // A group shows something when its marks place a value along y,
             // annotations included; the extent of a fixed shared domain is not read.
@@ -2250,8 +2279,9 @@ export class ChartModel {
 
     /** The category y axis of panel `i` over the plot from `y`, `size` tall. */
     const planCategories = (y: number, size: number, i: number): AxisPlan => {
-      // Categories read top to bottom; bands of numbers rise like a numeric axis.
-      const upward = bands.y !== undefined && numericBands(bands.y);
+      // Categories read top to bottom; bands of numbers rise like a numeric
+      // axis. The panel's own bands say which: another's may be categories.
+      const upward = numericBands(bandsOf("y", i));
       const paint = showsY("y", i) ? tickPaint("y", i) : theme.style.tickLabel;
       const plan = planBandAxis(
         bandsOf("y", i),

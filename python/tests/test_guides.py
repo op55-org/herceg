@@ -645,3 +645,34 @@ def test_legends_include_scales_and_marks_and_append_entries_of_your_own():
         hg.Chart(data, legend=twice).line(x="t", y="v").to_spec()
     assert raised.value.path == "legend.entries[1].key"
     assert 'legend.entries[1].key: "a" is the key of another' in str(raised.value)
+
+
+@pytest.mark.contract("axis.bands.order.python")
+def test_a_category_axis_takes_its_bands_order_from_its_domain():
+    sales = {"region": ["North", "South", "East", "West"], "revenue": [1, 2, 3, 4]}
+    listed = ["West", "Central", "North"]
+    chart = hg.Chart(sales, x=hg.AxisOptions(domain=listed)).bar(x="region", y="revenue")
+    assert chart.to_spec()[0]["x"] == {"domain": listed}
+    # Listed first, Central keeping its band without rows, the others after.
+    drawn = re.findall(r">(North|South|East|West|Central)</text>", chart.to_svg())
+    assert drawn == ["West", "Central", "North", "South", "East"]
+    assert hg.Scale(domain=("b", "a"))._spec() == {"domain": ["b", "a"]}
+    refused = {
+        'AxisOptions domain[1]: "a" is listed twice; list each category once': {
+            "domain": ["a", "a"]
+        },
+        "AxisOptions domain[1]: expected a category's name, as the list's first is; received 2": {
+            "domain": ["a", 2]
+        },
+        'AxisOptions domain: lists categories, which order an axis of categories; a "linear" '
+        "axis takes (low, high), such as (0, 100)": {"type": "linear", "domain": ["a"]},
+    }
+    for message, options in refused.items():
+        with pytest.raises(hg.ChartError) as raised:
+            hg.AxisOptions(**options)._spec()
+        assert str(raised.value) == message
+    # Two ends cannot order categories; categories cannot bound numbers.
+    with pytest.raises(hg.ChartError, match=r"x\.domain: the axis shows categories"):
+        hg.Chart(sales, x=hg.AxisOptions(domain=(0, 3))).bar(x="region", y="revenue").to_svg()
+    with pytest.raises(hg.ChartError, match=r"y\.domain: the axis shows numbers or times"):
+        hg.Chart(sales, y=hg.AxisOptions(domain=["a"])).bar(x="region", y="revenue").to_svg()

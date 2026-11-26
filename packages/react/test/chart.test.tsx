@@ -1039,6 +1039,24 @@ describe("<Chart>", () => {
     expect(updates).toBe(0);
   });
 
+  it("orders a category axis' bands by its domain, and by a new one", () => {
+    const sales = table({ region: ["North", "South", "East"], v: [1, 2, 3] });
+    const ref: { current: HercegChart | null } = { current: null };
+    function App({ order }: { order: string[] }) {
+      return (
+        <Chart ref={ref} x={{ domain: order }}>
+          <Bar data={sales} x="region" y="v" />
+        </Chart>
+      );
+    }
+    act(() => root.render(<App order={["East", "Central"]} />));
+    const categories = () => ref.current!.getPanels()[0]!.x!.categories;
+    expect(categories()).toEqual(["East", "Central", "North", "South"]);
+    act(() => root.render(<App order={["South", "North", "East"]} />));
+    ref.current!.render();
+    expect(categories()).toEqual(["South", "North", "East"]);
+  });
+
   it("draws a panel per facet value and keeps equal facets without updating", () => {
     const sales = table({ t: [0, 1, 0, 1], v: [1, 2, 3, 4], region: ["N", "N", "S", "S"] });
     const ref: { current: HercegChart | null } = { current: null };

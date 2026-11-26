@@ -627,12 +627,25 @@ export interface GeometryColumnSpec {
   codes?: number | readonly number[];
 }
 
+/**
+ * The categories of an axis of categories, each once, in the order their
+ * bands take.
+ * @minItems 1
+ * @uniqueItems
+ */
+export type CategoryOrder = readonly string[];
+
 /** Scale and axis options for one position channel. */
 export interface AxisSpec {
   /** Inferred from the data when omitted: time fields get "time". */
   type?: "linear" | "log" | "time";
-  /** Fixed domain. Time domains are epoch milliseconds. */
-  domain?: readonly [number, number];
+  /**
+   * Fixed domain: its two ends (epoch milliseconds on time axes), or on an
+   * axis of categories, the categories in the order their bands take,
+   * each keeping its band whether rows hold it or not; categories the list
+   * leaves out follow, in the order they take without it.
+   */
+  domain?: readonly [number, number] | CategoryOrder;
   /**
    * Extend the domain to round tick values. Default true for y, and for x
    * when it measures horizontal bars.

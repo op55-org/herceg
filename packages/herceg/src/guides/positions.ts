@@ -44,8 +44,18 @@ export function ownScales(
       !["x", "y", "yRight"].includes(name) &&
       TYPES.includes(spec?.type as string) &&
       !("range" in spec!)
-    )
+    ) {
+      // Scales of their own are continuous: their domain is two ends. Specs
+      // are checked so before; options given in code here.
+      const at = path(name);
+      if (typeof (spec as ScaleSpec).domain?.[0] === "string")
+        throw new kit.ChartError({
+          code: "invalid-option",
+          path: `${at}.domain`,
+          message: kit.unsuitedDomain(`chart ${at}`, true).message,
+        });
       own.set(name, spec as ScaleSpec);
+    }
   config.marks.forEach((mark, i) => {
     for (const [at, name, value] of named(mark)) {
       if (!own.has(name))
@@ -86,7 +96,8 @@ export function ownScales(
       const domainOf = (name: string, among: readonly MarkSeries[]): [number, number] => {
         const ctx = contexts.get(name)!;
         const spec = own.get(name)!;
-        if (spec.domain) return kit.usableDomain(spec.domain, ctx.type);
+        if (spec.domain)
+          return kit.usableDomain(spec.domain as readonly [number, number], ctx.type);
         const log = ctx.type === "log";
         // Zero where the settings say, else where marks stand on it (bars).
         let stands = false;

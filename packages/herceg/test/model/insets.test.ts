@@ -558,7 +558,8 @@ describe("insets", () => {
         bar(parent, { x: "k", y: "v", panel: "main" }),
         bar(inner, { x: "k", y: "v", panel: "zoom" }),
       ],
-      panels: zoomed(),
+      // Two ends cannot order categories: the inset takes none.
+      panels: panels(panel({ id: "main", title: "Main" }, [inset({ id: "zoom" })])),
       x: { scope: "chart" },
     });
     const [main, zoom] = model.panels();

@@ -44,7 +44,7 @@ import {
   type ScaleGroups,
   typedGroups,
 } from "./panel-layout.ts";
-import { type ScaledConfig, type Scopes, scopesOf } from "./scales.ts";
+import { listedCategories, type ScaledConfig, type Scopes, scopesOf } from "./scales.ts";
 import { HEADER_GAP, uniformPlacement } from "./uniform-grid.ts";
 
 export interface FacetOptions extends FacetLayoutSpec {
@@ -599,6 +599,10 @@ export class Splitter {
       bands,
       scopes,
       context,
+      (axis) => {
+        const categories = listedCategories(chart.config[axis]?.domain);
+        return categories && { categories, path: `chart ${axis}` };
+      },
     );
     return split;
   }

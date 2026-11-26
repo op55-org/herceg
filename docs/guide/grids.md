@@ -71,7 +71,9 @@ The grid follows its table and view as they change:
 
 - Rows appended below those in view cost nothing to draw.
 - When rows drop out of a rolling window, or sorted rows arrive above the
-  top row, the rows in view stay where they are.
+  top row (groups a cleared filter brings back, too), the rows in view
+  stay where they are. `model.scrollTo({ top: 0 })` goes back to the
+  first row.
 - The focused cell keeps to its row through sorting and streaming, or goes
   to the row taking its place.
 
@@ -635,7 +637,9 @@ chart.on("select", ({ selection, phase }) => {
 
 How they link is the application's choice; nothing filters automatically.
 To highlight rather than filter, bind charts and the grid to one channel
-instead ([Selected rows](interaction.md#selected-rows)).
+instead ([Selected rows](interaction.md#selected-rows)). For several
+panels that filter each other, a grid among them, see
+[Cross-filtering](data.md#cross-filtering).
 
 ## Grouped rows
 

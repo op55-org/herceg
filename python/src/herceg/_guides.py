@@ -107,6 +107,46 @@ def _instant(value: Any, role: str) -> float:
     return float(value)
 
 
+def position_domain(domain: Any, role: str, kind: str | None) -> list[Any] | None:
+    """A position scale's ``domain`` as the spec takes it: its two ends
+    (numbers, or times as epoch milliseconds), or on a scale of no ``type``
+    (``kind``), the categories of an axis of categories in their bands'
+    order, each once."""
+    if domain is None:
+        return None
+    if isinstance(domain, str) or not listlike(domain):
+        raise ChartError(
+            f"{role}: expected (low, high), or the categories in their order; "
+            f"received {shown(domain)}"
+        )
+    values = list(domain)
+    if values and isinstance(values[0], str):
+        if kind is not None:
+            raise ChartError(
+                f"{role}: lists categories, which order an axis of categories; a "
+                f"{shown(kind)} axis takes (low, high), such as (0, 100)"
+            )
+        seen: set[str] = set()
+        for i, value in enumerate(values):
+            if not isinstance(value, str):
+                raise ChartError(
+                    f"{role}[{i}]: expected a category's name, as the list's first is; "
+                    f"received {shown(value)}"
+                )
+            if value in seen:
+                raise ChartError(
+                    f"{role}[{i}]: {shown(value)} is listed twice; list each category once"
+                )
+            seen.add(value)
+        return [str(value) for value in values]
+    if len(values) != 2:
+        raise ChartError(
+            f"{role}: expected (low, high), or the categories in their order; "
+            f"received {shown(domain)}"
+        )
+    return [_instant(value, f"{role}[{i}]") for i, value in enumerate(values)]
+
+
 def _interval(value: Any, role: str) -> Any:
     """A time interval as the spec takes it: calendar steps, or elapsed milliseconds."""
     if isinstance(value, np.timedelta64):
@@ -684,8 +724,10 @@ class Scale:
     radius and outline, bar labels and widths; plain lines none), a share
     of the domain at each end (``0.05``), ``hg.Pixels(n)`` at each end, or
     ``0`` for none. Padding given also widens a ``domain`` set and a zoomed
-    view; ``"auto"`` leaves those exact. Scales of categories are
-    ``hg.OrdinalScale``."""
+    view; ``"auto"`` leaves those exact. ``domain`` is the scale's ends,
+    ``(low, high)``, or for ``"x"`` and ``"y"`` over categories, the
+    categories in their bands' order (see ``hg.AxisOptions``). Scales of
+    categories are ``hg.OrdinalScale``."""
 
     type: Literal["linear", "log", "time"] | None = None
     domain: Sequence[Any] | None = None
@@ -700,23 +742,15 @@ class Scale:
             _choice(self.type, ("linear", "log", "time"), "Scale type")
         padding_spec(self.padding, "Scale padding")
         scope_spec(self.scope, "Scale scope")
-        if self.domain is not None and (not listlike(self.domain) or len(self.domain) != 2):
-            raise ChartError(
-                f"Scale domain: a position scale's domain is (low, high); received "
-                f"{shown(self.domain)}"
-            )
         for name in ("nice", "zero"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, bool):
                 raise ChartError(f"Scale {name}: expected True or False; received {shown(value)}")
 
     def _spec(self) -> dict[str, Any]:
-        domain = self.domain
         spec = {
             "type": self.type,
-            "domain": [_instant(v, f"Scale domain[{i}]") for i, v in enumerate(domain)]
-            if domain is not None
-            else None,
+            "domain": position_domain(self.domain, "Scale domain", self.type),
             "nice": self.nice,
             "zero": self.zero,
             "scope": scope_spec(self.scope, "Scale scope"),

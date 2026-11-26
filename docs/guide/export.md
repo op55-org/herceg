@@ -414,6 +414,7 @@ listed in the schema's own description too:
 - Number patterns (",.2f") and time intervals ("6 hours") are written as herceg reads them; a break's dates ("YYYY-MM-DD") are days of the calendar, "24:00" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).
 - Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.
 - Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, an axis' room holds its tick marks, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.
+- A position scale's domain lists categories on an axis of categories alone, and gives two ends on the others: herceg refuses categories on an axis of numbers or times (marks placing numbers there, a heatmap banding numbers, a 3D chart's z, a scale of the chart's own, which gives its type), two ends on an axis of categories, and subplots listing the same categories in two orders.
 
 The schema is stricter than `validateSpec` in five places, where it
 refuses what the engine takes:

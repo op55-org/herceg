@@ -1205,6 +1205,10 @@ and Shift-drags still zoom and pan). Marks over tables without a binding
 neither write nor dim. To start with a selection, set the store's channel
 before drawing: `store.set("focus", selectWhere(col("fare").gt(20)))`.
 
+Binding highlights rows in place. To have a selection filter the other
+panels instead, so that they show only the selected rows and sum only
+them, see [Cross-filtering](data.md#cross-filtering).
+
 ### What gestures select
 
 - **Brushes** write a condition on the marks' fields, so rows appended

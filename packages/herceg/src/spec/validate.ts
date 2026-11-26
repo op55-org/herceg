@@ -814,14 +814,27 @@ function format(type: unknown): Check {
   };
 }
 
+/**
+ * A position scale's `domain`: its two ends, or on a scale of no `type`
+ * (an axis of categories), its categories in their bands' order, each once.
+ */
+function positionDomain(type: unknown): Check {
+  return (d, p) => {
+    if (type === undefined && Array.isArray(d) && typeof d[0] === "string") {
+      strings(d, p);
+      if (new Set(d).size !== d.length) fail(p, "each category once", d);
+      return;
+    }
+    numbers(d, p);
+    if ((d as unknown[]).length !== 2) fail(p, "two numbers, or categories in their order", d);
+  };
+}
+
 /** The checks of an axis' options. */
 function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
   return {
     type: oneOf("linear", "log", "time"),
-    domain: (d, p) => {
-      numbers(d, p);
-      if ((d as unknown[]).length !== 2) fail(p, "two numbers", d);
-    },
+    domain: positionDomain(spec.type),
     nice: boolean,
     zero: boolean,
     title: axisTitle,
@@ -1963,10 +1976,7 @@ const scaleSettings: Check = (v, path) => {
   const spec = v as Record<string, unknown>;
   properties(spec, path, {
     type: oneOf("linear", "log", "time"),
-    domain: (d, p) => {
-      numbers(d, p);
-      if ((d as unknown[]).length !== 2) fail(p, "two numbers", d);
-    },
+    domain: positionDomain(spec.type),
     nice: boolean,
     zero: boolean,
     scope,
