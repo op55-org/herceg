@@ -78,20 +78,50 @@ def _choice(value: Any, choices: Sequence[str], role: str) -> None:
         raise ChartError(f"{role}: expected {listed(choices)}; received {shown(value)}")
 
 
-def vertical_align_problem(value: Any, keys: tuple[str, ...]) -> tuple[str, str] | None:
-    """Where a text style given as a dict, under the option ``value`` (its
-    name and its keys so far in ``keys``), has a ``vertical_align`` that is
-    none, as the engine's validator finds it before it is refused: the place
-    under the option (``.style.vertical_align``) and what it expected. Dicts,
-    lists, and options classes' fields are looked into, a style's own or a
-    role's of one (``style.tick_label``), never a ``map``'s categories."""
+_ALIGNS = ("top", "middle", "bottom")
+#: The roles of text every text inherits from, in Python's spelling and the spec's.
+_TEXT_ROLES = frozenset(
+    ("text", "title", "panel_title", "axis_title", "tick_label", "legend_label", "legend_title")
+    + ("panelTitle", "axisTitle", "tickLabel", "legendLabel", "legendTitle")
+)
+
+
+def _align_problem(align: Any, keys: tuple[str, ...], label: bool) -> str | None:
+    """What is wrong with a text style's ``vertical_align`` at ``keys``: a
+    mark's label's style (``label``) takes "baseline" too; a role of text
+    every text inherits from, and tick labels, refuse it with where it goes."""
+    if align is None or align in _ALIGNS or (label and align == "baseline"):
+        return None
+    if align == "baseline" and keys[-2:-1] == ("style",) and keys[-1] in _TEXT_ROLES:
+        where = (
+            'tick labels align "top", "middle", or "bottom" at their ticks'
+            if keys[-1] in ("tick_label", "tickLabel")
+            else "give it in the label's style"
+        )
+        return f'"baseline" places a mark\'s label by a point; {where}'
+    aligns = (*_ALIGNS, "baseline") if label else _ALIGNS
+    return f"expected {listed(aligns)}; received {shown(align)}"
+
+
+def vertical_align_problem(
+    value: Any, keys: tuple[str, ...], label: tuple[str, ...] | None = None
+) -> tuple[str, str] | None:
+    """Where a text style under the option ``value`` (its name and its keys
+    so far in ``keys``) has a ``vertical_align`` the engine's validator
+    refuses there: the place under the option (``.style.vertical_align``)
+    and what is wrong. ``label`` is the keys of the style placing a mark's
+    label (``("label", "style")`` for text), which takes "baseline"; every
+    other style refuses it, an ``hg.TextStyle`` too. Dicts, lists, and
+    options classes' fields are looked into, a style's own or a role's of
+    one (``style.tick_label``), never a ``map``'s categories."""
+    if "style" in keys[-2:] and isinstance(value, (Mapping, TextStyle)):
+        own = keys == label
+        for key in ("vertical_align", "verticalAlign"):
+            align = value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
+            wrong = _align_problem(align, keys, own)
+            if wrong:
+                return f".{key}", wrong
     if isinstance(value, Mapping):
-        if "style" in keys[-2:]:
-            for key in ("vertical_align", "verticalAlign"):
-                if value.get(key) not in (None, "top", "middle", "bottom"):
-                    return f".{key}", (
-                        f'expected "top", "middle", or "bottom"; received {shown(value[key])}'
-                    )
         items: list[tuple[str, Any]] = [
             (str(key), item) for key, item in value.items() if key != "map"
         ]
@@ -99,14 +129,14 @@ def vertical_align_problem(value: Any, keys: tuple[str, ...]) -> tuple[str, str]
         items = [(f.name, getattr(value, f.name)) for f in fields(value) if f.name != "map"]
     elif isinstance(value, (list, tuple)):
         for i, item in enumerate(value):
-            problem = vertical_align_problem(item, keys)
+            problem = vertical_align_problem(item, keys, label)
             if problem:
                 return f"[{i}]{problem[0]}", problem[1]
         return None
     else:
         return None
     for key, item in items:
-        problem = vertical_align_problem(item, (*keys, key))
+        problem = vertical_align_problem(item, (*keys, key), label)
         if problem:
             return f".{key}{problem[0]}", problem[1]
     return None
@@ -274,7 +304,10 @@ class TextStyle:
     series, flat tick labels along x) that side of its block there; and
     ``vertical_align`` puts the block of its lines' ``"top"``, ``"middle"``,
     or ``"bottom"`` at its place (the same texts, and flat tick labels along
-    y at their ticks; titles and legends fill rows of their own);
+    y at their ticks; titles and legends fill rows of their own), and for a
+    mark's label (text marks', rules', regions', and series'), ``"baseline"``
+    its first line's alphabetic baseline, later lines ``line_height`` below
+    (styles of themes, axes, titles, and legends refuse it);
     ``halo`` is ``"auto"``, ``False``, or an ``hg.Halo``; ``background`` an
     ``hg.TextBox`` (or ``False``) with ``padding`` around the text in pixels.
     """
@@ -287,7 +320,7 @@ class TextStyle:
     opacity: float | None = None
     line_height: float | None = None
     align: Align | None = None
-    vertical_align: Literal["top", "middle", "bottom"] | None = None
+    vertical_align: Literal["top", "middle", "bottom", "baseline"] | None = None
     halo: HaloOption | None = None
     background: TextBox | Literal[False] | Mapping[str, Any] | None = None
     padding: float | Insets | None = None
@@ -317,7 +350,11 @@ class TextStyle:
         if self.align is not None:
             _choice(self.align, ("start", "center", "end"), "TextStyle align")
         if self.vertical_align is not None:
-            _choice(self.vertical_align, ("top", "middle", "bottom"), "TextStyle vertical_align")
+            _choice(
+                self.vertical_align,
+                ("top", "middle", "bottom", "baseline"),
+                "TextStyle vertical_align",
+            )
         if self.halo not in (None, "auto", False):
             self.halo = _built(self.halo, Halo, "TextStyle halo")
         if self.background is not None and self.background is not False:

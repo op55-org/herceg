@@ -27,7 +27,7 @@ import type {
 import type { FormatSpec } from "../spec/guides.ts";
 import type { Frame } from "../spec/place.ts";
 import type { Dash } from "../spec/spec.ts";
-import type { TextStyle } from "../spec/style.ts";
+import type { LabelStyle, TextStyle } from "../spec/style.ts";
 
 /**
  * The option of marks whose items are rows (lines' and points'
@@ -186,7 +186,7 @@ export interface SeriesLabels<S extends Schema> extends Omit<LabelLayoutSpec, "o
   at: LabelAt;
   content?: readonly LabelPartOf<keyof S & string>[];
   place?: TrackLabelPlaceSpec;
-  style?: TextStyle;
+  style?: LabelStyle;
 }
 
 /** Labels following each series of an area: along `edge` for a band's (see `AreaLabelsSpec`). */

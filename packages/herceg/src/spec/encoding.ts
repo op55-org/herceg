@@ -9,7 +9,7 @@ import type { Expression } from "../data/expression.ts";
 import type { FormatSpec, Room } from "./guides.ts";
 import type { Side } from "./place.ts";
 import type { Dash, Field } from "./spec.ts";
-import type { PaintStyle, StrokeStyle, TextStyle } from "./style.ts";
+import type { LabelStyle, PaintStyle, StrokeStyle, TextStyle } from "./style.ts";
 
 /**
  * A point's shape. Every shape covers the area of a circle of the same
@@ -391,7 +391,7 @@ export type LabelTextSpec = (
   | { content: LabelContent; text?: never; field?: never; format?: never }
 ) & {
   format?: FormatSpec;
-  style?: TextStyle;
+  style?: LabelStyle;
 };
 
 /**
@@ -467,7 +467,7 @@ export interface SeriesLabelsSpec extends Omit<LabelLayoutSpec, "overlapGroup"> 
   at: LabelAt;
   content?: LabelContent;
   place?: TrackLabelPlaceSpec;
-  style?: TextStyle;
+  style?: LabelStyle;
 }
 
 /**

@@ -15,7 +15,7 @@ import {
 } from "../layout/text.ts";
 import type { LabelsGeometry, Rect, TextGeometry, TextItem } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";
-import type { Halo, TextStyle } from "../spec/style.ts";
+import type { Halo, LabelStyle } from "../spec/style.ts";
 import { type ResolvedHalo, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import type { PartText } from "./features/part-text.ts";
@@ -28,18 +28,21 @@ import type { Frame } from "./mark.ts";
 export function labelPaint(
   theme: Theme,
   color: string,
-  style: Frozen<TextStyle> | undefined,
+  style: Frozen<LabelStyle> | undefined,
 ): TextPaint {
   const paint = textPaint([
     theme.roles.text,
     { color },
-    style as TextStyle | undefined,
+    style as LabelStyle | undefined,
     { halo: false },
   ]);
   return { ...paint, lineRatio: style?.lineHeight ?? theme.roles.text.lineHeight };
 }
 
-/** Whether a paint is the theme's plain text: drawn as text marks draw their labels. */
+/**
+ * Whether a paint is the theme's plain text: drawn as text marks draw their
+ * labels, by their middles (text placed by its baseline is drawn by it).
+ */
 export function plainText(paint: TextPaint, theme: Theme): boolean {
   return (
     paint.font === theme.font &&
@@ -48,13 +51,15 @@ export function plainText(paint: TextPaint, theme: Theme): boolean {
     !paint.italic &&
     paint.opacity === 1 &&
     paint.lineHeight === theme.style.text.lineHeight &&
-    !paint.background
+    !paint.background &&
+    paint.verticalAlign !== "baseline"
   );
 }
 
 /**
  * A label to draw: its text and where its anchor is, with its anchor and
- * baseline. A label of several lines is placed by its first line, the
+ * baseline (and for an alphabetic one, how far its first line's box reaches
+ * above it). A label of several lines is placed by its first line, the
  * others following a line height apart.
  */
 export interface PlacedLabel {
@@ -63,6 +68,7 @@ export interface PlacedLabel {
   y: number;
   anchor: "start" | "middle" | "end";
   baseline: TextAt["baseline"];
+  above?: number | undefined;
   /** The box behind it, where placed with it (see `anchorBlock`); else padded about the text. */
   box?: Rect | undefined;
   /** Its text in parts of their own looks, drawn in its box (`labelBox`) rather than from its point. */
@@ -140,12 +146,11 @@ export function labelsGeometry(
   const under = frame.surface ?? surface(frame.theme);
   const items: TextItem[] = [];
   labels.forEach((label, k) => {
-    const { text, x, y, anchor, baseline, box, parts } = label;
+    const { text, box, parts } = label;
     let made: TextItem[];
-    if (parts) made = parts.items(labelBox(label, paint, measure), anchor, paint, ring);
+    if (parts) made = parts.items(labelBox(label, paint, measure), label.anchor, paint, ring);
     else {
-      const at: TextAt = { x, y, anchor, baseline, angle: 0 };
-      const item = textItem(text, at, paint, under, measure, box);
+      const item = textItem(text, { ...label, angle: 0 }, paint, under, measure, box);
       made = [ring ? { ...item, halo: ring } : item];
     }
     for (const item of made) {

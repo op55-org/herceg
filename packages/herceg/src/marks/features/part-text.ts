@@ -25,6 +25,11 @@ export interface PartText {
    */
   readonly size: number;
   /**
+   * How far below its lines' top its first row's alphabetic baseline is,
+   * which `verticalAlign: "baseline"` puts at the label's point.
+   */
+  readonly baseline: number;
+  /**
    * Its block's box with its middle at `y` and its `anchor` side (or
    * middle) at `x`, padded by `paint`'s padding where it has a box.
    */
@@ -167,6 +172,7 @@ function set(
     },
     size:
       rows.reduce((sum, { height }) => sum + height, 0) - rows.at(-1)!.height + rows.at(-1)!.size,
+    baseline: rows[0]!.height / 2 + rows[0]!.size * DROP,
     box(x, y, anchor, label) {
       const [top, right, bottom, left] = label.background ? label.padding : [0, 0, 0, 0];
       const width = Math.max(...widths) + left + right;

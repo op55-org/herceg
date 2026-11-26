@@ -21,7 +21,7 @@ import type {
 } from "../../spec/encoding.ts";
 import type { Room } from "../../spec/guides.ts";
 import type { AreaSpec } from "../../spec/spec.ts";
-import type { TextStyle } from "../../spec/style.ts";
+import type { LabelStyle } from "../../spec/style.ts";
 import type { Frame, Mark } from "../mark.ts";
 import type { Series } from "../series.ts";
 import { type Anchor, anchorOf, type DrawnEdge } from "./attach.ts";
@@ -132,9 +132,9 @@ export interface Following {
   /** The edge followed: a line's, an area's value edge, or one of a band's (`lower`, its first field's). */
   readonly edge: "upper" | "lower";
   readonly content: ContentWriter;
-  readonly style: TextStyle | undefined;
+  readonly style: LabelStyle | undefined;
   /** The halo of the mark the labels are text of, under their style's. */
-  readonly halo?: TextStyle["halo"];
+  readonly halo?: LabelStyle["halo"];
   readonly place: TrackLabelPlaceSpec | undefined;
   /** The bounds `place.room` gives, checked (`checkPlace`). */
   readonly room?: Bounds | undefined;

@@ -4,7 +4,7 @@
 // Resolving a role's levels gives a paint: plain values renderers read,
 // made once per configuration and shared by every element of the role.
 
-import type { Halo, Insets, PlotStyle, StrokeStyle, TextBox, TextStyle } from "../spec/style.ts";
+import type { Halo, Insets, LabelStyle, PlotStyle, StrokeStyle, TextBox } from "../spec/style.ts";
 import { dashPattern } from "./dash.ts";
 
 /** Text as resolved: what layout measures and renderers draw with. */
@@ -26,7 +26,8 @@ export interface TextPaint {
   readonly lineRatio?: number | undefined;
   /** Undefined: the text's own natural alignment, along its lines and across them. */
   readonly align: "start" | "center" | "end" | undefined;
-  readonly verticalAlign: "top" | "middle" | "bottom" | undefined;
+  /** "baseline" only for marks' labels (`LabelStyle`). */
+  readonly verticalAlign: LabelStyle["verticalAlign"];
   /** Resolved against the surface under the text where it is drawn (see `haloOf`). */
   readonly halo: Halo;
   readonly background: TextBox | undefined;
@@ -98,7 +99,7 @@ export function cssFont(font: string, size: number, weight = 400, italic = false
  * A text role's paint from its levels, the first of which (the theme's
  * base text) gives every property.
  */
-export function textPaint(levels: Levels<TextStyle>): TextPaint {
+export function textPaint(levels: Levels<LabelStyle>): TextPaint {
   const style = cascade(levels);
   const font = style.font ?? "sans-serif";
   const size = style.fontSize ?? 12;

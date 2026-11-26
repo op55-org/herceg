@@ -29,6 +29,7 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { LabelsGeometry, Scene, TextGeometry, TextItem } from "../../src/scene/scene.ts";
 import type { BarLabelsSpec } from "../../src/spec/spec.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 vi.mock("../../src/dom/scheduler.ts", () => ({
   frameCount: () => 0,
@@ -1037,6 +1038,39 @@ describe("text labels of parts in a value transition's frames", () => {
       expect(middle(tween.scene)).toBeCloseTo(before, 6);
       // Its lines the new scene's at once, its middle where it stands at both ends.
       for (const ms of [10, 100, 190]) expect(middle(frameAt(tween, ms))).toBeCloseTo(before, 6);
+    }
+  });
+
+  contractTest("label.baseline.frames", () => {
+    // A label placed by its baseline counts on it: written again in each
+    // frame, its first line's baseline stays at its point, its box (and a
+    // label of parts' first row) where the baseline puts it.
+    const rows = (v: number[]) => ({ id: category(["a"]), x: [5], y: [5], v });
+    const labels = [
+      { field: "v", style: { verticalAlign: "baseline" } },
+      {
+        field: "v",
+        style: { verticalAlign: "baseline", background: { fill: "#eeeeee" }, padding: { top: 5 } },
+      },
+      {
+        content: [{ field: "v", style: { fontSize: 20 } }, "\nunits"],
+        style: { verticalAlign: "baseline", halo: false },
+      },
+    ];
+    for (const label of labels) {
+      const { spy, seen } = spying();
+      const { data, model } = notes(rows([1_000]), label);
+      const first = (scene: Scene) => labelItems(scene).get("a")![0]!;
+      const before = first(model.scene(spy));
+      expect(before.baseline).toBe("alphabetic");
+      const { tween } = change(model, () => data.reset(rows([3_000]) as never), spy, seen);
+      // Frames place labels in float32.
+      for (const ms of [10, 100, 190]) {
+        const item = first(frameAt(tween, ms));
+        expect(item.baseline).toBe("alphabetic");
+        expect(item.y).toBeCloseTo(before.y, 4);
+        if (before.box) expect(item.box!.y).toBeCloseTo(before.box.y, 4);
+      }
     }
   });
 

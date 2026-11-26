@@ -15,6 +15,7 @@ import type { TimeZone } from "../format/zone.ts";
 import type { Bounds } from "../guides/axes.ts";
 import type { GuideFields } from "../guides/fields.ts";
 import type { AttachedLabel } from "../layout/attached.ts";
+import type { baseline } from "../layout/baseline.ts";
 import type { PanelDrawing } from "../layout/placer.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -268,6 +269,12 @@ export interface MarkFeatures {
         ): [string, PartText | undefined] | undefined;
       }
     | undefined;
+  /**
+   * For rules', regions', and text marks' labels whose style places them by
+   * their first line's baseline: how labels in a paint are placed so
+   * (layout/baseline.ts), the font read once for the paint.
+   */
+  readonly baseline?: typeof baseline | undefined;
   /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
   readonly content?: ContentWriter | undefined;
   /** For rules and regions at a field's thresholds: the steps the chart's displays give it. */

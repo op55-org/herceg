@@ -2,7 +2,8 @@ import type { CategoryField, PositionField, Schema, Table } from "../data/table.
 import { labelHalo } from "../draw/label-halo.ts";
 import { ruleDrawing } from "../draw/rule.ts";
 import { type Formatter, lazyFormat } from "../format/format.ts";
-import { anchorBlock } from "../layout/block.ts";
+import type { Baseline } from "../layout/baseline.ts";
+import { anchorBlock, type BlockAnchor } from "../layout/block.ts";
 import {
   type LabelledMark,
   type LabelPlacement,
@@ -24,7 +25,7 @@ import type {
   RulePosition,
   RuleSpec,
 } from "../spec/spec.ts";
-import type { TextStyle } from "../spec/style.ts";
+import type { LabelStyle } from "../spec/style.ts";
 import { dashPattern } from "../style/dash.ts";
 import { cssFont, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
@@ -79,7 +80,7 @@ export type RuleLabel<
     ) &
       Layout & {
         format?: RuleLabelSpec["format"];
-        style?: TextStyle;
+        style?: LabelStyle;
         place?: Place;
       });
 
@@ -268,12 +269,13 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         layout.group === undefined);
     const vertical = spec.x !== undefined;
     const place = label?.place;
-    // A room the feature compiler checks, and fits labels to.
+    // A room the feature compiler checks, and fits labels to; labels it places by their baseline.
     this.featured =
       lazyFormat(label?.format) ||
       label?.content !== undefined ||
       !!stepped ||
-      place?.room !== undefined;
+      place?.room !== undefined ||
+      label?.style?.verticalAlign === "baseline";
     if (vertical && place?.room !== undefined)
       throw new Error(`rule label.place.room: ${VERTICAL_ROOM}`);
     if (place?.outside && place.attachment === "center")
@@ -634,6 +636,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
     const fits = (room?.bounds.max ?? Number.POSITIVE_INFINITY) - left - right - reach;
     const vertical = this.spec.x !== undefined;
+    // Placed by their baseline as the feature compiler places them, the font read once.
+    const baseline = frame.features?.of(this)?.baseline?.(paint, frame);
     const out: ApartLabel[] = [];
     for (const apart of drawn) {
       const { row, rule, bounds } = apart;
@@ -643,7 +647,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
           : [apart.text, apart.parts];
       if (!fitted) continue;
       const [text, parts] = fitted;
-      const at = this.#place(text, rule, frame, paint, parts);
+      const at = this.#place(text, rule, frame, paint, parts, baseline);
       // Measured either way, so a placer sees what each label covers; one
       // outside the plot keeps its one place, beside the axis' labels.
       const box = grown(labelBox(at, paint, frame.measure), reach);
@@ -753,7 +757,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
    * the rule or plot it is beside, and is centered where it is centered.
    * A style's verticalAlign puts the block's top, middle, or bottom, box
    * and all, at the place instead: a horizontal rule's label below it, on
-   * it, or above it. A label of `parts` is placed as a block too.
+   * it, or above it; "baseline" puts its first line's baseline where the
+   * label's natural edge would be (above a horizontal rule, beside it
+   * outside the plot), as `baseline` places it. A label of `parts` is
+   * placed as a block too.
    */
   #place(
     text: string,
@@ -761,6 +768,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     frame: Frame,
     paint: TextPaint,
     parts: PartText | undefined,
+    baseline: Baseline | undefined,
   ): PlacedLabel {
     const place: Frozen<TrackLabelPlaceSpec> = this.#data.label?.place ?? {};
     const vertical = this.spec.x !== undefined;
@@ -784,18 +792,24 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
           natural === "top" ? size / 2 : natural === "middle" ? -rest / 2 : -size / 2 - rest;
         return { text, x, y: y + dy, anchor, baseline: "middle" };
       }
-      const { at, box } = anchorBlock(
-        parts?.lines ?? textLines(text, paint, frame.measure),
-        {
-          x,
-          y,
-          align: anchor === "middle" ? "center" : anchor,
-          verticalAlign: verticalAlign ?? natural,
-          angle: 0,
-        },
-        paint,
-      );
-      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box, parts };
+      const lines = parts?.lines ?? textLines(text, paint, frame.measure);
+      const align = anchor === "middle" ? "center" : anchor;
+      // By its baseline as the feature compiler places it (`baseline` is
+      // there exactly when the style says "baseline"); else by a side.
+      const { at, box } = baseline
+        ? baseline.block(lines, { x, y, align }, parts)
+        : anchorBlock(
+            lines,
+            {
+              x,
+              y,
+              align,
+              verticalAlign: (verticalAlign ?? natural) as BlockAnchor["verticalAlign"],
+              angle: 0,
+            },
+            paint,
+          );
+      return { ...at, text, box, parts };
     };
     if (vertical) {
       const x = rule.x1;

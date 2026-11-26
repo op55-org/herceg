@@ -585,6 +585,23 @@ styles](docs/guide/styling.md#role-styles) and
   Changed: a label inside the plot whose line is a literal "…" wider than
   the plot is left out, as lines shortened to the ellipsis are. See
   [Labels that follow series](docs/guide/marks.md#labels-that-follow-series).
+- **Marks' labels placed by their baseline**: `verticalAlign: "baseline"`
+  (Python `vertical_align="baseline"`) on text marks', rules', regions',
+  and series' labels, text following series included, puts the first
+  line's alphabetic baseline at the label's point, later lines a line
+  height below, drawn exactly there in SVG, on canvases, in PDF, and in
+  static output; a label of parts puts its first row's there. Its box,
+  halo, staying inside the chart, and leaders are its block's, the first
+  line's box half a line and half the font's x-height above the baseline
+  (as the page's fonts measure "x"; 0.52 em in static output without
+  them), so a reference's baselines are em offsets with nothing measured.
+  It keeps apart from other labels as the other alignments do. Its type is `LabelStyle`, the style marks' labels
+  take: style roles (`text`, `tickLabel`, ...), titles, legends, and tick
+  labels keep `TextStyle`'s three alignments, so nothing inherits it, and
+  refuse it in TypeScript's types, in specs, and in Python
+  (`theme.style.text.verticalAlign: "baseline" places a mark's label by a
+  point; give it in the label's style`). See [Where text sits in its
+  line](docs/guide/styling.md#where-text-sits-in-its-line).
 - **The pointer names the nearest band on category axes.**
   `pointer.categories` (Python `hg.Pointer.categories`) names the first or
   last band in the room a band axis keeps beside them, and the nearer band

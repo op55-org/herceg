@@ -307,12 +307,19 @@ export function textLines(text: string, paint: TextPaint, measure: MeasureText):
 /**
  * The box of `lines` drawn at `at` (unturned), padded by the paint's
  * padding: as wide as the widest line, each line its line height tall,
- * stacked down from the first, whose middle (or top, "hanging") is at `at.y`.
+ * stacked down from the first, whose middle (or top, "hanging"; or
+ * baseline, `at.above` below its top) is at `at.y`.
  */
 export function textBox(lines: TextLines, at: TextAt, paint: TextPaint): Rect {
   const { size, lineHeight, padding } = paint;
   const [top, right, bottom, left] = padding;
-  const first = at.baseline === "middle" ? at.y - lineHeight / 2 : at.y - (lineHeight - size) / 2;
+  const first =
+    at.y -
+    (at.baseline === "middle"
+      ? lineHeight / 2
+      : at.baseline === "hanging"
+        ? (lineHeight - size) / 2
+        : (at.above ?? 0.8 * size));
   const start = at.x - lines.width * (at.anchor === "middle" ? 0.5 : at.anchor === "end" ? 1 : 0);
   return {
     x: start - left,
@@ -323,12 +330,12 @@ export function textBox(lines: TextLines, at: TextAt, paint: TextPaint): Rect {
 }
 
 /**
- * Where guide text is drawn: its point, which side of the text the point is
- * on (its middle, or its top for "hanging" text), and its turn.
+ * Where guide text is drawn: its point, which line of the text the point is
+ * on (its middle, its top for "hanging" text, or its baseline), and its
+ * turn; for "alphabetic" text, how far its first line's box reaches above
+ * the point (`above`).
  */
-export type TextAt = Pick<TextItem, "x" | "y" | "anchor" | "angle"> & {
-  baseline: "middle" | "hanging";
-};
+export type TextAt = Pick<TextItem, "x" | "y" | "anchor" | "angle" | "baseline" | "above">;
 
 /** How wide a line of `text` in `paint` is drawn: with its box's padding when it has a box. */
 export function textWidth(text: string, paint: TextPaint, measure: MeasureText): number {
@@ -426,5 +433,6 @@ export function textItem(
   };
   if (halo) item.halo = halo;
   if (box) item.box = box;
+  if (at.above !== undefined) item.above = at.above;
   return item;
 }
