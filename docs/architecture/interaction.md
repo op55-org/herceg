@@ -572,6 +572,20 @@ the view, and the selection, each on one of the chart's scales.
   model's `report`, which the chart sets to its error path. Drawing
   content's styled runs in the box (`dom/tooltip-content.ts`) loads with
   the controller.
+- **Paths and totals** are the writers' too. A `{ path: true }` part
+  writes a tree item's names from the top of the whole tree, each level
+  through its field's display, the same text as the default tooltip's
+  name. For a tooltip total, the inspector asks the writers per scene for
+  each totalling mark's text writer (`TooltipWriter.total`, made with that
+  panel's axis writer, so it follows zooms) and per reading for the sums
+  (`TooltipWriter.totals`, which sets or deletes `inspection.totals` in
+  place, `Inspector.totaled`): readings along an axis get them, from
+  `inspect()` and the keyboard's recombined readings, and `inspectAt` and
+  items none. The writers refuse category, time, and range values, and
+  formats that write no numbers, as each scene's inspector is made with
+  them, so a chart refuses them on the first frame drawn with that code;
+  the eager marks carry no check. The content chunk draws a mark's total
+  after its last point, and the keyboard's reading says it there.
 - **The heading** is decided once per shown tooltip by the controller
   (`headingOf` in `dom/tooltip.ts`): none with the chart's
   `tooltip.heading: false`, else the one point's mark heading where the

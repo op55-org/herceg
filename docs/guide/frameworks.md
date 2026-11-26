@@ -512,6 +512,39 @@ chart](interaction.md#fitting-inside-the-chart)).
 </Chart>
 ```
 
+A component that places its arrow by a property of its own, such as a
+component library's popover, takes the slide in an inline style on an
+element around it, without a stylesheet; its CSS reads the side from the
+wrapper's `data-side` (`[data-side="bottom"] .popover`), as [Fitting
+inside the chart](interaction.md#fitting-inside-the-chart) says:
+
+```tsx
+// React: its style types list no custom properties, hence the cast.
+<Anchor at={{ item: open }} side="top" offset={8}>
+  <div style={{ "--popover-slide-x": "var(--hg-anchor-slide-x, 0px)" } as CSSProperties}>
+    <Popover>{reason}</Popover>
+  </div>
+</Anchor>
+```
+
+```vue
+<!-- Vue -->
+<Anchor :at="{ item: open }" side="top" :offset="8">
+  <div :style="{ '--popover-slide-x': 'var(--hg-anchor-slide-x, 0px)' }">
+    <Popover>{{ reason }}</Popover>
+  </div>
+</Anchor>
+```
+
+```svelte
+<!-- Svelte -->
+<Anchor at={{ item: open }} side="top" offset={8}>
+  <div style:--popover-slide-x="var(--hg-anchor-slide-x, 0px)">
+    <Popover>{reason}</Popover>
+  </div>
+</Anchor>
+```
+
 React's and Vue's `<Anchor>` render nothing on the server and in the first
 render of a hydrated chart; Svelte's renders its children hidden, with the
 chart's other children, until the chart holds them. Content meant to float

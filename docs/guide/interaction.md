@@ -372,7 +372,7 @@ where that point is out of view, and in charts following a cursor through
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
 | mark `tooltip: { content }` | Each point's row as one line of parts, in place of its name and value ([Content](#content)). |
 | mark `tooltip: { heading }` | Parts heading a tooltip that shows one of the mark's points alone ([Headings](#headings)). |
-| mark `tooltip: { total }` | A row after the mark's points in a reading along an axis: their sum ([Totals](#totals)). |
+| mark `tooltip: { total }` | A row after the mark's points in a reading along an axis: their sum ([Tooltip totals](#tooltip-totals)). |
 | `renderTooltip` | JavaScript only: content of your own, text or a node. |
 
 ```ts
@@ -510,7 +510,7 @@ in specs `marks[0].tooltip.content[0].path: only treemaps' and sunbursts'
 nodes have levels; give { series: true } or { field }`, in Python `line
 tooltip content[0] path: ...`. Labels' parts do not take it.
 
-### Totals
+### Tooltip totals
 
 A series mark's `tooltip.total` adds a row after the mark's points in a
 reading along an axis: **the sum of the values the reading lists of the
@@ -532,13 +532,14 @@ chart.line(x="time", y="revenue", series="region", tooltip=hg.Tooltip(
   whose values are numbers: one value field, or several, each a series.
   Category values (points of a category `y`, which inspections read as
   band places), times, and ranges (bands of `y1` and `y2`, error bars,
-  candlesticks, custom marks spanning two fields) have no total and are
-  refused, as `point tooltip.total: y "segment" is a category field, whose
-  points have no sum; drop total`. Python refuses them as it builds the
-  chart, and specs refuse bands as they are read; in JavaScript they are
-  refused on the first frame the chart draws with its tooltip code, which
-  it loads for any mark with a `tooltip` (`chart.loading` waits for it),
-  not as the mark is made. Other marks' tooltips do not take it, and
+  candlesticks, segments, custom marks spanning two fields) have no total
+  and are refused, as `point tooltip.total: y "region" is a category
+  field, whose points have no sum; drop total`. Python refuses them as it
+  builds the chart, and specs refuse bands as they are read; JavaScript
+  refuses them on the first frame drawn with the tooltip code, which loads
+  for any mark with a `tooltip` (see Loading under [Content](#content);
+  `ready` and `chart.loading` wait for it), not as the mark is made. Other
+  marks' tooltips do not take it, and
   summarizing marks (histograms, box plots) take no tooltip at all. The
   chart's tooltip has no total: marks on two y axes, or a band and its
   line, would sum unlike values.
@@ -1001,6 +1002,9 @@ clicks.
 - `names`, for an item of a pie, funnel, treemap, or sunburst: its raw
   names from the top.
 
+Beside its points, a reading along an axis carries `totals` where a
+mark's tooltip asks for one ([Tooltip totals](#tooltip-totals)).
+
 **Keyboard selections.** Shift with the arrow keys selects a range along
 the axis the keys step along; Enter zooms to it where zoom is on; Escape
 clears. Selections are announced, the keyboard's and the pointer's alike
@@ -1313,12 +1317,18 @@ them, see [Cross-filtering](data.md#cross-filtering).
 
 - **Brushes** write a condition on the marks' fields, so rows appended
   later that meet it are selected too. On category axes it lists labels.
-  A mark's several y fields are its series: a row is in when any shown one
+  Where a mark's several y fields are its series (lines, areas, bars,
+  points, custom marks over one x field), a row is in when any shown one
   is. Each table gets its own condition; nothing joins tables.
 - **Stacks** are brushed at their drawn tops: a brush selects the rows drawn
   inside it, as a row set.
+- **Ranges** ([segments](marks.md#segments), and custom marks over ranges)
+  are brushed by their spans: a row is in where the span between its ends
+  meets the brush along each axis the brush covers, so a rectangle beside a
+  diagonal segment, inside both its spans, selects it.
 - **Lassos** select rows whose drawn point is inside (a point's center, a
-  line's vertex, a bar end's middle, a candle's close, a cell's center).
+  line's vertex, a bar end's middle, a candle's close, a cell's center, a
+  range's drawn box's middle).
 - **Clicks** select the row under the pointer; a histogram bin's rows; a box
   or violin group; a heatmap cell's rows. Shift adds, Ctrl or Cmd toggles,
   a click off the data clears. With the keyboard cursor on a point, Space
@@ -1356,6 +1366,7 @@ row.
 | Contours | Unchanged: they draw a field, not rows. |
 | Pies, funnels, treemaps, sunbursts, Sankey links | Each item's selected share; the rest dimmed. |
 | Maps, networks | Items without selected rows dimmed. |
+| Segments, custom marks | Each item's shapes dimmed while the selection leaves its row out. |
 
 Tooltips and the keyboard say how much is selected ("10 – 20: 42; 12 of 42
 rows selected"), and the text alternative says "42 of 120 rows selected."
@@ -1831,6 +1842,24 @@ place by `--hg-anchor-slide-x` (one on its left or right edge reads
   a shadow. CSS that sizes the element by them changes the size the chart
   measures, which slides it again, a frame late
   (a `ResizeObserver loop` error in the console).
+
+**Without a stylesheet.** The slide's properties inherit, so a component
+that places its arrow by a property of its own (a component library's
+popover) takes the slide in an inline style, on itself or on an element
+around it:
+
+```ts
+popover.style.setProperty("--popover-slide-x", "var(--hg-anchor-slide-x, 0px)");
+```
+
+The side is read by its attribute, a selector in the component's CSS
+(`[data-side="bottom"] .popover`). React, Vue, and Svelte write the inline
+style as [React, Vue, and Svelte](frameworks.md#anchors) shows. A component
+that takes its side as a prop rather than from CSS can follow the
+attribute: read it once, then watch it with a `MutationObserver`. The
+wrapper is the anchored element's parent (with `<Anchor>`, its content's
+grandparent). The side changes as the element is measured as well as in
+frames the chart draws, so a `render` listener does not hear every change.
 
 **An element that must stay on its point**, whole, at the plot's edge (a
 button whose bottom centre is its point) needs room past the plot:

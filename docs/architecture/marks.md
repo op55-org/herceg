@@ -649,6 +649,20 @@ the chart refuses (`update` returns false), and props a component refuses,
 leave its marks calling what they called. Marks passed
 as `marks` are the same only as themselves.
 
+**Segments** (`marks/segment.ts`) are a built-in user of the same core:
+`customCore(table, options, view, core)` makes the custom mark's class
+with a `CustomCore` (the mark's spec, its draw channels, the fields value
+transitions read, a color for every series, and the noun its text
+alternative counts), and the segment module adds only its options, its
+checks, and a `draw` that writes one filled outline per row (body, heads,
+and dots wound alike). Where the core's users differ, code asks
+`Mark.shapeLayout` ("points", "wide", "ranges", "none") rather than the
+spec's type: the feature compiler, transitions, highlights, selected rows,
+and tooltip writers. A segment's widths compile as draw channels named
+`from` and `to` (or one `width`), reported as `width.from` and
+`width.to`. Unlike custom marks, segments have a spec, so specs and
+Python make them.
+
 ## Layout marks
 
 Layout marks (pies, treemaps, sunbursts, gauges, funnels, radars, Sankey
