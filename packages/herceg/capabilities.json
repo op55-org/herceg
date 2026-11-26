@@ -3602,6 +3602,108 @@
         "integration.web": { "state": "unproved" }
       }
     },
+    "segment": {
+      "title": "segment",
+      "inventory": {
+        "spec": "segment",
+        "typescript": "segment",
+        "python": "Chart.segment",
+        "helper": "segment",
+        "react": "Segment",
+        "vue": "Segment",
+        "svelte": "Segment"
+      },
+      "emits": ["click", "hover", "pin", "rowSelection", "select", "viewport"],
+      "consumes": [
+        "animation.values",
+        "interaction.sync.cursor",
+        "interaction.sync.selection",
+        "interaction.sync.viewport",
+        "renderer",
+        "rowSelection"
+      ],
+      "cells": {
+        "placement.panel": { "state": "works" },
+        "placement.facet": { "state": "works" },
+        "placement.facet-in-cell": {
+          "state": "refused",
+          "error": {
+            "code": "unsupported",
+            "path": "facet",
+            "message": "facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own"
+          },
+          "alternative": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own."
+        },
+        "placement.nested": { "state": "works" },
+        "placement.span": { "state": "works" },
+        "placement.inset": { "state": "works" },
+        "selection.brush-x": { "state": "works" },
+        "selection.brush-y": { "state": "works" },
+        "selection.brush-xy": { "state": "works" },
+        "selection.lasso": { "state": "works" },
+        "selection.rows-x": { "state": "works" },
+        "selection.rows-y": { "state": "works" },
+        "selection.rows-xy": { "state": "works" },
+        "selection.rows-lasso": { "state": "works" },
+        "selection.click": { "state": "works" },
+        "selection.items": { "state": "works" },
+        "selection.series": { "state": "works" },
+        "selection.receive": { "state": "works" },
+        "selection.highlight": { "state": "works" },
+        "events.click": { "state": "works" },
+        "events.pin": { "state": "works" },
+        "events.drill": {
+          "state": "na",
+          "reason": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
+        },
+        "events.item-move": {
+          "state": "refused",
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": "Move a network's nodes (interaction.drag), or a rule of a value (drag)."
+        },
+        "legend.categorical": { "state": "works" },
+        "legend.colorbar": {
+          "state": "refused",
+          "error": {
+            "code": "field-type",
+            "path": "marks[0].color",
+            "message": "marks[0]: segment color: field \"y\" holds number values; expected category; give its values as strings, or numbers wrapped in category()"
+          },
+          "alternative": "Color it by a category field, which the legend lists."
+        },
+        "legend.entry": { "state": "works" },
+        "legend.toggle": { "state": "works" },
+        "legend.panel-toggle": { "state": "works" },
+        "reading.nearest-x": { "state": "works" },
+        "reading.nearest-y": { "state": "works" },
+        "reading.nearest": { "state": "works" },
+        "reading.fields": { "state": "works" },
+        "reading.keyboard": { "state": "works" },
+        "reading.description": { "state": "works" },
+        "rendering.svg": { "state": "works" },
+        "rendering.canvas": { "state": "works" },
+        "rendering.auto": { "state": "works" },
+        "lifecycle.view-animation": { "state": "works" },
+        "lifecycle.value-animation": { "state": "works" },
+        "lifecycle.cursor-sync": { "state": "works" },
+        "lifecycle.viewport-sync": { "state": "works" },
+        "lifecycle.selection-sync": { "state": "works" },
+        "lifecycle.hydration": { "state": "works" },
+        "export.svg": { "state": "works" },
+        "export.png": { "state": "works" },
+        "export.pdf": { "state": "works" },
+        "integration.react": { "state": "works" },
+        "integration.vue": { "state": "works" },
+        "integration.svelte": { "state": "works" },
+        "integration.widget": { "state": "unproved" },
+        "integration.streamlit": { "state": "unproved" },
+        "integration.web": { "state": "unproved" }
+      }
+    },
     "custom": {
       "title": "custom",
       "inventory": {

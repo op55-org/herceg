@@ -24,6 +24,7 @@ import { region } from "../../src/marks/region.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sankey } from "../../src/marks/sankey.ts";
+import { segment } from "../../src/marks/segment.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { text } from "../../src/marks/text.ts";
 import { treemap } from "../../src/marks/treemap.ts";
@@ -43,6 +44,7 @@ import type {
   RegionSpec,
   RugSpec,
   RuleSpec,
+  SegmentSpec,
   TreemapSpec,
   ViolinSpec,
 } from "../../src/spec/spec.ts";
@@ -579,12 +581,44 @@ rug(readings, { x: "at", series: "cpu" });
 rug(readings, { x: "at", side: "right" });
 // @ts-expect-error y rugs cannot use the right value axis
 rug(readings, { y: "cpu", axis: "right" });
+// Segments: a field or a pair of number or time fields on each axis, widths in pixels or
+// channels, caps of their own.
+const forecasts = table({ id: ["F-1"], start: [1], end: [4], at: time([0]), c: [0.5] });
+segment(forecasts, {
+  x: ["start", "end"],
+  y: "id",
+  color: "id",
+  itemKey: "id",
+  width: { from: { field: "c", scale: "widths" }, to: 1 },
+  caps: { from: { dot: { radius: 3 } }, to: { arrow: { length: 10, width: 8 } } },
+  encode: { opacity: { field: "c", scale: "fade" }, color: { value: "#ff0000" } },
+  tooltip: { heading: [{ field: "id" }], fields: ["c"] },
+});
+segment(forecasts, { x: ["at", "at"], y: ["start", "end"], width: 2, caps: { to: "arrow" } });
+segment(forecasts, { x: "start", y: ["start", "end"], color: "tomato" });
+// @ts-expect-error Type '"triangle"' is not assignable to type 'SegmentCap | undefined'.
+segment(forecasts, { x: ["start", "end"], y: "id", caps: { to: "triangle" } });
+// @ts-expect-error a pair's fields are numbers or times; a category stands alone
+segment(forecasts, { x: ["start", "id"], y: "id" });
+// @ts-expect-error a pair is two fields
+segment(forecasts, { x: ["start", "end", "c"], y: "id" });
+// @ts-expect-error a segment's points are ranges, which have no total
+segment(forecasts, { x: ["start", "end"], y: "id", tooltip: { total: true } });
+// @ts-expect-error widths are each row's: not the series' names
+segment(forecasts, { x: ["start", "end"], y: "id", width: { series: true, scale: "widths" } });
+// @ts-expect-error a width is pixels or a channel, not a field's name
+segment(forecasts, { x: ["start", "end"], y: "id", width: "c" });
+// @ts-expect-error both ends of a taper
+segment(forecasts, { x: ["start", "end"], y: "id", width: { from: 2 } });
+// @ts-expect-error a portable segment spec places it on both axes
+const segmentMissing: SegmentSpec = { type: "segment", x: ["a", "b"] };
+
 // @ts-expect-error a portable rug spec needs one axis
 const rugMissing: RugSpec = { type: "rug" };
 // @ts-expect-error a portable rug spec cannot have two axes
 const rugBoth: RugSpec = { type: "rug", x: "at", y: "cpu" };
 
-export { rugBoth, rugMissing };
+export { rugBoth, rugMissing, segmentMissing };
 
 violin(readings, { x: "stage", y: "cpu", series: "stage", split: true, inner: "quartiles" });
 violin(readings, { x: "cpu", y: "stage", inner: "none" });

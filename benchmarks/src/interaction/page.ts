@@ -8,6 +8,7 @@
 // page shows it: the live DOM, the text painted on the chart's canvas, or
 // the pixels of a screenshot, against what the fixture's data says.
 
+import * as engine from "herceg";
 import {
   type Anchor,
   anchor,
@@ -56,6 +57,7 @@ export type FixtureName =
   | "hover-headings"
   | "hover-totals"
   | "custom-hover"
+  | "segment-hover"
   | "point-hover"
   | "pan-labels"
   | "pan-view-labels"
@@ -69,6 +71,8 @@ export type FixtureName =
 declare global {
   interface Window {
     interaction: {
+      /** The fixtures this build can mount: trees from before segments mount no `segment-hover`. */
+      fixtures: FixtureName[];
       /**
        * Mounts fixture `name` for `moves` timed moves; a `candidate` build
        * must write what the fixture checks that older builds may not (totals).
@@ -442,12 +446,17 @@ const tooltipBox = (chart: Chart) =>
   );
 
 /**
- * A2's comets: 2,000 custom range items from (x0, y0) to (x1, y1), read
- * by the one nearest the pointer, their tooltip headed by the comet's own
- * id and category and its row written from parts. The move's effect is the
- * tooltip showing the comet under the pointer.
+ * A2's comets: 2,000 range items from (x0, y0) to (x1, y1), read by the
+ * one nearest the pointer, their tooltip headed by the comet's own id and
+ * category and its row written from parts: a custom mark's (a tail
+ * tapering to a point, and a dot), or a segment's of the same shape (one
+ * outline). The move's effect is the tooltip showing the comet under the
+ * pointer.
  */
-async function customHover(count: number): Promise<Fixture> {
+/** The engine's segments, which trees from before them do not export. */
+const segmentOf = () => (engine as Partial<typeof engine>).segment;
+
+async function cometHover(count: number, by: "custom" | "segment"): Promise<Fixture> {
   const n = 2_000;
   const next = random(4);
   const categories = ["rates", "fx", "credit", "equity"];
@@ -462,38 +471,45 @@ async function customHover(count: number): Promise<Fixture> {
     confidence: Float64Array.from({ length: n }, () => 0.5 + next() / 2),
     category: Array.from({ length: n }, () => categories[Math.floor(next() * 4)]!),
   });
-  const chart = createChart(host(800, 400), {
-    inspection: { mode: "nearest" },
-    marks: [
-      custom(comets, {
-        x: ["x0", "x1"],
-        y: ["y0", "y1"],
-        series: "category",
-        itemKey: "id",
-        tooltip: {
-          heading: [{ field: "id", style: { fontWeight: 600 } }, " (", { field: "category" }, ")"],
-          content: [{ field: "id" }, " ", { series: true }, ": ", { value: true }],
-          fields: ["confidence"],
-        },
-        draw({ table: t, series, x, y, item, path, circle }) {
-          const [ex, ey] = [t.numbers("x1"), t.numbers("y1")];
-          for (const s of series)
-            for (let k = 0; k < s.length; k++) {
-              const row = s.rowAt(k);
-              const [ax, ay, bx, by] = [x(s.x[row]!), y(s.y[row]!), x(ex[row]!), y(ey[row]!)];
-              item(s, row, () => {
-                // A tail tapering to the head's point.
-                path(`M${ax},${ay - 3}L${bx},${by}L${ax},${ay + 3}Z`, {
-                  fill: s.color,
-                  opacity: 0.7,
+  const options = {
+    x: ["x0", "x1"],
+    y: ["y0", "y1"],
+    series: "category",
+    itemKey: "id",
+    tooltip: {
+      heading: [{ field: "id", style: { fontWeight: 600 } }, " (", { field: "category" }, ")"],
+      content: [{ field: "id" }, " ", { series: true }, ": ", { value: true }],
+      fields: ["confidence"],
+    },
+  } as const;
+  const mark =
+    by === "segment"
+      ? segmentOf()!(comets, {
+          ...options,
+          width: { from: 6, to: 0 },
+          caps: { from: { dot: { radius: 3 } } },
+          encode: { opacity: { value: 0.7 } },
+        })
+      : custom(comets, {
+          ...options,
+          draw({ table: t, series, x, y, item, path, circle }) {
+            const [ex, ey] = [t.numbers("x1"), t.numbers("y1")];
+            for (const s of series)
+              for (let k = 0; k < s.length; k++) {
+                const row = s.rowAt(k);
+                const [ax, ay, bx, by] = [x(s.x[row]!), y(s.y[row]!), x(ex[row]!), y(ey[row]!)];
+                item(s, row, () => {
+                  // A tail tapering to the head's point.
+                  path(`M${ax},${ay - 3}L${bx},${by}L${ax},${ay + 3}Z`, {
+                    fill: s.color,
+                    opacity: 0.7,
+                  });
+                  circle(ax, ay, 3, { fill: s.color });
                 });
-                circle(ax, ay, 3, { fill: s.color });
-              });
-            }
-        },
-      }),
-    ],
-  });
+              }
+          },
+        });
+  const chart = createChart(host(800, 400), { inspection: { mode: "nearest" }, marks: [mark] });
   charts = [chart];
   await chart.loading;
   await until(chart);
@@ -512,7 +528,7 @@ async function customHover(count: number): Promise<Fixture> {
   // Three comets no move read (389 and n share no factor: every row, once).
   const read = new Set(expected);
   for (let row = 41, tried = 0; all.length < count + 3; row = (row + 389) % n) {
-    if (++tried > n) throw new Error("custom-hover: the moves read every comet; use fewer");
+    if (++tried > n) throw new Error(`${by}-hover: the moves read every comet; use fewer`);
     add(row);
     const id = expected.at(-1)!;
     if (!read.has(id)) {
@@ -1415,7 +1431,8 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
   "hover-headings": (count) => hoverListener(count, "headings"),
   "hover-totals": (count) => hoverListener(count, "totals"),
-  "custom-hover": customHover,
+  "custom-hover": (count) => cometHover(count, "custom"),
+  "segment-hover": (count) => cometHover(count, "segment"),
   "point-hover": pointHover,
   "pan-labels": panLabels,
   "pan-view-labels": (count) => panLabels(count, "view"),
@@ -1428,6 +1445,9 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
 };
 
 window.interaction = {
+  fixtures: (Object.keys(FIXTURES) as FixtureName[]).filter(
+    (name) => name !== "segment-hover" || segmentOf() !== undefined,
+  ),
   mount: (name, count, isCandidate = false) => {
     candidate = isCandidate;
     return FIXTURES[name](count);

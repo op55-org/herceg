@@ -46,7 +46,6 @@ import type { AreaGeometry, Geometry, GuideItem, LineGeometry } from "../../scen
 import type {
   AreaLabelsSpec,
   ChannelsSpec,
-  EncodingsSpec,
   LabelContent,
   MarkAnchorSpec,
   OrdinalScaleSpec,
@@ -65,7 +64,7 @@ import type { TraceFrame } from "../trace.ts";
 import { outputCheck } from "./channels.ts";
 import { writeContent } from "./content.ts";
 import { bandRuns, indexedBand, Topology } from "./continuity.ts";
-import { encodedChannels } from "./encoded.ts";
+import { type DrawChannel, encodedChannels } from "./encoded.ts";
 import { type MarkScope, scalePrefix, scopeOfMark, sourceOf, tableNames } from "./identity.ts";
 import { IdentityColors } from "./identity-colors.ts";
 import {
@@ -146,6 +145,7 @@ const PAINTED = [
   "violin",
   "errorbar",
   "rug",
+  "segment",
 ];
 
 /** Scales channels read without naming one. */
@@ -551,7 +551,7 @@ function compile(
     else if (spec.type === "bar")
       byMark.set(mark, barFeatures(kit, mark, at, zone, config.locale, fields, shown));
     else if (spec.type === "point") byMark.set(mark, pointFeatures(kit, mark, at, fields));
-    else if (spec.type === "custom") byMark.set(mark, customFeatures(kit, mark, at));
+    else if (mark.shapeLayout) byMark.set(mark, customFeatures(kit, mark, at));
     else if (spec.type === "region" && (mark.spec as { encode?: object }).encode) {
       const looks = rowLooks(mark.spec as RowStyleSpec, mark.table, read, path, kit.isColor);
       byMark.set(mark, {
@@ -1990,16 +1990,27 @@ function areaLooks(
   };
 }
 
-/** A custom mark's channels, which its `draw` reads per row, and the colors they give its series. */
+/**
+ * The channels a custom mark's `draw` reads per row (and a segment's,
+ * which the custom mark's core draws), and the colors they give its series.
+ */
 function customFeatures(
   kit: FeatureKit,
   mark: Mark,
   { scope, path, read, scale }: At,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
-  const { encode } = mark.spec as {
-    encode?: Pick<EncodingsSpec, "color" | "strokeWidth" | "opacity">;
-  };
-  const channels = encodedChannels(kit, encode, mark.table!, mark.identity?.field, read, path);
+  // What its draw reads: a custom mark's `encode`, a segment's widths, color, and opacity.
+  const { channels: given } = mark as Mark & { channels: readonly DrawChannel[] };
+  const { type } = mark.spec;
+  const channels = encodedChannels(
+    kit,
+    given,
+    mark.table!,
+    mark.identity?.field,
+    read,
+    path,
+    type === "custom" ? "draw" : `the ${type}`,
+  );
   let theme: Theme | undefined;
   return {
     use(t, p) {
@@ -2012,7 +2023,8 @@ function customFeatures(
         scope,
         scale,
         () => theme,
-        (key, label, given) => given ?? channels.seriesColor(sourceOf(key), label),
+        // An encoded color of the series' wins over a segment's color for every series.
+        (key, label, given) => channels.seriesColor(sourceOf(key), label) ?? given,
       ),
     attach: (s) => identify(s, scope, undefined),
     encoded: channels.encoded,

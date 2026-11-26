@@ -88,6 +88,7 @@ MARKS: dict[str, dict[str, Any]] = {
     "rug": {"x": "v"},
     "rule": {"y": 1.0},
     "sankey": {"source": "s", "target": "u", "value": "v"},
+    "segment": {"x": ("t", "w"), "y": "v"},
     "sunburst": {"path": ["s", "u"], "value": "v"},
     "surface": {"x": "x", "y": "y", "z": "z", "data": GRID},
     "text": {"label": "s", "x": "t", "y": "v"},

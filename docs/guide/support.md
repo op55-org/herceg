@@ -16,6 +16,7 @@ the generated [capability matrix](../capabilities.md).
 | boxplot, boxen, violin | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ◐ | · | — |
 | rug | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | errorbar, candlestick | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ |
+| segment | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | dendrogram | ◐ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | — | · | · | · | · | · | · | — |
 | heatmap | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | ✓ | ✓ |
 | 2D histogram | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | · | ✓ |
@@ -64,7 +65,7 @@ the generated [capability matrix](../capabilities.md).
   binding. [Selected rows](interaction.md#selected-rows)
 - **Series from color.** A category `color` names series on lines, areas,
   bars, points, histograms, box plots, boxen, violins, error bars, rugs,
-  map points, and 3D points; candlesticks color by rise and fall, and
+  segments, map points, and 3D points; candlesticks color by rise and fall, and
   `line3d` takes `series` only. [Styling](styling.md#colors)
 - **Colors by identity.** A field's value has one color and legend entry
   in every mark and panel, layout marks' items included; candlesticks,
@@ -87,7 +88,8 @@ the generated [capability matrix](../capabilities.md).
   their rows stay; areas along y show changes at once. Sunbursts move
   their sectors and drills; treemaps refuse value animation. Custom marks
   move the fields they declare (`x`, `y`, and those `encode` reads); what
-  else `draw` reads shows at once.
+  else `draw` reads shows at once. Segments move their ends, widths,
+  colors, and opacities.
   [Animation](interaction.md#animation)
 - **Everywhere.** Marks on the chart's scales take `clip`, `zIndex`
   ([Paint order](styling.md#paint-order)), and `legend: false`; lines,

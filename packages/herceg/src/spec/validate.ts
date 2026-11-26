@@ -2842,23 +2842,66 @@ function entry(value: Check): Check {
   };
 }
 
+/** Refuses a channel (or a list's entry) reading series' names, where each row reads its own: `why`. */
+function byRow(given: unknown, path: string, why: string): void {
+  for (const [i, c] of (Array.isArray(given) ? given : [given]).entries())
+    if (isRecord(c) && "series" in c)
+      throw refusal(`${path}${Array.isArray(given) ? `[${i}]` : ""}.series`, why);
+}
+
 /** A mark's `encode`, of the channels `names` it takes. */
 function encodings(names: readonly (keyof EncodingsSpec)[], seriesless = false): Check {
   const checks = Object.fromEntries(names.map((name) => [name, channel(CHANNEL_VALUES[name])]));
   return (v, path) => {
     object(v, path);
-    // Marks without series (regions) read no series' names, alone or in a list.
+    // Marks without series (regions) read no series' names.
     if (seriesless)
       for (const [name, given] of Object.entries(v as Record<string, unknown>))
-        for (const [i, c] of (Array.isArray(given) ? given : [given]).entries())
-          if (isRecord(c) && "series" in c)
-            throw refusal(
-              `${path}.${name}${Array.isArray(given) ? `[${i}]` : ""}.series`,
-              "regions have no series whose names it could read; give a field, a value, or a condition",
-            );
+        byRow(
+          given,
+          `${path}.${name}`,
+          "regions have no series whose names it could read; give a field, a value, or a condition",
+        );
     properties(v as Record<string, unknown>, path, checks);
   };
 }
+
+/** A segment's place along an axis: a field, or a pair of fields `[from, to]`. */
+const segmentEnds: Check = (v, path) => {
+  if (typeof v !== "string" && !(Array.isArray(v) && v.length === 2))
+    fail(path, "a field name, or a pair of field names [from, to]", v);
+  fields(v, path);
+};
+
+/** A segment's width: pixels or a row's channel, for the whole segment or `{ from, to }`. */
+const segmentWidth: Check = (v, path) => {
+  const one: Check = (w, at) => {
+    if (typeof w === "number") return width(w, at);
+    byRow(w, at, "each row has a width of its own; give a field, a value, or a condition");
+    channel(width)(w, at);
+  };
+  if (isRecord(v) && ("from" in v || "to" in v))
+    return checkProperties(v, path, ["from", "to"], { from: one, to: one });
+  one(v, path);
+};
+
+const segmentEncodings = encodings(MARK_CHANNELS.segment!.encode);
+
+/** What a segment draws at one end. */
+const segmentCap: Check = (v, path) => {
+  // A name, or an object of one of them.
+  const [form, ...others] = isRecord(v) ? Object.keys(v) : [v];
+  if (others.length > 0 || (form !== "dot" && form !== "arrow"))
+    fail(path, '"dot", "arrow", { dot }, or { arrow }', v);
+  if (!isRecord(v)) return;
+  const at = `${path}.${form}`;
+  object(v[form], at);
+  properties(
+    v[form] as Record<string, unknown>,
+    at,
+    form === "dot" ? { radius: width } : { length: width, width },
+  );
+};
 
 const markerStyle: Check = (v, path) => {
   object(v, path);
@@ -3536,6 +3579,35 @@ const MARKS: MarkChecks = {
       label: seriesName,
     },
   },
+  segment: {
+    required: ["x", "y"],
+    checks: {
+      itemKey: field,
+      color: string,
+      tooltip,
+      ...placement,
+      legend: legended,
+      x: segmentEnds,
+      y: segmentEnds,
+      series: field,
+      label: seriesName,
+      width: segmentWidth,
+      caps: (v, path) => {
+        object(v, path);
+        properties(v as Record<string, unknown>, path, { from: segmentCap, to: segmentCap });
+      },
+      // Opacity is each row's, as its width is; colors may name the series'.
+      encode: (v, path) => {
+        if (isRecord(v))
+          byRow(
+            v.opacity,
+            `${path}.opacity`,
+            "each row has an opacity of its own; give a field, a value, or a condition",
+          );
+        segmentEncodings(v, path);
+      },
+    },
+  },
   errorbar: {
     required: [],
     checks: {
@@ -3895,6 +3967,10 @@ const FORMS: Partial<
       return 'rug axis: a y rug has no right axis; drop axis: "right"';
     return undefined;
   },
+  segment: (spec) =>
+    typeof spec.x === "string" && typeof spec.y === "string"
+      ? "segment x, y: a segment goes from one place to another; give x or y a pair of field names [from, to]"
+      : undefined,
   errorbar: (spec) => {
     const form = errorBarForm(spec);
     if (typeof form === "string") return form;

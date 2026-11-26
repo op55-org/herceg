@@ -1497,6 +1497,44 @@
         "fields": [["group", "N"]]
       }
     },
+    "segment": {
+      "table": "samples",
+      "mark": {
+        "type": "segment",
+        "x": "x",
+        "y": ["low", "high"],
+        "series": "kind",
+        "width": 3
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3, 5],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 20],
+          "off": [4, 40]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "10 – 30"]],
+        "fields": [["note", "four"]],
+        "keys": ["k: 1 – 3 at 0", "2 – 4 at 2"],
+        "describes": ["2 series", "k", "m", "50"]
+      },
+      "lifecycle": {
+        "change": ["high", 3, 36]
+      }
+    },
     "custom": {
       "table": "samples",
       "categories": ["k", "m"],

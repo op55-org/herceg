@@ -48,6 +48,7 @@ from ._encoding import (
     CENTERED_OFFSET,
     SYMBOLS,
     BarLabels,
+    Caps,
     Channel,
     ChannelOption,
     Continuity,
@@ -66,6 +67,8 @@ from ._encoding import (
     Pixels,
     Position,
     RowPosition,
+    SegmentWidth,
+    SegmentWidthOption,
     SeriesLabels,
     Stack,
     SunburstLabels,
@@ -90,6 +93,7 @@ from ._encoding import (
     name_spec,
     output_problem,
     pixels_option,
+    segment_width_spec,
     tagged_spec,
 )
 from ._errors import (
@@ -961,6 +965,8 @@ class Tooltip:
             )
         if self.total is not None:
             at = role.field("total")
+            if mark == "segment":
+                raise at.error("a segment's points are ranges, which have no total; drop total")
             if mark not in _TOTALS:
                 raise at.error(
                     "only lines, filled areas, bars, and points total their points; drop total"
@@ -1231,10 +1237,12 @@ class Camera:
         return spec
 
 
-class _SharedOptions(TypedDict, total=False):
+class _SharedButWidth(TypedDict, total=False):
+    """The chart options every chart takes but ``width``, which ``hg.segment``'s
+    segments take (see `SegmentOptions`)."""
+
     title: str | Title | dict[str, Any] | None
     description: str | None
-    width: int | None
     height: int | None
     y_right: AxisOptions | dict[str, Any] | None
     legend: bool | LegendOptions | dict[str, Any] | None
@@ -1264,6 +1272,10 @@ class _SharedOptions(TypedDict, total=False):
     drag: bool | None
     toolbar: bool | None
     navigator: bool | Navigator | dict[str, Any] | None
+
+
+class _SharedOptions(_SharedButWidth, total=False):
+    width: int | None
 
 
 class _DisplayOptions(TypedDict, total=False):
@@ -1323,6 +1335,20 @@ class RadarOptions(
     """Chart options as ``hg.radar`` takes them, after its own: the
     helpers' (``HelperOptions``) but ``fields``, which are its spokes; give
     the chart's field displays as ``hg.Chart(data, fields=...).radar(...)``."""
+
+
+class SegmentOptions(
+    _SharedButWidth,
+    _LayoutOptions,
+    _BindingOptions,
+    _StateOptions,
+    _HelperAxes,
+    _DisplayOptions,
+    total=False,
+):
+    """Chart options as ``hg.segment`` takes them, after its own: the
+    helpers' (``HelperOptions``) but ``width``, which is its segments'; give
+    the chart's as ``hg.Chart(data, width=...).segment(...)``."""
 
 
 class HelperOptions(RadarOptions, _DisplayOptions, total=False):
@@ -2624,6 +2650,144 @@ class Chart:
                 "unselected": look_spec(unselected, "rug unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rug"),
+                "id": id,
+            },
+            table,
+        )
+
+    @_check_method_options
+    def segment(
+        self,
+        x: str | tuple[str, str],
+        y: str | tuple[str, str],
+        *,
+        series: str | None = None,
+        color: str | None = None,
+        data: Any = None,
+        width: SegmentWidthOption | SegmentWidth | None = None,
+        caps: Caps | Mapping[str, Any] | None = None,
+        encode: Encodings | Mapping[str, Any] | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
+        legend: Literal[False] | None = None,
+        axis: Literal["left", "right"] | None = None,
+        facet: Literal["repeat"] | None = None,
+        panel: str | None = None,
+        clip: Clip | None = None,
+        tooltip: Tooltip | None = None,
+        z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
+        item_key: str | None = None,
+        id: str | None = None,
+    ) -> Chart:
+        """Segments: each row from one place to another.
+
+        ``x`` and ``y`` are each a column, the same at both ends (a category
+        column places rows in its bands), or a pair ``(start, end)`` of
+        numeric or datetime columns; at least one is a pair. Both ends count
+        toward the axes' domains. ``width`` is pixels or a channel giving each
+        row's (an ``hg.Channel`` through an ``hg.ChannelScale``, or
+        ``hg.when``), or ``hg.SegmentWidth(start=..., end=...)``, tapering
+        linearly between the body's ends (an arrowhead's base where an end has
+        one); a line's width by default, and rows a channel gives no width are
+        not drawn. ``caps=hg.Caps(start=..., end=...)`` draws ``"dot"``,
+        ``"arrow"``, ``hg.Dot(radius=...)``, or ``hg.Arrow(length=...,
+        width=...)`` at either end: a segment shorter than its arrowhead draws
+        the head alone, two heads longer than it together each take half of
+        it, and a segment of no length draws its dots and no arrowhead.
+
+        A category ``color`` names the series (as ``series`` does); a CSS
+        color paints every segment. ``encode=hg.Encodings(color=...,
+        opacity=...)`` gives each row its own color and opacity. Rows are
+        items, picked by their shapes; tooltips write their ends as ranges
+        ("12 – 40", "(1, 2) – (3, 4)"), with ``tooltip`` fields and parts
+        besides. ``item_key`` names the column whose value names each row's
+        item, which selections and value animations follow. Meant for
+        thousands of segments, not millions. ``start`` and ``end`` are the
+        spec's ``from`` and ``to``.
+        """
+        table = self._mark_table(data)
+        pairs: dict[str, tuple[str, str]] = {}
+        for axis_name, given in (("x", x), ("y", y)):
+            if isinstance(given, str):
+                self._require(table, given, (*_NUMERIC, "category"), f"segment {axis_name}")
+                continue
+            pair = tuple(given) if listlike(given) and not isinstance(given, Mapping) else ()
+            if len(pair) != 2:
+                raise ChartError(
+                    f"segment {axis_name}: expected a column's name, or a pair of them "
+                    f"(start, end); received {shown(given)}",
+                    path=self._path("segment", axis_name),
+                )
+            for i, column in enumerate(pair):
+                self._require(table, column, _NUMERIC, f"segment {axis_name}[{i}]")
+            pairs[axis_name] = (pair[0], pair[1])
+        if not pairs:
+            raise ChartError(
+                "segment x, y: a segment goes from one place to another; give x or y a pair "
+                'of columns, x=("start", "end")',
+                path=self._path("segment", "x"),
+            )
+        split = self._color_series(
+            table, series, color, "segment", "encode=hg.Encodings(color=hg.Channel(value=...))"
+        )
+        self._require(table, split, ("category",), "segment series")
+        width_spec: Any = None
+        if isinstance(width, Mapping) and {"start", "end"} & set(width):
+            width = _built(width, SegmentWidth, "segment width")
+        if isinstance(width, SegmentWidth):
+            width_spec = self._option("segment width", width._spec)
+        elif width is not None:
+            width_spec = self._option(
+                "segment width", lambda: segment_width_spec(width, "segment width")
+            )
+        built_caps = _built(caps, Caps, "segment caps")
+        encoded = self._option(
+            "segment encode", lambda: encodings_spec(encode, ("color", "opacity"), "segment")
+        )
+        self._check_outputs(encoded or {}, "segment", "encode.")
+        for where, channel in _entries("encode.opacity", (encoded or {}).get("opacity")):
+            if isinstance(channel, dict) and "series" in channel:
+                raise ChartError(
+                    f"segment {python_path(where)}: each row has an opacity of its own; give a "
+                    "field, a value, or a condition",
+                    path=self._path("segment", python_path(where)),
+                )
+        ends = width_spec if isinstance(width_spec, dict) and "from" in width_spec else None
+        widths = {f"width.{end}": ends[end] for end in ("from", "to")} if ends else {}
+        if not ends and isinstance(width_spec, (dict, list)):
+            widths["width"] = width_spec
+        # Widths' constants and branches are pixels, as strokeWidth's are; channels' columns exist
+        # (their scales say what values they take, as on other marks).
+        for at, given in widths.items():
+            for where, channel in _entries(at, given):
+                self._check_output("strokeWidth", channel, "segment", where)
+        read = {**widths, **{f"encode.{name}": value for name, value in (encoded or {}).items()}}
+        for at, given in read.items():
+            for where, channel in _entries(at, given):
+                if isinstance(channel, dict) and isinstance(channel.get("field"), str):
+                    self._require(table, channel["field"], _ANY, f"segment {python_path(where)}")
+        return self._add(
+            {
+                "type": "segment",
+                "x": list(pairs["x"]) if "x" in pairs else x,
+                "y": list(pairs["y"]) if "y" in pairs else y,
+                "series": split,
+                "color": color,
+                "label": name_spec(label, "segment"),
+                "width": width_spec,
+                "caps": (built_caps._spec() or None) if built_caps is not None else None,
+                "encode": encoded,
+                "legend": _mark_legend(legend, "segment"),
+                "axis": axis,
+                "facet": _mark_facet(facet, "segment"),
+                "panel": panel,
+                "clip": _clip(clip, "segment"),
+                "tooltip": self._mark_tooltip(table, tooltip, "segment"),
+                "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
+                "itemKey": self._item_key(table, item_key, "segment"),
                 "id": id,
             },
             table,
@@ -7101,7 +7265,12 @@ class Chart:
         return series_of(color, encode, paint, paint_name, lambda field: self._kind(table, field))
 
     def _color_series(
-        self, table: int, series: str | None, color: str | None, mark: str
+        self,
+        table: int,
+        series: str | None,
+        color: str | None,
+        mark: str,
+        paint: str = "the color as fill or stroke",
     ) -> str | None:
         """The series column of a mark of summaries or observations (a
         histogram, box plot, violin, boxen plot, error bar, or rug) given its
@@ -7126,7 +7295,7 @@ class Chart:
         if is_color(color):
             raise ChartError(
                 f"{mark} color: {color!r} names both a column and a color; give "
-                f"series={color!r}, or the color as fill or stroke",
+                f"series={color!r}, or {paint}",
                 path=self._path(mark, "color"),
             )
         self._require(table, color, ("category",), f"{mark} color")
@@ -8189,6 +8358,7 @@ class Panel:
     bar = _in_panel(Chart.bar)
     rug = _in_panel(Chart.rug)
     errorbar = _in_panel(Chart.errorbar)
+    segment = _in_panel(Chart.segment)
     point = _in_panel(Chart.point)
     histogram = _in_panel(Chart.histogram)
     candlestick = _in_panel(Chart.candlestick)
@@ -9001,6 +9171,14 @@ def _feature_fields(spec: dict[str, Any]) -> set[str]:
         for key in ("color", "size", "fillOpacity", "symbol")
         if isinstance(spec.get(key), (dict, list))
     ]
+    # A segment's widths: a channel for the whole segment, or each end's.
+    width = spec.get("width") if spec.get("type") == "segment" else None
+    ends = (
+        [width.get("from"), width.get("to")]
+        if isinstance(width, dict) and "from" in width
+        else [width]
+    )
+    channels += [end for end in ends if isinstance(end, (dict, list))]
     # A list's entries each, and the column a rank test ranks by.
     for _, channel in [entry for given in channels for entry in _entries("", given)]:
         if "field" in channel:
@@ -9919,7 +10097,7 @@ def _helper_axis(error: ChartError, name: str) -> ChartError:
 
 #: Helpers whose mark's points or items are rows of the data, which tooltip fields read.
 _ROW_HELPERS = frozenset(
-    ("line", "area", "bar", "scatter", "scatter_3d", "line_3d", "heatmap")
+    ("line", "area", "bar", "scatter", "scatter_3d", "line_3d", "heatmap", "segment")
     + ("choropleth", "scatter_geo", "candlestick", "surface", "radar", "gauge")
     + ("pie", "funnel", "treemap", "sunburst", "sankey")
 )
@@ -11305,6 +11483,53 @@ def candlestick(
         unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
+        item_key=item_key,
+        id=id,
+    )
+
+
+@helper
+def segment(
+    data: Any,
+    x: str | tuple[str, str],
+    y: str | tuple[str, str],
+    *,
+    series: str | None = None,
+    color: str | None = None,
+    width: SegmentWidthOption | SegmentWidth | None = None,
+    caps: Caps | Mapping[str, Any] | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
+    axis: Literal["left", "right"] | None = None,
+    panel: str | None = None,
+    clip: Clip | None = None,
+    z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
+    item_key: str | None = None,
+    id: str | None = None,
+    **options: Unpack[SegmentOptions],
+) -> Chart:
+    """A chart of segments, each row from one place to another (see
+    ``Chart.segment``): dumbbells, arrows, comets. ``width`` is the
+    segments'; give the chart's as ``hg.Chart(data, width=800).segment(...)``."""
+    chart, tooltip = _rows_chart_of(data, cast("RadarOptions", options))
+    return chart.segment(
+        x,
+        y,
+        series=series,
+        color=color,
+        width=width,
+        caps=caps,
+        encode=encode,
+        label=label,
+        axis=axis,
+        panel=panel,
+        clip=clip,
+        tooltip=tooltip,
+        z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         item_key=item_key,
         id=id,
     )

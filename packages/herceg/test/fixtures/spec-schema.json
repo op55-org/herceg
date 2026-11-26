@@ -659,7 +659,7 @@
     },
     {
       "id": "forms",
-      "text": "Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; an axis' side along its axis (top or bottom for x, left or right for y), once among the guides and the short form's place; a stack's inside-out order only for shares or a stream; a rule's labels outside the plot only at its start or end, and their room only where the rule is horizontal; ticks' fiscal years only by months or years, and their anchor only by elapsed time.",
+      "text": "Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a segment's x or y a pair of fields, from one place to another; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; an axis' side along its axis (top or bottom for x, left or right for y), once among the guides and the short form's place; a stack's inside-out order only for shares or a stream; a rule's labels outside the plot only at its start or end, and their room only where the rule is horizontal; ticks' fiscal years only by months or years, and their anchor only by elapsed time.",
       "matches": [
         "needs a place",
         "one of them",
@@ -692,7 +692,8 @@
         "expected no anchor with a calendar interval",
         "the channel before it always gives an output",
         "a vertical rule's labels stand above or below the plot",
-        "a label outside the plot goes at the rule's start or end"
+        "a label outside the plot goes at the rule's start or end",
+        "a segment goes from one place to another"
       ],
       "witnesses": [
         {
@@ -796,6 +797,10 @@
               "label": { "text": "SLO", "place": { "outside": true, "attachment": "center" } }
             }
           ]
+        },
+        {
+          "data": { "data": { "columns": { "t": [0, 1], "v": [1, 2] } } },
+          "marks": [{ "type": "segment", "x": "t", "y": "v" }]
         }
       ]
     },
@@ -1425,9 +1430,10 @@
   "unprobed": [
     {
       "id": "forms",
-      "reason": "Forms of an option that need another option the probe does not set: a contour of bands (no stroke or strokeWidth; two thresholds), a rule over a table (no drag), text at a place (no from, nor its label's place), labels that do not move (no leader), a facet by row or column (one of them), ticks of a calendar interval (no anchor), and a guide's time formats and intervals (a time axis, where its sample names a number axis).",
+      "reason": "Forms of an option that need another option the probe does not set: a contour of bands (no stroke or strokeWidth; two thresholds), a rule over a table (no drag), text at a place (no from, nor its label's place), labels that do not move (no leader), a facet by row or column (one of them), ticks of a calendar interval (no anchor), a guide's time formats and intervals (a time axis, where its sample names a number axis), and a segment's y of one field (its row's y is the pair; x would need one).",
       "places": [
         "contour: marks\\[\\]\\.(stroke|strokeWidth|thresholds(\\[\\])?)",
+        "segment: marks\\[\\]\\.y",
         "rule: marks\\[\\]\\.drag",
         "(rule|text): marks\\[\\]\\.label\\.leader(\\..*)?",
         "text: marks\\[\\]\\.(from|label\\.place)(\\..*)?",

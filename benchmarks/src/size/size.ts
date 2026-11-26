@@ -41,6 +41,7 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-scatter": "herceg",
   "herceg-heatmap": "herceg",
   "herceg-contour": "herceg",
+  "herceg-segment": "herceg",
   "herceg-react-line": "@herceg/react",
   "herceg-react-grid": "@herceg/react",
   "herceg-react-grid-remote": "@herceg/react",

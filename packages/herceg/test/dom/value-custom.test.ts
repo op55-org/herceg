@@ -22,6 +22,7 @@ import { bar } from "../../src/marks/bar.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
 import { type CustomDataOptions, custom } from "../../src/marks/custom.ts";
 import { point } from "../../src/marks/point.ts";
+import { segment } from "../../src/marks/segment.ts";
 import { planAxis } from "../../src/model/axis.ts";
 import { axisGuide } from "../../src/model/axis-guide.ts";
 import { facet } from "../../src/model/facet.ts";
@@ -588,5 +589,64 @@ describe("custom marks changing values", () => {
     // Between where 10 was and where it is: the y axis moves under it.
     expect(ys.at(-1)!).toBeGreaterThan(Math.min(before, after));
     expect(ys.at(-1)!).toBeLessThan(Math.max(before, after));
+  });
+});
+
+describe("segments changing values", () => {
+  it("move both ends and their channels' fields, as the custom mark's core moves its own", () => {
+    const data = table({
+      id: ["a", "b"],
+      start: [10, 80],
+      end: [40, 50],
+      lane: [1, 2],
+      confidence: [0, 1],
+    });
+    const model = chart({
+      scales: SCALES,
+      x: { domain: [0, 100] },
+      y: { domain: [0, 3] },
+      marks: [
+        segment(data, {
+          x: ["start", "end"],
+          y: "lane",
+          itemKey: "id",
+          width: { from: { field: "confidence", scale: "widths" }, to: 1 },
+          caps: { from: "dot", to: "arrow" },
+        }),
+      ],
+    });
+    const tween = change(model, () => data.replace(0, { end: [60, 20], confidence: [1, 1] }));
+    expect(tween).toBeDefined();
+    const { x, y } = model.panels()[0]!;
+    const half = shapes(frameAt(tween!, 100)).shapes as { d: string }[];
+    // Half way: a's tip at 50 and its tail 4 px wide at its start, whose dot stays;
+    // b's tip at 35, from 80 toward 20.
+    const at = (v: number, w: number) =>
+      `${Math.round(x.map(v) * 10) / 10} ${Math.round(w * 10) / 10}`;
+    expect(half[0]!.d).toContain(`L${at(50, y.map(1))}L`);
+    expect(half[0]!.d).toContain(`M${at(10, y.map(1) - 2)}L`);
+    expect(half[0]!.d).toMatch(
+      new RegExp(`M${x.map(10) - 3} ${Math.round(y.map(1) * 10) / 10}a3 3`),
+    );
+    expect(half[1]!.d).toContain(`L${at(35, y.map(2))}L`);
+    // At the end, the new values' outlines.
+    const done = shapes(tween!.scene).shapes as { d: string }[];
+    expect(done[0]!.d).toContain(`L${at(60, y.map(1))}L`);
+    expect(done[1]!.d).toContain(`L${at(20, y.map(2))}L`);
+  });
+
+  it('move a pair\'s first field named "" as any other', () => {
+    const data = table({ id: ["a"], "": [10], end: [90], t: [5] });
+    const model = chart({
+      x: { domain: [0, 10] },
+      y: { domain: [0, 100] },
+      marks: [segment(data, { x: "t", y: ["", "end"], itemKey: "id", width: 2 })],
+    });
+    const tween = change(model, () => data.replace(0, { "": [50] }));
+    const { y } = model.panels()[0]!;
+    const [half] = shapes(frameAt(tween!, 100)).shapes as { d: string }[];
+    // Half way, its start at 30: the body's first corner there.
+    const [, startY] = half!.d.slice(1).split("L")[0]!.split(" ").map(Number);
+    expect(startY).toBeCloseTo(y.map(30), 0);
   });
 });

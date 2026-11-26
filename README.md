@@ -5,9 +5,9 @@ engine for TypeScript, React, Vue, Svelte, and Python, built for charts
 whose data is large or changes often.
 
 - **Charts.** Line, area, bar, scatter, heatmap, contour, histogram, box
-  plot, violin, error bar, candlestick, pie, treemap, sunburst, gauge,
-  funnel, radar, Sankey, network, map, and 3D charts, with annotations and
-  custom marks, composed on shared scales.
+  plot, violin, error bar, segment, candlestick, pie, treemap, sunburst,
+  gauge, funnel, radar, Sankey, network, map, and 3D charts, with
+  annotations and custom marks, composed on shared scales.
 - **Layout.** Small multiples, subplots of nested rows and columns, insets,
   a second y axis, time axes that leave out nights and weekends, and a
   range navigator.

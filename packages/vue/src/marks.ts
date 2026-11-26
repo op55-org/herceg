@@ -59,9 +59,11 @@ import {
   rule,
   type SankeyOptions,
   type Schema,
+  type SegmentOptions,
   type SunburstOptions,
   type SurfaceOptions,
   sankey,
+  segment,
   sunburst,
   surface,
   Table,
@@ -216,6 +218,13 @@ export const Rug = /* @__PURE__ */ markComponent(
   ({ data, ...options }: WithRows<RugOptions<Schema>, Schema>) => rug(data, options),
   ["pick", "inspect"],
 ) as unknown as <S extends Schema>(props: WithRows<RugOptions<S>, S>) => null;
+
+/** Segments: each row from one place to another, with dots or arrowheads at its ends. */
+export const Segment = /* @__PURE__ */ markComponent(
+  "Segment",
+  ({ data, ...options }: WithRows<SegmentOptions<Schema>, Schema>) => segment(data, options),
+  ["pick", "inspect"],
+) as unknown as <S extends Schema>(props: WithRows<SegmentOptions<S>, S>) => null;
 
 /** Error bars: `x`, `y1`, `y2` (vertical) or `y`, `x1`, `x2` (horizontal). */
 export const ErrorBar = /* @__PURE__ */ markComponent(

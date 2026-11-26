@@ -43,6 +43,7 @@ import Pies from "./Pies.svelte";
 import Pins from "./Pins.svelte";
 import Prices from "./Prices.svelte";
 import RowTips from "./RowTips.svelte";
+import Segments from "./Segments.svelte";
 import Solids from "./Solids.svelte";
 import Stacks from "./Stacks.svelte";
 import Stray from "./Stray.svelte";
@@ -190,6 +191,17 @@ describe("<Chart>", () => {
     await frame();
     expect(host.textContent).toContain("renamed");
     expect(host.querySelectorAll('path[stroke="#ff0000"]')).toHaveLength(1);
+  });
+
+  it("draws segment components as one outline per row, read as ranges", async () => {
+    const props = $state({ end: 40 });
+    render(Segments, props);
+    expect(host.querySelectorAll('[data-kind="shapes"] path[fill="#ff0000"]')).toHaveLength(2);
+    expect(host.textContent).toContain("start – end: 2 segments in 2 categories, x from 10 to 80");
+    // The table written in place: the chart draws it again, its text alternative after.
+    props.end = 90;
+    flushSync();
+    await expect.poll(() => host.textContent, { timeout: 5000 }).toContain("x from 10 to 90");
   });
 
   it("orders a category axis' bands by its domain, and by a new one", () => {

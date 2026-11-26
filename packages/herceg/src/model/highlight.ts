@@ -111,13 +111,13 @@ const ROWS = new Set(["point", "bar", "errorbar", "rug"]);
 /** Whether a mark draws the rows a channel selects highlighted; others draw every row as before. */
 export function highlights(mark: Mark): boolean {
   const type = mark.spec.type;
-  // Custom marks dim the items their draw makes of rows a selection leaves
-  // out, themselves (see `Highlighter.geometry`).
+  // Custom marks and segments dim the items they draw of rows a selection
+  // leaves out, themselves (see `Highlighter.geometry`).
   return (
     ROWS.has(type) ||
     type === "line" ||
     type === "area" ||
-    type === "custom" ||
+    !!mark.shapeLayout ||
     !!mark.selectedGeometry
   );
 }
@@ -166,8 +166,8 @@ export class Highlighter {
     rows?: RowParts,
   ): Geometry[] | undefined {
     const type = mark.spec.type;
-    // Custom marks dim their own items, reading `Frame.highlighted`.
-    if (!highlights(mark) || type === "custom") return undefined;
+    // Custom marks and segments dim their own items, reading `Frame.highlighted`.
+    if (!highlights(mark) || mark.shapeLayout) return undefined;
     const table = mark.table;
     const chosen = table && this.#of(mark);
     if (!chosen) return undefined;

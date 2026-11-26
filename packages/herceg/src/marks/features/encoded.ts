@@ -4,7 +4,8 @@
 // version, theme, and what channels read beyond the row (channel scales'
 // domains, ranks); and the colors a color channel gives series (a
 // constant, the series field's values, or the series' names through a
-// scale, alone or ending a list).
+// scale, alone or ending a list). Marks the custom mark's core draws
+// (segments) read their own channels the same way, by the names they give.
 
 import type { MarkRows } from "../../data/row-view.ts";
 import type { ReadonlyTable, Table } from "../../data/table.ts";
@@ -18,17 +19,25 @@ import {
   type ScaleOf,
 } from "../../encoding/channels.ts";
 import type { FeatureKit } from "../../model/features.ts";
-import type { ChannelName } from "../../spec/channels.ts";
-import type { EncodingsSpec } from "../../spec/encoding.ts";
+import type { ChannelsSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { CustomSeries } from "../custom.ts";
 import type { GlyphKey } from "../mark.ts";
 import { displayFields, outputCheck, seriesTail } from "./channels.ts";
 import { categoryKey, keyedFields } from "./row-styles.ts";
 
-/** The channels a custom mark's `draw` reads. */
-const CHANNELS = ["color", "strokeWidth", "opacity"] as const;
-type Name = (typeof CHANNELS)[number];
+/**
+ * A channel a mark's draw reads per row: the name it reads it by (a
+ * color's is "color"), the output it gives (checked as that channel's
+ * are), the channel as given, and where it is given, as messages name it
+ * ("encode.color", "width.from").
+ */
+export interface DrawChannel {
+  readonly name: string;
+  readonly output: "color" | "strokeWidth" | "opacity";
+  readonly given: ChannelsSpec<unknown>;
+  readonly path: string;
+}
 
 interface Compiled {
   /** What a series' rows read: the channel, or a list but the entry ending it that colors the series. */
@@ -39,6 +48,7 @@ interface Compiled {
   readonly whole: Channel<unknown>;
   readonly check: Check;
   readonly path: string;
+  readonly colors: boolean;
   /** Rows of `channel` (`read`) and of `whole` (`alone`) of the mark's table as last read, and what they were read at. */
   read?: Read;
   alone?: Read;
@@ -56,18 +66,22 @@ interface Read {
   readonly rows: RowReader<unknown>;
 }
 
-/** A custom mark's channels, compiled against its table (`path` names the mark in messages). */
+/**
+ * A mark's draw channels, compiled against its table (`path` names the
+ * mark in messages; `reader`, what reads widths and opacities by row).
+ */
 export function encodedChannels(
   kit: FeatureKit,
-  encode: Pick<EncodingsSpec, Name> | undefined,
+  given: readonly DrawChannel[],
   table: Table,
   series: string | undefined,
   scales: ScaleOf,
   path: string,
+  reader: string,
 ): {
   use(theme: Theme, paint: PaintReader): void;
   encoded(
-    channel: Name,
+    channel: string,
     row: number,
     series?: CustomSeries,
     frame?: ReadonlyTable,
@@ -79,23 +93,29 @@ export function encodedChannels(
   /** The number fields whose display colors a color list reads, which the chart's legends key. */
   displayColors: string[] | undefined;
 } {
-  const compiled = new Map<Name, Compiled>();
-  for (const name of CHANNELS) {
-    const given = encode?.[name];
-    if (!given) continue;
-    const at = `${path} encode.${name}`;
-    // Series' outputs are read as the series' colors; draw reads widths and opacities by row.
-    if (name !== "color")
-      for (const [i, c] of (Array.isArray(given) ? given : [given]).entries())
+  const compiled = new Map<string, Compiled>();
+  for (const { name, output, given: channels, path: option } of given) {
+    const at = `${path} ${option}`;
+    // Series' outputs are read as the series' colors; widths and opacities are read by row.
+    if (output !== "color")
+      for (const [i, c] of (Array.isArray(channels) ? channels : [channels]).entries())
         if ("series" in c)
           throw new TypeError(
-            `${at}${Array.isArray(given) ? `[${i}]` : ""}: the series' names give each series one ${name}, and draw reads it by row; give a field, a value, or a condition`,
+            `${at}${Array.isArray(channels) ? `[${i}]` : ""}: the series' names give each series one ${name}, and ${reader} reads it by row; give a field, a value, or a condition`,
           );
-    const check = outputCheck(name as ChannelName, kit.isColor);
-    const read = compileChannel(given as never, table, scales, name, check, at, name);
+    const check = outputCheck(output, kit.isColor);
+    const read = compileChannel(channels as never, table, scales, output, check, at, output);
     // Only colors end in the series' (widths and opacities refuse its names; a field of the series' is read by row).
-    const [channel, tail] = name === "color" ? seriesTail(read, series) : [read, undefined];
-    compiled.set(name, { channel, tail, whole: read, check, path: at, frames: new WeakMap() });
+    const [channel, tail] = output === "color" ? seriesTail(read, series) : [read, undefined];
+    compiled.set(name, {
+      channel,
+      tail,
+      whole: read,
+      check,
+      path: at,
+      colors: output === "color",
+      frames: new WeakMap(),
+    });
   }
   let theme: Theme | undefined;
   let paint: PaintReader = (value) => value;
@@ -130,7 +150,7 @@ export function encodedChannels(
         source === table ? c : (c.frames.get(source) ?? c.frames.set(source, {}).get(source)!);
       let read = reads[slot];
       if (read?.version !== table.version || read.scaled !== scaled || read.theme !== theme) {
-        const colors = name === "color";
+        const { colors } = c;
         read = {
           version: table.version,
           scaled,

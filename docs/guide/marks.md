@@ -13,6 +13,7 @@ y axes, the options they share, encodings, annotations, and custom marks.
 - [Bars](#bars)
 - [Points](#points)
 - [Heatmaps](#heatmaps)
+- [Segments](#segments)
 - [Encodings](#encodings)
 - [Placing rows by pixels or fractions](#placing-rows-by-pixels-or-fractions)
 - [Annotations](#annotations)
@@ -25,6 +26,7 @@ y axes, the options they share, encodings, annotations, and custom marks.
 | Values over time or a sequence | `line`, `area` | `hg.line`, `hg.area` | this page |
 | Values by category | `bar` | `hg.bar` | this page |
 | Two numbers per row | `point` | `hg.scatter` | this page |
+| A move or change from one place to another: arrows, dumbbells, comets | `segment` | `hg.segment`, `Chart.segment` | [Segments](#segments) |
 | A value over two axes | `heatmap`, `contour`, `histogram` (x and y) | `hg.heatmap`, `hg.contour`, `hg.histogram` | this page, [Statistical charts](statistical-charts.md) |
 | Distributions | `histogram`, `boxplot`, `boxen`, `violin`, `rug`, `errorbar` | same names; `herceg.express` | [Statistical charts](statistical-charts.md) |
 | Clustering trees | `dendrogram` | `Chart.dendrogram` | [Statistical charts](statistical-charts.md#dendrograms) |
@@ -414,6 +416,78 @@ hg.heatmap(color=grid, x=xs, y=ys)  # a 2D array: row i, column j at y[i], x[j]
   at the seam.
 - **Limits.** Heatmaps refuse log axes. Calendars take no `x`, `y`, steps,
   bands, or time breaks. Edge cells take no steps, bands, or time breaks.
+
+## Segments
+
+A segment draws each row from one place to another: `x` and `y` are each a
+field, the same at both ends, or a pair of fields `[from, to]`, and at
+least one is a pair. Its width tapers between the ends, and each end draws
+a dot, an arrowhead, or nothing.
+
+```ts
+segment(moves, { x: ["before", "after"], y: "country", caps: { to: "arrow" } }); // arrows
+segment(gaps, { x: ["women", "men"], y: "job", caps: { from: "dot", to: "dot" } }); // dumbbells
+segment(winds, { x: ["lon", "lon2"], y: ["lat", "lat2"], width: 1.5, caps: { to: "arrow" } });
+segment(forecasts, {
+  x: ["start", "end"],
+  y: "id", // a category field: a band per forecast
+  color: "category",
+  itemKey: "id",
+  width: { from: { field: "confidence", scale: "widths" }, to: 1 }, // tapering to 1 px
+  caps: { from: "dot", to: { arrow: { length: 10, width: 8 } } },
+  encode: { opacity: { field: "age", scale: "fade" } },
+  tooltip: { fields: ["confidence", "age"] },
+});
+```
+
+```python
+hg.segment(moves, x=("before", "after"), y="country", caps=hg.Caps(end="arrow"))
+hg.Chart(forecasts, scales={"widths": hg.ChannelScale(domain=(0, 1), range=(2, 7))}).segment(
+    x=("start", "end"),
+    y="id",
+    color="category",
+    width=hg.SegmentWidth(start=hg.Channel(field="confidence", scale="widths"), end=1),
+    caps=hg.Caps(start="dot", end=hg.Arrow(length=10, width=8)),
+)
+```
+
+Python names the ends `start` and `end` (`from` is a keyword); the spec
+writes them `from` and `to`. In `hg.segment`, `width` is the segment's;
+size the chart with `hg.Chart(width=...)`.
+
+| Option | Means |
+| --- | --- |
+| `x`, `y` | A field (number, time, or category) for both ends, or `[from, to]`, a pair of number or time fields. Both ends count toward the axes' domains; a category places rows in its bands. |
+| `series`, `color` | A category field making a series per value (`color` colors them too, and must name the same field as `series` where both are given), or a CSS color for every segment. |
+| `width` | Pixels across, or a channel giving each row's: a field through a scale, a value, a condition, or a list of them. `{ from, to }` tapers linearly between the body's ends; one width draws it straight. By default, a line's width. A row a channel gives no width is not drawn. |
+| `caps` | `{ from, to }`, each `"dot"` (radius 3), `"arrow"` (10 px long, 8 px across its base), `{ dot: { radius } }`, or `{ arrow: { length, width } }`; nothing by default. A head's tip is at its end, and the body runs to the head's base. |
+| `encode` | `color` (over the series' color) and `opacity` (0 to 1), read by row through the chart's scales. |
+| `tooltip`, `label`, `legend`, `itemKey`, `clip`, `pick`, `inspect` | As other marks take them. |
+
+- **Outline.** Each row is one filled outline: the body, its heads, and its
+  dots paint once where they overlap, so a translucent segment has no
+  darker joins. Segments are drawn series by series, each series' rows in
+  order, so a later series' segments paint over an earlier one's.
+- **Short segments.** A segment shorter than its arrowhead draws the head
+  alone, its base at the other end; two heads longer than the segment each
+  take half of it. A segment of no length draws its dots and no arrowhead.
+- **Reading.** Rows are items: the pointer picks the segment under it by
+  its shape, and the tooltip writes its ends as ranges ("12 – 40" along one
+  axis, "(1, 2) – (3, 4)" along both). The keyboard steps a series'
+  segments in row order. The text alternative counts each series'
+  segments and the categories they are in ("energy: 2 segments in 2
+  categories, x from -12 to 70"). Tooltips take no `total`.
+- **Selection and animation.** A click selects the segment under the
+  pointer, by its shape. A brush selects the rows whose span from one end
+  to the other meets it along each axis it covers, so a rectangle beside a
+  diagonal segment, inside both its spans, selects it; a lasso selects the
+  rows whose drawn box's middle is inside it. A selection dims the others.
+  With `itemKey`, replaced data moves each segment from its old ends and
+  widths to its new ones ([Animation](interaction.md#animation)).
+- **Output.** SVG, canvas, static SVG, PNG, and PDF draw the same outline.
+- **Limits.** `color` is a category field or a color, so segments show
+  no colorbar. They are drawn on the CPU, meant for shapes in the
+  thousands.
 
 ## Encodings
 
@@ -1062,7 +1136,10 @@ custom(requests, {
 | `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
 | `items(mark)` | Copies of the items a pie, funnel, treemap, or sunburst drew in the panel, as `getItems` gives them; a custom mark beside it without `x` and `y` draws in pixels by them ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 
-Range glyphs, A2's comets for example, take part as items:
+Range glyphs, A2's comets for example, take part as items. Per-row shapes
+from one place to another (arrows, dumbbells, tapering comets) are
+[segments](#segments), which draw this one with no `draw` and work in a
+spec and in Python:
 
 ```ts
 custom(forecasts, {

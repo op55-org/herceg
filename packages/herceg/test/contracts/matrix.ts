@@ -100,7 +100,7 @@ const CUSTOM_RADIUS = 3;
  * How far past its plot, in CSS pixels, a row's places reach: custom
  * circles' outlines reach their radius past the points at its edges.
  */
-export const REACH: Record<string, number> = { custom: CUSTOM_RADIUS };
+export const REACH: Record<string, number> = { custom: CUSTOM_RADIUS, segment: 1.5 };
 
 /**
  * Options of the rows the spec cannot write, by row: custom marks draw a

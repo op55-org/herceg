@@ -392,6 +392,24 @@ reads it, and inspections carry it (`inspection.totals`) in events,
 Streamlit, and Python's `hg.Inspection.totals` (`hg.InspectedTotal`). See
 [Totals](docs/guide/interaction.md#totals).
 
+Segments (`segment`, `{ type: "segment" }`, `Chart.segment` and
+`hg.segment` in Python, `<Segment>` in React, Vue, and Svelte) draw each
+row from one place to another: `x` and `y` are each a field, the same at
+both ends, or a pair `[from, to]` of number or time fields
+(`x=("start", "end")` in Python, which names the ends `start` and `end`).
+Their `width` is pixels or a channel by row, one for the whole segment or
+`{ from, to }` tapering between the ends (`hg.SegmentWidth`); `caps` puts
+a dot or an arrowhead at either end (`"dot"`, `"arrow"`, or sized:
+`hg.Caps(start=hg.Dot(radius=3), end=hg.Arrow(length=10, width=8))`);
+`encode` takes each row's `color` and `opacity`. Each row is one filled
+outline, its dots and heads painting once where they overlap; a segment
+shorter than its arrowhead draws the head alone. Segments are drawn by the
+custom mark's core, so they take part as custom marks of ranges do:
+series and legends, picking by shape, tooltips writing ranges, the
+keyboard, selection and dimming, value transitions with `itemKey`, the
+text alternative ("2 segments in 2 categories"), and SVG, canvas, PNG,
+and PDF output. See [Segments](docs/guide/marks.md#segments).
+
 Selections are announced once per gesture, in the same words for the
 pointer and the keyboard. A click or Enter that selects says the item as
 its mark's tooltip writes it (its heading and content line, else its

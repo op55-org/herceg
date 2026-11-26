@@ -30,6 +30,7 @@ export { default as Region } from "./Region.svelte";
 export { default as Rug } from "./Rug.svelte";
 export { default as Rule } from "./Rule.svelte";
 export { default as Sankey } from "./Sankey.svelte";
+export { default as Segment } from "./Segment.svelte";
 export { default as Sunburst } from "./Sunburst.svelte";
 export { default as Surface } from "./Surface.svelte";
 export { default as Text } from "./Text.svelte";

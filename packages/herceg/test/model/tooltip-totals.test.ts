@@ -482,6 +482,17 @@ describe("tooltip totals in specs", () => {
     expect(refusal({ type: "area", x: "t", y1: "lo", y2: "v", tooltip: { total: true } })).toBe(
       "marks[0].tooltip.total: a band's points are ranges, which have no total; drop total",
     );
+    // A field may be named "": its band is a band all the same, along either axis.
+    for (const band of [
+      { x: "t", y1: "", y2: "v" },
+      { y: "t", x1: "", x2: "v" },
+    ])
+      expect(refusal({ type: "area", ...band, tooltip: { total: true } })).toBe(
+        "marks[0].tooltip.total: a band's points are ranges, which have no total; drop total",
+      );
+    expect(refusal({ type: "segment", x: ["lo", "v"], y: "k", tooltip: { total: true } })).toBe(
+      "marks[0].tooltip.total: only lines, filled areas, bars, and points total their points; drop total",
+    );
     expect(refusal({ type: "histogram", x: "v", tooltip: { total: true } })).toBe(
       "marks[0].tooltip.total: a histogram's bins count rows, and its tooltips write each summary as it is; drop total",
     );

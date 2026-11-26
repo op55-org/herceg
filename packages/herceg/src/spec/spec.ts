@@ -1351,6 +1351,7 @@ export type MarkSpec =
   | HeatmapSpec
   | ContourSpec
   | RugSpec
+  | SegmentSpec
   | ErrorBarSpec
   | CandlestickSpec
   | HistogramSpec
@@ -2053,6 +2054,73 @@ interface RugStyle extends SeriesBase, RowTooltip, RowItems {
   strokeWidth?: number;
   label?: NameSpec;
 }
+
+/**
+ * Segments: each row from its `from` place to its `to` place. `x` and `y`
+ * are each a field, the same at both ends (a category places rows in its
+ * bands), or a pair `[from, to]` of number or time fields; at least one is
+ * a pair. Both ends count toward the axes' domains. Rows are items, picked
+ * by their shapes and read as ranges ("12 – 40", "(1, 2) – (3, 4)"); a
+ * series per value of `series` (or of a category `color`), else one.
+ */
+export interface SegmentSpec extends Omit<MarkBase, keyof SelectionLooks>, Legended, RowItems {
+  type: "segment";
+  x: Field | readonly [from: Field, to: Field];
+  y: Field | readonly [from: Field, to: Field];
+  series?: Field;
+  /**
+   * A category field naming the series, whose values color them (as
+   * `series` does, which must then name it too), or a color for every
+   * segment.
+   */
+  color?: string;
+  label?: NameSpec;
+  /**
+   * Pixels across, or a channel giving each row's: one for the whole
+   * segment, or `{ from, to }`, tapering linearly between the body's ends
+   * (an arrowhead's base where an end has one). By default, a line's width.
+   * A row a channel gives no width is not drawn.
+   */
+  width?: SegmentWidthSpec | { from: SegmentWidthSpec; to: SegmentWidthSpec };
+  /** What each end draws: nothing by default. */
+  caps?: { from?: SegmentCap; to?: SegmentCap };
+  /** Each row's own color (over its series') and opacity (by default 1), read as custom marks read them. */
+  encode?: {
+    color?: ChannelsSpec<string>;
+    /** Opacities from 0 to 1. @minimum 0 @maximum 1 */
+    opacity?: RowChannelsSpec<number>;
+  };
+  tooltip?: MarkTooltipSpec;
+}
+
+/** A segment's width in pixels, or a channel giving each row's. @minimum 0 */
+export type SegmentWidthSpec = number | RowChannelsSpec<number>;
+
+/**
+ * What a segment draws at one end: a dot about it (`radius` 3 px by
+ * default), or an arrowhead whose tip is at it (`length` 10 px along the
+ * segment and `width` 8 px across its base by default). A segment shorter
+ * than its arrowhead draws the head alone, its base at the other end; two
+ * heads longer than the segment together each take half of it; a segment
+ * of no length draws its dots and no arrowhead.
+ */
+export type SegmentCap =
+  | "dot"
+  | "arrow"
+  | {
+      dot: {
+        /** @minimum 0 @default 3 */
+        radius?: number;
+      };
+    }
+  | {
+      arrow: {
+        /** @minimum 0 @default 10 */
+        length?: number;
+        /** @minimum 0 @default 8 */
+        width?: number;
+      };
+    };
 
 /**
  * Error bars: vertical intervals at each `x`, from `y1` to `y2` or from

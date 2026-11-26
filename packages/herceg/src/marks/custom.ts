@@ -22,6 +22,7 @@ import type {
 import { n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import type {
+  CustomRedraw,
   Geometry,
   PathShape,
   PlotRect,
@@ -43,6 +44,7 @@ import type {
   PickResult,
 } from "./drawn.ts";
 import type { ColorChannels, ItemKeyed, RowChannels } from "./encoding.ts";
+import type { DrawChannel } from "./features/encoded.ts";
 import { copiesOf, type ItemInfo } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { clipBox } from "./lookups.ts";
@@ -339,8 +341,30 @@ export interface CustomSpec {
   legend?: false;
 }
 
-/** How a custom mark's rows make series: as a line's, a series per y field, or a row an item. */
-type Layout = "points" | "wide" | "ranges" | undefined;
+/** How a custom mark's rows make series: as a line's, a series per y field, a row an item, or none. */
+type Layout = NonNullable<Mark["shapeLayout"]>;
+
+/**
+ * What a built-in mark the custom mark's core draws (marks/segment.ts)
+ * gives it besides the options custom marks take: its spec, whose type
+ * names it in messages; the channels its draw reads, and what value
+ * transitions read of them (`declared`); a color for every series; and
+ * what its text alternative counts. Its rows are items spanning their
+ * fields (ranges), however many it has.
+ */
+export interface CustomCore {
+  readonly spec: Frozen<{
+    readonly type: string;
+    readonly itemKey?: string | undefined;
+    readonly clip?: Clip | undefined;
+    readonly tooltip?: SeriesTooltipSpec | undefined;
+  }>;
+  readonly channels: readonly DrawChannel[];
+  readonly declared: CustomRedraw["spec"];
+  readonly color: string | undefined;
+  /** "segment": "300 segments in 300 categories". */
+  readonly noun: string;
+}
 
 /** Pixels a series' point reaches when its mark drew no items, which the picker finds it within. */
 const POINT_REACH = 3;
@@ -454,6 +478,9 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
   readonly identity: MarkSources | undefined;
   readonly wide: boolean;
   readonly featured: boolean;
+  readonly shapeLayout: Layout;
+  /** The channels `draw` reads per row (see `encoded`). */
+  readonly channels: readonly DrawChannel[];
   /** For ranges: where an item is (its drawn box's middle), for the keyboard and selections. */
   readonly place?: (
     series: Series,
@@ -469,7 +496,6 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
   ) => Hit | undefined;
   readonly #x: readonly string[];
   readonly #y: readonly string[];
-  readonly #layout: Layout;
   /** The axes a single category field places rows in bands along. */
   readonly #banded: { readonly x: boolean; readonly y: boolean };
   /** Splits the table into series, when the mark shows any. */
@@ -477,6 +503,13 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
   readonly #draw: (context: DataDrawContext<Schema>) => void;
   readonly #pointText: CustomDataOptions<Schema>["pointText"];
   readonly #description: string | undefined;
+  /** The built-in mark it draws, if any. */
+  readonly #core: CustomCore | undefined;
+  /**
+   * A custom mark's own description (its drawing says nothing the chart
+   * can read); a built-in mark's core has none, so the chart names its kind.
+   */
+  readonly describe?: () => string | undefined;
   /** Each chart drawing the mark, told of `redraw()`. */
   readonly #told = new Set<() => void>();
   #drawingRevision = 0;
@@ -486,7 +519,13 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
     WeakMap<BandPlaces, { version: number; values: Float64Array }>
   >();
 
-  constructor(table: Table | undefined, options: CustomDataOptions<Schema>, view?: RowView) {
+  constructor(
+    table: Table | undefined,
+    options: CustomDataOptions<Schema>,
+    view?: RowView,
+    core?: CustomCore,
+  ) {
+    const type = core?.spec.type ?? "custom";
     const spec: CustomSpec = {
       type: "custom",
       ...definedFields(options, [
@@ -526,7 +565,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
           table!,
           field,
           fields.length === 1 ? [...NUMERIC, ...CATEGORY] : NUMERIC,
-          `custom ${axis}`,
+          `${type} ${axis}`,
         );
     }
     this.#banded = {
@@ -535,18 +574,20 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
     };
     const field = options.series === false ? undefined : options.series;
     // One x field and y fields are series as a line's (a series per y field
-    // without a series field); other fields span each row's item.
-    const layout: Layout =
-      options.series === false || this.#x.length === 0 || this.#y.length === 0
-        ? undefined
+    // without a series field); other fields span each row's item, as a
+    // core's always do.
+    const layout: Layout = core
+      ? "ranges"
+      : options.series === false || this.#x.length === 0 || this.#y.length === 0
+        ? "none"
         : this.#x.length === 1 && this.#y.length === 1
           ? "points"
           : this.#x.length === 1 && field === undefined
             ? "wide"
             : "ranges";
-    this.#layout = layout;
-    if (layout) {
-      if (field !== undefined) requireField(table!, field, CATEGORY, "custom series");
+    this.shapeLayout = layout;
+    if (layout !== "none") {
+      if (field !== undefined) requireField(table!, field, CATEGORY, `${type} series`);
       const ranged = this.#x.length > 1 ? this.#x : this.#y;
       this.#split = new SeriesSplitter(
         () => this.rows(),
@@ -578,8 +619,15 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
         );
       spec.encode = options.encode as NonNullable<CustomSpec["encode"]>;
     }
-    this.spec = frozen(spec);
-    this.featured = options.encode !== undefined;
+    this.spec = core ? (core.spec as Frozen<CustomSpec>) : frozen(spec);
+    this.channels =
+      core?.channels ??
+      (["color", "strokeWidth", "opacity"] as const).flatMap((name): DrawChannel[] => {
+        // As frozen: expressions built with `col` are their JSON form.
+        const given = this.spec.encode?.[name];
+        return given ? [{ name, output: name, given, path: `encode.${name}` }] : [];
+      });
+    this.featured = this.channels.length > 0;
     this.seriesless = !this.#split;
     this.tooltip = layout === "ranges" ? "point" : "x";
     // Series stand for their field's values, or for their y fields' names, as a line's do.
@@ -587,11 +635,13 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
       ? { field, values: layout === "wide" ? this.#y : [this.#y[0]!] }
       : undefined;
     this.wide = layout === "wide" && this.#y.length > 1;
-    checkTooltip(table, this.spec.tooltip, "custom");
-    checkOptionalItemKey(table, this.spec.itemKey, "custom");
+    checkTooltip(table, this.spec.tooltip, type);
+    checkOptionalItemKey(table, this.spec.itemKey, type);
     this.#draw = options.draw;
     this.#pointText = options.pointText;
     this.#description = options.description;
+    this.#core = core;
+    if (!core) this.describe = () => this.#description;
     if (layout === "ranges") {
       this.place = (series, row, frame) => this.#placeOf(series, row, frame);
       this.pick = (series, px, py, frame) => this.#pickAt(series, px, py, frame);
@@ -666,13 +716,21 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
           )
         : undefined;
     const x = placed("x") ?? this.table!.numbers(this.#x[0] as never);
-    return buildSeries(this.table!, this.#split.sources(), x, key, palette, undefined, placed("y"));
+    return buildSeries(
+      this.table!,
+      this.#split.sources(),
+      x,
+      key,
+      palette,
+      this.#core?.color,
+      placed("y"),
+    );
   }
 
   xExtent(series: readonly Series[], log: boolean): readonly [number, number] | undefined {
     if (this.#banded.x) return undefined;
     // A range counts whole: every field, at the rows of the series shown.
-    if (this.#layout === "ranges")
+    if (this.shapeLayout === "ranges")
       return unionExtent(series.map((s) => seriesExtent(this.table!, s, this.#x, log)));
     if (this.#split) return unionExtent(series.map((s) => xExtent(s, log)));
     return unionExtent(this.#x.map((field) => fieldExtent(this.rows(), field, log)));
@@ -686,7 +744,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
    */
   yExtent(series: readonly Series[], x0: number, x1: number, log: boolean) {
     if (this.#banded.y) return undefined;
-    if (this.#layout === "ranges")
+    if (this.shapeLayout === "ranges")
       return unionExtent(series.map((s) => seriesExtent(this.table!, s, this.#y, log)));
     if (!this.#split)
       return unionExtent(this.#y.map((field) => fieldExtent(this.rows(), field, log)));
@@ -701,7 +759,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
    */
   pointText(series: Series, row: number, format: AxisFormat): string {
     if (this.#pointText) return this.#pointText(row, format, customSeries(series, this.#placed));
-    if (this.#layout !== "ranges")
+    if (this.shapeLayout !== "ranges")
       return (series.write?.(format.y) ?? format.y)(valueAt(series, row));
     const table = this.table!;
     const written = (fields: readonly string[], axis: "x" | "y") =>
@@ -727,7 +785,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
    * value axis' extent over its fields. Others take the chart's.
    */
   summarize(parts: readonly Series[], name: string, { format }: SummaryContext) {
-    const ranges = this.#layout === "ranges";
+    const ranges = this.shapeLayout === "ranges";
     if (!ranges && !this.#banded.y) return undefined;
     const table = this.table!;
     const axes = (["x", "y"] as const).map((axis) => ({
@@ -761,17 +819,13 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
         }
       }
     if (count === 0) return `${name}: no data`;
-    let text = `${name}: ${count} ${ranges ? "range" : "point"}${count === 1 ? "" : "s"}`;
+    let text = `${name}: ${count} ${ranges ? (this.#core?.noun ?? "range") : "point"}${count === 1 ? "" : "s"}`;
     // Categories along y, as points' sentences count them, else along x.
     const { used } = axes[this.#banded.y ? 1 : 0]!;
     if (used.size > 0) text += ` in ${used.size} ${used.size === 1 ? "category" : "categories"}`;
     for (const { axis, banded, low, high } of axes)
       if (!banded) text += `, ${axis} from ${format[axis](low)} to ${format[axis](high)}`;
     return text;
-  }
-
-  describe(): string | undefined {
-    return this.#description;
   }
 
   /**
@@ -818,7 +872,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
         ? {
             ...view,
             x: this.#banded.x ? view.x : values.numbers(this.#x[0]!),
-            y: this.#banded.y || !s.field ? view.y : values.numbers(s.field),
+            y: this.#banded.y || s.field === undefined ? view.y : values.numbers(s.field),
           }
         : view;
     });
@@ -930,7 +984,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
     const geometry: ShapesGeometry = {
       kind: "shapes",
       draw: shapesDrawing,
-      key: seriesKey(key, "custom"),
+      key: seriesKey(key, this.spec.type),
       shapes,
       font,
       fontSize: theme.fontSize,
@@ -954,7 +1008,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
           : [];
       geometry.redraw = {
         mark: this,
-        spec: this.spec,
+        spec: this.#core?.declared ?? this.spec,
         x: this.#x,
         y: this.#y,
         table,
@@ -1007,7 +1061,8 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
     const wanted = (s: Series) =>
       !frame.hidden.has(s.key) && (query.series === undefined || query.series === s.key);
     if (!items) {
-      const point = this.#layout === "ranges" ? undefined : this.#pickPoint(drawn, query, wanted);
+      const point =
+        this.shapeLayout === "ranges" ? undefined : this.#pickPoint(drawn, query, wanted);
       return point && { candidate: point };
     }
     const found = items.shapes.find(query.x, query.y, query.slop, (group) =>
@@ -1183,6 +1238,16 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
       distance,
     };
   }
+}
+
+/** A mark the custom mark's core draws with `options.draw`, as `core` describes it (see `CustomCore`). */
+export function customCore(
+  table: Table,
+  options: CustomDataOptions<Schema>,
+  view: RowView | undefined,
+  core: CustomCore,
+): Mark {
+  return new CustomShapeMark(table, options, view, core);
 }
 
 /** `box` with its own size added on every side. */

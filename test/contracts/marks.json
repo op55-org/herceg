@@ -2948,6 +2948,104 @@
         "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
+    "segment": {
+      "title": "segment",
+      "inventory": {
+        "spec": "segment",
+        "typescript": "segment",
+        "python": "Chart.segment",
+        "helper": "segment",
+        "react": "Segment",
+        "vue": "Segment",
+        "svelte": "Segment"
+      },
+      "works": [
+        "placement.panel",
+        "placement.facet",
+        "placement.nested",
+        "placement.span",
+        "placement.inset",
+        "legend.categorical",
+        "export.pdf",
+        "legend.entry",
+        "legend.toggle",
+        "legend.panel-toggle",
+        "selection.rows-x",
+        "selection.rows-y",
+        "selection.rows-xy",
+        "selection.rows-lasso",
+        "selection.click",
+        "selection.receive",
+        "selection.highlight",
+        "reading.nearest-x",
+        "reading.nearest-y",
+        "reading.nearest",
+        "reading.keyboard",
+        "reading.description",
+        "reading.fields",
+        "rendering.svg",
+        "rendering.canvas",
+        "rendering.auto",
+        "export.svg",
+        "export.png",
+        "lifecycle.hydration",
+        "selection.brush-x",
+        "selection.brush-y",
+        "selection.brush-xy",
+        "selection.lasso",
+        "lifecycle.value-animation",
+        "lifecycle.view-animation",
+        "lifecycle.cursor-sync",
+        "lifecycle.viewport-sync",
+        "lifecycle.selection-sync",
+        "integration.react",
+        "integration.vue",
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
+      ],
+      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "refused": {
+        "placement.facet-in-cell": {
+          "error": {
+            "code": "unsupported",
+            "path": "facet",
+            "message": "facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own"
+          },
+          "alternative": {
+            "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
+            "proofs": ["segment.placement.nested", "segment.placement.facet"]
+          }
+        },
+        "legend.colorbar": {
+          "error": {
+            "code": "field-type",
+            "path": "marks[0].color",
+            "message": "marks[0]: segment color: field \"y\" holds number values; expected category; give its values as strings, or numbers wrapped in category()"
+          },
+          "alternative": {
+            "text": "Color it by a category field, which the legend lists.",
+            "proofs": ["segment.legend.categorical"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
+        }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
+      }
+    },
     "custom": {
       "title": "custom",
       "inventory": {

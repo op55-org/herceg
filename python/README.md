@@ -78,8 +78,9 @@ state = hst.chart(chart, key="latency", on_select="rerun")
 ## What it does
 
 - **Charts**: line, area, bar, scatter, heatmap, contour, histogram, box
-  plot, boxen, violin, error bars, rug, candlestick, dendrogram, pie,
-  treemap, sunburst, gauge, funnel, radar, Sankey, network, maps, and 3D
+  plot, boxen, violin, error bars, rug, segments (arrows, dumbbells,
+  tapering comets), candlestick, dendrogram, pie, treemap, sunburst,
+  gauge, funnel, radar, Sankey, network, maps, and 3D
   points, lines, and surfaces; rules, regions, and text annotations, on
   the axes or placed by a pie's or treemap's items; small multiples,
   subplots, and insets.
