@@ -1,4 +1,4 @@
-import type { Clip, Dash, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
+import type { Clip, Dash, Frozen, SeriesTooltipSpec } from "../spec/spec.ts";
 // Custom marks: a JavaScript `draw` function places shapes using the chart's
 // scales. They share axes, viewport, and rendering (SVG, Canvas, static SVG)
 // with built-in marks, but are not portable: a chart spec cannot hold one.
@@ -82,7 +82,7 @@ import {
   xExtent,
   yExtent,
 } from "./series.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type SeriesTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
 /**
@@ -286,8 +286,8 @@ export interface CustomDataOptions<S extends Schema> extends CustomBase, ItemKey
    * axes and other numbers.
    */
   pointText?(row: number, format: AxisFormat, series: CustomSeries): string;
-  /** Fields of the row tooltips show besides the series' values. */
-  tooltip?: MarkTooltip<S>;
+  /** What tooltips show besides the series' values: fields of the row, its content, a heading, the reading's total. */
+  tooltip?: SeriesTooltip<S>;
   /**
    * Channels `draw` reads per row (`encoded`): a color, a stroke width, an
    * opacity, from fields through the chart's scales (a channel scale for
@@ -329,7 +329,7 @@ export interface CustomSpec {
   y?: string | string[];
   series?: string;
   label?: string;
-  tooltip?: MarkTooltipSpec;
+  tooltip?: SeriesTooltipSpec;
   /** The channels `draw` reads per row. */
   encode?: {
     color?: ChannelsSpec<string>;
@@ -560,7 +560,7 @@ class CustomShapeMark implements Mark<Frozen<CustomSpec>>, CustomMark {
       spec.y = typeof options.y === "string" ? options.y : [...this.#y];
       if (field !== undefined) spec.series = field;
       if (options.label !== undefined) spec.label = options.label;
-      if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
+      if (options.tooltip !== undefined) spec.tooltip = options.tooltip as SeriesTooltipSpec;
     } else if (
       field !== undefined ||
       options.label !== undefined ||

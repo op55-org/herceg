@@ -3576,3 +3576,206 @@ def test_style_builders_check_their_values_in_python_names():
     for make, message in cases:
         with pytest.raises((ValueError, TypeError), match=message):
             make()
+
+
+@pytest.mark.contract("tooltip.total.python")
+def test_tooltip_total_is_a_series_marks_row():
+    data = {
+        "day": np.array(["2026-01-05", "2026-01-05", "2026-01-06"], dtype="datetime64[ms]"),
+        "region": ["north", "south", "north"],
+        "revenue": [100.0, 80.0, 120.0],
+        "low": [90.0, 70.0, 110.0],
+    }
+    total = hg.TooltipTotal(label="All regions", format=hg.Format(number=",.0f"))
+    for chart, spec in [
+        (
+            hg.Chart(data).line("day", "revenue", series="region", tooltip=hg.Tooltip(total=True)),
+            True,
+        ),
+        (
+            hg.Chart(data).area(
+                "day", "revenue", series="region", stack=True, tooltip=hg.Tooltip(total=total)
+            ),
+            {"label": "All regions", "format": {"number": ",.0f"}},
+        ),
+        (
+            hg.Chart(data).bar("region", "revenue", tooltip=hg.Tooltip(total=hg.TooltipTotal())),
+            True,
+        ),
+        (hg.Chart(data).point("day", "revenue", tooltip=hg.Tooltip(total=True)), True),
+        # A one-call helper gives it to its one mark.
+        (hg.line(data, "day", "revenue", series="region", tooltip=hg.Tooltip(total=True)), True),
+    ]:
+        drawn, buffers = chart.to_spec()
+        assert drawn["marks"][0]["tooltip"] == {"total": spec}
+        hg_render.svg(drawn, buffers)
+    refused = [
+        (
+            lambda: hg.Chart(data).point("revenue", "region", tooltip=hg.Tooltip(total=True)),
+            "point tooltip total: y 'region' is a category column, whose points have no sum; "
+            "drop total",
+            "marks[0].tooltip.total",
+        ),
+        (
+            lambda: hg.Chart(data).line("revenue", "day", tooltip=hg.Tooltip(total=True)),
+            "line tooltip total: y 'day' is a time column, whose points have no sum; drop total",
+            "marks[0].tooltip.total",
+        ),
+        (
+            lambda: hg.Chart(data).area(
+                "day", y1="low", y2="revenue", tooltip=hg.Tooltip(total=True)
+            ),
+            "area tooltip total: a band's points are ranges, which have no total; drop total",
+            "marks[0].tooltip.total",
+        ),
+        (
+            lambda: hg.Chart(data).pie(
+                category="region", value="revenue", tooltip=hg.Tooltip(total=True)
+            ),
+            "pie tooltip total: only lines, filled areas, bars, and points total their points; "
+            "drop total",
+            "marks[0].tooltip.total",
+        ),
+        (
+            lambda: hg.Chart(data).line("day", "revenue", tooltip=hg.Tooltip(total=False)),  # type: ignore[arg-type]
+            "line tooltip total: expected True or an hg.TooltipTotal; received False",
+            "marks[0].tooltip.total",
+        ),
+        (
+            lambda: hg.Chart(data, tooltip=hg.Tooltip(total=True)).line("day", "revenue"),
+            "Chart tooltip total: belongs to the marks whose points it sums; give it to a mark, "
+            "as in chart.line(..., tooltip=hg.Tooltip(total=True))",
+            "tooltip.total",
+        ),
+        (
+            lambda: hg.histogram(data, "revenue", tooltip=hg.Tooltip(total=True)),
+            "histogram tooltip total: its points summarize rows, and its tooltips write each "
+            "summary as it is; drop total",
+            None,
+        ),
+    ]
+    for make, message, path in refused:
+        with pytest.raises(hg.ChartError) as error:
+            make().to_spec()
+        assert str(error.value) == message
+        if path is not None:
+            assert error.value.path == path
+    for format in (hg.Format(time="%H"), {"dateStyle": "short"}):
+        with pytest.raises(
+            hg.ChartError,
+            match=r"^TooltipTotal format: totals are numbers; give a number format$",
+        ):
+            hg.TooltipTotal(format=format)
+    with pytest.raises(hg.ChartError, match=r"^TooltipTotal label: expected text; received 3$"):
+        hg.TooltipTotal(label=3)  # type: ignore[arg-type]
+
+
+@pytest.mark.contract("tooltip.path.python")
+def test_tooltip_path_is_a_part_of_trees_tooltips():
+    data = {
+        "region": ["Europe", "Europe", "Asia"],
+        "country": ["France", "Spain", "Japan"],
+        "v": [1.0, 2.0, 3.0],
+    }
+    parts = ["all/", hg.LabelPart(path=True, separator="/"), {"path": True}]
+    for mark in ("sunburst", "treemap"):
+        drawn, buffers = getattr(hg.Chart(data), mark)(
+            path=["region", "country"],
+            value="v",
+            tooltip=hg.Tooltip(content=parts, heading=[hg.LabelPart(path=True)]),
+        ).to_spec()
+        assert drawn["marks"][0]["tooltip"] == {
+            "content": ["all/", {"path": True, "separator": "/"}, {"path": True}],
+            "heading": [{"path": True}],
+        }
+        hg_render.svg(drawn, buffers)
+    refused = [
+        (
+            lambda: hg.Chart(data).line(
+                "region", "v", tooltip=hg.Tooltip(content=[hg.LabelPart(path=True)])
+            ),
+            "line tooltip content[0] path: only treemaps' and sunbursts' nodes have levels; give "
+            "hg.LabelPart(series=True) or (field=...)",
+        ),
+        (
+            lambda: hg.Chart(data).pie(
+                category="region", value="v", tooltip=hg.Tooltip(heading=["x", {"path": True}])
+            ),
+            "pie tooltip heading[1] path: only treemaps' and sunbursts' nodes have levels; give "
+            "hg.LabelPart(series=True) or (field=...)",
+        ),
+        (
+            lambda: hg.LabelPart(path=True, separator=1),  # type: ignore[arg-type]
+            "LabelPart separator: expected a string; received 1",
+        ),
+        (
+            lambda: hg.LabelPart(field="region", separator="/"),
+            "LabelPart separator: joins a path's levels; give path=True, or drop separator",
+        ),
+        (
+            lambda: hg.LabelPart(path=True, format=hg.Format(number=".1f")),
+            "LabelPart format: a path's levels are written as their columns' displays write "
+            "them; drop format",
+        ),
+        (
+            lambda: hg.LabelPart(path=True, field="region"),
+            "LabelPart path: names a node's levels alone; drop field",
+        ),
+        (lambda: hg.LabelPart(path=1), "LabelPart path: expected True; received 1"),  # type: ignore[arg-type]
+        # Names, labels, and links take no levels either.
+        (
+            lambda: hg.Chart(data).line("region", "v", label=[hg.LabelPart(path=True)]),
+            "line label[0] path: only treemaps' and sunbursts' nodes have levels; use "
+            "hg.LabelPart(series=True), (field=...), or (label=...)",
+        ),
+        (
+            lambda: hg.Chart(data).text(
+                "region", "v", label=hg.Label(content=[hg.LabelPart(path=True)])
+            ),
+            "Label content[0] path: only treemaps' and sunbursts' nodes have levels; give "
+            "hg.LabelPart(series=True) or (field=...)",
+        ),
+        (
+            lambda: hg.Link(url=["#", hg.LabelPart(path=True)]),
+            "Link url[1]: a link's part is text, a column (field=), or the value (value=True); "
+            "give one of them",
+        ),
+    ]
+    for make, message in refused:
+        with pytest.raises(hg.ChartError) as error:
+            built = make()
+            if isinstance(built, hg.Chart):
+                built.to_spec()
+        assert str(error.value) == message
+
+
+@pytest.mark.contract("inspection.totals.python")
+def test_tooltip_totals_decode_with_their_inspection():
+    from herceg._events import decode_inspection
+
+    point = {
+        "mark": 0,
+        "markId": None,
+        "key": "0:v",
+        "label": "v",
+        "row": 0,
+        "value": 2,
+        "text": "2",
+    }
+    total = {"mark": 0, "markId": "revenue", "label": "Total", "value": 5, "text": "5", "count": 2}
+    inspection = decode_inspection(
+        {
+            "axis": "x",
+            "value": 1,
+            "time": False,
+            "label": "1",
+            "points": [point, point],
+            "totals": [total],
+        }
+    )
+    assert inspection is not None
+    assert inspection.totals == (hg.InspectedTotal("Total", 5, "5", 2, mark=0, mark_id="revenue"),)
+    plain = decode_inspection(
+        {"axis": "x", "value": 1, "time": False, "label": "1", "points": [point]}
+    )
+    assert plain is not None and plain.totals == ()

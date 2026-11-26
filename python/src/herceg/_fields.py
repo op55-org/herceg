@@ -341,7 +341,7 @@ def _link_parts(parts: Any, role: str) -> list[str | LabelPart]:
                 f"received {shown(part)}"
             )
         built = _built(part, LabelPart, at)
-        if built.series or built.label is not None:
+        if built.series or built.label is not None or built.path:
             raise ChartError(
                 f"{at}: a link's part is text, a column (field=), or the value (value=True); "
                 f"give one of them"

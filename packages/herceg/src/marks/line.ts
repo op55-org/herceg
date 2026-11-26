@@ -53,7 +53,7 @@ import {
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type SeriesTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
 
 interface LineStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
@@ -123,8 +123,8 @@ interface LineStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   inspect?: boolean;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
-  /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
-  tooltip?: MarkTooltip<S>;
+  /** What tooltips show besides the mark's values: fields of the row, its content, a heading, the reading's total. */
+  tooltip?: SeriesTooltip<S>;
   id?: string;
 }
 

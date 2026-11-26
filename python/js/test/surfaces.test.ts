@@ -194,6 +194,85 @@ describe("a legend entry's click, as each front end reports it", () => {
   });
 });
 
+/** The click events a notebook widget sends drawing `drawn`, `click` clicking its chart. */
+async function widgetClicks(
+  drawn: DrawnCase["spec"],
+  click: (chart: MountedChart) => Promise<void>,
+) {
+  const model = new MockModel({
+    _chart: {
+      revision: 0,
+      spec: fullSpec(drawn),
+      buffers: [],
+      selection: null,
+      viewport: null,
+      drill_root: null,
+      item_positions: {},
+    },
+    _listening: ["click"],
+  });
+  const widget = widgetModule();
+  const page = host();
+  const chart = made(() => {
+    cleanups.push(widget.initialize({ model }));
+    cleanups.push(widget.render({ model, el: page }));
+  });
+  await click(chart);
+  return model.messages("click");
+}
+
+/** The click events a Streamlit app triggers drawing `drawn`, `click` clicking its chart. */
+async function streamlitClicks(
+  drawn: DrawnCase["spec"],
+  click: (chart: MountedChart) => Promise<void>,
+) {
+  const payload = encodePayload(fullSpec(drawn), [], { events: ["click"] });
+  let triggers: [string, unknown][] = [];
+  const chart = made(() => {
+    const ran = run(host(), payload);
+    cleanups.push(ran.cleanup);
+    triggers = ran.triggers;
+  });
+  await click(chart);
+  return triggers;
+}
+
+/** The click events a web page dispatches drawing `drawn`, `click` clicking its chart. */
+async function pageClicks(drawn: DrawnCase["spec"], click: (chart: MountedChart) => Promise<void>) {
+  const page = host();
+  const inline = { protocol: 1, kind: "chart", spec: fullSpec(drawn), buffers: [] };
+  const template = document.createElement("template");
+  template.setAttribute("data-herceg-payload", "");
+  template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  page.dataset.herceg = "";
+  page.append(template);
+  const clicks: unknown[] = [];
+  page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
+  const chart = await mountFragment(page);
+  cleanups.push(() => unmountFragment(page));
+  await click(chart as unknown as MountedChart);
+  return clicks;
+}
+
+/** Each front end's click events drawing a spec, `click` clicking its chart. */
+function surfacesClicking(click: (chart: MountedChart) => Promise<void>) {
+  return [
+    [
+      "widget",
+      "a notebook widget",
+      async (drawn: DrawnCase["spec"]) =>
+        (await widgetClicks(drawn, click)).map(({ event }) => event),
+    ],
+    [
+      "streamlit",
+      "a Streamlit app",
+      async (drawn: DrawnCase["spec"]) =>
+        (await streamlitClicks(drawn, click)).map(([, event]) => event),
+    ],
+    ["web", "a web page", (drawn: DrawnCase["spec"]) => pageClicks(drawn, click)],
+  ] as const;
+}
+
 describe("an inspected tree node's names, as each front end reports them", () => {
   const spec = sent({
     data: {
@@ -225,60 +304,6 @@ describe("an inspected tree node's names, as each front end reports them", () =>
     for (let loading = chart.loading; loading; loading = chart.loading) await loading;
     await new Promise((resolve) => requestAnimationFrame(resolve));
     await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-
-  /** The click events a notebook widget sends of France, drawing `drawn`. */
-  async function widgetClicks(drawn: DrawnCase["spec"]) {
-    const model = new MockModel({
-      _chart: {
-        revision: 0,
-        spec: fullSpec(drawn),
-        buffers: [],
-        selection: null,
-        viewport: null,
-        drill_root: null,
-        item_positions: {},
-      },
-      _listening: ["click"],
-    });
-    const widget = widgetModule();
-    const page = host();
-    const chart = made(() => {
-      cleanups.push(widget.initialize({ model }));
-      cleanups.push(widget.render({ model, el: page }));
-    });
-    await clickFrance(chart);
-    return model.messages("click");
-  }
-
-  /** The click events a Streamlit app triggers of France, drawing `drawn`. */
-  async function streamlitClicks(drawn: DrawnCase["spec"]) {
-    const payload = encodePayload(fullSpec(drawn), [], { events: ["click"] });
-    let triggers: [string, unknown][] = [];
-    const chart = made(() => {
-      const ran = run(host(), payload);
-      cleanups.push(ran.cleanup);
-      triggers = ran.triggers;
-    });
-    await clickFrance(chart);
-    return triggers;
-  }
-
-  /** The click events a web page dispatches of France, drawing `drawn`. */
-  async function pageClicks(drawn: DrawnCase["spec"]) {
-    const page = host();
-    const inline = { protocol: 1, kind: "chart", spec: fullSpec(drawn), buffers: [] };
-    const template = document.createElement("template");
-    template.setAttribute("data-herceg-payload", "");
-    template.innerHTML = JSON.stringify(inline).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-    page.dataset.herceg = "";
-    page.append(template);
-    const clicks: unknown[] = [];
-    page.addEventListener("herceg:click", (event) => clicks.push((event as CustomEvent).detail));
-    const chart = await mountFragment(page);
-    cleanups.push(() => unmountFragment(page));
-    await clickFrance(chart as unknown as MountedChart);
-    return clicks;
   }
 
   /** The same sector, its tooltip's `tooltip` as given. */
@@ -319,19 +344,7 @@ describe("an inspected tree node's names, as each front end reports them", () =>
     ],
   };
 
-  const surfaces = [
-    [
-      "widget",
-      "a notebook widget",
-      async (drawn: DrawnCase["spec"]) => (await widgetClicks(drawn)).map(({ event }) => event),
-    ],
-    [
-      "streamlit",
-      "a Streamlit app",
-      async (drawn: DrawnCase["spec"]) => (await streamlitClicks(drawn)).map(([, event]) => event),
-    ],
-    ["web", "a web page", pageClicks],
-  ] as const;
+  const surfaces = surfacesClicking(clickFrance);
   for (const [surface, where, clicks] of surfaces) {
     contractTest(
       `inspection.names.${surface}`,
@@ -349,4 +362,60 @@ describe("an inspected tree node's names, as each front end reports them", () =>
       `carries the heading its mark wrote, in ${where}`,
     );
   }
+});
+
+describe("a reading's totals, as each front end reports them", () => {
+  const spec = sent({
+    data: {
+      sales: {
+        columns: {
+          day: [1, 1, 1, 2],
+          region: ["north", "south", "west", "north"],
+          revenue: [100, 80, 70, 120],
+        },
+      },
+    },
+    marks: [
+      {
+        type: "line",
+        id: "revenue",
+        data: "sales",
+        x: "day",
+        y: "revenue",
+        series: "region",
+        tooltip: { total: { label: "All regions" } },
+      },
+    ],
+  } as unknown as DrawnCase["spec"]);
+
+  /** Clicks the chart at day 1, once it has loaded. */
+  async function clickDay(chart: MountedChart) {
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    chart.render();
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    const at = {
+      clientX: rect.left + chart.toPixel(1, { axis: "x" })!,
+      clientY: rect.top + plot.y + plot.height / 2,
+      bubbles: true,
+    };
+    for (const type of ["pointermove", "pointerdown", "pointerup"])
+      chart.root.dispatchEvent(new PointerEvent(type, { ...at, pointerType: "mouse", button: 0 }));
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  const inspection = {
+    axis: "x",
+    totals: [
+      { mark: 0, markId: "revenue", label: "All regions", value: 250, text: "250", count: 3 },
+    ],
+  };
+  for (const [surface, where, clicks] of surfacesClicking(clickDay))
+    contractTest(
+      `inspection.totals.${surface}`,
+      async () => expect(await clicks(spec)).toMatchObject([{ inspection }]),
+      `carries the reading's total, in ${where}`,
+    );
 });

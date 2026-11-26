@@ -223,7 +223,13 @@ export { type SankeyOptions, sankey } from "./marks/sankey.ts";
 export { type SunburstOptions, sunburst } from "./marks/sunburst.ts";
 export { type SurfaceOptions, surface } from "./marks/surface.ts";
 export { type TextDataOptions, type TextOptions, text } from "./marks/text.ts";
-export type { InspectedField, MarkTooltip } from "./marks/tooltip-fields.ts";
+export type {
+  InspectedField,
+  MarkTooltip,
+  SeriesTooltip,
+  TooltipTotal,
+  TreeTooltip,
+} from "./marks/tooltip-fields.ts";
 export type { DrillRoot, DrillStep } from "./marks/tree-data.ts";
 export { type TreemapOptions, treemap } from "./marks/treemap.ts";
 export { type ViolinOptions, violin } from "./marks/violin.ts";
@@ -232,6 +238,7 @@ export type {
   AxisInspection,
   ChartConfig,
   InspectedPoint,
+  InspectedTotal,
   Inspection,
   ItemInspection,
   Viewport,

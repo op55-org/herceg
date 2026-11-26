@@ -45,7 +45,7 @@ import {
 } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type TreeTooltip } from "./tooltip-fields.ts";
 import { count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
 import { TreeLabels } from "./tree-labels.ts";
 import {
@@ -102,8 +102,12 @@ export type SunburstOptions<S extends Schema> = (
     center?: boolean;
     /** Pixels between neighboring sectors and between rings; 2 by default. */
     gap?: number | { angular?: number; radial?: number };
-    /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
-    tooltip?: MarkTooltip<S>;
+    /**
+     * What tooltips show besides an item's value: fields of the row it is
+     * (where it is one row), its content and heading, which `{ path: true }`
+     * writes its levels in.
+     */
+    tooltip?: TreeTooltip<S>;
     id?: string;
     /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
     panel?: string;

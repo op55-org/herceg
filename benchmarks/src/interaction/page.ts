@@ -15,6 +15,7 @@ import {
   createChart,
   custom,
   histogram,
+  type Inspection,
   line,
   point,
   rowSelection,
@@ -53,6 +54,7 @@ export interface Fixture {
 export type FixtureName =
   | "hover-listener"
   | "hover-headings"
+  | "hover-totals"
   | "custom-hover"
   | "point-hover"
   | "pan-labels"
@@ -60,13 +62,18 @@ export type FixtureName =
   | "anchor-pan"
   | "cross-filter"
   | "crosshair-dashboard"
+  | "crosshair-totals"
   | "pick-crowd"
   | "rule-drag";
 
 declare global {
   interface Window {
     interaction: {
-      mount(name: FixtureName, moves: number): Promise<Fixture>;
+      /**
+       * Mounts fixture `name` for `moves` timed moves; a `candidate` build
+       * must write what the fixture checks that older builds may not (totals).
+       */
+      mount(name: FixtureName, moves: number, candidate?: boolean): Promise<Fixture>;
       /**
        * Times move `index`, of the fixture's moves and then its checks:
        * `result` resolves with ms to the frame after its effect, or null after 1 s.
@@ -342,17 +349,23 @@ function shownPixels(pixel: Pixels, text: PaintedText): number {
 /**
  * One chart of 8 series x 2,000 minutes with a rule at the hovered minute,
  * which a `hover` listener writes: the move's effect is the rule drawn
- * there, in the move's frame. With `headed`, the lines' tooltip has heading
- * parts, which every point read writes though the tooltip of eight points
- * shows its place (`hover-headings`).
+ * there, in the move's frame. With `"headings"`, the lines' tooltip has
+ * heading parts, which every point read writes though the tooltip of eight
+ * points shows its place (`hover-headings`); with `"totals"`, it totals
+ * the eight (`hover-totals`).
  */
-async function hoverListener(count: number, headed = false): Promise<Fixture> {
+async function hoverListener(count: number, tooltip?: "headings" | "totals"): Promise<Fixture> {
+  const headed = tooltip === "headings";
   const { data, names } = walks(8, 2_000, 1);
   const marker = table({ t: time(Float64Array.of(START)) });
   const heading = [{ series: true }, " at ", { field: "t", format: { time: "%H:%M" } }] as const;
   const chart = createChart(host(800, 400), {
     marks: [
-      line(data, { x: "t", y: names, ...(headed && { tooltip: { heading } }) }),
+      line(data, {
+        x: "t",
+        y: names,
+        ...(tooltip && { tooltip: headed ? { heading } : { total: true } }),
+      }),
       rule(marker, { x: "t", stroke: MARKED, strokeWidth: 3 }),
     ],
     timeZone: "UTC",
@@ -386,10 +399,11 @@ async function hoverListener(count: number, headed = false): Promise<Fixture> {
     const { x } = all[index]!;
     const wrong = markedLine(await pixels(screenshot!), chart, x);
     if (wrong) return `the rule ${wrong}, the pointer's minute`;
-    if (!headed) return;
-    // Every point read carries its heading where the build writes them; the box keeps the place.
+    if (!tooltip) return;
     const box = chart.root.getBoundingClientRect();
     const read = chart.inspect(x - box.left, chart.getPanels()[0]!.plot.y + 10)!;
+    if (!headed) return totalsWrong(chart, read);
+    // Every point read carries its heading where the build writes them; the box keeps the place.
     const heads = read.points.map((point) => point.heading?.map((run) => run.text).join(""));
     if (heads.some((text) => text !== undefined && !/^s\d at \d\d:\d\d$/.test(text)))
       return `points read carry headings ${heads.join(", ")}`;
@@ -397,6 +411,25 @@ async function hoverListener(count: number, headed = false): Promise<Fixture> {
     if (shown !== read.label) return `the tooltip is headed "${shown}", not by its place`;
   };
   return { moves, checks, screenshot: true };
+}
+
+/** Whether the build mounted is the candidate, which must write totals; a baseline may not. */
+let candidate = false;
+
+/**
+ * What is wrong with the total of `read`, a reading of one mark's points,
+ * and the tooltip's last row: the sum of the points' values, written as the
+ * box's last row. A baseline build without totals passes.
+ */
+function totalsWrong(chart: Chart, read: Inspection): string | undefined {
+  const { totals } = read as { totals?: { value: number; text: string; count: number }[] };
+  if (!totals) return candidate ? "the reading has no totals" : undefined;
+  const sum = read.points.reduce((all, point) => all + point.value, 0);
+  const [total] = totals;
+  if (totals.length !== 1 || total!.count !== read.points.length || total!.value !== sum)
+    return `the reading totals ${JSON.stringify(totals)}, not its ${read.points.length} points' ${sum}`;
+  const last = tooltipBox(chart)?.lastElementChild?.textContent;
+  if (last !== `Total${total!.text}`) return `the tooltip's last row is "${last}", not its total`;
 }
 
 /** The chart's tooltip box, where it shows. */
@@ -1031,13 +1064,14 @@ function highlighted(
 /**
  * Ten charts of 15 series x 3,000 minutes sharing a cursor: a move over
  * the first shows the crosshair in the other nine, each reporting it once
- * drawn. The move's effect is all nine reports at the first's minute.
+ * drawn. The move's effect is all nine reports at the first's minute. With
+ * `totals`, every chart's lines total their fifteen (`crosshair-totals`).
  */
-async function crosshairDashboard(count: number): Promise<Fixture> {
+async function crosshairDashboard(count: number, totals = false): Promise<Fixture> {
   charts = Array.from({ length: 10 }, (_, k) => {
     const { data, names } = walks(15, 3_000, 10 + k);
     return createChart(host(600, 250), {
-      marks: [line(data, { x: "t", y: names })],
+      marks: [line(data, { x: "t", y: names, ...(totals && { tooltip: { total: true } }) })],
       interaction: { sync: { cursor: "dashboard" } },
       theme: { style: { crosshair: { stroke: MARKED } } },
       timeZone: "UTC",
@@ -1085,6 +1119,9 @@ async function crosshairDashboard(count: number): Promise<Fixture> {
       const wrong = markedLine(pixel, chart, x);
       if (wrong) return `chart ${k + 1}'s crosshair ${wrong}, the first chart's minute`;
     }
+    if (!totals) return;
+    const box = first.root.getBoundingClientRect();
+    return totalsWrong(first, first.inspect(all[index]!.x - box.left, all[index]!.y - box.top)!);
   };
   return { moves, checks, screenshot: true };
 }
@@ -1376,7 +1413,8 @@ async function ruleDrag(count: number): Promise<Fixture> {
 
 const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "hover-listener": hoverListener,
-  "hover-headings": (count) => hoverListener(count, true),
+  "hover-headings": (count) => hoverListener(count, "headings"),
+  "hover-totals": (count) => hoverListener(count, "totals"),
   "custom-hover": customHover,
   "point-hover": pointHover,
   "pan-labels": panLabels,
@@ -1384,12 +1422,16 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "anchor-pan": anchorPan,
   "cross-filter": crossFilter,
   "crosshair-dashboard": crosshairDashboard,
+  "crosshair-totals": (count) => crosshairDashboard(count, true),
   "pick-crowd": pickCrowd,
   "rule-drag": ruleDrag,
 };
 
 window.interaction = {
-  mount: (name, count) => FIXTURES[name](count),
+  mount: (name, count, isCandidate = false) => {
+    candidate = isCandidate;
+    return FIXTURES[name](count);
+  },
   arm(index) {
     armed?.cancel();
     reset(index);

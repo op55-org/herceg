@@ -83,7 +83,7 @@ import {
 } from "./series.ts";
 import { RowStack } from "./stack.ts";
 import { offsetLayers, stackError, stackPointText } from "./stack-offset.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type MarkTooltip, type SeriesTooltip } from "./tooltip-fields.ts";
 import {
   curveLayers,
   curveRows,
@@ -180,6 +180,8 @@ interface Filled<S extends Schema> {
    * it has no row, zero or the line between its rows on either side).
    */
   stack?: AreaStack | StackSpec;
+  /** What tooltips show besides the mark's values: fields of the row, its content, a heading, the reading's total. */
+  tooltip?: SeriesTooltip<S>;
   y1?: never;
   y2?: never;
   x1?: never;
@@ -190,6 +192,8 @@ interface Filled<S extends Schema> {
 interface Banded<S extends Schema> {
   series?: CategoryField<S> | false;
   stack?: never;
+  /** What tooltips show besides the band's ends: fields of the row, its content, a heading (a band's points are ranges, which have no total). */
+  tooltip?: MarkTooltip<S>;
 }
 
 /**
@@ -197,10 +201,8 @@ interface Banded<S extends Schema> {
  * `orient: "y"`, a category y, or a band between `x1` and `x2`. Category
  * positions place points at their bands' centers, in band order.
  */
-export type AreaOptions<S extends Schema> = AreaCommon<S> & {
-  /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
-  tooltip?: MarkTooltip<S>;
-} & (
+export type AreaOptions<S extends Schema> = AreaCommon<S> &
+  (
     | (Filled<S> & {
         orient?: "x";
         /** Positions: a number or time field, a category field, or a coordinate. */

@@ -85,7 +85,7 @@ import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { extentAt, isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { placeAt, rowOf, type Series, valueAt, visibleRange, xExtent, yExtent } from "./series.ts";
 import { offsetOf, Swarms } from "./swarm.ts";
-import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
+import { checkTooltip, type SeriesTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
 /**
@@ -260,8 +260,8 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   label?: SeriesName<S>;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
-  /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
-  tooltip?: MarkTooltip<S>;
+  /** What tooltips show besides the mark's values: fields of the row, its content, a heading, the reading's total. */
+  tooltip?: SeriesTooltip<S>;
   id?: string;
 }
 

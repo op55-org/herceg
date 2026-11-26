@@ -21,7 +21,7 @@ import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import type { NameSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
+import type { AnyTooltipSpec, Clip, Frozen } from "../spec/spec.ts";
 import type { ItemReference, SeriesReference } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { AtThresholds } from "./annotation.ts";
@@ -379,7 +379,7 @@ export interface MarkIdentity {
   /** `false` leaves the mark out of the chart's legends; `true` lists an annotation. */
   readonly legend?: boolean | undefined;
   /** What tooltips show of the rows of marks whose points are rows, besides their values. */
-  readonly tooltip?: Frozen<MarkTooltipSpec> | undefined;
+  readonly tooltip?: Frozen<AnyTooltipSpec> | undefined;
   /** Where the mark is drawn among the others of its panel (see `MarkBase.zIndex`). */
   readonly zIndex?: number | undefined;
   /** `false`: the pointer passes through the mark (see `MarkBase.pick`). */

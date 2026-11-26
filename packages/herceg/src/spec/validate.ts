@@ -16,7 +16,7 @@ import {
   regexProblem,
   urlProblem,
 } from "../fields/check.ts";
-import { NUMBER_OPTIONS, TIME_OPTIONS } from "../format/intl-options.ts";
+import { intlWrites, NUMBER_OPTIONS, TIME_OPTIONS } from "../format/intl-options.ts";
 import { formatWriter, formOf } from "../format/patterns.ts";
 import { calendarInterval } from "../guides/ticks.ts";
 import { areaFormError } from "../marks/area.ts";
@@ -2112,7 +2112,7 @@ function hierarchyChecks(): Record<
   };
   return {
     panel: string,
-    tooltip,
+    tooltip: tooltipOf(true, false),
     path: (v, path) => {
       if (!Array.isArray(v) || v.length === 0) fail(path, "a list of at least one field", v);
       for (const [i, item] of (v as unknown[]).entries()) field(item, `${path}[${i}]`);
@@ -2214,37 +2214,74 @@ const legended: Check = (v, path) => {
   if (v !== false) fail(path, "false, which leaves the mark out of the legends", v);
 };
 
+/** A total's format: a number format. */
+const totalFormat: Check = (f, at) => {
+  axisFormat(undefined)(f, at);
+  const form = formOf(f as object, at);
+  if (form === "time" || (form === "intl" && !intlWrites(f as object, "number")))
+    throw refusal(at, "totals are numbers; give a number format");
+};
+
 /**
  * What a mark's tooltips show of its rows: fields, by name or with a label
  * and format, a row of parts in place of each point's name and value, and
- * parts heading a tooltip of one of its points.
+ * parts heading a tooltip of one of its points; trees' parts take
+ * `{ path: true }` too (`tree`), and series marks' tooltips a reading's
+ * `total` (`totals`).
  */
-const tooltip: Check = (v, path) => {
-  object(v, path);
-  properties(v as Record<string, unknown>, path, {
-    content: labelContent,
-    heading: (h, at) => {
-      if (h === false)
-        throw refusal(
-          at,
-          "no heading is the chart's choice; give heading: false to the chart's tooltip",
-        );
-      labelContent(h, at);
-    },
-    fields: (list, at) => {
-      if (!Array.isArray(list)) fail(at, "an array of fields", list);
-      list.forEach((entry, i) => {
-        if (typeof entry === "string") return;
-        if (!isRecord(entry)) fail(`${at}[${i}]`, "a field name or an object", entry);
-        checkProperties(entry, `${at}[${i}]`, ["field"], {
-          field,
-          label: string,
-          format: axisFormat(undefined),
+const tooltipOf =
+  (tree: boolean, totals: boolean): Check =>
+  (v, path) => {
+    object(v, path);
+    const parts: Check = (list, at) => {
+      if (!Array.isArray(list) || list.length === 0) return labelContent(list, at);
+      for (const [i, part] of list.entries()) {
+        const one = `${at}[${i}]`;
+        if (!isRecord(part) || !("path" in part)) labelPart(part, one);
+        else if (!tree)
+          throw refusal(
+            `${one}.path`,
+            "only treemaps' and sunbursts' nodes have levels; give { series: true } or { field }",
+          );
+        else properties(part, one, { path: yes, separator: string, style: partStyle });
+      }
+    };
+    properties(v as Record<string, unknown>, path, {
+      content: parts,
+      heading: (h, at) => {
+        if (h === false)
+          throw refusal(
+            at,
+            "no heading is the chart's choice; give heading: false to the chart's tooltip",
+          );
+        parts(h, at);
+      },
+      total: (t, at) => {
+        if (!totals)
+          throw refusal(
+            at,
+            "only lines, filled areas, bars, and points total their points; drop total",
+          );
+        if (t === true) return;
+        if (!isRecord(t)) fail(at, "true, or { label, format }", t);
+        properties(t, at, { label: string, format: totalFormat });
+      },
+      fields: (list, at) => {
+        if (!Array.isArray(list)) fail(at, "an array of fields", list);
+        list.forEach((entry, i) => {
+          if (typeof entry === "string") return;
+          if (!isRecord(entry)) fail(`${at}[${i}]`, "a field name or an object", entry);
+          checkProperties(entry, `${at}[${i}]`, ["field"], {
+            field,
+            label: string,
+            format: axisFormat(undefined),
+          });
         });
-      });
-    },
-  });
-};
+      },
+    });
+  };
+const tooltip = tooltipOf(false, false);
+const seriesTooltip = tooltipOf(false, true);
 
 /** A coordinate's share of a frame, or its pixels: a number, or a number field's `{ field }`. */
 const amount: Check = (v, path) => {
@@ -2419,15 +2456,17 @@ const PART_BLOCK = [
 ];
 
 /** A part of a label's text: literal text, a field's value, the series' name, the value, or a field's label. */
+/** `true`, as flags of parts are. */
+const yes: Check = (t, at) => {
+  if (t !== true) fail(at, "true", t);
+};
+
 const labelPart: Check = (v, path) => {
   if (typeof v === "string") return;
   object(v, path);
   const part = v as Record<string, unknown>;
   if (["field", "series", "value", "label"].filter((key) => key in part).length !== 1)
     fail(path, "text, { field }, { series: true }, { value: true }, or { label }", v);
-  const yes: Check = (t, at) => {
-    if (t !== true) fail(at, "true", t);
-  };
   properties(part, path, {
     field,
     series: yes,
@@ -2909,7 +2948,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y"],
     checks: {
       itemKey: field,
-      tooltip,
+      tooltip: seriesTooltip,
       ...placement,
       ...looks,
       legend: legended,
@@ -2938,7 +2977,7 @@ const MARKS: MarkChecks = {
     required: [],
     checks: {
       itemKey: field,
-      tooltip,
+      tooltip: seriesTooltip,
       ...placement,
       ...looks,
       legend: legended,
@@ -3081,7 +3120,7 @@ const MARKS: MarkChecks = {
     checks: {
       itemKey: field,
       halo,
-      tooltip,
+      tooltip: seriesTooltip,
       ...placement,
       ...looks,
       legend: legended,
@@ -3156,7 +3195,7 @@ const MARKS: MarkChecks = {
   point: {
     required: ["x", "y"],
     checks: {
-      tooltip,
+      tooltip: seriesTooltip,
       ...placement,
       ...looks,
       legend: legended,
@@ -3937,8 +3976,8 @@ const mark: Check = (v, path) => {
   // field, and its tooltips write the summary.
   const summary = SUMMARIES[spec.type as string];
   const asked = spec.tooltip as Record<string, unknown> | null | undefined;
-  // Parts written from a row: a summary's tooltip writes the summary.
-  const parts = ["content", "heading"].find((list) => asked?.[list] !== undefined);
+  // Parts written from a row, and totals of rows: a summary's tooltip writes the summary.
+  const parts = ["content", "heading", "total"].find((list) => asked?.[list] !== undefined);
   if (summary && asked !== undefined)
     throw parts && asked?.fields === undefined
       ? refusal(
@@ -3953,6 +3992,11 @@ const mark: Check = (v, path) => {
         );
   const problem = FORMS[spec.type as MarkSpec["type"]]?.(spec);
   if (problem) throw refusal(path, problem);
+  if (spec.type === "area" && (spec.y1 ?? spec.x1) !== undefined && asked?.total !== undefined)
+    throw refusal(
+      `${path}.tooltip.total`,
+      "a band's points are ranges, which have no total; drop total",
+    );
   if (spec.type === "text" && !series && (spec.label as TextLabelSpec).place)
     throw refusal(
       `${path}.label.place`,

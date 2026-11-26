@@ -43,6 +43,7 @@ import type { FixtureName } from "./page.ts";
 const FIXTURES: FixtureName[] = [
   "hover-listener",
   "hover-headings",
+  "hover-totals",
   "custom-hover",
   "point-hover",
   "pan-labels",
@@ -50,6 +51,7 @@ const FIXTURES: FixtureName[] = [
   "anchor-pan",
   "cross-filter",
   "crosshair-dashboard",
+  "crosshair-totals",
   "pick-crowd",
   "rule-drag",
 ];
@@ -203,8 +205,8 @@ async function runBlock(
     await page.goto(`${origin}/${name}/`);
     await page.waitForFunction(() => window.interaction !== undefined);
     const { press, moves, checks, screenshot } = await page.evaluate(
-      ([fixture, count]) => window.interaction.mount(fixture, count),
-      [fixture, WARMUP + MOVES] as const,
+      ([fixture, count, candidate]) => window.interaction.mount(fixture, count, candidate),
+      [fixture, WARMUP + MOVES, name === "candidate"] as const,
     );
     const cdp = await context.newCDPSession(page);
     const taskTime = async () => {

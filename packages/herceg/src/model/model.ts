@@ -423,6 +423,7 @@ export type RangeSource = "fit" | "set" | "drawn";
 export type {
   AxisInspection,
   InspectedPoint,
+  InspectedTotal,
   Inspection,
   InspectionMode,
   ItemInspection,
@@ -493,7 +494,8 @@ export class ChartModel {
   declare rowLink: RowLink | undefined;
   /**
    * Writes what marks' tooltips show besides points' names and values
-   * (`tooltip.fields` and `tooltip.content`) into inspections: given with
+   * (`tooltip.fields`, `content`, `heading`, and readings' `total`) into
+   * inspections: given with
    * the compilers, which charts load for marks that have them (see
    * `lacks`) as they draw without them; scenes made after read them.
    */
@@ -733,8 +735,8 @@ export class ChartModel {
 
   /**
    * Which of the guide compiler, the feature compiler, the display code,
-   * and the tooltip writers (for marks with `tooltip.fields` or
-   * `tooltip.content`) the configuration needs and the model lacks.
+   * and the tooltip writers (for marks with a `tooltip`: fields, content,
+   * a heading, or a total) the configuration needs and the model lacks.
    */
   lacks(): [boolean, boolean, boolean, boolean] {
     const config = this.#source;
@@ -748,7 +750,7 @@ export class ChartModel {
           [...this.hidden].some((key) => key.startsWith('{"mark":'))),
       !this.#features && (features > 0 || this.#clash),
       !LOADED[2] && features > 1,
-      // A mark's tooltip shows fields, content, or both.
+      // A mark's tooltip shows fields, content, a heading, or a total.
       !this.writers && config.marks.some((mark) => mark.spec.tooltip),
     ];
   }

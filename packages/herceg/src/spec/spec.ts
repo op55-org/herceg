@@ -28,6 +28,7 @@ import type {
   StackSpec,
   SymbolName,
   TrackPlaceSpec,
+  TreeContent,
 } from "./encoding.ts";
 import type { FieldDisplaysSpec } from "./fields.ts";
 import type {
@@ -1477,6 +1478,40 @@ export interface MarkTooltipSpec {
   heading?: LabelContent;
 }
 
+/**
+ * A row closing a reading's points of a mark (`tooltip.total`): their sum,
+ * under `label` ("Total" by default), written as the points' values are
+ * (their value fields' display and the axis' `tooltipFormat`; the axis'
+ * format alone where the mark's value fields' displays differ), or in
+ * `format`, a number format.
+ */
+export type TooltipTotalSpec = true | { label?: string; format?: NumberFormatSpec };
+
+/** The tooltip of a mark whose points carry one number each: lines, filled areas, bars, and points. */
+export interface SeriesTooltipSpec extends MarkTooltipSpec {
+  /**
+   * A row after the mark's points in a reading along an axis (any but
+   * "nearest"), summing the values it lists of the mark, one point too:
+   * series hidden or reading nothing there are left out, a stack's
+   * points carry their own values (a normalized stack's raw ones), and
+   * under `snap: "each"` the points may stand at different places. A sum
+   * that is not finite shows no row. Category and time values have none.
+   * Inspections carry it (`inspection.totals`).
+   */
+  total?: TooltipTotalSpec;
+}
+
+/** A treemap's or sunburst's tooltip: its content and heading take `{ path: true }` too. */
+export interface TreeTooltipSpec extends Omit<MarkTooltipSpec, "content" | "heading"> {
+  /** As `MarkTooltipSpec.content`, and `{ path: true }`, the node's levels. */
+  content?: TreeContent;
+  /** As `MarkTooltipSpec.heading`, and `{ path: true }`, the node's levels. */
+  heading?: TreeContent;
+}
+
+/** Any mark's tooltip, as code reading every mark's takes it. */
+export type AnyTooltipSpec = TreeTooltipSpec & Pick<SeriesTooltipSpec, "total">;
+
 /** Marks whose points are rows of their table, so that tooltips can show more of the row. */
 /**
  * Marks whose items are rows: what names each row's item (a line's or
@@ -1495,6 +1530,11 @@ interface RowItems {
 
 interface RowTooltip {
   tooltip?: MarkTooltipSpec;
+}
+
+/** Marks whose points carry one number each, whose tooltips can total a reading. */
+interface SeriesTooltip {
+  tooltip?: SeriesTooltipSpec;
 }
 
 /**
@@ -1521,7 +1561,7 @@ export type Orient = "x" | "y";
  * give several lines. A category position places points at its bands'
  * centers, in band order.
  */
-export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
+export interface LineSpec extends SeriesBase, SeriesTooltip, RowItems {
   type: "line";
   /**
    * Positions along x, or with `orient: "y"` the values: one field or several, or a coordinate.
@@ -1582,7 +1622,7 @@ export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   labels?: SeriesLabelsSpec;
 }
 
-interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
+interface AreaStyle extends SeriesBase, RowItems {
   type: "area";
   orient?: Orient;
   /** On a category position axis, with `series` and no stack: the series side by side in each band. */
@@ -1670,6 +1710,7 @@ export type AreaSpec = AreaStyle &
         series?: Field | false;
         /** Pile the areas up: `true`, a mode, or its parts (`offset`, `order`, `gaps`). */
         stack?: AreaStack | StackSpec;
+        tooltip?: SeriesTooltipSpec;
         y1?: never;
         y2?: never;
         x1?: never;
@@ -1687,6 +1728,8 @@ export type AreaSpec = AreaStyle &
         /** Category field that splits rows into one band per value (or a `color` field, as above). */
         series?: Field | false;
         stack?: never;
+        /** A band's points are ranges, which have no total. */
+        tooltip?: MarkTooltipSpec;
       }
     | {
         y: RowPosition;
@@ -1699,6 +1742,7 @@ export type AreaSpec = AreaStyle &
         y2?: never;
         series?: Field | false;
         stack?: never;
+        tooltip?: MarkTooltipSpec;
       }
   );
 
@@ -1910,7 +1954,7 @@ export interface TextSpec extends AnnotationBase, RowItems {
  * other position, a frame's share or pixels included, centers vertical
  * bars on `x`. Several length fields are drawn side by side or stacked.
  */
-export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
+export interface BarSpec extends SeriesBase, SeriesTooltip, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own. @default "auto"
@@ -2408,7 +2452,8 @@ export interface SunburstLabelsSpec extends TreeLabelsSpec {
  */
 export type TreemapSpec = TreemapStyle & TreeShape;
 
-interface TreemapStyle extends RowTooltip, TreePaintStyle {
+interface TreemapStyle extends TreePaintStyle {
+  tooltip?: TreeTooltipSpec;
   type: "treemap";
   data?: string;
   id?: string;
@@ -2433,7 +2478,8 @@ interface TreemapStyle extends RowTooltip, TreePaintStyle {
  */
 export type SunburstSpec = SunburstStyle & TreeShape;
 
-interface SunburstStyle extends RowTooltip, TreePaintStyle {
+interface SunburstStyle extends TreePaintStyle {
+  tooltip?: TreeTooltipSpec;
   type: "sunburst";
   data?: string;
   id?: string;
@@ -2894,7 +2940,7 @@ export type PointSpec = PointStyleSpec &
       }
   );
 
-interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
+interface PointStyleSpec extends SeriesBase, SeriesTooltip, RowItems {
   type: "point";
   /** A number, time, or category field (a category field places points in its bands), or a coordinate. */
   x: RowPosition;

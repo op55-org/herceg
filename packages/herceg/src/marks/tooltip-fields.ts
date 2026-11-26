@@ -11,9 +11,10 @@ import type { Formatter } from "../format/format.ts";
 import type { FormatKit } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { CompiledFeatures } from "../model/features.ts";
-import type { PartStyle } from "../spec/encoding.ts";
+import type { AxisInspection } from "../model/inspect.ts";
+import type { PartStyle, PathPart } from "../spec/encoding.ts";
 import type { NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
-import type { Frozen, MarkTooltipSpec } from "../spec/spec.ts";
+import type { AnyTooltipSpec, Frozen, TooltipTotalSpec } from "../spec/spec.ts";
 import type { LabelPartOf } from "./encoding.ts";
 import { ANY_KIND, requireField } from "./mark.ts";
 
@@ -59,6 +60,57 @@ export interface MarkTooltip<S extends Schema> {
    * @minItems 1
    */
   heading?: readonly LabelPartOf<keyof S & string>[];
+}
+
+/**
+ * A treemap's or sunburst's tooltip: as `MarkTooltip`, its content and
+ * heading taking `{ path: true, separator? }` too, the node's names from
+ * the top of the whole tree, each as its path field's display writes it,
+ * joined by `separator` (" / " by default).
+ */
+export interface TreeTooltip<S extends Schema> extends Omit<MarkTooltip<S>, "content" | "heading"> {
+  /**
+   * As `MarkTooltip.content`, and `{ path: true }`: "Europe / France", or
+   * `{ path: true, separator: "/" }` for "Europe/France". A node of the
+   * first level writes its own name, the middle of a drilled view the
+   * levels it stands for.
+   * @minItems 1
+   */
+  content?: readonly (LabelPartOf<keyof S & string> | PathPart)[];
+  /**
+   * As `MarkTooltip.heading`, and `{ path: true }`, the node's levels.
+   * @minItems 1
+   */
+  heading?: readonly (LabelPartOf<keyof S & string> | PathPart)[];
+}
+
+/**
+ * A row after a mark's points in a reading along an axis, summing their
+ * values: `true`, or `{ label, format }` ("Total" by default; a number
+ * format, else as the points' values are written).
+ */
+export type TooltipTotal = TooltipTotalSpec;
+
+/**
+ * The tooltip of a mark whose points carry one number each (lines, filled
+ * areas, bars, points, custom marks): as `MarkTooltip`, with `total`.
+ */
+export interface SeriesTooltip<S extends Schema> extends MarkTooltip<S> {
+  /**
+   * A row after the mark's points in a reading along an axis (any mode but
+   * "nearest"), the sum of the values it lists of the mark (one point
+   * too): hidden series and series reading nothing there are left out; a
+   * stack's points carry their own values, a normalized stack's their raw
+   * ones; under `snap: "each"` they may stand at different places. Written
+   * as the points' values are (their value fields' display over the axis'
+   * `tooltipFormat`; the axis' alone where the value fields' displays
+   * differ), or in `format`, under `label` ("Total" by default). A sum that
+   * is not finite shows no row. Category and time values, and ranges, have
+   * none: refused. Inspections carry it (`inspection.totals`), as hover and
+   * click events, `chart.inspect()`, `renderTooltip`, and the keyboard's
+   * `i` read it.
+   */
+  total?: TooltipTotal;
 }
 
 /** A tooltip field with a label and a format of its kind's forms. */
@@ -118,23 +170,65 @@ export interface TooltipText {
   heading?: ContentRun[];
 }
 
+/** A mark as tooltip writers read it: its table, and its spec's type, tooltip, and id. */
+export interface WrittenMark {
+  readonly table?: Table | undefined;
+  readonly spec: {
+    readonly type: string;
+    readonly tooltip?: Frozen<AnyTooltipSpec> | undefined;
+    readonly id?: string | undefined;
+  };
+}
+
+/** A mark that totals readings, as tooltip writers read it: its value fields (`Mark.identity`) and how it is read besides. */
+export type TotalingMark = WrittenMark & {
+  readonly identity?: { readonly values: readonly string[] } | undefined;
+  readonly tooltip: string;
+};
+
+/** A mark whose tooltip totals a reading: its index in the chart's marks, and how its totals are written. */
+export interface TotaledMark {
+  readonly mark: TotalingMark;
+  readonly index: number;
+  readonly text: Formatter;
+}
+
 /**
- * What `mark`'s tooltip writes of `point`: the fields of `row` (its table's
- * row the point is; undefined where no one row is), its content, and its
- * heading, a layout item's `names` (from the top) naming it by the fields
- * of its path or category; undefined for a mark that writes none.
+ * Writes what marks' tooltips show of points besides their names and
+ * values, and the totals of readings.
  */
-export type TooltipWriter = (
-  mark:
-    | {
-        readonly table?: Table | undefined;
-        readonly spec: { readonly tooltip?: Frozen<MarkTooltipSpec> | undefined };
-      }
-    | undefined,
-  row: number | undefined,
-  point: PointText,
-  names?: readonly string[],
-) => TooltipText | undefined;
+export interface TooltipWriter {
+  /**
+   * What `mark`'s tooltip writes of `point`: the fields of `row` (its
+   * table's row the point is; undefined where no one row is), its content,
+   * and its heading, a layout item's `names` (from the top) naming it by
+   * the fields of its path or category; undefined for a mark that writes
+   * none.
+   */
+  (
+    mark: WrittenMark | undefined,
+    row: number | undefined,
+    point: PointText,
+    names?: readonly string[],
+  ): TooltipText | undefined;
+  /**
+   * How `mark`'s totals are written in a panel (see `tooltipWriters`),
+   * where `axisText` writes its values on their axis. Refuses totals of
+   * ranges (among its `series` there), categories, and times, which have
+   * no sum, and formats that do not write numbers.
+   */
+  total(
+    mark: TotalingMark,
+    series: readonly { readonly range: boolean }[],
+    axisText: Formatter,
+  ): Formatter;
+  /**
+   * Gives `inspection`, a reading along an axis, the totals of its points
+   * of `marks`, in place: of each that it lists points of, their values'
+   * sum and its text. Leaves none where no mark has one.
+   */
+  totals(marks: readonly TotaledMark[], inspection: AxisInspection): void;
+}
 
 /**
  * Makes tooltip writers in a chart's locale and zone, which write with the
@@ -156,11 +250,12 @@ export type TooltipWriters = (
 /**
  * Refuses fields a mark's tooltip shows, and fields its content's and
  * heading's parts read, that its table does not have, naming them as
- * `mark` does.
+ * `mark` does. Parts and totals the mark does not take are refused by
+ * its types and by the spec validator.
  */
 export function checkTooltip(
   table: Table | undefined,
-  tooltip: Frozen<MarkTooltipSpec> | undefined,
+  tooltip: Frozen<AnyTooltipSpec> | undefined,
   mark: string,
 ): void {
   tooltip?.fields?.forEach((entry, i) => {

@@ -977,6 +977,15 @@ class LabelPart:
             "\n",
             hg.LabelPart(value=True, style=hg.TextStyle(opacity=0.7)),
         ]
+
+    In the tooltips of treemaps and sunbursts, ``path=True`` names a node's
+    levels: its names from the top of the whole tree down to it, each as its
+    level's column's display writes it, joined by ``separator`` (" / " by
+    default). A node of the first level writes its own name, the middle of a
+    drilled view the levels it stands for; other marks and labels refuse it::
+
+        chart.sunburst(path=["level1", "level2"], value="size", tooltip=hg.Tooltip(
+            content=["flare/", hg.LabelPart(path=True, separator="/")]))
     """
 
     field: str | None = None
@@ -985,14 +994,32 @@ class LabelPart:
     label: str | None = None
     format: Format | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
+    path: bool | None = None
+    separator: str | None = None
 
     def __post_init__(self) -> None:
         given = [name for name in _PART_KINDS if getattr(self, name) is not None]
+        if self.path is not None and len(given) > 1:
+            other = next(name for name in given if name != "path")
+            raise ChartError(f"LabelPart path: names a node's levels alone; drop {other}")
         if len(given) != 1:
             raise ChartError(
                 "LabelPart: give field, series=True, value=True, or label, one of them"
             )
-        for name in ("series", "value"):
+        if self.separator is not None and not isinstance(self.separator, str):
+            raise ChartError(
+                f"LabelPart separator: expected a string; received {shown(self.separator)}"
+            )
+        if self.separator is not None and self.path is None:
+            raise ChartError(
+                "LabelPart separator: joins a path's levels; give path=True, or drop separator"
+            )
+        if self.path is not None and self.format is not None:
+            raise ChartError(
+                "LabelPart format: a path's levels are written as their columns' displays "
+                "write them; drop format"
+            )
+        for name in ("series", "value", "path"):
             # True itself: 1 equals True, but is no flag.
             if getattr(self, name) is not None and getattr(self, name) is not True:
                 raise ChartError(
@@ -1025,8 +1052,12 @@ class LabelPart:
             if self.label is not None
             else {"series": True}
             if self.series
+            else {"path": True}
+            if self.path
             else {"value": True}
         )
+        if self.separator is not None:
+            spec["separator"] = self.separator
         if self.format is not None:
             spec["format"] = format_spec(self.format, "LabelPart format")
         if self.style is not None:
@@ -1035,15 +1066,16 @@ class LabelPart:
 
 
 #: The kinds of parts, one of which each part is.
-_PART_KINDS = ("field", "series", "value", "label")
+_PART_KINDS = ("field", "series", "value", "label", "path")
 
 #: What a label's block has once, which its parts' styles leave to it.
 _PART_BLOCK = ("font", "line_height", "align", "vertical_align", "halo", "background", "padding")
 
 
-def content_spec(value: Any, role: str) -> Any:
+def content_spec(value: Any, role: str, paths: bool = False) -> Any:
     """A label's ``content`` as the spec takes it: its parts in order, each
-    literal text or an ``hg.LabelPart`` (or a dict of its options)."""
+    literal text or an ``hg.LabelPart`` (or a dict of its options); with
+    ``paths``, a tree's tooltip's, which takes ``path=True`` parts."""
     if value is None:
         return None
     if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence) or not value:
@@ -1051,10 +1083,17 @@ def content_spec(value: Any, role: str) -> Any:
             f'{role}: expected a list of parts, such as ["Peak ", hg.LabelPart(value=True)]; '
             f"received {shown(value)}"
         )
-    return [
+    parts = [
         part if isinstance(part, str) else built_spec(part, LabelPart, f"{role}[{i}]")
         for i, part in enumerate(value)
     ]
+    for i, part in enumerate(parts):
+        if not paths and isinstance(part, dict) and "path" in part:
+            raise ChartError(
+                f"{role}[{i}] path: only treemaps' and sunbursts' nodes have levels; give "
+                "hg.LabelPart(series=True) or (field=...)"
+            )
+    return parts
 
 
 def name_spec(value: Any, mark: str) -> Any:
@@ -1081,6 +1120,11 @@ def name_spec(value: Any, mark: str) -> Any:
             raise at.error(
                 "a series' name has no value; use hg.LabelPart(series=True), (field=...), "
                 "or (label=...)"
+            )
+        if built.path:
+            raise at.field("path").error(
+                "only treemaps' and sunbursts' nodes have levels; use hg.LabelPart(series=True), "
+                "(field=...), or (label=...)"
             )
         for name in ("style", "format"):
             if getattr(built, name) is not None:

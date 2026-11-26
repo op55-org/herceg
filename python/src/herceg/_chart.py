@@ -786,6 +786,38 @@ class TooltipField:
 
 @refuses
 @dataclass
+class TooltipTotal:
+    """A mark's row after its points in a reading along an axis, the sum of
+    the values the reading lists of the mark (see ``hg.Tooltip``'s
+    ``total``): under ``label`` ("Total" by default), written in ``format``,
+    a number format, else as the points' values are::
+
+        chart.line(x="time", y="revenue", series="region", tooltip=hg.Tooltip(
+            total=hg.TooltipTotal(label="All regions", format=hg.Format(number=",.0f"))))
+    """
+
+    label: str | None = None
+    format: Format | dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.label is not None and not isinstance(self.label, str):
+            raise ChartError(f"TooltipTotal label: expected text; received {shown(self.label)}")
+        self._spec()
+
+    def _spec(self) -> dict[str, Any]:
+        written = format_spec(self.format, "TooltipTotal format")
+        if written is not None and not writes(written, "number"):
+            raise ChartError("TooltipTotal format: totals are numbers; give a number format")
+        spec = {"label": self.label, "format": written}
+        return {key: value for key, value in spec.items() if value is not None}
+
+
+#: Marks whose tooltips total a reading's points.
+_TOTALS = ("line", "area", "bar", "point")
+
+
+@refuses
+@dataclass
 class Tooltip:
     """Tooltip options: ``axis_labels`` labels the crosshair on the axes, as
     financial charts do: the inspected value on the axis it follows and the
@@ -831,6 +863,30 @@ class Tooltip:
             x="time", y="value", series="series", tooltip=hg.Tooltip(content=row))
         chart.custom(..., tooltip=hg.Tooltip(heading=[hg.LabelPart(field="id")]))
 
+    Treemaps' and sunbursts' ``content`` and ``heading`` take
+    ``hg.LabelPart(path=True, separator=...)`` too, a node's levels from the
+    top of the whole tree, each as its column's display writes it::
+
+        chart.sunburst(path=["level1", "level2", "level3"], value="size", tooltip=hg.Tooltip(
+            content=["flare/", hg.LabelPart(path=True, separator="/")]))
+
+    ``total=True`` (or an ``hg.TooltipTotal`` with its ``label`` and
+    ``format``), on lines, filled areas, bars, and points of number values,
+    adds a row after the mark's points in a reading along an axis (any
+    ``mode`` but "nearest"), one point too: the sum of the values the
+    reading lists of the mark. Hidden series and series reading nothing
+    there are left out; a stack's points carry their own values, a
+    normalized stack's (``stack="fill"``) their raw ones; under
+    ``snap="each"`` the points may stand at different places. It is
+    written as the points' values are (their column's display over the
+    axis' ``tooltip_format``; the axis' alone where the mark's value
+    columns' displays differ), or in its ``format``; a sum too large for a
+    float shows no row. Category and datetime values, and bands, have no
+    total. Inspections carry it (``hg.Inspection.totals``), and the
+    keyboard's ``i`` reads it after the points::
+
+        chart.line(x="time", y="revenue", series="region", tooltip=hg.Tooltip(total=True))
+
     ``pin="click"`` pins the tooltip where a click (or Enter on the keyboard
     cursor) inspects: it stays, takes the pointer and focus so its links
     work, and goes on Escape, a click outside, or another click. Pinned at
@@ -844,6 +900,7 @@ class Tooltip:
     pin: Literal["click"] | None = None
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
     heading: Literal[False] | Sequence[str | LabelPart | Mapping[str, Any]] | None = None
+    total: Literal[True] | TooltipTotal | None = None
 
     def _spec(self) -> dict[str, Any]:
         if self.fields is not None:
@@ -855,6 +912,11 @@ class Tooltip:
             raise ChartError(
                 "Chart tooltip content: belongs to the marks whose rows it writes; give it "
                 "to a mark, as in chart.line(..., tooltip=hg.Tooltip(content=[...]))"
+            )
+        if self.total is not None:
+            raise ChartError(
+                "Chart tooltip total: belongs to the marks whose points it sums; give it to a "
+                "mark, as in chart.line(..., tooltip=hg.Tooltip(total=True))"
             )
         spec: dict[str, Any] = {}
         if _flag(self.axis_labels, "Tooltip axis_labels"):
@@ -876,7 +938,7 @@ class Tooltip:
         return spec
 
     def _mark_spec(self, mark: str) -> dict[str, Any]:
-        """The tooltip of mark ``mark``: its fields, content, and heading."""
+        """The tooltip of mark ``mark``: its fields, content, heading, and total."""
         role = Role(mark).field("tooltip")
         for name in ("axis_labels", "pin"):
             if getattr(self, name):
@@ -886,16 +948,29 @@ class Tooltip:
                 "False is the chart's; give it to the chart's tooltip"
             )
         spec: dict[str, Any] = {}
+        tree = mark in ("treemap", "sunburst")
         if self.content is not None:
             spec["content"] = located(
                 role.field("content"),
-                lambda: content_spec(self.content, f"{mark} tooltip content"),
+                lambda: content_spec(self.content, f"{mark} tooltip content", tree),
             )
         if self.heading is not None:
             spec["heading"] = located(
                 role.field("heading"),
-                lambda: content_spec(self.heading, f"{mark} tooltip heading"),
+                lambda: content_spec(self.heading, f"{mark} tooltip heading", tree),
             )
+        if self.total is not None:
+            at = role.field("total")
+            if mark not in _TOTALS:
+                raise at.error(
+                    "only lines, filled areas, bars, and points total their points; drop total"
+                )
+            if isinstance(self.total, TooltipTotal):
+                spec["total"] = located(at, self.total._spec) or True
+            elif self.total is True:
+                spec["total"] = True
+            else:
+                raise at.error(f"expected True or an hg.TooltipTotal; received {shown(self.total)}")
         if self.fields is None:
             return spec
         at = role.field("fields")
@@ -2024,7 +2099,9 @@ class Chart:
                 "facet": _mark_facet(facet, "line"),
                 "panel": panel,
                 "clip": _clip(clip, "line"),
-                "tooltip": self._mark_tooltip(table, tooltip, "line"),
+                "tooltip": self._mark_tooltip(
+                    table, tooltip, "line", ("y" if along == "x" else "x", values)
+                ),
                 "zIndex": z_index,
                 "pick": pick,
                 "selected": look_spec(selected, "line selected"),
@@ -2235,7 +2312,13 @@ class Chart:
                 "facet": _mark_facet(facet, "area"),
                 "panel": panel,
                 "clip": _clip(clip, "area"),
-                "tooltip": self._mark_tooltip(table, tooltip, "area"),
+                "tooltip": self._mark_tooltip(
+                    table,
+                    tooltip,
+                    "area",
+                    ("y" if runs == "x" else "x", values),
+                    band=along_x or along_y,
+                ),
                 "zIndex": z_index,
                 "pick": pick,
                 "selected": look_spec(selected, "area selected"),
@@ -2435,7 +2518,9 @@ class Chart:
                 "facet": _mark_facet(facet, "bar"),
                 "panel": panel,
                 "clip": _clip(clip, "bar"),
-                "tooltip": self._mark_tooltip(table, tooltip, "bar"),
+                "tooltip": self._mark_tooltip(
+                    table, tooltip, "bar", ("x", xs) if horizontal else ("y", ys)
+                ),
                 "width": self._option("bar width", lambda: length_spec(width, "bar width")),
                 "strokeSides": self._option(
                     "bar stroke_sides", lambda: _sides(stroke_sides, "bar stroke_sides")
@@ -2920,7 +3005,7 @@ class Chart:
                 "facet": _mark_facet(facet, "point"),
                 "panel": panel,
                 "clip": _clip(clip, "point"),
-                "tooltip": self._mark_tooltip(table, tooltip, "point"),
+                "tooltip": self._mark_tooltip(table, tooltip, "point", ("y", y)),
                 "zIndex": z_index,
                 "pick": pick,
                 "selected": look_spec(selected, "point selected"),
@@ -6776,9 +6861,16 @@ class Chart:
             )
 
     def _mark_tooltip(
-        self, table: int, tooltip: Tooltip | None, mark: str
+        self,
+        table: int,
+        tooltip: Tooltip | None,
+        mark: str,
+        values: tuple[str, str | Sequence[str] | None] | None = None,
+        band: bool = False,
     ) -> dict[str, Any] | None:
-        """The spec of a mark's ``tooltip``, its fields checked against its data."""
+        """The spec of a mark's ``tooltip``, its fields checked against its
+        data, and a total against the mark's value columns (``values``: the
+        axis they are on, and their names) or its ``band``."""
         if tooltip is None:
             return None
         if not isinstance(tooltip, Tooltip):
@@ -6787,6 +6879,18 @@ class Chart:
                 f"received {shown(tooltip)}"
             )
         spec = tooltip._mark_spec(mark)
+        total = Role(mark).field("tooltip").field("total")
+        if "total" in spec and band:
+            raise total.error("a band's points are ranges, which have no total; drop total")
+        if "total" in spec and values is not None:
+            axis, columns = values
+            for summed in [columns] if isinstance(columns, str) else (columns or ()):
+                kind = self._kind(table, summed)
+                if kind is not None and kind != "number":
+                    raise total.error(
+                        f"{axis} {summed!r} is a {kind} column, whose points have no sum; "
+                        "drop total"
+                    )
         parts = [
             (name, i, part)
             for name in ("content", "heading")
@@ -9766,8 +9870,9 @@ def helper(function: Callable[_P, _R]) -> Callable[_P, _R]:
                         "drop fields"
                     )
                 )
-            # Parts written from a row; a heading of False is the chart's, which they keep.
-            for name in ("content", "heading"):
+            # Parts written from a row, and totals of rows; a heading of False is the
+            # chart's, which they keep.
+            for name in ("content", "heading", "total"):
                 parts = getattr(tooltip, name, None) if isinstance(tooltip, Tooltip) else None
                 if rows or parts is None or parts is False:
                     continue
@@ -9865,13 +9970,19 @@ def _unknown_option(function: Callable[..., Any], name: str, known: set[str]) ->
 
 def _rows_chart_of(data: Any, options: RadarOptions) -> tuple[Chart, Tooltip | None]:
     """The chart of a helper whose mark's points are rows, and the mark's
-    tooltip: the ``fields``, ``content``, and heading parts of the helper's
-    ``tooltip``, which are the mark's; ``heading=False`` is the chart's."""
+    tooltip: the ``fields``, ``content``, heading parts, and ``total`` of
+    the helper's ``tooltip``, which are the mark's; ``heading=False`` is the
+    chart's."""
     tooltip = options.get("tooltip")
     if not isinstance(tooltip, Tooltip):
         return _chart_of(data, options), None
     parts = None if tooltip.heading is False else tooltip.heading
-    if tooltip.fields is None and tooltip.content is None and parts is None:
+    if (
+        tooltip.fields is None
+        and tooltip.content is None
+        and parts is None
+        and tooltip.total is None
+    ):
         return _chart_of(data, options), None
     # The chart keeps the rest, or its default tooltip without any.
     heading: Literal[False] | None = False if tooltip.heading is False else None
@@ -9881,7 +9992,9 @@ def _rows_chart_of(data: Any, options: RadarOptions) -> tuple[Chart, Tooltip | N
         else None
     )
     chart = _chart_of(data, {**options, "tooltip": shared})
-    return chart, Tooltip(fields=tooltip.fields, content=tooltip.content, heading=parts)
+    return chart, Tooltip(
+        fields=tooltip.fields, content=tooltip.content, heading=parts, total=tooltip.total
+    )
 
 
 def _chart_of(data: Any, options: RadarOptions) -> Chart:

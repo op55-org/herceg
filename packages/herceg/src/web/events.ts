@@ -264,6 +264,15 @@ export interface InspectionPayload {
     /** The heading its mark's `tooltip.heading` wrote, as `content`. */
     heading?: { text: string; style?: PartStyle }[];
   }[];
+  /** Each mark's total of a reading along an axis (`tooltip.total`), where any mark has one. */
+  totals?: {
+    mark: number;
+    markId: string | null;
+    label: string;
+    value: number;
+    text: string;
+    count: number;
+  }[];
   /** An item's data by field (a 3D chart's point): numbers, times in epoch ms, and categories. */
   values?: Readonly<Record<string, number | string>>;
 }
@@ -772,6 +781,10 @@ export function inspectionPayload(
       ...(point.content && { content: runs(point.content) }),
       ...(point.heading && { heading: runs(point.heading) }),
     })),
+    ...(inspection.axis !== "item" &&
+      inspection.totals && {
+        totals: inspection.totals.map((total) => ({ ...total, markId: total.markId ?? null })),
+      }),
     ...(inspection.axis === "item" && inspection.values && { values: inspection.values }),
   };
 }

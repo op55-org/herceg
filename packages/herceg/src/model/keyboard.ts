@@ -664,25 +664,28 @@ export function inspectPosition(
   if (shared) {
     const anchored = inspector.inspectAt(axis, value, reads, undefined, anchor, position);
     // Of the series the pointer reads, each at the row the cursor's reading
-    // gives it (none for a stack's layer without one), and its cells.
-    inspection = read
-      ? {
-          ...anchored,
-          points: read.points.flatMap((p) =>
-            reads.some((s) => s.key === p.key)
-              ? anchored.points.filter((q) => q.key === p.key)
-              : [p],
-          ),
-        }
-      : anchored;
+    // gives it (none for a stack's layer without one), and its cells; the
+    // totals of those points.
+    inspection = inspector.totaled(
+      read
+        ? {
+            ...anchored,
+            points: read.points.flatMap((p) =>
+              reads.some((s) => s.key === p.key)
+                ? anchored.points.filter((q) => q.key === p.key)
+                : [p],
+            ),
+          }
+        : anchored,
+    );
   } else if (read && along === axis) {
     // The cursor's row stands for its series' point at its place (a snap
     // may read another), where positions repeat.
     const at = along === "x" ? "px" : "py";
-    inspection = {
+    inspection = inspector.totaled({
       ...read,
       points: read.points.map((p) => (p.key === key && p[at] === target![at] ? target! : p)),
-    };
+    });
   }
   // Nothing drawn at this position: no tooltip rather than an empty one.
   if (!inspection?.points.length) return undefined;
