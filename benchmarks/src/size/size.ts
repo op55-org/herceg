@@ -32,6 +32,7 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-grid": "herceg",
   "herceg-grid-fields": "herceg",
   "herceg-pivot": "herceg",
+  "herceg-lineage": "herceg",
   "herceg-grid-pivot": "herceg",
   "herceg-grid-remote": "herceg",
   "herceg-grid-sparklines": "herceg",

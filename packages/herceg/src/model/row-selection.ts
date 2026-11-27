@@ -30,7 +30,7 @@ import { conditionsOf } from "./conditions.ts";
 import { GUIDE_KIT } from "./guides.ts";
 import { Highlighter, type HighlightKit, highlights } from "./highlight.ts";
 import { itemResolver } from "./items.ts";
-import { channelSelection, channelsChosen, membership } from "./memberships.ts";
+import { channelSelection, channelsChosen, type Membership, membershipOf } from "./memberships.ts";
 import type { ChangeCause, ChartConfig, ChartModel } from "./model.ts";
 import {
   brushedRows,
@@ -139,6 +139,14 @@ interface Bound {
   events: ReadonlySet<SelectionGesture>;
   highlight: boolean;
   live: boolean;
+  /** Which rows the channel holds, taken on first read and held as long as the binding. */
+  membership?: Membership;
+}
+
+/** The membership of a bound channel, held by the binding from its first read. */
+function membershipOfBound(bound: Bound): Membership {
+  bound.membership ??= membershipOf(bound.store, bound.channel);
+  return bound.membership;
 }
 
 const GESTURES: readonly SelectionGesture[] = ["brush", "lasso", "click"];
@@ -166,9 +174,6 @@ export function rowSelection<const S extends readonly Schema[]>(
   // Each table's schema types its own binding; the chart reads them alike.
   return new RowSelection(bindings as unknown as readonly SelectionBinding[]);
 }
-
-/** How many rows each membership holds, counted once: descriptions are read every frame. */
-const counts = new WeakMap<Uint8Array, number>();
 
 /** Identities of stores, which say whether two row selections bind the same ones. */
 const storeIds = new WeakMap<SelectionStore, number>();
@@ -282,7 +287,8 @@ export class RowSelection {
       mark.geometry(series, frame, key, rows);
     const layout: NonNullable<ChartModel["layoutHighlight"]> = (table, mark, series) => {
       const selection = channelSelection(highlighted, table);
-      return selection ? membership(table, selection) : model.layoutLooks?.(table, mark, series);
+      const bound = selection && highlighted.find((b) => b.table === table);
+      return bound ? membershipOfBound(bound).selected : model.layoutLooks?.(table, mark, series);
     };
     model.highlight = draw;
     model.layoutHighlight = layout;
@@ -300,17 +306,12 @@ export class RowSelection {
   get description(): string | undefined {
     const shown = this.#bound.filter((b) => b.highlight);
     const several = shown.length > 1;
-    const held = shown.flatMap(({ store, table, channel }) => {
+    const held = shown.flatMap((bound) => {
+      const { store, table, channel } = bound;
       const selection = store.get(channel);
       // Rows selected before the table was reset are gone: nothing is selected.
       if (!selection || (selection.kind === "rows" && !selection.rows.current)) return [];
-      const selected = membership(table, selection);
-      let count = counts.get(selected);
-      if (count === undefined) {
-        count = 0;
-        for (let row = 0; row < selected.length; row++) count += selected[row]!;
-        counts.set(selected, count);
-      }
+      const count = membershipOfBound(bound).count;
       const name = several && table.name !== undefined ? ` of ${table.name}` : "";
       return [`${count} of ${table.length} ${table.length === 1 ? "row" : "rows"}${name}`];
     });

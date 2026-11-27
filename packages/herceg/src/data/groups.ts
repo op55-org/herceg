@@ -14,10 +14,18 @@
 // where their values changed.
 
 import { type ColumnInput, category, time } from "./column.ts";
+import {
+  type ContributorLink,
+  type LinkedRecord,
+  type Removed,
+  setContributors,
+} from "./contributor-records.ts";
 import type { Expression } from "./expression.ts";
 import { checkAggregates, GroupLevel, GroupTable } from "./group-levels.ts";
+import { measureOf, operandsOf } from "./group-lineage.ts";
 import { MemberRuns } from "./group-members.ts";
 import { rowComparator } from "./order.ts";
+import type { RemovalLog } from "./removal-log.ts";
 import { fieldsOf, type RowSnapshot, type RowView } from "./row-view.ts";
 import type {
   FieldName,
@@ -243,6 +251,19 @@ export class RowGroups<
   #stopped = false;
   /** Set once the bounds refused a change: the groups no longer follow, and read as they were. */
   #frozen = false;
+  /**
+   * Counts the changes that may give groups other rows than appends and
+   * drops do (lineage.ts): a new query, a reset, rows inserted, an edit of
+   * a grouping field or one the view filters by, stopping. Edits of fields
+   * only aggregates read leave every row in its group.
+   */
+  #lineage = 0;
+  /** Set when a change heard edits what puts rows in groups (see `#lineage`). */
+  #rekeyed = false;
+  /** The rows dropped lately, in the log a reader of the groups' contributors gave. */
+  #removals: RemovalLog | null = null;
+  /** Readers holding the log; it goes with the last. */
+  #keepers = 0;
   #lookupCost = { version: -1, room: -1, bytes: 0 };
   #ranks = { version: -1, query: -1, bytes: 0 };
   /** While bounded groups are first made: what they reach so far, asked of the bounds as they grow. */
@@ -297,6 +318,7 @@ export class RowGroups<
       level.published = { version: level.table.version, length: level.count };
       level.unmark();
       keepers.set(level.table, this as unknown as RowGroups);
+      setContributors(this.#record(level));
     }
     this.table = this.#levels.at(-1)!.table as unknown as Table<R>;
 
@@ -518,6 +540,8 @@ export class RowGroups<
   dispose(): void {
     if (this.#stopped) return;
     this.#stopped = true;
+    this.#lineage++;
+    this.#removals = null;
     this.#stop();
     followers.unregister(this);
     this.#slots = new Int32Array(0);
@@ -527,6 +551,160 @@ export class RowGroups<
     this.#compare = null;
     this.#scratch = new Uint32Array(0);
     this.#listeners.clear();
+  }
+
+  /**
+   * What a level's table's rows were computed from (lineage.ts): the rows of
+   * the view's table in each group, those whose value of an aggregate's
+   * field is finite for that aggregate.
+   */
+  #record(level: GroupLevel): LinkedRecord {
+    const groups = this;
+    const source = this.#source;
+    const aggregates = this.aggregates;
+    const operandOf = operandsOf(aggregates);
+    const { depth } = level;
+    const last = this.by.length - 1;
+    /** The values of the field `field` reads, if any. */
+    const operand = (field: string | undefined) => {
+      const name = operandOf(field);
+      return name === undefined ? undefined : source.numbers(name);
+    };
+    /** A last-level group's group at the level. */
+    const up = (group: number) => {
+      for (let d = last; d > depth && group >= 0; d--) group = this.#levels[d]!.parents[group]!;
+      return group;
+    };
+    const link: ContributorLink = {
+      get rows() {
+        return source.length;
+      },
+      get targets() {
+        return groups.countAt(depth);
+      },
+      single: false,
+      partition: true,
+      contributors: (group, visit, field) => {
+        this.#check(group, depth);
+        if (this.#stopped) return;
+        const values = operand(field);
+        const runs = this.#runs();
+        const rowOffset = source.rowOffset;
+        const each = values
+          ? (position: number) => {
+              if (Number.isFinite(values[position]!)) visit(position);
+            }
+          : visit;
+        const leaves = (g: number, d: number) => {
+          if (d === last) runs.visit(g, each, rowOffset);
+          else for (const child of this.childrenOf(g, d)) leaves(child, d + 1);
+        };
+        leaves(group, depth);
+      },
+      targetsOf: (position, visit, field) => {
+        const target = link.targetAt(position, field);
+        if (target >= 0) visit(target);
+      },
+      targetAt: (position, field) => {
+        const group = this.groupOf(position, depth);
+        if (group < 0) return -1;
+        const values = operand(field);
+        return !values || Number.isFinite(values[position]!) ? group : -1;
+      },
+      count: (group, field) => {
+        this.#update();
+        if (this.#stopped) return 0;
+        // Stopped at a limit, their counters are of rows the source may have dropped since.
+        if (this.#frozen || this.#behind()) {
+          let count = 0;
+          link.contributors(group, () => count++, field);
+          return count;
+        }
+        const rows = this.size(group, depth);
+        const name = operandOf(field);
+        if (name === undefined) return rows;
+        // Counts and sums of the field count its finite values already.
+        const k = level.aggregates.findIndex(
+          (a, i) => aggregates[i]!.field === name && (a.op === "count" || level.finite[i]),
+        );
+        if (k >= 0) return (level.finite[k] ?? level.running[k]!)[group]!;
+        let count = 0;
+        link.contributors(group, () => count++, field);
+        return count;
+      },
+      classOf: (field) => operandOf(field) ?? null,
+      operandOf,
+      passes: () => undefined,
+      // Stopped, their values no longer follow the rows that remain.
+      measureOf: (field) =>
+        this.#stopped || this.#frozen ? undefined : measureOf(aggregates, field),
+      incidences: (visit, field) => {
+        this.#update();
+        if (this.#stopped) return;
+        const values = operand(field);
+        const length = source.length;
+        if (this.#behind()) {
+          for (let position = 0; position < length; position++) {
+            const target = link.targetAt(position, field);
+            if (target >= 0) visit(position, target);
+          }
+          return;
+        }
+        const slots = this.#slots;
+        const offset = this.#offset;
+        for (let position = 0; position < length; position++) {
+          const group = slots[offset + position]!;
+          if (group < 0 || (values && !Number.isFinite(values[position]!))) continue;
+          visit(position, depth === last ? group : up(group));
+        }
+      },
+      byteLength: 0,
+    };
+    const links = [link];
+    return {
+      kind: "links",
+      source,
+      target: level.table,
+      get revision() {
+        groups.#update();
+        return groups.#lineage;
+      },
+      get layout() {
+        groups.#update();
+        return groups.#renumbered;
+      },
+      links: () => links,
+      removed: (slot: number, field: string | undefined, out: Removed) => {
+        this.#update();
+        const log = this.#removals;
+        const at = log ? log.find(slot) : -1;
+        if (at < 0) return false;
+        const name = operandOf(field);
+        const k = name === undefined ? -1 : this.#read.indexOf(name);
+        out.value = k < 0 ? Number.NaN : log!.value(at, k);
+        const fed = name === undefined || Number.isFinite(out.value);
+        out.target = fed ? up(log!.target(at)) : -1;
+        return true;
+      },
+      logged: this.#read,
+      get log() {
+        return groups.#removals;
+      },
+      hold: (make: () => RemovalLog) => {
+        if (this.#stopped || this.#frozen) return () => {};
+        this.#keepers++;
+        this.#removals ??= make();
+        let held = true;
+        return () => {
+          if (!held) return;
+          held = false;
+          if (--this.#keepers === 0) this.#removals = null;
+        };
+      },
+      get owned() {
+        return groups.byteLength;
+      },
+    };
   }
 
   #level(depth: number): GroupLevel {
@@ -562,16 +740,13 @@ export class RowGroups<
     this.#heard++;
     // Rows inserted before others move them, and every row's slot after them:
     // the groups are computed again (rows keep their groups).
-    if (change.inserted) this.#recompute = true;
+    if (change.inserted) this.#recompute = this.#rekeyed = true;
     else if (change.updated) {
       const query = this.view.query;
       // A view keeps its filter as an expression.
-      const reads = new Set<string>([
-        ...this.by,
-        ...this.#read,
-        ...fieldsOf(query.filter as Expression),
-      ]);
-      if (change.fields.some((field) => reads.has(field))) this.#recompute = true;
+      const keys = new Set<string>([...this.by, ...fieldsOf(query.filter as Expression)]);
+      if (change.fields.some((field) => keys.has(field))) this.#recompute = this.#rekeyed = true;
+      else if (change.fields.some((field) => this.#read.includes(field))) this.#recompute = true;
       else if (query.sort?.some(({ field }) => change.fields.includes(field)))
         this.#reordered = true;
     }
@@ -599,6 +774,15 @@ export class RowGroups<
       (dropped > 0 && this.#read.length > 0 && !this.#kept);
     const moved = dropped > 0 || source.rowOffset + source.length !== seen.rowOffset + seen.length;
     const reordered = this.#reordered;
+    // Rows may change groups (see `#lineage`) unless only aggregated values were edited.
+    const rekeyed =
+      recompute &&
+      (this.#rekeyed ||
+        (unheard && source.modifiedVersion !== seen.modified) ||
+        source.generation !== seen.generation ||
+        view.queryRevision !== seen.query ||
+        (dropped > 0 && this.#read.length > 0 && !this.#kept));
+    this.#rekeyed = false;
     // The view's order as it was holds the table's old arrays.
     this.#compare = null;
     // Bounded groups refused what the change would make them (a new order of
@@ -607,6 +791,8 @@ export class RowGroups<
       const from = recompute ? 0 : Math.max(0, seen.rowOffset + seen.length - source.rowOffset);
       if (this.#refusal(snapshot, from, recompute, Math.min(dropped, seen.length))) {
         this.#frozen = true;
+        this.#lineage++;
+        this.#removals = null;
         this.#stop();
         followers.unregister(this);
         this.#tell();
@@ -614,6 +800,10 @@ export class RowGroups<
       }
     }
     if (recompute || moved || reordered) this.#revision++;
+    if (rekeyed) {
+      this.#lineage++;
+      this.#removals?.clear();
+    }
     // Caught up before the groups' tables change: their listeners read what is current.
     this.#heard = 0;
     this.#recompute = false;
@@ -822,6 +1012,12 @@ export class RowGroups<
   #remove(removed: number, end: number) {
     const start = this.#offset;
     const slots = this.#slots;
+    const log = this.#removals;
+    if (log) {
+      const kept = this.#kept ?? [];
+      for (let i = 0; i < removed; i++)
+        log.push(end - removed + i, slots[start + i]!, kept, start + i);
+    }
     this.#apply(start, start + removed, -1, this.#kept ?? [], 0);
     const members = this.#members;
     if (members) {

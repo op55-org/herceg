@@ -4,7 +4,7 @@ import {
   channelSelection,
   channelsChosen,
   type HighlightedChannel,
-  membership,
+  membershipOf,
 } from "../../src/model/memberships.ts";
 import { HIGHLIGHT_KIT } from "../../src/model/row-selection.ts";
 
@@ -16,7 +16,8 @@ export function channelHighlighter(channels: readonly HighlightedChannel[]) {
   return Object.assign(new Highlighter(HIGHLIGHT_KIT, channelsChosen(channels)), {
     selected(table: Table): Uint8Array | undefined {
       const selection = channelSelection(channels, table);
-      return selection && membership(table, selection);
+      const channel = channels.find((c) => c.table === table);
+      return selection && channel && membershipOf(channel.store, channel.channel).selected;
     },
   });
 }

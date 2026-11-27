@@ -872,13 +872,76 @@ are never selected by lassos, clicks, or keys.
 
 Results are computed for every table before any channel changes.
 
-**Membership** (`model/highlight.ts`) is a byte per table row, kept per
-table and selection in weak maps (so charts showing one selection share
-it) while the table's version is the same. When a table only appended or
-dropped rows, kept rows keep their bytes and only new rows are tested, so a
-live condition over a rolling window costs the new rows. Brush conditions
-are tested a column at a time (a range in one branch-free pass); other
-conditions row by row through the compiled condition.
+**Membership** (`model/memberships.ts`, `membershipOf`) is a byte per
+table row, kept per store and channel while someone holds it, so charts
+showing one channel share it however often the channel is set.
+
+- **Bytes.** They grow in place past their end as rows arrive (room for a
+  quarter more, then twice the rows at each capacity crossing), so an
+  append tests only the new rows and readers holding the bytes see them
+  unchanged. A change of rows already there (a new selection, an edit of a
+  field the condition reads) writes a new array, testing again only the
+  updated span when the selection is the same; a change heard out of turn
+  (made inside an earlier listener of the same table) tests every row
+  again. Brush conditions are tested a column at a time, each comparison a
+  branch-free loop of its own; other conditions row by row through the
+  compiled condition.
+- **Changes.** A reader asks the membership's history
+  (`model/membership-changes.ts`, `historyOf`, part of the lineage reader)
+  for a `cursor()` and later for `changes(cursor)`: `unchanged`, a
+  **delta**, or `rebuild`. A delta spans
+  table versions between which the table only appended, dropped from the
+  front, and changed values in place: `dropped` rows went from the front,
+  `left` lists positions in the earlier layout (dropped selected rows
+  among them), `joined` positions in the later one, and `updated` the span
+  whose `fields` changed in place, which a selection may hold whether or
+  not it changed. Insertions, resets, and sorts give `rebuild`.
+- **History.** A membership tells its history each transition once one
+  exists, and highlighting alone makes none. The history finds what
+  changed by comparing the old and new bytes four rows at a time as the
+  membership writes them; a lagging reader gets the deltas it missed merged
+  (a row that left and joined again changed nothing). History holds at
+  most an eighth of the rows' positions (at least 16) and 64 transitions;
+  past that, the oldest go, and their readers rebuild. Readers hold the
+  history (`hold()`); once the last lets go, it stops listening and
+  readers of older cursors rebuild.
+- **Counts.** The membership keeps its selected count, counted again only
+  after a rewrite, so descriptions read it.
+
+**Coverage** (`model/coverage.ts`, `coverageOf`) is what a channel holds of
+each target's [contributors](data.md#contributors) through a relation:
+`selected` and `total` distinct source rows, a `state` (`"none"`,
+`"partial"`, `"all"`; no contributors is `"none"`), and for a field with a
+measure, the selected rows' count or sum beside the target's value (rows
+all selected read the target's value itself); `of(target, field)` gives
+them together, with a measure only of the field named. Each read catches
+the relation up first, so a target's value and its counts agree. It is
+kept per relation, store, channel, and class of fields, so fields reading
+the same rows share it, two stores of one table under one channel name do
+not, and two aggregates of one group reading different finite values do
+not. A coverage holds its relation and the membership's history while it
+lives, and lets them go once collected. No mark draws it yet.
+
+- **Following changes.** Counts are kept per target as two `Uint32Array`s;
+  sums as compensated high, low, and error parts with a count of negative
+  contributions, 28 bytes a target more. A delta changes the counts of the
+  targets its rows feed and reads nothing else: rows that left and joined
+  through `targetAt` (partitions) or `targetsOf`, rows appended into the
+  totals, rows dropped through what their producer remembered. An edit in
+  place of a field the class or the sum reads counts the updated rows'
+  targets again from their contributors, and a sum that lost its accuracy
+  is summed again. Work is counted in incidences (row, target pairs) read:
+  for partitions, rows changed.
+- **Counting again.** A new relation revision or target layout, a
+  membership's `rebuild`, a drop through a relation that is no partition
+  or past what its producer remembered, all count every incidence once.
+  Coverage of an older layout is never remapped.
+- **Targets of one row each** (a filter's output) read the membership
+  directly and keep nothing.
+
+A brush over a million rows with a bar of 1,000 groups following takes
+about 1.1 ms of coverage after the membership's 1.5 ms; 1,000 rows
+appended, about 0.25 ms, making about 1 KB (Node, Apple M6).
 
 **Highlighting** replaces a mark's geometry through the model's hook while
 its table's channel holds a selection.

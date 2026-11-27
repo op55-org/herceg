@@ -4,7 +4,8 @@
 
 import { count, max, mean, min, sum } from "../src/data/aggregations.ts";
 import { category, encodedCategory, time } from "../src/data/column.ts";
-import { derive } from "../src/data/derive.ts";
+import { relationTo } from "../src/data/contributors.ts";
+import { derive, deriveTable } from "../src/data/derive.ts";
 import { col } from "../src/data/expr.ts";
 import { fromGeoJSON } from "../src/data/geojson.ts";
 import { groupRows } from "../src/data/groups.ts";
@@ -75,6 +76,7 @@ import { UnionStack } from "../src/marks/union-stack.ts";
 import { violin } from "../src/marks/violin.ts";
 import { labelsMeet, planAxis } from "../src/model/axis.ts";
 import { axisGuide } from "../src/model/axis-guide.ts";
+import { type Coverage, coverageOf, coverageWork } from "../src/model/coverage.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
 import {
@@ -85,7 +87,7 @@ import {
   orderAt,
   standing,
 } from "../src/model/keyboard.ts";
-import { membership } from "../src/model/memberships.ts";
+import { membershipOf } from "../src/model/memberships.ts";
 import { type ChartConfig, ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
 import { earliest } from "../src/model/nearest.ts";
@@ -1821,14 +1823,287 @@ measure(
   },
   { warmup: 5, samples: 30 },
 );
+const brushMembership = membershipOf(focus as never, "brush");
 measure(
   "row selection: brush 1M points, membership alone",
   () => {
     moveBrush();
-    membership(brushed as never, focus.get("brush") as never);
+    void brushMembership.selected;
   },
   { warmup: 5, samples: 30 },
 );
+
+// Lineage: charts of a groups table or a derivation following a selection
+// of the source's rows (data/contributors.ts, model/coverage.ts). Each case
+// times its phases apart (the source's change and the groups following it,
+// the membership's evaluation, coverage taking the change in), and reports
+// the incidences coverage read and the array-buffer bytes the membership
+// and coverage made a step (JavaScript objects uncounted). Capacity crossings, where the membership's bytes move to a larger array,
+// are counted apart. After each case, coverage is checked against counts
+// made again from the rows.
+{
+  const M = 1_000_000;
+  const GROUPS = 1000;
+  const salesOf = (n: number, maxRows?: number) =>
+    table(
+      {
+        x: Float64Array.from({ length: n }, () => Math.random() * 100),
+        v: Float64Array.from({ length: n }, () =>
+          Math.random() < 0.05 ? Number.NaN : Math.random() * 10,
+        ),
+        g: category(Array.from({ length: n }, (_, i) => `g${i % GROUPS}`)),
+        h: category(Array.from({ length: n }, (_, i) => `h${i % 10}`)),
+      },
+      maxRows === undefined ? {} : { maxRows },
+    ) as unknown as Table;
+  const batchOf = (n: number, from: number) => ({
+    x: Float64Array.from({ length: n }, () => Math.random() * 100),
+    v: Float64Array.from({ length: n }, () => Math.random() * 10),
+    g: Array.from({ length: n }, (_, i) => `g${(from + i) % GROUPS}`),
+    h: Array.from({ length: n }, (_, i) => `h${(from + i) % 10}`),
+  });
+  const gc = (globalThis as { gc?: () => void }).gc;
+  /**
+   * Bytes of array buffers `run` makes, read from the process after two
+   * collections, the second finishing the first's freeing (which runs
+   * beside the program), so none of earlier garbage is freed during it.
+   * Typed arrays of 64 bytes or fewer, kept in the JavaScript heap, and
+   * JavaScript objects are uncounted.
+   */
+  const made = (run: () => void): number => {
+    gc?.();
+    gc?.();
+    const before = process.memoryUsage().arrayBuffers;
+    run();
+    return process.memoryUsage().arrayBuffers - before;
+  };
+  const ms = (times: number[]) => {
+    const sorted = [...times].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1]!;
+    const mad = sorted.map((t) => Math.abs(t - median)).sort((a, b) => a - b)[sorted.length >> 1]!;
+    return median < 0.1
+      ? `${(median * 1000).toFixed(1)} µs ± ${(mad * 1000).toFixed(1)}`
+      : `${median.toFixed(3)} ms ± ${mad.toFixed(3)}`;
+  };
+  const mean = (times: number[]) => times.reduce((a, b) => a + b, 0) / times.length;
+  /**
+   * A lineage case: `step` changes the source or the selection (its time
+   * reported as `changed`), then the membership and each coverage read
+   * every target. Bytes are those the membership and coverages make; of
+   * appends (`appends`), steps whose membership crossed its capacity count
+   * apart.
+   */
+  const lineage = (
+    name: string,
+    step: (i: number) => void,
+    membership: { selected: Uint8Array },
+    coverages: readonly { coverage: Coverage; field: string | undefined }[],
+    { warmup = 5, samples = 30, appends = false } = {},
+  ) => {
+    // What earlier cases left is collected first, not during this one.
+    gc?.();
+    const read = () => {
+      for (const { coverage, field } of coverages)
+        for (let t = 0; t < coverage.relation.targets; t++) {
+          coverage.selected(t);
+          if (field !== undefined) coverage.measure(t, field);
+        }
+    };
+    let i = 0;
+    for (let w = 0; w < warmup; w++) {
+      step(i++);
+      void membership.selected;
+      read();
+    }
+    const times = { changed: [] as number[], membership: [] as number[], coverage: [] as number[] };
+    const work = { incidences: 0, rebuilds: 0, bytes: 0, crossings: 0, crossed: 0 };
+    for (let k = 0; k < samples; k++) {
+      let t0 = performance.now();
+      step(i++);
+      times.changed.push(performance.now() - t0);
+      const [incidences, rebuilds] = [coverageWork.incidences, coverageWork.rebuilds];
+      t0 = performance.now();
+      void membership.selected;
+      times.membership.push(performance.now() - t0);
+      t0 = performance.now();
+      read();
+      times.coverage.push(performance.now() - t0);
+      work.incidences += coverageWork.incidences - incidences;
+      work.rebuilds += coverageWork.rebuilds - rebuilds;
+    }
+    // Bytes, on steps of their own: collections before each would slow the steps timed.
+    let last = membership.selected.buffer;
+    for (let k = 0; k < samples; k++) {
+      step(i++);
+      let crossed = false;
+      const bytes = made(() => {
+        const after = membership.selected.buffer;
+        crossed = appends && after !== last;
+        last = after;
+        read();
+      });
+      if (crossed) {
+        work.crossings++;
+        work.crossed += bytes;
+      } else work.bytes += bytes;
+    }
+    const plain = samples - work.crossings;
+    console.log(
+      `${name.padEnd(48)} change ${ms(times.changed)}; membership ${ms(times.membership)}; ` +
+        `coverage ${ms(times.coverage)} (mean ${mean(times.coverage).toFixed(3)} ms); ` +
+        `${Math.round(work.incidences / samples).toLocaleString("en-US")} incidences, ${work.rebuilds} rebuilds in ${samples}; ` +
+        `${(plain ? work.bytes / plain / 1024 : 0).toFixed(1)} KB made a step` +
+        (work.crossings
+          ? `, ${work.crossings} crossings of ${(work.crossed / work.crossings / 2 ** 20).toFixed(2)} MB`
+          : ""),
+    );
+  };
+  /** Checks a coverage of groups by `field`'s finite values against counts made again from the rows. */
+  const verify = (
+    coverage: Coverage,
+    keyOf: (target: number) => string,
+    key: string,
+    field: string | undefined,
+  ) => {
+    const source = coverage.relation.source;
+    const bytes = coverage.membership.selected;
+    const { codes, dictionary } = source.categories(key as never);
+    const values = field === undefined ? null : source.numbers(field as never);
+    const want = new Map<string, [number, number, number]>();
+    for (let p = 0; p < source.length; p++) {
+      if (values && !Number.isFinite(values[p]!)) continue;
+      const k = dictionary[codes[p]!]!;
+      const at = want.get(k) ?? [0, 0, 0];
+      at[1]++;
+      if (bytes[p]) {
+        at[0]++;
+        at[2] += values ? values[p]! : 0;
+      }
+      want.set(k, at);
+    }
+    for (let t = 0; t < coverage.relation.targets; t++) {
+      const [selected, total, summed] = want.get(keyOf(t)) ?? [0, 0, 0];
+      const measure = field === undefined ? undefined : coverage.measure(t, "s");
+      if (
+        coverage.selected(t) !== selected ||
+        coverage.total(t) !== total ||
+        (measure && Math.abs(measure.selected - summed) > 1e-9 * Math.max(1, Math.abs(summed)))
+      )
+        throw new Error(`lineage: coverage of target ${t} differs from the rows' counts`);
+    }
+  };
+
+  // A brush moving over x, a bar of 1,000 groups' sums following.
+  {
+    const sales = salesOf(M);
+    const store = selectionStore(sales);
+    const groups = groupRows(rowView(sales), { by: ["g"], ops: { s: sum("v"), n: count() } });
+    const coverage = coverageOf(relationTo(groups.table, sales)!, "s", store, "brush");
+    const membership = membershipOf(store, "brush");
+    const brushAt = (i: number) => {
+      const a = 10 + (i % 20);
+      store.set(
+        "brush",
+        selectWhere(
+          col("x")
+            .ge(a)
+            .and(col("x").le(a + 30)),
+        ),
+      );
+    };
+    lineage("lineage: brush 1M rows, a bar of 1,000 groups follows", brushAt, membership, [
+      { coverage, field: "s" },
+    ]);
+    verify(coverage, (t) => groups.keyOf(t)[0] as string, "g", "v");
+
+    // A click selecting one row more, a sparse delta.
+    const sets = Array.from({ length: 64 }, (_, i) =>
+      selectRows(new RowSet(sales).addAll([5, 1000 + i * 13_001])),
+    );
+    store.set("click", sets[0]!);
+    const clicked = coverageOf(relationTo(groups.table, sales)!, "s", store, "click");
+    lineage(
+      "lineage: click one row of 1M (a sparse delta)",
+      (i) => store.set("click", sets[i % 64]!),
+      membershipOf(store, "click"),
+      [{ coverage: clicked, field: "s" }],
+    );
+    verify(clicked, (t) => groups.keyOf(t)[0] as string, "g", "v");
+  }
+
+  // Batches of 1,000 rows appended to a brushed table, which grows, then to one keeping its last million.
+  for (const rolling of [false, true]) {
+    const sales = salesOf(M, rolling ? M : undefined);
+    const store = selectionStore(sales);
+    store.set("brush", selectWhere(col("x").ge(20).and(col("x").le(50))));
+    const groups = groupRows(rowView(sales), { by: ["g"], ops: { s: sum("v") } });
+    const coverage = coverageOf(relationTo(groups.table, sales)!, "s", store, "brush");
+    let next = 0;
+    lineage(
+      rolling
+        ? "lineage: a rolling window of 1M rows dropping 1,000 a batch"
+        : "lineage: append 1,000 rows to a brushed 1M table, groups follow",
+      () => {
+        sales.append(batchOf(1000, next) as never);
+        next += 1000;
+      },
+      membershipOf(store, "brush"),
+      [{ coverage, field: "s" }],
+      { samples: 100, appends: true },
+    );
+    verify(coverage, (t) => groups.keyOf(t)[0] as string, "g", "v");
+  }
+
+  // A new predicate, three marks following one evaluation: bars of 1,000 and of 10 groups, and the totals.
+  {
+    const sales = salesOf(M);
+    const store = selectionStore(sales);
+    const view = rowView(sales);
+    const byG = groupRows(view, { by: ["g"], ops: { s: sum("v") } });
+    const byH = groupRows(view, { by: ["h"], ops: { s: sum("v"), n: count() } });
+    const totals = rowTotals(view, { ops: { s: sum("v") } });
+    const coverages = [
+      { coverage: coverageOf(relationTo(byG.table, sales)!, "s", store, "brush"), field: "s" },
+      {
+        coverage: coverageOf(relationTo(byH.table, sales)!, "n", store, "brush"),
+        field: undefined,
+      },
+      { coverage: coverageOf(relationTo(totals.table, sales)!, "s", store, "brush"), field: "s" },
+    ];
+    lineage(
+      "lineage: a new predicate over 1M rows, three marks follow",
+      (i) => store.set("brush", selectWhere(col("v").lt(4 + (i % 8) * 0.25))),
+      membershipOf(store, "brush"),
+      coverages,
+    );
+    verify(coverages[0]!.coverage, (t) => byG.keyOf(t)[0] as string, "g", "v");
+    verify(coverages[1]!.coverage, (t) => byH.keyOf(t)[0] as string, "h", undefined);
+
+    // A pipeline that aggregates twice: its targets' rows counted, no measure.
+    const twice = deriveTable(sales, [
+      { aggregate: [{ op: "sum", field: "v", as: "s" }], by: ["g", "h"] },
+      {
+        aggregate: [
+          { op: "sum", field: "s", as: "t" },
+          { op: "count", as: "n" },
+        ],
+        by: ["g"],
+      },
+    ]);
+    const nested = relationTo(twice, sales)!;
+    if (nested.measureOf("t") || nested.measureOf("n"))
+      throw new Error("lineage: a nested aggregate has no measure");
+    const ofTwice = coverageOf(nested, "t", store, "brush");
+    lineage(
+      "lineage: a pipeline aggregating twice follows a new predicate",
+      (i) => store.set("brush", selectWhere(col("v").lt(4 + (i % 8) * 0.25))),
+      membershipOf(store, "brush"),
+      [{ coverage: ofTwice, field: undefined }],
+      { samples: 10, warmup: 2 },
+    );
+    verify(ofTwice, (t) => twice.value("g" as never, t) as string, "g", "v");
+  }
+}
 
 // Custom marks taking part through their items (the customisation study's
 // A2): 2,000 range comets, each a tapered tail and a dot drawn in its row's
