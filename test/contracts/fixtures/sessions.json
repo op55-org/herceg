@@ -1,0 +1,4208 @@
+{
+  "about": [
+    "How copies of one data object name its rows (a data id, a generation, an ordinal), as TypeScript (packages/herceg/src/data/numbering.ts, data/channel-states.ts, web/envelope.ts; packages/herceg/test/data/sessions.test.ts) and Python (python/src/herceg/_numbering.py; python/tests/test_numbering.py) both answer. Each case names the languages that run it (runs) and, where it waits for a later slice's code, that slice (slice) with runs empty: its expected outcome is kept here so the slice runs it as written.",
+    "Ordinals by position are written as ranges: [first, count] pairs in position order, [[0, 3], [10, 2]] for 0, 1, 2, 10, 11. A copy is {generation, ordinals, rowOffset, maxRows, revision, base, extendedBy}, each optional but ordinals (generation 0, rowOffset 0, no window, revision 0, no allocation facts); form is the numbering's (offset, runs, ordinals); held the ranges it holds, ascending; positions maps an ordinal to its position (-1 for none).",
+    "numbering: a copy, then steps, each a list of mutations staged whole (refused names each language's message, and the copy stays as it was) or a front drop (drop), from the case's or the step's allocator.",
+    "history: Python's allocator numbers each copy's mutations (copies of the history's snapshot of snapshot rows; make adds one later); each step expects the mutations it sends, null for none. TypeScript stages those on its own copies of the snapshot. Both check each copy at the end, and the numbering its snapshot carries (spec, buffers by ranges), which TypeScript reads back.",
+    "page: realms (registries of one realm each: a page, a frame, the kernel's) and copies in them; a gesture writes a copy's rows by position (or clear, or a predicate) stamped after the realm's clock; receive delivers a state named by as to another realm; write and snapshot are a stream's server writes through a realm's fragment, stamped with the realm's name as writer; takeOver has the realm take over stamping, with the states of the realm named by from (none when it left); a copy's append or reset changes its numbering. Each step may expect what each copy resolves for its generation's channel: positions, [] for an empty selection, null for none.",
+    "agreement: allocation facts of two copies of one data id and generation, and the fact they disagree on. caps: an update's sizes against the limits one response carries, and a header's UTF-8 bytes, which both languages measure alike. stream: revisions a stream keeps, and the merged update Python writes from a base revision (null: a snapshot instead), which TypeScript reads. registry: Python's process registries."
+  ],
+  "cases": [
+    {
+      "name": "a late lower ordinal fills a gap",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "Copy B holds its own append (1010 to 1019) and not A's (1000 to 1009); A's arrives later with lower ordinals and fills the gap: gaps are allowed, overlaps refused.",
+      "allocator": "a1",
+      "copy": {
+        "ordinals": [[0, 1000], [1010, 10]],
+        "revision": 1,
+        "base": 1000,
+        "extendedBy": "a1"
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 1000,
+              "count": 10,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 1000], [1010, 10], [1000, 10]],
+            "form": "runs",
+            "held": [[0, 1020]],
+            "positions": {
+              "1005": 1015,
+              "1015": 1005,
+              "1020": -1
+            },
+            "revision": 2
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 1015,
+              "count": 1,
+              "revision": 3
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append: ordinal 1,015 overlaps ordinals 0 to 1,019, which this copy holds in generation 0; give each history one owner, which numbers each append once",
+            "python": "operations[0] append: ordinal 1,015 overlaps ordinals 0 to 1,019, which this copy holds in generation 0; give each history one owner, which numbers each append once"
+          },
+          "expect": {
+            "ordinals": [[0, 1000], [1010, 10], [1000, 10]],
+            "revision": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "a failed second operation changes nothing",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "A valid append, then one overlapping it: the batch is refused at its second operation and the copy keeps its rows and revision. 16-5a repeats it through real tables, stores, and the applied revision.",
+      "copy": {
+        "ordinals": [[0, 1000]],
+        "base": 1000
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 1000,
+              "count": 10,
+              "revision": 1
+            },
+            {
+              "op": "append",
+              "first": 1005,
+              "count": 5,
+              "revision": 2
+            }
+          ],
+          "refused": {
+            "typescript": "operations[1] append: ordinals 1,005 to 1,009 overlap ordinals 0 to 1,009, which this copy holds in generation 0; give each history one owner, which numbers each append once",
+            "python": "operations[1] append: ordinals 1,005 to 1,009 overlap ordinals 0 to 1,009, which this copy holds in generation 0; give each history one owner, which numbers each append once"
+          },
+          "expect": {
+            "ordinals": [[0, 1000]],
+            "form": "offset",
+            "revision": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "a range edit keeps ordinals; a reset starts a newer generation",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "Replacing rows in place keeps their ordinals; a replacement past the rows is refused; a reset numbers its rows from 0 in a generation newer than the copy's (not necessarily the next), and one not newer is refused; a reset to no rows, then an append.",
+      "allocator": "a1",
+      "copy": {
+        "ordinals": [[0, 1000]],
+        "base": 1000
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "replace",
+              "start": 10,
+              "count": 5,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 1000]],
+            "form": "offset",
+            "revision": 1
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "replace",
+              "start": 998,
+              "count": 5,
+              "revision": 2
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] replace: rows 998 to 1,002 pass this copy's 1,000 rows; replace rows the copy holds",
+            "python": "operations[0] replace: rows 998 to 1,002 pass this copy's 1,000 rows; replace rows the copy holds"
+          },
+          "expect": {
+            "revision": 1
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "reset",
+              "generation": 2,
+              "count": 20,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "generation": 2,
+            "ordinals": [[0, 20]],
+            "form": "offset",
+            "revision": 2,
+            "base": 20,
+            "extendedBy": "a1"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "reset",
+              "generation": 1,
+              "count": 5,
+              "revision": 3
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] reset generation: 1 is not newer than this copy's generation 2; reset to a newer generation, which the history's owner gives",
+            "python": "operations[0] reset generation: 1 is not newer than this copy's generation 2; reset to a newer generation, which the history's owner gives"
+          },
+          "expect": {
+            "generation": 2,
+            "revision": 2
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "reset",
+              "generation": 3,
+              "count": 0,
+              "revision": 3
+            }
+          ],
+          "expect": {
+            "generation": 3,
+            "ordinals": [],
+            "form": "offset",
+            "held": [],
+            "revision": 3,
+            "base": 0
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 0,
+              "count": 3,
+              "revision": 4
+            }
+          ],
+          "expect": {
+            "generation": 3,
+            "ordinals": [[0, 3]],
+            "form": "offset",
+            "revision": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "a mutation that skips a revision is refused",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "A missed delta: each mutation carries the copy's revision after it, one more than the last, so a copy that missed one refuses the next and loads the snapshot.",
+      "copy": {
+        "ordinals": [[0, 10]],
+        "revision": 4
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 10,
+              "count": 1,
+              "revision": 6
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append revision: 6 does not follow this copy's revision 4, so it missed a mutation; load the snapshot again",
+            "python": "operations[0] append revision: 6 does not follow this copy's revision 4, so it missed a mutation; load the snapshot again"
+          },
+          "expect": {
+            "ordinals": [[0, 10]],
+            "revision": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows drop whole appends and a batch's first rows",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "A table's own window (maxRows 8) and an append's (maxRows) drop from the first row, batch rows included, every batch row numbered: a window that drops two whole appends; an empty append, which changes no rows but takes a revision and applies its window; a window that is not a positive whole number.",
+      "copy": {
+        "ordinals": [[0, 5]],
+        "maxRows": 8
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 100,
+              "count": 2,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 5], [100, 2]],
+            "form": "runs",
+            "rowOffset": 0,
+            "held": [[0, 5], [100, 2]]
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 200,
+              "count": 10,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "ordinals": [[202, 8]],
+            "form": "offset",
+            "rowOffset": 9,
+            "positions": {
+              "201": -1,
+              "202": 0
+            }
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 300,
+              "count": 3,
+              "maxRows": 4,
+              "revision": 3
+            }
+          ],
+          "expect": {
+            "ordinals": [[209, 1], [300, 3]],
+            "form": "ordinals",
+            "rowOffset": 16
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 400,
+              "count": 0,
+              "maxRows": 2,
+              "revision": 4
+            }
+          ],
+          "expect": {
+            "ordinals": [[301, 2]],
+            "form": "offset",
+            "rowOffset": 18,
+            "revision": 4
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 500,
+              "count": 1,
+              "maxRows": 0,
+              "revision": 5
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append maxRows: expected a positive whole number; received 0",
+            "python": "operations[0] append max_rows: expected a positive whole number; received 0"
+          },
+          "expect": {
+            "ordinals": [[301, 2]],
+            "revision": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "ordinals up to the largest safe integer",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "The last JS-safe ordinal (2^53 - 1) is a row's; an append past it is refused.",
+      "copy": {
+        "ordinals": [[9007199254740980, 10]]
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 9007199254740990,
+              "count": 1,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[9007199254740980, 11]],
+            "form": "offset"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 9007199254740991,
+              "count": 2,
+              "revision": 2
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append: ordinals 9,007,199,254,740,991 to 9,007,199,254,740,992 pass the largest safe integer (9,007,199,254,740,991); reset the table to start a new generation",
+            "python": "operations[0] append: ordinals 9,007,199,254,740,991 to 9,007,199,254,740,992 pass the largest safe integer (9,007,199,254,740,991); reset the table to start a new generation"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 9007199254740991,
+              "count": 1,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "ordinals": [[9007199254740980, 12]],
+            "form": "offset",
+            "held": [[9007199254740980, 12]],
+            "positions": {
+              "9007199254740991": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "runs near the largest safe integer, keyed from a row offset",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "Runs keyed by local identities from a row offset past 0, holding ordinals up to 2^53 - 1: each lookup takes differences first, since an ordinal plus an identity can pass 2^53 and round.",
+      "copy": {
+        "ordinals": [[0, 6], [9007199254740989, 3]],
+        "rowOffset": 7
+      },
+      "steps": [
+        {
+          "mutations": [],
+          "expect": {
+            "form": "runs",
+            "positions": {
+              "9007199254740989": 6,
+              "9007199254740990": 7,
+              "9007199254740991": 8,
+              "5": 5
+            },
+            "held": [[0, 6], [9007199254740989, 3]]
+          }
+        },
+        {
+          "drop": 2,
+          "expect": {
+            "ordinals": [[2, 4], [9007199254740989, 3]],
+            "form": "runs",
+            "rowOffset": 9,
+            "positions": {
+              "9007199254740991": 6,
+              "2": 0
+            }
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 6,
+              "count": 1,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[2, 4], [9007199254740989, 3], [6, 1]],
+            "form": "ordinals",
+            "positions": {
+              "6": 7,
+              "9007199254740990": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "runs past a third of the rows switch to an ordinals column",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "Runs take 24 bytes each and an ordinals column 8 a row: past a third as many runs as rows a copy holds a column, and goes back to runs only at a sixth.",
+      "copy": {
+        "ordinals": [[0, 6]]
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 10,
+              "count": 1,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 6], [10, 1]],
+            "form": "runs"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 20,
+              "count": 1,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 6], [10, 1], [20, 1]],
+            "form": "ordinals"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 21,
+              "count": 9,
+              "revision": 3
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 6], [10, 1], [20, 10]],
+            "form": "ordinals"
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 30,
+              "count": 1,
+              "revision": 4
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 6], [10, 1], [20, 11]],
+            "form": "runs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a snapshot's rows in another order than their ordinals",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "A snapshot gives each row's ordinal (a reordered copy): looked up both ways, dropped from the front, and appended to.",
+      "copy": {
+        "ordinals": [[5, 1], [3, 2], [0, 3]],
+        "base": 6
+      },
+      "steps": [
+        {
+          "mutations": [],
+          "expect": {
+            "form": "ordinals",
+            "held": [[0, 6]],
+            "positions": {
+              "5": 0,
+              "4": 2,
+              "0": 3,
+              "6": -1
+            }
+          }
+        },
+        {
+          "drop": 2,
+          "expect": {
+            "ordinals": [[4, 1], [0, 3]],
+            "form": "ordinals",
+            "rowOffset": 2
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 6,
+              "count": 1,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[4, 1], [0, 3], [6, 1]],
+            "form": "ordinals",
+            "positions": {
+              "6": 4,
+              "5": -1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an append another allocator numbered is refused",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "Two allocators' appends to copies of one data id: a copy whose generation one allocator extended refuses another's; a copy no allocator extended yet takes the first one's name.",
+      "copy": {
+        "ordinals": [[0, 1000]],
+        "base": 1000,
+        "extendedBy": "a1"
+      },
+      "steps": [
+        {
+          "allocator": "a2",
+          "mutations": [
+            {
+              "op": "append",
+              "first": 1000,
+              "count": 5,
+              "revision": 1
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append: numbered by allocator \"a2\", but \"a1\" extended this copy's generation 0; give each history one owner, which numbers each append once",
+            "python": "operations[0] append: numbered by allocator \"a2\", but \"a1\" extended this copy's generation 0; give each history one owner, which numbers each append once"
+          },
+          "expect": {
+            "ordinals": [[0, 1000]],
+            "extendedBy": "a1",
+            "revision": 0
+          }
+        },
+        {
+          "allocator": "a1",
+          "mutations": [
+            {
+              "op": "append",
+              "first": 1000,
+              "count": 5,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 1005]],
+            "extendedBy": "a1",
+            "revision": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "the first extension names its allocator",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "A copy of a snapshot no allocator extended (an application's id, read-only so far) learns its allocator from its first append.",
+      "copy": {
+        "ordinals": [[0, 10]],
+        "base": 10
+      },
+      "steps": [
+        {
+          "allocator": "a2",
+          "mutations": [
+            {
+              "op": "append",
+              "first": 10,
+              "count": 1,
+              "revision": 1
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 11]],
+            "base": 10,
+            "extendedBy": "a2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an append's window is a positive safe whole number",
+      "kind": "numbering",
+      "runs": ["typescript", "python"],
+      "about": "maxRows past 2^53 - 1 is refused in both languages, as every count is; at 2^53 - 1 it keeps every row.",
+      "allocator": "a1",
+      "copy": {
+        "ordinals": [[0, 4]],
+        "revision": 1,
+        "base": 4,
+        "extendedBy": "a1"
+      },
+      "steps": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 4,
+              "count": 1,
+              "maxRows": 9007199254740992,
+              "revision": 2
+            }
+          ],
+          "refused": {
+            "typescript": "operations[0] append maxRows: expected a positive whole number; received 9007199254740992",
+            "python": "operations[0] append max_rows: expected a positive whole number; received 9007199254740992"
+          },
+          "expect": {
+            "ordinals": [[0, 4]],
+            "revision": 1
+          }
+        },
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "first": 4,
+              "count": 1,
+              "maxRows": 9007199254740991,
+              "revision": 2
+            }
+          ],
+          "expect": {
+            "ordinals": [[0, 5]],
+            "form": "offset",
+            "revision": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "two widgets of one history mutate in turn",
+      "kind": "history",
+      "runs": ["typescript", "python"],
+      "about": "Divergent appends: widgets A and B of one snapshot append in turn, each taking the history's next ordinals, so they never collide; B's transaction of an append and a replacement ends at the last one's revision. Each copy's snapshot carries its ordinals as a buffer, its runs no form specs have.",
+      "data": "trips",
+      "allocator": "a1",
+      "snapshot": 1000,
+      "copies": {
+        "A": {},
+        "B": {}
+      },
+      "steps": [
+        {
+          "copy": "A",
+          "append": 10,
+          "expect": [
+            {
+              "op": "append",
+              "first": 1000,
+              "count": 10,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "B",
+          "append": 10,
+          "expect": [
+            {
+              "op": "append",
+              "first": 1010,
+              "count": 10,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": 5,
+          "expect": [
+            {
+              "op": "append",
+              "first": 1020,
+              "count": 5,
+              "revision": 2
+            }
+          ]
+        },
+        {
+          "copy": "B",
+          "transaction": [
+            {
+              "append": 3
+            },
+            {
+              "replace": [0, 2]
+            }
+          ],
+          "expect": [
+            {
+              "op": "append",
+              "first": 1025,
+              "count": 3,
+              "revision": 2
+            },
+            {
+              "op": "replace",
+              "start": 0,
+              "count": 2,
+              "revision": 3
+            }
+          ]
+        }
+      ],
+      "end": {
+        "A": {
+          "generation": 0,
+          "ordinals": [[0, 1010], [1020, 5]],
+          "form": "runs",
+          "revision": 2,
+          "base": 1000,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 0,
+            "ordinals": {
+              "buffer": 0
+            },
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "buffers": [[[0, 1010], [1020, 5]]]
+        },
+        "B": {
+          "generation": 0,
+          "ordinals": [[0, 1000], [1010, 10], [1025, 3]],
+          "form": "runs",
+          "revision": 3,
+          "base": 1000,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 0,
+            "ordinals": {
+              "buffer": 0
+            },
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "buffers": [[[0, 1000], [1010, 10], [1025, 3]]]
+        }
+      }
+    },
+    {
+      "name": "transactions, windows, and resets across copies",
+      "kind": "history",
+      "runs": ["typescript", "python"],
+      "about": "A transaction of three mutations, the last with a window, ends at revision 3; B's reset starts generation 1 and C's generation 2, while A keeps appending to generation 0 (the history keeps a next ordinal per generation); an empty append sends nothing; D's own window (maxRows 30) drops the snapshot's first rows; E, a copy of the snapshot made after the resets, still joins generation 0.",
+      "data": "trips",
+      "allocator": "a1",
+      "snapshot": 100,
+      "copies": {
+        "A": {},
+        "B": {},
+        "C": {},
+        "D": {
+          "maxRows": 30
+        }
+      },
+      "steps": [
+        {
+          "copy": "A",
+          "transaction": [
+            {
+              "append": 10
+            },
+            {
+              "replace": [0, 5]
+            },
+            {
+              "append": 2,
+              "maxRows": 50
+            }
+          ],
+          "expect": [
+            {
+              "op": "append",
+              "first": 100,
+              "count": 10,
+              "revision": 1
+            },
+            {
+              "op": "replace",
+              "start": 0,
+              "count": 5,
+              "revision": 2
+            },
+            {
+              "op": "append",
+              "first": 110,
+              "count": 2,
+              "maxRows": 50,
+              "revision": 3
+            }
+          ]
+        },
+        {
+          "copy": "B",
+          "reset": 20,
+          "expect": [
+            {
+              "op": "reset",
+              "generation": 1,
+              "count": 20,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": 3,
+          "expect": [
+            {
+              "op": "append",
+              "first": 112,
+              "count": 3,
+              "revision": 4
+            }
+          ]
+        },
+        {
+          "copy": "B",
+          "append": 4,
+          "expect": [
+            {
+              "op": "append",
+              "first": 20,
+              "count": 4,
+              "revision": 2
+            }
+          ]
+        },
+        {
+          "copy": "C",
+          "reset": 5,
+          "expect": [
+            {
+              "op": "reset",
+              "generation": 2,
+              "count": 5,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": 0,
+          "expect": null
+        },
+        {
+          "copy": "D",
+          "append": 5,
+          "expect": [
+            {
+              "op": "append",
+              "first": 115,
+              "count": 5,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "E",
+          "make": {}
+        },
+        {
+          "copy": "E",
+          "append": 1,
+          "expect": [
+            {
+              "op": "append",
+              "first": 120,
+              "count": 1,
+              "revision": 1
+            }
+          ]
+        }
+      ],
+      "end": {
+        "A": {
+          "generation": 0,
+          "ordinals": [[62, 53]],
+          "form": "offset",
+          "rowOffset": 62,
+          "revision": 4,
+          "base": 100,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 0,
+            "ordinals": 62,
+            "base": 100,
+            "extendedBy": "a1"
+          }
+        },
+        "B": {
+          "generation": 1,
+          "ordinals": [[0, 24]],
+          "form": "offset",
+          "revision": 2,
+          "base": 20,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 1,
+            "ordinals": 0,
+            "base": 20,
+            "extendedBy": "a1"
+          }
+        },
+        "C": {
+          "generation": 2,
+          "ordinals": [[0, 5]],
+          "form": "offset",
+          "revision": 1,
+          "base": 5,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 2,
+            "ordinals": 0,
+            "base": 5,
+            "extendedBy": "a1"
+          }
+        },
+        "D": {
+          "generation": 0,
+          "ordinals": [[75, 25], [115, 5]],
+          "form": "runs",
+          "rowOffset": 75,
+          "revision": 1,
+          "base": 100,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 0,
+            "ordinals": {
+              "buffer": 0
+            },
+            "base": 100,
+            "extendedBy": "a1"
+          },
+          "buffers": [[[75, 25], [115, 5]]]
+        },
+        "E": {
+          "generation": 0,
+          "ordinals": [[0, 100], [120, 1]],
+          "form": "runs",
+          "revision": 1,
+          "base": 100,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 0,
+            "ordinals": {
+              "buffer": 0
+            },
+            "base": 100,
+            "extendedBy": "a1"
+          },
+          "buffers": [[[0, 100], [120, 1]]]
+        }
+      }
+    },
+    {
+      "name": "a copy that claims another length for the snapshot",
+      "kind": "history",
+      "runs": ["python"],
+      "about": "Two lengths for one snapshot, caught where it is allocated: the allocator's side, which TypeScript does not have (it compares copies' allocation facts where they meet; see the agreement cases).",
+      "data": "trips",
+      "allocator": "a1",
+      "snapshot": 100,
+      "copies": {
+        "A": {}
+      },
+      "steps": [
+        {
+          "copy": "F",
+          "make": {
+            "length": 120
+          },
+          "refused": {
+            "python": "history 'trips': its snapshot has 100 rows, and this copy 120; give different data different ids (hg.data(..., id=...))"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an allocation past the largest ordinal",
+      "kind": "history",
+      "runs": ["python"],
+      "about": "The allocator gives the last JS-safe ordinal, then refuses the next nonempty append; a reset starts a new generation numbered from 0. The allocator is Python's alone.",
+      "data": "trips",
+      "allocator": "a1",
+      "snapshot": 9007199254740990,
+      "copies": {
+        "A": {}
+      },
+      "steps": [
+        {
+          "copy": "A",
+          "append": 1,
+          "expect": [
+            {
+              "op": "append",
+              "first": 9007199254740990,
+              "count": 1,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": 2,
+          "refused": {
+            "python": "history 'trips': an append of 2 rows passes the largest ordinal (9,007,199,254,740,991); replace the rows, which starts a new generation"
+          }
+        },
+        {
+          "copy": "A",
+          "append": 0,
+          "expect": null
+        },
+        {
+          "copy": "A",
+          "reset": 3,
+          "expect": [
+            {
+              "op": "reset",
+              "generation": 1,
+              "count": 3,
+              "revision": 2
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": 2,
+          "expect": [
+            {
+              "op": "append",
+              "first": 3,
+              "count": 2,
+              "revision": 3
+            }
+          ]
+        }
+      ],
+      "end": {
+        "A": {
+          "generation": 1,
+          "ordinals": [[0, 5]],
+          "form": "offset",
+          "revision": 3,
+          "base": 3,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 1,
+            "ordinals": 0,
+            "base": 3,
+            "extendedBy": "a1"
+          }
+        }
+      }
+    },
+    {
+      "name": "a refused allocation takes no ordinals",
+      "kind": "history",
+      "runs": ["python"],
+      "about": "The allocator checks a mutation whole before it moves on: an append or a reset refused takes no ordinals and no generation, so the next ones follow the last given.",
+      "data": "trips",
+      "allocator": "a1",
+      "snapshot": 10,
+      "copies": {
+        "A": {},
+        "B": {}
+      },
+      "steps": [
+        {
+          "copy": "B",
+          "append": 5,
+          "expect": [
+            {
+              "op": "append",
+              "first": 10,
+              "count": 5,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "append": -5,
+          "refused": {
+            "python": "operations[0] append count: expected a whole number of 0 or more; received -5"
+          }
+        },
+        {
+          "copy": "A",
+          "append": 1,
+          "expect": [
+            {
+              "op": "append",
+              "first": 15,
+              "count": 1,
+              "revision": 1
+            }
+          ]
+        },
+        {
+          "copy": "A",
+          "reset": -1,
+          "refused": {
+            "python": "operations[0] reset count: expected a whole number of 0 or more; received -1"
+          }
+        },
+        {
+          "copy": "A",
+          "reset": 2,
+          "expect": [
+            {
+              "op": "reset",
+              "generation": 1,
+              "count": 2,
+              "revision": 2
+            }
+          ]
+        }
+      ],
+      "end": {
+        "A": {
+          "generation": 1,
+          "ordinals": [[0, 2]],
+          "form": "offset",
+          "revision": 2,
+          "base": 2,
+          "extendedBy": "a1",
+          "spec": {
+            "generation": 1,
+            "ordinals": 0,
+            "base": 2,
+            "extendedBy": "a1"
+          }
+        }
+      }
+    },
+    {
+      "name": "two registries and a restarted owner",
+      "kind": "registry",
+      "runs": ["python"],
+      "about": "Two allocators' copies of one snapshot: two processes name it by its digest and their allocators, so they never share a data id (only an id the application gives is shared across processes). A restarted owner is a new process: a new allocator, new data ids, and new epochs.",
+      "digest": "9f2c41",
+      "registries": {
+        "a1": {
+          "data": "9f2c41@a1",
+          "epochs": ["a1:1", "a1:2"]
+        },
+        "b7": {
+          "data": "9f2c41@b7",
+          "epochs": ["b7:1"]
+        }
+      }
+    },
+    {
+      "name": "a selection across divergent copies",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "Divergent appends: A and B (the copies the history case above ends with) share a channel by ordinals; each resolves the rows it holds, and the canonical set keeps ordinals one of them does not hold.",
+      "realms": ["page"],
+      "copies": {
+        "A": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 1010], [1020, 5]]
+        },
+        "B": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 1000], [1010, 10], [1025, 3]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "A",
+            "channel": "focus",
+            "positions": [5, 1005, 1012]
+          },
+          "expect": {
+            "stamp": [1, "A"],
+            "ordinals": [5, 1005, 1022],
+            "copies": {
+              "A": {
+                "focus": [5, 1005, 1012]
+              },
+              "B": {
+                "focus": [5]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "B",
+            "channel": "focus",
+            "positions": [1000, 1010]
+          },
+          "expect": {
+            "stamp": [2, "B"],
+            "ordinals": [1010, 1025],
+            "copies": {
+              "A": {
+                "focus": []
+              },
+              "B": {
+                "focus": [1000, 1010]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "rows arriving later are tested wherever their ordinals fall",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A late lower ordinal: B holds 1010 to 1019 and a channel selects 1005 and 1015; A's rows 1000 to 1009 reach B later, below what it holds, and 1005 is selected as it arrives (a high-water mark would miss it).",
+      "realms": ["page"],
+      "copies": {
+        "B": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 1000], [1010, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "receive": {
+            "data": "trips",
+            "channel": "focus",
+            "stamp": [5, "w"],
+            "value": {
+              "rows": [1005, 1015]
+            }
+          },
+          "expect": {
+            "applied": true,
+            "clock": 5,
+            "copies": {
+              "B": {
+                "focus": [1005]
+              }
+            }
+          }
+        },
+        {
+          "copy": "B",
+          "append": {
+            "first": 1000,
+            "count": 10
+          },
+          "expect": {
+            "copies": {
+              "B": {
+                "focus": [1005, 1015]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a copy reset to a newer generation reads that generation's channel",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "Reset against a range edit: a replacement keeps ordinals, so A's selection stays; B's reset starts generation 1, where the generation 0 selection names no row, while A, still on generation 0, keeps sharing it.",
+      "realms": ["page"],
+      "copies": {
+        "A": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 100]]
+        },
+        "B": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "A",
+            "channel": "focus",
+            "positions": [3, 7]
+          },
+          "expect": {
+            "stamp": [1, "A"],
+            "copies": {
+              "A": {
+                "focus": [3, 7]
+              },
+              "B": {
+                "focus": [3, 7]
+              }
+            }
+          }
+        },
+        {
+          "copy": "A",
+          "replace": {
+            "start": 0,
+            "count": 5
+          },
+          "expect": {
+            "copies": {
+              "A": {
+                "focus": [3, 7]
+              }
+            }
+          }
+        },
+        {
+          "copy": "B",
+          "reset": {
+            "generation": 1,
+            "count": 50
+          },
+          "expect": {
+            "copies": {
+              "A": {
+                "focus": [3, 7]
+              },
+              "B": {
+                "focus": null
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "B",
+            "channel": "focus",
+            "positions": [3]
+          },
+          "expect": {
+            "stamp": [2, "B"],
+            "copies": {
+              "A": {
+                "focus": [3, 7]
+              },
+              "B": {
+                "focus": [3]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a stale clear is dropped",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A frame clears while the page selects twice; states reach the other realm late and out of order. Each realm keeps the newest by stamp: the clear, older than the page's second selection, changes nothing anywhere.",
+      "realms": ["page", "frame"],
+      "copies": {
+        "a": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "frame",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [1]
+          },
+          "as": "g1",
+          "expect": {
+            "stamp": [1, "a"]
+          }
+        },
+        {
+          "realm": "frame",
+          "gesture": {
+            "copy": "b",
+            "channel": "focus",
+            "clear": true
+          },
+          "as": "c1",
+          "expect": {
+            "stamp": [1, "b"]
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [2]
+          },
+          "as": "g2",
+          "expect": {
+            "stamp": [2, "a"]
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "g2",
+          "expect": {
+            "applied": true
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "g1",
+          "expect": {
+            "applied": false
+          }
+        },
+        {
+          "realm": "page",
+          "receive": "c1",
+          "expect": {
+            "applied": false,
+            "clocks": {
+              "page": 2,
+              "frame": 2
+            },
+            "copies": {
+              "a": {
+                "focus": [2]
+              },
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "simultaneous writers agree by the writer's id",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "Two realms write one channel at the same counter: both keep the state of the writer whose id sorts last, whatever order the states arrive in.",
+      "realms": ["page", "frame"],
+      "copies": {
+        "a": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "frame",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [1]
+          },
+          "as": "g1",
+          "expect": {
+            "stamp": [1, "a"]
+          }
+        },
+        {
+          "realm": "frame",
+          "gesture": {
+            "copy": "b",
+            "channel": "focus",
+            "positions": [2]
+          },
+          "as": "g2",
+          "expect": {
+            "stamp": [1, "b"]
+          }
+        },
+        {
+          "realm": "page",
+          "receive": "g2",
+          "expect": {
+            "applied": true
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "g1",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "a": {
+                "focus": [2]
+              },
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an empty selection is not a clear",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "Empty against clear: a selection of no rows dims every row; a clear selects nothing at all. Copies keep the difference.",
+      "realms": ["page"],
+      "copies": {
+        "a": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": []
+          },
+          "expect": {
+            "ordinals": [],
+            "copies": {
+              "a": {
+                "focus": []
+              },
+              "b": {
+                "focus": []
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "b",
+            "channel": "focus",
+            "clear": true
+          },
+          "expect": {
+            "copies": {
+              "a": {
+                "focus": null
+              },
+              "b": {
+                "focus": null
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "predicate": [">", ["field", "fare"], 10]
+          },
+          "expect": {
+            "copies": {
+              "b": {
+                "focus": {
+                  "predicate": [">", ["field", "fare"], 10]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm that missed a state takes the next whole one",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A missed delta: states travel whole, so a frame that never received the first selection takes the second as it is, and drops the first when it arrives late.",
+      "realms": ["page", "frame"],
+      "copies": {
+        "a": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "frame",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [1]
+          },
+          "as": "g1"
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [1, 2]
+          },
+          "as": "g2"
+        },
+        {
+          "realm": "frame",
+          "receive": "g2",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "b": {
+                "focus": [1, 2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "g1",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "b": {
+                "focus": [1, 2]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a delayed server write is dropped; a newer one is stamped on arrival",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A delayed server write: the realm keeps the newest write it accepted per stream and epoch; a write at or below it (older, or a duplicate) is dropped before anything else; a newer one is stamped after everything the realm applied, so it wins over earlier gestures and a later gesture wins over it; a write of another epoch than the stream's is dropped.",
+      "realms": ["page"],
+      "copies": {
+        "f1": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 1,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [5]
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "stamp": [1, "page"],
+            "copies": {
+              "f1": {
+                "slow": [5]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "f1",
+            "channel": "slow",
+            "positions": [7]
+          },
+          "expect": {
+            "stamp": [2, "f1"],
+            "copies": {
+              "f1": {
+                "slow": [7]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [9]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "f1": {
+                "slow": [7]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 1,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [5]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "f1": {
+                "slow": [7]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 42,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [11]
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "stamp": [3, "page"],
+            "copies": {
+              "f1": {
+                "slow": [11]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "f1",
+            "channel": "slow",
+            "positions": [12]
+          },
+          "expect": {
+            "stamp": [4, "f1"],
+            "copies": {
+              "f1": {
+                "slow": [12]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "b7:1",
+            "revision": 50,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [13]
+            }
+          },
+          "expect": {
+            "outcome": "other epoch",
+            "copies": {
+              "f1": {
+                "slow": [12]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a snapshot restored against a newer gesture",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A snapshot's channel states pass the server writes' test: one written at a position the realm accepted keeps the gesture made since; one written later wins over it.",
+      "realms": ["page"],
+      "copies": {
+        "f1": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [3]
+                },
+                "revision": 40,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "page"]],
+            "copies": {
+              "f1": {
+                "slow": [3]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "f1",
+            "channel": "slow",
+            "positions": [8]
+          },
+          "expect": {
+            "stamp": [2, "f1"]
+          }
+        },
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [3]
+                },
+                "revision": 40,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "f1": {
+                "slow": [8]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [4]
+                },
+                "revision": 43,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[3, "page"]],
+            "copies": {
+              "f1": {
+                "slow": [4]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "snapshot 42 through one fragment, a gesture, then another fragment's delayed write 41",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "Two fragments of one stream on a page: one restores a snapshot whose channel was written at revision 42; a gesture follows; the other fragment's delayed write 41 is dropped, and the gesture stays.",
+      "realms": ["page"],
+      "copies": {
+        "f1": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        },
+        "f2": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 42,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "page"]],
+            "copies": {
+              "f1": {
+                "slow": [2]
+              },
+              "f2": {
+                "slow": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "f2",
+            "channel": "slow",
+            "positions": [6]
+          },
+          "expect": {
+            "stamp": [2, "f2"]
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "f1": {
+                "slow": [6]
+              },
+              "f2": {
+                "slow": [6]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a restarted owner",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "The owner of stream s restarts as another process (allocator a2), which cannot replay what a1 gave: its epoch a2:1 is not ordered against a1:1. A fragment's snapshot of the new epoch that the realm did not ask for may be older than the realm's state, so the realm asks the stream instead (reconcile); the snapshot answering its request switches the stream, and the old epoch's delayed write is dropped.",
+      "realms": ["page"],
+      "copies": {
+        "f1": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [5]
+                },
+                "revision": 3,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "page"]],
+            "copies": {
+              "f1": {
+                "focus": [5]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": null,
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "stamps": [],
+            "copies": {
+              "f1": {
+                "focus": [5]
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": null,
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[2, "page"]],
+            "copies": {
+              "f1": {
+                "focus": null
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 4,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [6]
+            }
+          },
+          "expect": {
+            "outcome": "other epoch",
+            "copies": {
+              "f1": {
+                "focus": null
+              }
+            }
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [7]
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "stamp": [3, "page"],
+            "copies": {
+              "f1": {
+                "focus": [7]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm stamping later after a restart restores the current epoch first",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "The page switched stream s from a1:1 to a2:1 and kept a gesture since; a realm that joins it and then takes over stamping the stream's writes (pageTakeOver, with the page's states) trusts no epoch, so it takes no write until it restores the stream's snapshot (reconcile); after it, an a1:1 write and a state an a1:1 write made are dropped, and the gesture stays.",
+      "realms": ["page", "joiner"],
+      "copies": {
+        "p": {
+          "realm": "page",
+          "data": "trips",
+          "ordinals": [[0, 100]]
+        },
+        "j": {
+          "realm": "joiner",
+          "data": "trips",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 4,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [5]
+            }
+          },
+          "as": "w4",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [1, "page"]
+          }
+        },
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "p",
+            "channel": "focus",
+            "positions": [8]
+          },
+          "expect": {
+            "stamp": [2, "p"]
+          }
+        },
+        {
+          "realm": "joiner",
+          "join": "page",
+          "expect": {
+            "copies": {
+              "j": {
+                "focus": [8]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "takeOver": {
+            "from": "page"
+          }
+        },
+        {
+          "realm": "joiner",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 5,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [6]
+            }
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "copies": {
+              "j": {
+                "focus": [8]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "joiner",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 5,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [6]
+            }
+          },
+          "expect": {
+            "outcome": "other epoch",
+            "copies": {
+              "j": {
+                "focus": [8]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "receive": "w4",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "j": {
+                "focus": [8]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an epoch switch at the stamping realm, then the realm that stamped before takes the role back",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A stamps stream s's writes, then B joins it, restores the stream's snapshot, and takes the role over; the owner restarts and B switches to a2:1. A, still connected, takes B's stamped state as it is: stamps order it whatever its epoch. Taking the role back (pageTakeOver, with B's states), A cannot know whether the epoch it kept is current, so it takes no write and no fragment's snapshot until the snapshot it asked for restores the stream; that snapshot's state is the one B relayed, so A keeps it unstamped, then drops an a1:1 write and takes an a2:1 one.",
+      "realms": ["A", "B"],
+      "copies": {
+        "a": {
+          "realm": "A",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "B",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [1]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "A"]],
+            "copies": {
+              "a": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "join": "A",
+          "expect": {
+            "copies": {
+              "b": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [1]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "b": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "as": "w",
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[2, "B"]],
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "receive": "w",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "takeOver": {
+            "from": "B"
+          }
+        },
+        {
+          "realm": "A",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [3]
+            }
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [1]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "stamps": [],
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [3]
+            }
+          },
+          "expect": {
+            "outcome": "other epoch",
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "write": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [4]
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "stamp": [3, "A"],
+            "copies": {
+              "a": {
+                "focus": [4]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm stamping writes later learns which were accepted",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "One realm of a namespace stamps a stream's writes (the host page; frames forward their fragments' writes to it). States carry the newest server writes their realm accepted, so a realm that takes that role later (here the frame, the page having left without handing its states over) first restores the stream's snapshot, as it asks for one before stamping any write (reconcile), and, having received only the gesture made after write 42, drops the snapshot's state of write 42, a delayed write 41, and write 42 relayed again: the gesture stays.",
+      "realms": ["page", "frame"],
+      "copies": {
+        "h": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        },
+        "j": {
+          "realm": "frame",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 42,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [2]
+            }
+          },
+          "as": "w42",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [1, "page"]
+          }
+        },
+        {
+          "realm": "page",
+          "gesture": {
+            "copy": "h",
+            "channel": "slow",
+            "positions": [6]
+          },
+          "as": "g",
+          "expect": {
+            "stamp": [2, "h"]
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "g",
+          "expect": {
+            "applied": true,
+            "clock": 2,
+            "copies": {
+              "j": {
+                "slow": [6]
+              }
+            }
+          }
+        },
+        {
+          "realm": "frame",
+          "takeOver": {}
+        },
+        {
+          "realm": "frame",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "copies": {
+              "j": {
+                "slow": [6]
+              }
+            }
+          }
+        },
+        {
+          "realm": "frame",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "requested": true,
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 42,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "j": {
+                "slow": [6]
+              }
+            }
+          }
+        },
+        {
+          "realm": "frame",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "j": {
+                "slow": [6]
+              }
+            }
+          }
+        },
+        {
+          "realm": "frame",
+          "receive": "w42",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "j": {
+                "slow": [6]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a join carries every write its realm accepted",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "The page accepts write 42, then keeps a frame's gesture stamped later, made without having seen it: the gesture's state says nothing of write 42, but the page's slot does. A realm joining the page takes the page's states with the slot's writes (pageStates), so when it stamps the stream's writes later it still drops the snapshot's state of write 42 and a delayed write 41.",
+      "realms": ["page", "frame", "joiner"],
+      "copies": {
+        "p": {
+          "realm": "page",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        },
+        "f": {
+          "realm": "frame",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        },
+        "j": {
+          "realm": "joiner",
+          "namespace": "ops",
+          "data": "requests",
+          "ordinals": [[0, 100]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "page",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "page",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 42,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [2]
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "stamp": [1, "page"]
+          }
+        },
+        {
+          "realm": "frame",
+          "gesture": {
+            "copy": "f",
+            "channel": "slow",
+            "positions": [3]
+          },
+          "expect": {
+            "stamp": [1, "f"]
+          }
+        },
+        {
+          "realm": "frame",
+          "gesture": {
+            "copy": "f",
+            "channel": "slow",
+            "positions": [4]
+          },
+          "as": "g",
+          "expect": {
+            "stamp": [2, "f"]
+          }
+        },
+        {
+          "realm": "page",
+          "receive": "g",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "p": {
+                "slow": [4]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "join": "page",
+          "expect": {
+            "copies": {
+              "j": {
+                "slow": [4]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "snapshot": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "requested": true,
+            "channels": [
+              {
+                "namespace": "ops",
+                "data": "requests",
+                "channel": "slow",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 42,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "j": {
+                "slow": [4]
+              }
+            }
+          }
+        },
+        {
+          "realm": "joiner",
+          "write": {
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "index": 0,
+            "namespace": "ops",
+            "data": "requests",
+            "channel": "slow",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "j": {
+                "slow": [4]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm that never stamped takes over and trusts no snapshot it did not ask for",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A switched stream s from a1:1 to a2:1; B joined it, never stamped, and takes over (with A's states). B heard of s only through them, and of stream t not at all: a fragment's a1:1 snapshot of s, a snapshot of t, and an a1:1 write answer reconcile until the snapshot B asked for restores s; its state is the one A relayed, so B keeps it unstamped; then an a1:1 write is of another epoch and an a2:1 one reaches A.",
+      "realms": ["A", "B"],
+      "copies": {
+        "a": {
+          "realm": "A",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "B",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [1]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "A"]],
+            "copies": {
+              "a": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[2, "A"]],
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "join": "A",
+          "expect": {
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "takeOver": {
+            "from": "A"
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [1]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "stamps": [],
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "t",
+            "epoch": "a1:3",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "B",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [3]
+            }
+          },
+          "expect": {
+            "outcome": "reconcile",
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 0,
+                "index": 0
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": [],
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [3]
+            }
+          },
+          "expect": {
+            "outcome": "other epoch",
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "write": {
+            "stream": "s",
+            "epoch": "a2:1",
+            "revision": 1,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [4]
+            }
+          },
+          "as": "w",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [3, "B"],
+            "copies": {
+              "b": {
+                "focus": [4]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "receive": "w",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "a": {
+                "focus": [4]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm taking over with its predecessor's states stamps after them",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "A stamps write 43 after a gesture, and C receives it; A stops stamping and hands its states to B, which restores a snapshot written at 44. B's clock is past A's stamps, so 44's state wins in every realm, and write 43's state, relayed to B again, is dropped by its stamp.",
+      "realms": ["A", "B", "C"],
+      "copies": {
+        "a": {
+          "realm": "A",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "B",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "c": {
+          "realm": "C",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "A",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [5]
+          },
+          "expect": {
+            "stamp": [1, "a"]
+          }
+        },
+        {
+          "realm": "A",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 43,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "as": "w43",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [2, "A"],
+            "copies": {
+              "a": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "C",
+          "receive": "w43",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "c": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "takeOver": {
+            "from": "A"
+          }
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 44,
+                "index": 0
+              }
+            ]
+          },
+          "as": "s44",
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[3, "B"]],
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "C",
+          "receive": "s44",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "c": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "A",
+          "receive": "s44",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "a": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "receive": "w43",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a realm taking over from one that left: realms agree, and the next write is current",
+      "kind": "page",
+      "runs": ["typescript"],
+      "about": "As before, but A leaves without handing its states over, and B's clock is behind A's: B stamps the snapshot's write 44 below write 43's state, which C holds. Stamps decide alone, so C keeps 43's state and B, given it, takes it too: the realms agree, on the older write, and B still drops a raw write 43. B's next write is stamped past everything it received, and reaches C.",
+      "realms": ["A", "B", "C"],
+      "copies": {
+        "a": {
+          "realm": "A",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "b": {
+          "realm": "B",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        },
+        "c": {
+          "realm": "C",
+          "data": "trips",
+          "ordinals": [[0, 10]]
+        }
+      },
+      "steps": [
+        {
+          "realm": "A",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "channels": []
+          },
+          "expect": {
+            "outcome": "restored",
+            "stamps": []
+          }
+        },
+        {
+          "realm": "A",
+          "gesture": {
+            "copy": "a",
+            "channel": "focus",
+            "positions": [5]
+          },
+          "expect": {
+            "stamp": [1, "a"]
+          }
+        },
+        {
+          "realm": "A",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 43,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [1]
+            }
+          },
+          "as": "w43",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [2, "A"],
+            "copies": {
+              "a": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "C",
+          "receive": "w43",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "c": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "takeOver": {}
+        },
+        {
+          "realm": "B",
+          "snapshot": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "requested": true,
+            "channels": [
+              {
+                "data": "trips",
+                "channel": "focus",
+                "value": {
+                  "rows": [2]
+                },
+                "revision": 44,
+                "index": 0
+              }
+            ]
+          },
+          "as": "s44",
+          "expect": {
+            "outcome": "restored",
+            "stamps": [[1, "B"]],
+            "copies": {
+              "b": {
+                "focus": [2]
+              }
+            }
+          }
+        },
+        {
+          "realm": "C",
+          "receive": "s44",
+          "expect": {
+            "applied": false,
+            "copies": {
+              "c": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "receive": "w43",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "b": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 43,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [6]
+            }
+          },
+          "expect": {
+            "outcome": "obsolete",
+            "copies": {
+              "b": {
+                "focus": [1]
+              }
+            }
+          }
+        },
+        {
+          "realm": "B",
+          "write": {
+            "stream": "s",
+            "epoch": "a1:1",
+            "revision": 45,
+            "index": 0,
+            "data": "trips",
+            "channel": "focus",
+            "value": {
+              "rows": [3]
+            }
+          },
+          "as": "w45",
+          "expect": {
+            "outcome": "applied",
+            "stamp": [3, "B"],
+            "copies": {
+              "b": {
+                "focus": [3]
+              }
+            }
+          }
+        },
+        {
+          "realm": "C",
+          "receive": "w45",
+          "expect": {
+            "applied": true,
+            "copies": {
+              "c": {
+                "focus": [3]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "copies of one data id that disagree",
+      "kind": "agreement",
+      "runs": ["typescript"],
+      "about": "Two allocators' copies of one data id (an id the application gives, served by two processes): copies agree when they began with the same rows and no two allocators extended them, so read-only workers' identical snapshots share; two lengths for one snapshot, or two allocators' appends, are a disagreement. A copy that cannot say (a snapshot that never carried its base) is not compared on that fact: what a compact snapshot never received it cannot prove.",
+      "pairs": [
+        {
+          "a": {
+            "base": 1000
+          },
+          "b": {
+            "base": 1000
+          },
+          "expect": null
+        },
+        {
+          "a": {
+            "base": 1000
+          },
+          "b": {
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "expect": null
+        },
+        {
+          "a": {
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "b": {
+            "base": 1200
+          },
+          "expect": {
+            "fact": "base",
+            "values": [1000, 1200]
+          }
+        },
+        {
+          "a": {
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "b": {
+            "base": 1000,
+            "extendedBy": "a2"
+          },
+          "expect": {
+            "fact": "allocator",
+            "values": ["a1", "a2"]
+          }
+        },
+        {
+          "a": {},
+          "b": {
+            "base": 1000,
+            "extendedBy": "a1"
+          },
+          "expect": null
+        }
+      ]
+    },
+    {
+      "name": "an update past each limit",
+      "kind": "caps",
+      "runs": ["typescript", "python"],
+      "about": "An update's header is at most 1 MiB of UTF-8, 4,096 operations, 8,192 buffer descriptors, and 64 MiB of buffers: each limit exactly, and one past it. TypeScript refuses the past ones as it reads (the length before decoding, the counts before staging); Python's writer sends a revision past them as a snapshot instead. A header with multibyte text measures the same in both.",
+      "limits": [
+        {
+          "headerBytes": 1048576,
+          "expect": null
+        },
+        {
+          "headerBytes": 1048577,
+          "expect": "headerBytes",
+          "typescript": "update: its header is 1,048,577 bytes, more than an update's 1,048,576; send a revision this large as a snapshot, as herceg.web.Stream does"
+        },
+        {
+          "operations": 4096,
+          "expect": null
+        },
+        {
+          "operations": 4097,
+          "expect": "operations",
+          "typescript": "update operations: 4,097, more than an update's 4,096; send a revision this large as a snapshot, as herceg.web.Stream does"
+        },
+        {
+          "buffers": 8192,
+          "expect": null
+        },
+        {
+          "buffers": 8193,
+          "expect": "buffers",
+          "typescript": "update buffers: 8,193 descriptors, more than an update's 8,192; send a revision this large as a snapshot, as herceg.web.Stream does"
+        },
+        {
+          "bufferBytes": 67108864,
+          "expect": null
+        },
+        {
+          "bufferBytes": 67108865,
+          "expect": "bufferBytes",
+          "typescript": "update buffers: 67,108,865 bytes, more than an update's 67,108,864; send a revision this large as a snapshot, as herceg.web.Stream does"
+        }
+      ],
+      "measured": {
+        "header": {
+          "protocol": 1,
+          "kind": "update",
+          "stream": "flöde",
+          "epoch": "a1:1",
+          "revision": 2,
+          "baseRevision": 1,
+          "operations": [
+            {
+              "op": "rule",
+              "id": "ø→π",
+              "x": 1
+            }
+          ],
+          "buffers": []
+        },
+        "bytes": 156
+      }
+    },
+    {
+      "name": "merged revisions keep each server write's identity",
+      "kind": "stream",
+      "runs": ["typescript", "python"],
+      "about": "A delayed server write, as the stream writes it: an update merging revisions 39 to 41 keeps each select's revision and index, and each mutation's copy revision; buffers are renumbered into one list. TypeScript reads the update: its selects through a realm (then the first again, delayed through another fragment: dropped), its append staged on a copy at revision 6.",
+      "stream": "latency",
+      "epoch": "a1:2",
+      "revisions": [
+        {
+          "number": 39,
+          "add": [
+            {
+              "operation": {
+                "op": "select",
+                "data": "requests",
+                "generation": 0,
+                "namespace": "ops",
+                "channel": "slow",
+                "selection": {
+                  "kind": "rows",
+                  "ordinals": {
+                    "buffer": 0
+                  }
+                }
+              },
+              "buffers": [[5]]
+            }
+          ]
+        },
+        {
+          "number": 40,
+          "add": [
+            {
+              "operation": {
+                "op": "append",
+                "data": "requests",
+                "columns": {
+                  "latency": [1.5, 2.5]
+                },
+                "first": 100,
+                "revision": 7
+              }
+            }
+          ]
+        },
+        {
+          "number": 41,
+          "add": [
+            {
+              "operation": {
+                "op": "rule",
+                "id": "r",
+                "x": 3
+              }
+            },
+            {
+              "operation": {
+                "op": "select",
+                "data": "requests",
+                "generation": 0,
+                "namespace": "ops",
+                "channel": "slow",
+                "selection": null
+              }
+            }
+          ]
+        }
+      ],
+      "requests": [
+        {
+          "since": 38,
+          "expect": {
+            "protocol": 1,
+            "kind": "update",
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "baseRevision": 38,
+            "operations": [
+              {
+                "op": "select",
+                "data": "requests",
+                "generation": 0,
+                "namespace": "ops",
+                "channel": "slow",
+                "selection": {
+                  "kind": "rows",
+                  "ordinals": {
+                    "buffer": 0
+                  }
+                },
+                "write": {
+                  "revision": 39,
+                  "index": 0
+                }
+              },
+              {
+                "op": "append",
+                "data": "requests",
+                "columns": {
+                  "latency": [1.5, 2.5]
+                },
+                "first": 100,
+                "revision": 7
+              },
+              {
+                "op": "rule",
+                "id": "r",
+                "x": 3
+              },
+              {
+                "op": "select",
+                "data": "requests",
+                "generation": 0,
+                "namespace": "ops",
+                "channel": "slow",
+                "selection": null,
+                "write": {
+                  "revision": 41,
+                  "index": 1
+                }
+              }
+            ],
+            "buffers": [[0, 8]]
+          },
+          "buffers": [[5]],
+          "read": {
+            "copy": {
+              "ordinals": [[0, 100]],
+              "revision": 6
+            },
+            "outcomes": ["applied", "applied"],
+            "then": {
+              "ordinals": [[0, 102]],
+              "revision": 7
+            },
+            "delayed": "obsolete"
+          }
+        },
+        {
+          "since": 39,
+          "expect": {
+            "protocol": 1,
+            "kind": "update",
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 41,
+            "baseRevision": 39,
+            "operations": [
+              {
+                "op": "append",
+                "data": "requests",
+                "columns": {
+                  "latency": [1.5, 2.5]
+                },
+                "first": 100,
+                "revision": 7
+              },
+              {
+                "op": "rule",
+                "id": "r",
+                "x": 3
+              },
+              {
+                "op": "select",
+                "data": "requests",
+                "generation": 0,
+                "namespace": "ops",
+                "channel": "slow",
+                "selection": null,
+                "write": {
+                  "revision": 41,
+                  "index": 1
+                }
+              }
+            ],
+            "buffers": []
+          },
+          "buffers": []
+        },
+        {
+          "since": 37,
+          "expect": null
+        }
+      ]
+    },
+    {
+      "name": "updates stop between whole revisions",
+      "kind": "stream",
+      "runs": ["typescript", "python"],
+      "about": "A continuation: two revisions of 3,000 operations each do not fit one update, so it carries the first whole, with more; a single revision past the limits is never split: the stream answers with a snapshot (null). TypeScript checks the update it reads is within the limits, and the larger one is not.",
+      "stream": "latency",
+      "epoch": "a1:2",
+      "revisions": [
+        {
+          "number": 1,
+          "rules": 3000
+        },
+        {
+          "number": 2,
+          "rules": 3000
+        }
+      ],
+      "requests": [
+        {
+          "since": 0,
+          "expect": {
+            "revision": 1,
+            "baseRevision": 0,
+            "more": true,
+            "rules": 3000
+          }
+        },
+        {
+          "since": 1,
+          "expect": {
+            "revision": 2,
+            "baseRevision": 1,
+            "rules": 3000
+          }
+        }
+      ],
+      "alone": {
+        "revisions": [
+          {
+            "number": 1,
+            "rules": 4097
+          }
+        ],
+        "since": 0,
+        "expect": null
+      }
+    },
+    {
+      "name": "merged revisions renumber every buffer a column names",
+      "kind": "stream",
+      "runs": ["typescript", "python"],
+      "about": "Buffers are numbered per revision and renumbered into one list as revisions merge: a number column's buffer, a category column's codes (its dictionary inline), a geometry column's coordinates, offsets, and codes, within one revision and across two; inline arrays stay as they are. Buffers are written as typed arrays ({\"float64\": [...]}, {\"int32\": [...]}).",
+      "stream": "latency",
+      "epoch": "a1:2",
+      "revisions": [
+        {
+          "number": 1,
+          "add": [
+            {
+              "operation": {
+                "op": "append",
+                "data": "t",
+                "columns": {
+                  "v": {
+                    "type": "number",
+                    "dtype": "float64",
+                    "buffer": 0
+                  }
+                },
+                "first": 0,
+                "revision": 1
+              },
+              "buffers": [
+                {
+                  "float64": [1]
+                }
+              ]
+            },
+            {
+              "operation": {
+                "op": "append",
+                "data": "c",
+                "columns": {
+                  "k": {
+                    "type": "category",
+                    "codes": 0,
+                    "dictionary": ["a", "b"]
+                  },
+                  "w": {
+                    "type": "category",
+                    "codes": [1, 0],
+                    "dictionary": ["x", "y"]
+                  }
+                },
+                "first": 0,
+                "revision": 1
+              },
+              "buffers": [
+                {
+                  "int32": [0]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "add": [
+            {
+              "operation": {
+                "op": "reset",
+                "data": "g",
+                "columns": {
+                  "shape": {
+                    "type": "geometry",
+                    "coordinates": 0,
+                    "ringOffsets": 1,
+                    "polygonOffsets": 2,
+                    "geometryOffsets": 3,
+                    "codes": 4
+                  }
+                },
+                "generation": 1,
+                "revision": 1
+              },
+              "buffers": [
+                {
+                  "float64": [0, 0, 1, 0, 1, 1]
+                },
+                {
+                  "int32": [0, 3]
+                },
+                {
+                  "int32": [0, 1]
+                },
+                {
+                  "int32": [0, 1]
+                },
+                {
+                  "int32": [0]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requests": [
+        {
+          "since": 0,
+          "expect": {
+            "protocol": 1,
+            "kind": "update",
+            "stream": "latency",
+            "epoch": "a1:2",
+            "revision": 2,
+            "baseRevision": 0,
+            "operations": [
+              {
+                "op": "append",
+                "data": "t",
+                "columns": {
+                  "v": {
+                    "type": "number",
+                    "dtype": "float64",
+                    "buffer": 0
+                  }
+                },
+                "first": 0,
+                "revision": 1
+              },
+              {
+                "op": "append",
+                "data": "c",
+                "columns": {
+                  "k": {
+                    "type": "category",
+                    "codes": 1,
+                    "dictionary": ["a", "b"]
+                  },
+                  "w": {
+                    "type": "category",
+                    "codes": [1, 0],
+                    "dictionary": ["x", "y"]
+                  }
+                },
+                "first": 0,
+                "revision": 1
+              },
+              {
+                "op": "reset",
+                "data": "g",
+                "columns": {
+                  "shape": {
+                    "type": "geometry",
+                    "coordinates": 2,
+                    "ringOffsets": 3,
+                    "polygonOffsets": 4,
+                    "geometryOffsets": 5,
+                    "codes": 6
+                  }
+                },
+                "generation": 1,
+                "revision": 1
+              }
+            ],
+            "buffers": [[0, 8], [8, 4], [16, 48], [64, 8], [72, 8], [80, 8], [88, 4]]
+          },
+          "buffers": [
+            {
+              "float64": [1]
+            },
+            {
+              "int32": [0]
+            },
+            {
+              "float64": [0, 0, 1, 0, 1, 1]
+            },
+            {
+              "int32": [0, 3]
+            },
+            {
+              "int32": [0, 1]
+            },
+            {
+              "int32": [0, 1]
+            },
+            {
+              "int32": [0]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "updates stop at the bytes a browser materializes",
+      "kind": "stream",
+      "runs": ["typescript", "python"],
+      "about": "Two revisions of 40 MiB of buffers each do not fit one update's 64 MiB, so it carries the first whole, with more; a revision of 65 MiB alone answers with a snapshot (null).",
+      "stream": "latency",
+      "epoch": "a1:2",
+      "revisions": [
+        {
+          "number": 1,
+          "bytes": 41943040
+        },
+        {
+          "number": 2,
+          "bytes": 41943040
+        }
+      ],
+      "requests": [
+        {
+          "since": 0,
+          "expect": {
+            "revision": 1,
+            "baseRevision": 0,
+            "more": true,
+            "bytes": [41943040]
+          }
+        }
+      ],
+      "alone": {
+        "revisions": [
+          {
+            "number": 1,
+            "bytes": 68157440
+          }
+        ],
+        "since": 0,
+        "expect": null
+      }
+    },
+    {
+      "name": "an ordered table's order field replaced in a second operation",
+      "kind": "applier",
+      "runs": [],
+      "slice": "16-5a",
+      "about": "Through the applier and real tables: an ordered table's valid append, then a replace of its orderBy field; the batch is refused at operations[1] with the table's own message (replace \"t\": is the table's orderBy; drop and append those rows), and the tables, numbering, stores, and applied revision are as before."
+    },
+    {
+      "name": "an ordered append before the last key",
+      "kind": "applier",
+      "runs": [],
+      "slice": "16-5a",
+      "about": "An ordered table holding t = [1, 2, 3] with ordinals [0, 1, 2] takes an append first 3 of t = [1.5]: it merges into place, its identity is its ordinal (the history's, given before the merge), and the table's ordinals by position are [0, 3, 1, 2]."
+    },
+    {
+      "name": "an entirely evicted ordered batch",
+      "kind": "applier",
+      "runs": [],
+      "slice": "16-5a",
+      "about": "An ordered table with maxRows 3 holding t = [5, 6, 7] takes an append first 3 of t = [1, 2]: no row is kept, the ordinals 3 and 4 are taken all the same, and the copy's revision moves on, so the next append is first 5."
+    },
+    {
+      "name": "a select of ordinals a copy does not hold yet, through the applier",
+      "kind": "applier",
+      "runs": [],
+      "slice": "16-5a",
+      "about": "A select of rows [5, 2000] on a copy holding ordinals 0 to 999: the store holds row 5; the channel's canonical set keeps 2000, and an append first 2000 later selects its first row."
+    },
+    {
+      "name": "a snapshot past its stream's bound",
+      "kind": "applier",
+      "runs": [],
+      "slice": "16-5b",
+      "about": "hub.payload answers 413 for a snapshot past web.Stream(max_snapshot_bytes=...), and the page reports it (herceg:error \"load-failed\", phase \"load\"): updates \"/live\" stream \"trips\": the snapshot is 700 MiB, past the stream's 512 MiB; keep fewer rows (max_rows), or raise web.Stream(max_snapshot_bytes=...)."
+    }
+  ]
+}
