@@ -5,7 +5,7 @@ import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { Table } from "../../src/data/table.ts";
 import { specToPDF, specToSVG } from "../../src/from-spec.ts";
 import { estimateText } from "../../src/layout/text.ts";
-import { membership } from "../../src/model/memberships.ts";
+import { membershipOf } from "../../src/model/memberships.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec, RowSelectionSpec } from "../../src/spec/spec.ts";
@@ -122,13 +122,15 @@ describe("row selections in specs", () => {
     const trips = rows.tables.get("trips")!;
     const held = rows.stores.get("trips")!.get("focus")!;
     expect(held.kind).toBe("rows");
-    expect(Array.from(membership(trips, held))).toEqual([1, 0, 1]);
+    expect(Array.from(membershipOf(rows.stores.get("trips")!, "focus").selected)).toEqual([
+      1, 0, 1,
+    ]);
     // From a buffer of uint32 positions, too.
     const buffered = loadSpec(spec({ channel: "focus", selection: { kind: "rows", rows: 0 } }), [
       Uint32Array.of(1),
     ]);
-    const fromBuffer = buffered.stores.get("trips")!.get("focus")!;
-    expect(Array.from(membership(buffered.tables.get("trips")!, fromBuffer))).toEqual([0, 1, 0]);
+    const fromBuffer = buffered.stores.get("trips")!;
+    expect(Array.from(membershipOf(fromBuffer, "focus").selected)).toEqual([0, 1, 0]);
     const condition = loadSpec(
       spec({
         channel: "focus",

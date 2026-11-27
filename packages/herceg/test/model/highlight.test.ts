@@ -3,7 +3,13 @@ import { type ColumnInput, time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { compileExpression, type Expression } from "../../src/data/expression.ts";
 import { RowSet } from "../../src/data/row-set.ts";
-import { selectionStore, selectRows, selectWhere } from "../../src/data/selection.ts";
+import {
+  type DataSelection,
+  type SelectionStore,
+  selectionStore,
+  selectRows,
+  selectWhere,
+} from "../../src/data/selection.ts";
 import { type Table, table as typed } from "../../src/data/table.ts";
 
 import { estimateText } from "../../src/layout/text.ts";
@@ -19,7 +25,7 @@ import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
-import { membership } from "../../src/model/memberships.ts";
+import { type Membership, membershipOf } from "../../src/model/memberships.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { clickedRows } from "../../src/model/selected-rows.ts";
@@ -39,6 +45,21 @@ import { contractTest } from "../helpers/contracts.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
 import { withPicker } from "../helpers/picker.ts";
 import { xScale, yScale } from "../helpers/scales.ts";
+
+/** A store of each table, holding the selection read in one channel. */
+const stores = new Map<Table, { store: SelectionStore; held: Membership }>();
+
+/** Which of `source`'s rows a store's channel holding `selection` selects, by position. */
+function membership(source: Table, selection: DataSelection): Uint8Array {
+  let known = stores.get(source);
+  if (!known) {
+    const store = selectionStore(source);
+    known = { store, held: membershipOf(store, "held") };
+    stores.set(source, known);
+  }
+  if (known.store.get("held") !== selection) known.store.set("held", selection);
+  return known.held.selected;
+}
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: { maxRows?: number }): Table =>

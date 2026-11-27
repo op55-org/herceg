@@ -295,6 +295,10 @@ could load for some chart, not what its own chart downloads.
   `herceg-image`, and `herceg-web` measure those subpaths, and
   `herceg-grid-sparklines` a grid with a sparkline column; the other
   libraries have no counterparts.
+- `herceg-lineage` is a bar of row groups highlighting a selection of their
+  source's rows: the chart, its row selection, and the lineage reader
+  (contributors and coverage), which it takes from the package's source
+  until the row-selection binding loads it.
 
 ### React integration
 

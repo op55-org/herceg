@@ -4,6 +4,10 @@
 // code that derives tables: each record carries its own rewriting, which
 // data/derive.ts writes. It imports no code, so the picking chunk takes it
 // without sharing a module with charts' first chunks.
+//
+// Which rows stand behind which, rather than conditions, is
+// data/contributor-records.ts's: derived tables register both, groups and
+// totals contributors alone.
 
 import type { TransformSpec } from "../spec/spec.ts";
 import type { Expression } from "./expression.ts";

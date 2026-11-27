@@ -268,7 +268,9 @@ A data entry with `source` and `transform` derives rows from another table
   where `bin` puts them; a read of the bin's `end` gives null; aggregates keep `by` fields and give null for outputs;
   sorts change nothing; rolling windows give null. A rewrite the rules do
   not cover gives null, never an approximate condition. Tables a spec's
-  `origin` names were computed elsewhere, so a walk ends at them.
+  `origin` names were computed elsewhere, so a walk ends at them. Which
+  rows each derived row stands for is recorded apart
+  ([Contributors](#contributors)).
 - **Aggregations** (`data/aggregations.ts`) live apart from the derivation
   code, so pivots and summaries that use them do not load lineage or
   `derive`.
@@ -496,6 +498,104 @@ disposed, while its groups still hold their rows; one stopped at a limit
 before its totals row was read folds its groups as they were, keeping the
 compensated sums, since the table's values are no longer theirs. The
 folds are counted in the pivot's bounds and `byteLength`.
+
+## Contributors
+
+A derived row's **contributors** are the rows of its source it stands for:
+a group's rows, the rows an aggregate's finite values came from, a
+filter's one row. Coverage ([Selected rows](interaction.md#selected-rows))
+counts what a selection holds of them. Every producer registers, for the
+table it writes, a **record** in `data/contributor-records.ts` (a registry
+that imports no code): its source, two revisions, and what it keeps
+anyway. Queries of the records are the **lineage reader**'s:
+`data/contributors.ts` and the modules it loads (`derived-links.ts`,
+`totals-links.ts`, `removal-log.ts`), with coverage and membership
+histories in `model/`. A pivot grid, a plain `groupRows`, or a derivation
+that no chart reads through lineage carries none of the reader.
+
+- **`revision`** moves whenever a target's contributors may have changed
+  other than by the source's appends and front drops: keys or a filter's
+  fields edited, rows inserted, a reset, a view's new query, a groups'
+  table frozen or disposed. An edit of an aggregated value alone does not
+  move it; the value's finiteness is the reader's to follow.
+- **`layout`** moves whenever targets are renumbered (groups emptied at the
+  front compacted, a derived table computed again).
+
+A **link** is one step from targets to the rows of its input side:
+`contributors(target, visit, field?)` visits each input row behind a
+target once, `targetsOf(row, visit, field?)` each target a row feeds,
+`targetAt` the one target of a partition, `count`, and `incidences` every
+pair in one pass. `field` names a target field whose contributors differ
+from the target's rows: an aggregate of a field reads that field's finite
+values, so its contributors are the rows where it is finite. `classOf`
+names the rows a field reads, so fields reading the same rows (counts of
+rows, keys) share counts. A link is a **partition** when each input row
+feeds at most one target, and **single** when each target has one row.
+
+| Producer | What it records | Link, made by | Partition |
+| --- | --- | --- | --- |
+| Row groups, each level; pivots' cells and rows (their groups' levels) | Its own links, which read member runs and slots only it holds | Member runs and `groupOf`, a level above the last through parents (groups) | Yes |
+| Row totals | Its view and aggregates | Every row the view shows, of the one target (`totals-links.ts`) | Yes |
+| Derived tables whose steps work row by row | The derived rows' source slots, kept anyway to follow appends | A gather by slot, searched by halving (`derived-links.ts`) | Single |
+| Other derived tables | Its steps, each step's row count, and the trace a reader asked for | A trace of each step, below (`derived-links.ts`) | Aggregates are; rolling windows are not |
+
+**Derived traces.** A derivation that aggregates, ranks, or rolls is
+traced the first time a reader asks for its links: its steps call hooks of
+a tracer the reader gives (`Trace` in `derive.ts`), and running them again
+records stretches (row-by-row steps between, as gathers) and layers
+(aggregates as each output row's input rows, compressed into one array
+and offsets; rolling windows as each output row's window in its group's
+order). The trace is recorded again with each computation while a reader
+holds it, and let go once none does. An aggregate's layer keeps 8 bytes
+a row of its input (each row's output row, and the lists), and a byte a
+row for each field with missing values; a rolling window's more, with its
+order; `lineageCost` estimates a trace before it is made.
+
+**Chains.** `relationTo(target, ancestor)` (`data/contributors.ts`)
+composes the records between, top first, into a **relation**, shared by
+every reader of the pair. Links compose lazily: a traversal walks each
+link in turn and nothing is flattened, so a bar of 1,000 groups over a
+million rows holds no list of a million pairs. Composition is done again
+only when a record replaces its links (a derivation computed again). A
+traversal that can reach a row twice (an aggregate of rolling windows)
+marks rows by a stamp per row, 4 bytes a row made on first need. A chain's
+revision adds the layouts of the records below its top, whose
+renumbering changes the positions the top reads. Each read catches the
+records up from the ancestor toward the target first, so a read from a
+source listener that runs before the producers' own answers for the rows
+the source holds. A reader **holds** a relation (`hold()`, released by the
+returned function) for as long as it reads it; what the relation built for
+readers (traces, logs of dropped rows) goes with the last hold.
+
+**Measures.** A relation states a **measure** (`measureOf`: a count of
+rows or of a field's finite values, or a sum of a field) only where the
+field is one count or sum step over a field of the ancestor, reached
+through steps that keep rows one for one. Nested aggregates, rolling
+windows, calculations after an aggregate, and fields of tables between
+have coverage and no measure. Producers stopped at a limit or disposed
+state none: their values no longer follow the rows.
+
+**Rows dropped.** A row the source dropped is gone from the table and
+from its producers' links, so a reader that counted it would have nothing
+to take it from. Groups and totals over tables that drop rows therefore
+remember the rows they drop in a log while a reader holds it (`hold`,
+counted per producer, so every level of row groups shares one log): each
+row's slot, target, and values of the fields they read, in a ring of a
+sixteenth of the rows and at least 4,096 (`data/removal-log.ts`), 4
+bytes plus 8 a field a row; a reader asking for a row the ring has
+forgotten counts again. Derivations do not; relations through them count
+again after a drop.
+
+**Budgets.** `lineageCost` (`model/coverage.ts`) counts, before anything
+is made, what highlighting a relation's fields through a store's channel
+keeps: the membership with its transitions, the links (a trace, rows
+remembered), and each class of fields' counts per target (8 bytes, 28 more
+with a sum). What exists counts as it is, or as it will be once it grows
+at the next read (counts and bytes past their room), whichever is larger,
+and what is shared counts once.
+A binding's default budget is 16 bytes a row of the bound table;
+`budgetRefusal` names what was asked and what to do past it. Producers'
+own arrays (groups' slots) are reported beside the budget, not in it.
 
 ## Level of detail
 

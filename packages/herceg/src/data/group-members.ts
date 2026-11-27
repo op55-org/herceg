@@ -115,6 +115,15 @@ export class MemberRuns {
     return length;
   }
 
+  /** Visits a group's rows, as table positions, in order. */
+  visit(group: number, visit: (position: number) => void, rowOffset: number): void {
+    const entries = this.#entries;
+    const start = this.#start[group]!;
+    const end = start + this.#length[group]!;
+    const shift = this.base - rowOffset;
+    for (let i = start; i < end; i++) visit(entries[i]! + shift);
+  }
+
   /** Where the row at `position` is among its group's rows, or -1: a binary search. */
   indexOf(group: number, position: number, rowOffset: number, order: Order): number {
     const entries = this.#entries;

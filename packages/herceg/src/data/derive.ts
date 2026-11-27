@@ -22,6 +22,7 @@ import {
   type NumericArray,
   time,
 } from "./column.ts";
+import { type DerivedEntry, setContributors } from "./contributor-records.ts";
 import { type Expr, expressionOf, type KindOf } from "./expr.ts";
 import { compileExpression, type Expression, type Fields } from "./expression.ts";
 import { type GeometrySet, geometryOf } from "./geometry.ts";
@@ -50,7 +51,7 @@ type Column =
   | { kind: "geometry"; codes: Int32Array; set: GeometrySet; owned: boolean };
 
 /** Rows between steps: columns of one length, and each row's source row slot. */
-class Rows implements Fields {
+export class Rows implements Fields {
   readonly length: number;
   readonly columns: Map<string, Column>;
   /** Each row's source row slot (`rowOffset` plus its position), while rows map to source rows. */
@@ -160,14 +161,29 @@ function rowwise(step: TransformSpec): boolean {
   );
 }
 
-/** Rows after `step`; `counted` hears the edges a bin of a count used. */
-function apply(rows: Rows, step: TransformSpec, counted?: (edges: Float64Array) => void): Rows {
+/**
+ * Rows after `step`; `counted` hears the edges a bin of a count used, and
+ * `trace` where the rows came from.
+ */
+function apply(
+  rows: Rows,
+  step: TransformSpec,
+  counted?: (edges: Float64Array) => void,
+  trace?: Trace,
+): Rows {
   if ("filter" in step) return filter(rows, step.filter);
-  if ("calculate" in step) return calculate(rows, step);
-  if ("bin" in step) return bin(rows, step, counted);
-  if ("aggregate" in step) return aggregate(rows, step.aggregate, step.by ?? []);
-  if ("rolling" in step) return rolling(rows, step.rolling, step.size, step.by ?? []);
-  if ("sort" in step) return sort(rows, step.sort, step.order ?? "ascending");
+  if ("calculate" in step) {
+    trace?.made(step.as);
+    return calculate(rows, step);
+  }
+  if ("bin" in step) {
+    trace?.made(step.as ?? step.bin);
+    if (step.end !== undefined) trace?.made(step.end);
+    return bin(rows, step, counted);
+  }
+  if ("aggregate" in step) return aggregate(rows, step.aggregate, step.by ?? [], trace);
+  if ("rolling" in step) return rolling(rows, step.rolling, step.size, step.by ?? [], trace);
+  if ("sort" in step) return sort(rows, step.sort, step.order ?? "ascending", !!trace);
   throw new TypeError(
     `expected a filter, calculate, bin, aggregate, rolling, or sort step; received ${JSON.stringify(step)}`,
   );
@@ -392,7 +408,12 @@ const KEEPS_KIND = new Set<AggregateOp | RollingOp>([
   "last",
 ]);
 
-function aggregate(rows: Rows, specs: readonly AggregateSpec[], by: readonly string[]): Rows {
+function aggregate(
+  rows: Rows,
+  specs: readonly AggregateSpec[],
+  by: readonly string[],
+  trace?: Trace,
+): Rows {
   const { group, firsts } = groupsOf(rows, by);
   // Without groups there is always one row, even for no input: a count of 0.
   const groups = by.length === 0 ? 1 : firsts.length;
@@ -410,7 +431,9 @@ function aggregate(rows: Rows, specs: readonly AggregateSpec[], by: readonly str
         : "number";
     columns.set(spec.as, { kind, values: out, owned: true });
   }
-  return new Rows(groups, columns, undefined);
+  if (!trace) return new Rows(groups, columns, undefined);
+  trace.layer(rows, { kind: "aggregate", group, groups, specs });
+  return new Rows(groups, columns, counting(groups));
 }
 
 function aggregateOp(
@@ -511,10 +534,12 @@ function rolling(
   specs: readonly RollingSpec[],
   size: number,
   by: readonly string[],
+  trace?: Trace,
 ): Rows {
   if (!(Number.isInteger(size) && size >= 1))
     throw new RangeError(`size: expected a whole number of at least 1; received ${size}`);
   const { group, firsts } = groupsOf(rows, by);
+  trace?.layer(rows, { kind: "rolling", group, groups: firsts.length, size, specs });
   // Each group's rows, in order.
   const members = Array.from({ length: firsts.length }, () => [] as number[]);
   for (let i = 0; i < rows.length; i++) members[group[i]!]!.push(i);
@@ -526,7 +551,7 @@ function rolling(
     const kind = KEEPS_KIND.has(spec.op) && rows.kind(spec.field) === "time" ? "time" : "number";
     out = out.with(spec.as, { kind, values: result, owned: true });
   }
-  return out;
+  return trace ? new Rows(out.length, out.columns, counting(out.length)) : out;
 }
 
 /**
@@ -660,11 +685,12 @@ function add(m: Moments, n: number, mean: number, m2: number, min: number, max: 
   if (max > m.max) m.max = max;
 }
 
-function sort(rows: Rows, field: string, order: "ascending" | "descending"): Rows {
+function sort(rows: Rows, field: string, order: "ascending" | "descending", traced = false): Rows {
   const indexes = Array.from({ length: rows.length }, (_, i) => i);
   indexes.sort(rowComparator(rows, [{ field, order }]));
   const sorted = rows.pick(indexes);
-  return new Rows(sorted.length, sorted.columns, undefined);
+  // Sorted rows follow no source order, which appends need; a trace keeps where they came from.
+  return traced ? sorted : new Rows(sorted.length, sorted.columns, undefined);
 }
 
 /** Column inputs for a table, copying columns still read from the source. */
@@ -689,24 +715,38 @@ function inputsOf(rows: Rows): Record<string, ColumnInput> {
 
 /**
  * Runs transforms over a table's rows from position `from`, keeping in
- * `edges` the edges each bin of a count used (by step).
+ * `edges` the edges each bin of a count used (by step), with `trace` where
+ * every row came from, and in `sizes` the rows entering each step and
+ * those made.
  */
 function run(
   source: Table,
   transforms: readonly TransformSpec[],
   from = 0,
   edges: Float64Array[] = [],
+  trace?: Trace,
+  sizes: number[] = [],
 ): Rows {
   let rows = rowsOf(source, from);
+  // Traced rows carry positions in the layer below, the source's at first.
+  if (trace) rows = new Rows(rows.length, rows.columns, counting(rows.length));
   transforms.forEach((step, i) => {
+    sizes[i] = rows.length;
     try {
-      rows = apply(rows, step, (used) => {
-        edges[i] = used;
-      });
+      rows = apply(
+        rows,
+        step,
+        (used) => {
+          edges[i] = used;
+        },
+        trace,
+      );
     } catch (error) {
       throw new Error(`transform[${i}] (${Object.keys(step)[0]}): ${(error as Error).message}`);
     }
   });
+  sizes[transforms.length] = rows.length;
+  trace?.end(rows);
   return rows;
 }
 
@@ -894,6 +934,124 @@ function unbinned(
   return exact ? out : null;
 }
 
+// Contributors (contributor-records.ts): what a derivation keeps for the
+// lineage reader (derived-links.ts), which makes its links. A derivation
+// working row by row keeps its rows' source slots anyway (`ids` in
+// `deriveTable`); any other runs again with a trace when a reader asks,
+// and records one with each computation while read.
+
+/** What records where a derivation's rows came from as it runs: derived-links.ts's tracer. */
+export interface Trace {
+  /** The current stretch of steps keeping rows one for one makes `field`. */
+  made(field: string): void;
+  /** A fan-in step over `rows`, whose `ids` are the rows below. */
+  layer(rows: Rows, fanIn: FanIn): void;
+  /** The derivation's rows. */
+  end(rows: Rows): void;
+}
+
+/** A fan-in step: each input row's group (an aggregate's output row, a rolling window's group). */
+export type FanIn =
+  | {
+      kind: "aggregate";
+      group: Int32Array;
+      groups: number;
+      specs: readonly AggregateSpec[];
+    }
+  | {
+      kind: "rolling";
+      group: Int32Array;
+      groups: number;
+      size: number;
+      specs: readonly RollingSpec[];
+    };
+
+/** What a derivation writes as it follows its source, and the lineage reader writes back. */
+export interface Followed {
+  /** Counts the table's resets. */
+  revision: number;
+  /** Counts its renumberings, front drops included. */
+  layout: number;
+  /** The rows entering each step as the derivation last ran, and those made: what a trace's size follows. */
+  sizes: number[];
+  /** What the reader recorded of the last computation, while it reads it. */
+  trace: Trace | null;
+  /** Set when the links were read since the last computation, which `tracer` then records. */
+  read: boolean;
+  tracer: ((rows: number) => Trace) | null;
+  /**
+   * Catches the derivation up with its source, for a reader that reads it
+   * before the source's listeners reached it: what it records is then of
+   * the source as it is.
+   */
+  sync(): void;
+}
+
+/** A derived table's contributor record: what derived-links.ts reads. */
+export interface DerivedRecord extends DerivedEntry {
+  readonly transforms: readonly TransformSpec[];
+  /** Every step works row by row: rows gather their source slots. */
+  readonly incremental: boolean;
+  /** Kept apart from the record, which holds the table: the source's subscription holds it. */
+  readonly followed: Followed;
+  /** Source slots of the derived rows (`ids` from `idStart`), while every step works row by row. */
+  slots(): { ids: readonly number[]; idStart: number };
+  /** The derived table's rows. */
+  length(): number;
+  /** Runs the steps again over every source row, into `trace`. */
+  run(trace: Trace): void;
+}
+
+/** 0, 1, 2, … `n` − 1: rows of a new layer, by position. */
+function counting(n: number): Float64Array {
+  const ids = new Float64Array(n);
+  for (let i = 0; i < n; i++) ids[i] = i;
+  return ids;
+}
+
+/**
+ * A derived table's contributor record. Its own function, so that nothing
+ * the source's subscription holds holds the derived table: the record is
+ * kept by the table, and the table by its readers.
+ */
+function recordOf(
+  source: Table,
+  derived: Table,
+  transforms: readonly TransformSpec[],
+  incremental: boolean,
+  followed: Followed,
+  slots: () => { ids: readonly number[]; idStart: number },
+): DerivedRecord {
+  const ref = new WeakRef(derived);
+  return {
+    kind: "derived",
+    source,
+    target: derived,
+    get revision() {
+      followed.sync();
+      return followed.revision;
+    },
+    get layout() {
+      followed.sync();
+      return followed.layout;
+    },
+    transforms,
+    incremental,
+    followed,
+    slots: () => {
+      followed.sync();
+      return slots();
+    },
+    length: () => {
+      followed.sync();
+      return ref.deref()?.length ?? 0;
+    },
+    run: (trace) => {
+      run(source, transforms, 0, [], trace);
+    },
+  };
+}
+
 /** Stops a collected derived table's subscription to its source. */
 const followers = new FinalizationRegistry<() => void>((stop) => stop());
 
@@ -909,7 +1067,8 @@ export function deriveTable(
 ): Table {
   // The edges bins of a count used, as the rows were last computed.
   let edges: Float64Array[] = [];
-  const first = run(source, transforms, 0, edges);
+  const sizes: number[] = [];
+  const first = run(source, transforms, 0, edges, undefined, sizes);
   const derived = table(
     inputsOf(first),
     options.name === undefined ? {} : { name: options.name },
@@ -929,6 +1088,19 @@ export function deriveTable(
     back: (condition) => back(transforms, edges, condition),
   });
   const ref = new WeakRef(derived);
+  // What contributors read, which the subscription writes as it follows.
+  const followed: Followed = {
+    revision: 0,
+    layout: 0,
+    sizes,
+    trace: null,
+    read: false,
+    tracer: null,
+    sync: () => {},
+  };
+  setContributors(
+    recordOf(source, derived, transforms, incremental, followed, () => ({ ids, idStart })),
+  );
   // The source's version the derived rows hold. A change made in another
   // listener is heard before the one that listener was told of: one heard
   // out of turn is computed again from the source, and then the earlier one
@@ -936,15 +1108,16 @@ export function deriveTable(
   let held = source.version;
   // The source slot after the last row read. A table made inside a
   // transaction has read rows that the transaction's change counts as appended.
-  let read = source.rowOffset + source.length;
-  const stop = source.subscribe((change: TableChange) => {
+  let end = source.rowOffset + source.length;
+  // Follows a change of the source, or catches up with one unheard yet (`change` undefined).
+  const follow = (change: TableChange | undefined) => {
     const target = ref.deref();
     if (!target) {
       stop();
       return;
     }
     if (source.version === held) return;
-    const inTurn = source.version === held + 1;
+    const inTurn = change !== undefined && source.version === held + 1;
     held = source.version;
     // Rows an ordered source inserted move the rows after them: computed again.
     if (inTurn && incremental && !change.reset && change.updated === null && !change.inserted) {
@@ -958,13 +1131,14 @@ export function deriveTable(
         if (dropped > 0) {
           target.dropFirst(dropped);
           idStart += dropped;
+          followed.layout++;
           if (idStart > 1024 && idStart * 2 > ids.length) {
             ids = ids.slice(idStart);
             idStart = 0;
           }
         }
-        const from = Math.max(0, read - source.rowOffset);
-        read = source.rowOffset + source.length;
+        const from = Math.max(0, end - source.rowOffset);
+        end = source.rowOffset + source.length;
         if (from < source.length) {
           const added = run(source, transforms, from);
           if (added.length > 0) {
@@ -976,12 +1150,21 @@ export function deriveTable(
       return;
     }
     edges = [];
-    const rows = run(source, transforms, 0, edges);
+    // Links read since the last computation are recorded again with it.
+    const tracer = !incremental && followed.read ? followed.tracer?.(source.length) : undefined;
+    followed.sizes = [];
+    const rows = run(source, transforms, 0, edges, tracer, followed.sizes);
     ids = incremental ? Array.from(rows.ids ?? []) : [];
     idStart = 0;
-    read = source.rowOffset + source.length;
+    end = source.rowOffset + source.length;
+    followed.revision++;
+    followed.layout++;
+    followed.trace = tracer ?? null;
+    followed.read = false;
     target.reset(inputsOf(rows) as never);
-  });
+  };
+  const stop = source.subscribe((change: TableChange) => follow(change));
+  followed.sync = () => follow(undefined);
   followers.register(derived, stop);
   return derived;
 }

@@ -13,9 +13,11 @@
 
 import type { ColumnInput, NumericArray } from "./column.ts";
 import { time } from "./column.ts";
+import { setContributors, type TotalsRecord } from "./contributor-records.ts";
 import type { Expression } from "./expression.ts";
 import { addCompensated, checkAggregates, GroupLevel, GroupTable } from "./group-levels.ts";
 import type { GroupAggregate, GroupSchema, NamedAggregate } from "./groups.ts";
+import type { RemovalLog } from "./removal-log.ts";
 import { fieldsOf, type RowSnapshot, type RowView } from "./row-view.ts";
 import type { NumericField, Schema, Table, TableChange } from "./table.ts";
 
@@ -68,6 +70,17 @@ export class RowTotals<
   #recompute = false;
   /** Set while writing the table, whose listeners may read the totals or change their source. */
   #updating = false;
+  /**
+   * Counts the changes that may give the totals other rows than appends and
+   * drops do (lineage.ts): a new query, a reset, rows inserted, an edit of a
+   * field the view filters by. Edits of fields only aggregates read keep them.
+   */
+  #lineage = 0;
+  #rekeyed = false;
+  /** The rows dropped lately, in the log a reader of the totals' contributors gave. */
+  #removals: RemovalLog | null = null;
+  /** Readers holding the log; it goes with the last. */
+  #keepers = 0;
   #stopped = false;
   readonly #stop: () => void;
   readonly #listeners = new Set<() => void>();
@@ -105,6 +118,7 @@ export class RowTotals<
     level.unmark();
     this.table = level.table as unknown as Table<R>;
     keepers.set(level.table, this as unknown as RowTotals);
+    setContributors(this.#record());
 
     // Held weakly by what it follows, so totals no one keeps (nor their table) stop on their own.
     const ref = new WeakRef(this);
@@ -157,6 +171,8 @@ export class RowTotals<
   dispose(): void {
     if (this.#stopped) return;
     this.#stopped = true;
+    this.#lineage++;
+    this.#removals = null;
     this.#stop();
     followers.unregister(this);
     this.#kept = null;
@@ -181,11 +197,13 @@ export class RowTotals<
     // A read inside an earlier listener caught up with it already.
     if (this.#source.version === this.#seen.version) return;
     this.#heard++;
-    if (change.inserted) this.#recompute = true;
+    if (change.inserted) this.#recompute = this.#rekeyed = true;
     else if (change.updated) {
       // A view keeps its filter as an expression.
-      const reads = new Set([...this.#read, ...fieldsOf(this.view.query.filter as Expression)]);
-      if (change.fields.some((field) => reads.has(field))) this.#recompute = true;
+      const keys = fieldsOf(this.view.query.filter as Expression);
+      if (change.fields.some((field) => keys.includes(field)))
+        this.#recompute = this.#rekeyed = true;
+      else if (change.fields.some((field) => this.#read.includes(field))) this.#recompute = true;
     }
     this.#update();
   }
@@ -202,13 +220,20 @@ export class RowTotals<
     const unheard = source.version - seen.version > this.#heard;
     const dropped = source.rowOffset - seen.rowOffset;
     if (dropped > 0) this.#dropping = true;
-    const recompute =
-      this.#recompute ||
+    // Rows may come or go other than by appends and drops (see `#lineage`).
+    const rekeyed =
+      this.#rekeyed ||
       (unheard && source.modifiedVersion !== seen.modified) ||
       source.generation !== seen.generation ||
       view.queryRevision !== seen.query ||
       // Dropped rows are taken away by what was kept of them, kept from now on.
       (dropped > 0 && !this.#keeps(snapshot));
+    const recompute = this.#recompute || rekeyed;
+    if (rekeyed) {
+      this.#lineage++;
+      this.#removals?.clear();
+    }
+    this.#rekeyed = false;
     this.#heard = 0;
     this.#recompute = false;
     this.#seen = this.#state();
@@ -270,16 +295,20 @@ export class RowTotals<
     // An append larger than `maxRows` drops every row there was, and some of its own.
     const removed = Math.min(source.rowOffset - seen.rowOffset, seen.length);
     const from = Math.max(0, seen.rowOffset + seen.length - source.rowOffset);
-    if (removed > 0) this.#remove(removed);
+    if (removed > 0) this.#remove(removed, seen.rowOffset);
     if (from < source.length) this.#add(snapshot, from);
   }
 
-  /** Takes away the table's first `removed` rows (as they were), which it dropped. */
-  #remove(removed: number) {
+  /** Takes away the table's first `removed` rows (as they were, from slot `first`), which it dropped. */
+  #remove(removed: number, first: number) {
     const level = this.#level;
     const kept = this.#kept ?? [];
     const shown = this.#shown;
     const start = this.#offset;
+    const log = this.#removals;
+    if (log)
+      for (let index = start; index < start + removed; index++)
+        log.push(first + index - start, !shown || shown[index] ? 0 : -1, kept, index);
     for (let index = start; index < start + removed; index++)
       if (!shown || shown[index]) level.change(0, -1, kept, index);
     this.#offset += removed;
@@ -320,6 +349,48 @@ export class RowTotals<
       shown.fill(0, offset + from, offset + length);
       for (const position of positions ?? []) shown[offset + position] = 1;
     }
+  }
+
+  /**
+   * What the totals table's one row was computed from (contributor-records.ts):
+   * every row the view shows; totals-links.ts reads it.
+   */
+  #record(): TotalsRecord {
+    const totals = this;
+    return {
+      kind: "totals",
+      source: this.#source,
+      target: this.#level.table,
+      get revision() {
+        totals.#update();
+        return totals.#lineage;
+      },
+      layout: 0,
+      view: this.view as unknown as RowView,
+      aggregates: this.aggregates,
+      current: () => {
+        this.#update();
+        return !this.#stopped;
+      },
+      logged: this.#read,
+      get log() {
+        return totals.#removals;
+      },
+      hold: (make: () => RemovalLog) => {
+        if (this.#stopped) return () => {};
+        this.#keepers++;
+        this.#removals ??= make();
+        let held = true;
+        return () => {
+          if (!held) return;
+          held = false;
+          if (--this.#keepers === 0) this.#removals = null;
+        };
+      },
+      get owned() {
+        return totals.byteLength;
+      },
+    };
   }
 
   /** Computes again a minimum or maximum that left, and sums that lost their accuracy, from the rows shown. */
