@@ -194,6 +194,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "clip": {
           "title": "Clip",
           "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
@@ -754,6 +759,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "clip": {
           "title": "Clip",
           "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
@@ -1053,6 +1063,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "legend": {
           "title": "Legend",
           "description": "`false` leaves the mark's series, color ramps, and keys out of the chart's legends.",
@@ -1241,6 +1256,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -1464,6 +1484,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -3216,6 +3241,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "clip": {
           "title": "Clip",
           "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
@@ -4148,6 +4178,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "clip": {
           "title": "Clip",
           "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
@@ -4298,6 +4333,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -4478,6 +4518,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "legend": {
           "title": "Legend",
           "description": "`false` leaves the mark's series, color ramps, and keys out of the chart's legends.",
@@ -4647,6 +4692,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -5638,6 +5688,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -6842,6 +6897,11 @@
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
           "$ref": "#/$defs/Look"
         },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
+          "$ref": "#/$defs/Look"
+        },
         "clip": {
           "title": "Clip",
           "description": "What the mark's drawing is cut to. Without it, data is cut to the plot, and labels, rules, and text are drawn whole (those of values outside the plot are left out).",
@@ -7637,6 +7697,12 @@
           "type": "boolean",
           "default": false
         },
+        "budget": {
+          "title": "Budget",
+          "description": "Bytes the indexes highlighting through lineage may take, for marks of tables that come from the bound one (derived tables): coverage of each of their rows, what derivations keep of their rows. 16 a row of the bound table by default, at least 64 KiB. Past it, the chart is refused, or, when tables grow past it later, stops highlighting them and reports it.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "selection": {
           "title": "Selection",
           "description": "What the channel holds once loaded, in a store `loadSpec` makes (a store given in its options keeps what it holds), which static exports of the spec draw: a condition (rows appended later that meet it are selected too), or rows by position in the table. Left out, nothing is selected; `{ \"kind\": \"rows\", \"rows\": [] }` selects no row, dimming every one.",
@@ -7681,6 +7747,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {
@@ -10312,6 +10383,11 @@
         "unselected": {
           "title": "Unselected",
           "description": "What it does not, while it holds something; by default at a quarter of its opacity.",
+          "$ref": "#/$defs/Look"
+        },
+        "partial": {
+          "title": "Partial",
+          "description": "An item some of whose rows a row selection holds, where no selected part of it can be drawn (a mean of a group bound through lineage, see `rowSelection`'s `lineage`): by default the unselected look, outlined in the item's color at full opacity, 1.5 px wide.",
           "$ref": "#/$defs/Look"
         },
         "clip": {

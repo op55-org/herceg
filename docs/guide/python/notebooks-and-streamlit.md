@@ -216,9 +216,10 @@ hg.Chart(trips, row_selection=picked).histogram(x="distance").to_svg()  # drawn 
 | --- | --- |
 | `events` | Gestures that select (`["click"]`; `[]` shows only) |
 | `effect="none"` | Select without dimming |
-| `data` | The table (the chart's data by default); a list binds several |
+| `data` | The table (the chart's data by default), or the data a derived table the marks draw comes from; a list binds several |
 | `fields` | Columns to send beyond those marks read, for conditions set from Python |
 | `selection` | What the channel holds when drawn: a condition, positions, a mask, or a widget's `row_selection` |
+| `budget` | Bytes highlighting a derived table's groups may keep (16 a row of `data` by default) |
 
 - An `hg.RowSelection` holds `channel`, `data`, and either `rows`
   (positions in the data as the chart holds it now) or a brush's
@@ -229,6 +230,23 @@ hg.Chart(trips, row_selection=picked).histogram(x="distance").to_svg()  # drawn 
   `row_selection` for that.
 - Static HTML highlights in the browser and reports nothing; SVG, PNG, and
   PDF draw the binding's `selection`.
+- A chart of a derived table's aggregates bound to the data they come from
+  highlights how much of each group the channel holds, and its clicks
+  select the group's rows of the data
+  ([Groups highlighting their rows](../data.md#groups-highlighting-their-rows)):
+
+  ```python
+  by_region = hg.derive(sales).aggregate(by="region", revenue=("revenue", "sum"))
+  binding = hg.SelectionBinding("focus", data=sales)
+  hg.Chart(by_region, row_selection=binding).bar(x="region", y="revenue")
+  ```
+
+  Bars of counts and sums draw their selected part from their base; the
+  others draw a group partly selected in the mark's `partial=` look
+  (`hg.Look`; the unselected look outlined in the bar's color by
+  default). Inspected points then carry `coverage`, an `hg.Coverage` of
+  `selected` and `total` rows, `state`, `channel`, and for counts and sums
+  its `measure` (`hg.CoverageMeasure`).
 
 ## Streamlit
 

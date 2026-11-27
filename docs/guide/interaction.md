@@ -1303,6 +1303,8 @@ notebook chart or Streamlit chart (see
 | `effect` | `"none"` writes without dimming. |
 | `live` | The channel hears a brush's previews while it moves, and its cancel, which gives back what the channel held before the gesture; commits only by default. |
 | `selection` | (specs) The channel's starting selection. |
+| `lineage` | For a store of a table the marks' tables come from (`import { lineage } from "herceg"`): see [Selected rows through lineage](#selected-rows-through-lineage). |
+| `budget` | Bytes highlighting through lineage may keep; 16 a row of the store's table by default, at least 64 KiB. |
 
 A brush that writes rows selects rather than zooms (Ctrl/⌘+wheel, pinches,
 and Shift-drags still zoom and pan). Marks over tables without a binding
@@ -1381,12 +1383,37 @@ Exports draw the selection the stores hold when called.
   table only they read is refused.
 - Gauges, radars, and 3D charts refuse a binding; select their rows in a
   chart of the same table along x and y.
-- A chart of a derived table's aggregates binds the derived table's own
-  store, whose rows are its groups.
+- A chart of a derived table's aggregates, groups, or totals binds either
+  their own store, whose rows are its groups, or with `lineage` the
+  source's (below).
 
 Charts showing one selection share a byte per row. Brushing a scatter of a
 million rows with a histogram and a box plot following takes about 10 ms a
 step (Node).
+
+### Selected rows through lineage
+
+A chart of groups, totals, or a derived table's aggregates bound to a
+store of the table they come from, with `lineage`
+([Groups highlighting their rows](data.md#groups-highlighting-their-rows)),
+writes the source's rows there and highlights what each group holds of
+them:
+
+| Gesture on a mark of a groups' table | Writes to the source's channel |
+| --- | --- |
+| A click on an item (a bar, a point, a slice), or Space on it | The rows behind its value (a bar's `revenue`, a slice's `value`; a band's or error bar's, every row behind it), as rows of the source; Shift adds, Ctrl or Cmd toggles. |
+| A lasso | The rows behind the items inside it, each behind its own series' field (a bar of `y: ["revenue", "margin"]` writes the rows behind each segment's value). |
+| A brush along the groups' axis | A condition on the source's fields where every step between writes one (a derived table's group fields, bins, fields passed through), as a brush of the source would; otherwise the rows behind the groups inside it, of the series shown. |
+| A brush along the values axis (counts, sums, means, a range of minimums and maximums, rolling sums) | Refused when the chart is made: its values are aggregates, which no brush selects rows by. |
+| Items and series (`interaction.select`) | As a brush along the groups' axis writes: a condition where one is written back (the items of a category), otherwise the rows behind them, of the value field their series is of. |
+| A grid's row, range, or select-all | The rows behind the rows selected. |
+
+Charts of the source following the channel then highlight those rows, and
+the groups' chart highlights its groups: bars of counts and sums from
+their bases, the others in the `partial` look. Two bars of 1,000 groups
+(a sum and a mean) following a brush over a million rows draw in about
+3 ms a step, 1.5 ms of it the brush's membership, which charts of the
+source share; with the selection unchanged, 0.6 ms (Node, Apple M6).
 
 ## Range navigator
 

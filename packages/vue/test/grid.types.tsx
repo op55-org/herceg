@@ -1,7 +1,15 @@
 // Compile-time tests of the grid components in TSX (`jsxImportSource:
 // "vue"`), run by `npm run typecheck`: JSX checks a component as templates
 // do, so the schema is inferred from `model`, and `cells` follows it.
-import { rowView, table } from "herceg";
+import {
+  count,
+  type DataSelection,
+  groupRows,
+  lineage,
+  rowView,
+  selectionStore,
+  table,
+} from "herceg";
 import { createGridModel } from "herceg/grid";
 import { Grid } from "../src/grid.ts";
 
@@ -33,6 +41,26 @@ export const Requests = () => (
       if (selection?.kind === "rows") selection.rows.copy().add(0);
       // @ts-expect-error a reported selection's rows are read-only: change a copy
       if (selection?.kind === "rows") selection.rows.add(0);
+    }}
+  />
+);
+
+// Through lineage: a grid of groups of requests reports selections of requests.
+type Requests = { latency: "number"; host: "category" };
+const hosts = createGridModel({
+  data: rowView(groupRows(rowView(requests), { by: ["host"], ops: { n: count() } }).table),
+  columns: [{ field: "host" }, { field: "n" }],
+  selectionStore: selectionStore(requests),
+  channel: "focus",
+  lineage,
+});
+export const Hosts = () => (
+  <Grid
+    model={hosts}
+    ariaLabel="Hosts"
+    onSelect={({ selection }) => {
+      const rows: DataSelection<Requests> | null = selection;
+      return rows;
     }}
   />
 );

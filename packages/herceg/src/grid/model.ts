@@ -24,6 +24,8 @@ import type { PositionField, Schema, Table } from "../data/table.ts";
 import type { RowTotals } from "../data/totals.ts";
 import { wholeTable } from "../encoding/channel-scales.ts";
 import { missingValue } from "../fields/display.ts";
+import type { SelectionLineage } from "../model/lineage-binding.ts";
+import type { LineageGrid, LineageKit } from "../model/lineage-kit.ts";
 import {
   BaseGridModel,
   type Column,
@@ -163,6 +165,7 @@ export interface GridModelOptions<
   G extends Schema = NoTables,
   B extends readonly string[] = readonly string[],
   T extends Schema = NoTables,
+  R extends Schema = S,
 > extends GridSettings {
   /** The rows to show, in order. The application owns the view; the grid sorts through it. */
   data: RowView<S>;
@@ -192,10 +195,22 @@ export interface GridModelOptions<
    * row take none.
    */
   encode?: CellEncodings<S> | undefined;
-  /** Where the selected rows go; a store of the grid's own when left out. */
-  selectionStore?: SelectionStore<S>;
+  /**
+   * Where the selected rows go: a store of the view's table, or with
+   * `lineage`, of a table the view's table comes from (a grid of a groups'
+   * table bound to a store of their source); a store of the grid's own when
+   * left out.
+   */
+  selectionStore?: SelectionStore<R>;
   /** The store's channel for the selected rows; "grid-rows" by default. */
   channel?: string;
+  /**
+   * The lineage reader (`import { lineage } from "herceg"`), for a store of
+   * a table the view's table comes from: a row selects the rows behind it
+   * there, and shows how many of them the channel holds. Grids of groups
+   * (`groups`) through lineage are not drawn yet.
+   */
+  lineage?: SelectionLineage | undefined;
 }
 
 /**
@@ -336,10 +351,14 @@ interface ModelLooks {
  * The state of one grid over a row view. Every read brings it up to date
  * with its view, its groups, its table, and its selection store; listeners
  * are told synchronously when any of them, or the model's own state, changes.
+ * `R` is the schema of the table its selection store is of: the view's, or
+ * with `lineage` one the view's table comes from.
  */
-export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
+export class GridModel<S extends Schema = Schema, R extends Schema = S> extends BaseGridModel<S> {
   readonly data: RowView<S>;
-  readonly selectionStore: SelectionStore<S>;
+  readonly selectionStore: SelectionStore<R>;
+  /** The store as the model's own selection reads it, of the view's table (see `LineageGrid`). */
+  readonly #store: SelectionStore<S>;
   readonly channel: string;
   readonly #table: Table;
   #looks: ModelLooks | null = null;
@@ -393,16 +412,21 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
 
   /** `pivot`, from `createPivotGridModel`, shows a pivot's rows. */
   // biome-ignore lint/suspicious/noExplicitAny: groups and totals of any fields, which the columns' types were checked against.
-  constructor(options: GridModelOptions<S, any, any, any>, pivot?: GridPivot) {
+  constructor(options: GridModelOptions<S, any, any, any, R>, pivot?: GridPivot) {
     super(options, pivot ? "pivot grid" : "grid", options.data.source as unknown as Table);
     const { data, selectionStore: store } = options;
     this.data = data;
     this.#table = data.source as unknown as Table;
-    if (store && store.source !== data.source)
+    // A store of a table the view's comes from: the lineage reader's grid
+    // route reads and writes the selection in place of the model's own.
+    const through = !!store && (store.source as unknown as Table) !== this.#table;
+    const lineage = options.lineage as unknown as LineageKit | undefined;
+    if (through && !lineage)
       throw new Error(
-        "grid selectionStore: the store is of another table; give a store of the view's table",
+        "grid selectionStore: the store is of another table; give a store of the view's table, or lineage for a table it comes from",
       );
-    this.selectionStore = store ?? selectionStore(data.source);
+    this.selectionStore = store ?? (selectionStore(data.source) as unknown as SelectionStore<R>);
+    this.#store = this.selectionStore as unknown as SelectionStore<S>;
     this.channel = options.channel ?? "grid-rows";
     this.#pivot = pivot ?? null;
     const columns = options.columns as unknown as readonly GridColumn[];
@@ -425,7 +449,10 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       if (channel === model.channel) model.heardSelection(selection, revision);
       model.#changed();
     };
-    const stops = [data.subscribe(changed), this.selectionStore.subscribe(selected)];
+    // The reader refuses what it cannot show before the model follows anything.
+    const release = through && lineage!.grid(this as unknown as LineageGrid, changed, !!groups);
+    const stops = [data.subscribe(changed), this.#store.subscribe(selected)];
+    if (release) stops.push(release);
     const stop = () => {
       for (const unsubscribe of stops) unsubscribe();
     };
@@ -826,7 +853,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
 
   [COPY_ROWS](columns: readonly PlacedColumn[], limit: number): CopiedRows {
     // A pivot refuses any selection, without finding its rows.
-    if (this.#pivot) return this.selectionStore.get(this.channel) ? PIVOT_ROWS : null;
+    if (this.#pivot) return this.#store.get(this.channel) ? PIVOT_ROWS : null;
     const positions = this.#selectedOf(limit);
     if (!positions) return null;
     const table = this.#table;
@@ -902,7 +929,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   get selectionRevision(): number {
-    return this.selectionStore.revision;
+    return this.#store.revision;
   }
 
   /**
@@ -910,7 +937,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * counted over the whole table, so ask after selecting, not every frame.
    */
   get selectedCount(): number {
-    const selection = this.selectionStore.get(this.channel);
+    const selection = this.#store.get(this.channel);
     if (!selection) return 0;
     if (selection.kind === "rows") return selection.rows.size;
     const version = this.#table.version;
@@ -990,7 +1017,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   protected applyClearSelection(): boolean {
-    const store = this.selectionStore;
+    const store = this.#store;
     const had = store.get(this.channel) !== null || this.rangeAnchor !== null;
     this.rangeAnchor = null;
     if (store.get(this.channel) !== null) this.writeSelection(store, this.channel, null);
@@ -1478,15 +1505,12 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * further.
    */
   #selectedOf(limit: number): Uint32Array | null {
-    const selection = this.selectionStore.get(this.channel);
+    const selection = this.#store.get(this.channel);
     if (!selection) return null;
     const { indices, length } = (this.current() as Display).snapshot;
     let found = new Uint32Array(Math.min(length, 1024));
     let count = 0;
-    const test =
-      selection.kind === "rows"
-        ? (position: number) => selection.rows.has(position)
-        : this.#test(selection.expression);
+    const test = this.selectedTest(selection);
     for (let i = 0; i < length && count <= limit; i++) {
       const position = indices ? indices[i]! : i;
       if (!test(position)) continue;
@@ -1500,9 +1524,20 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     return found.subarray(0, count);
   }
 
+  /**
+   * Whether `selection` (the channel's) selects the record at a position,
+   * as copying reads it; a grid through lineage takes those all of whose
+   * rows it holds.
+   */
+  protected selectedTest(selection: DataSelection<S>): (position: number) => boolean {
+    return selection.kind === "rows"
+      ? (position) => selection.rows.has(position)
+      : this.#test(selection.expression);
+  }
+
   /** Whether the table's row at `position` is selected. */
   #selected(position: number): boolean {
-    const selection = this.selectionStore.get(this.channel);
+    const selection = this.#store.get(this.channel);
     if (!selection) return false;
     if (selection.kind === "rows") return selection.rows.has(position);
     return this.#test(selection.expression)(position);
@@ -1523,8 +1558,8 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   #groupCounts(): SelectedCounts {
     const groups = this.#groups!;
     this.current();
-    const selection = this.selectionStore.get(this.channel) as DataSelection | null;
-    const revision = this.selectionStore.revision;
+    const selection = this.#store.get(this.channel) as DataSelection | null;
+    const revision = this.#store.revision;
     const view = this.data as unknown as RowView;
     const cached = this.#counts;
     if (cached && countsHold(cached, groups, revision, selection, view)) {
@@ -1588,7 +1623,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * as they are now (toggling a row of it keeps the others selected).
    */
   #writable(): RowSet<S> {
-    const current = this.selectionStore.get(this.channel);
+    const current = this.#store.get(this.channel);
     if (current?.kind === "rows") return current.rows.copy();
     const rows = new RowSet(this.data.source);
     if (current?.kind === "predicate") {
@@ -1606,7 +1641,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * when they were current, so a click counts nothing again.
    */
   #publish(rows: RowSet<S>, adjust: ((counts: readonly Float64Array[]) => void) | null) {
-    const store = this.selectionStore;
+    const store = this.#store;
     const groups = this.#groups;
     const before = this.#counts;
     const view = this.data as unknown as RowView;
@@ -1638,7 +1673,8 @@ export function createGridModel<
   G extends Schema = NoTables,
   B extends readonly string[] = readonly string[],
   T extends Schema = NoTables,
->(options: GridModelOptions<S, G, B, T>): GridModel<S> {
+  R extends Schema = S,
+>(options: GridModelOptions<S, G, B, T, R>): GridModel<S, R> {
   return new GridModel(options);
 }
 

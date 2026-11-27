@@ -726,6 +726,7 @@ export function candlestick<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
       "itemKey",
     ]),
   };

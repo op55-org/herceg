@@ -3,7 +3,7 @@
   when they change; a theme or header height no longer passed goes back to
   its default.
 -->
-<script lang="ts" generics="S extends Schema">
+<script lang="ts" generics="S extends Schema, R extends Schema = S">
   import type { Schema } from "herceg";
   import { createGrid, type GridModel } from "herceg/grid";
   import { getAllContexts } from "svelte";
@@ -25,7 +25,7 @@
     onrowclick,
     oncellclick,
     onrender,
-  }: GridProps<S> = $props();
+  }: GridProps<S, R> = $props();
 
   const attach = useGrid(
     (container, given, options) => createGrid(container, { ...options, model: given as GridModel }),

@@ -324,10 +324,12 @@ class Chain implements ContributorRelation {
   }
 
   get partition(): boolean {
+    this.#catchUp();
     return this.#current().partition;
   }
 
   get single(): boolean {
+    this.#catchUp();
     return this.#current().single;
   }
 
@@ -352,14 +354,17 @@ class Chain implements ContributorRelation {
   }
 
   classOf(field?: string): string | null {
+    this.#catchUp();
     return this.#current().classOf(field);
   }
 
   operandOf(field?: string): string | undefined {
+    this.#catchUp();
     return this.#current().operandOf(field);
   }
 
   measureOf(field: string): Measure | undefined {
+    this.#catchUp();
     return this.#current().measureOf(field);
   }
 
@@ -401,7 +406,8 @@ class Chain implements ContributorRelation {
   }
 
   estimate(): number {
-    // Each part as built where it is, as estimated where it is not yet.
+    // Each part as built where it is, as estimated where it is not yet, of the rows caught up with.
+    this.#catchUp();
     let bytes = this.#current().estimate ?? 0;
     for (const record of this.#records) {
       if (record.kind === "derived") {
@@ -418,6 +424,7 @@ class Chain implements ContributorRelation {
   }
 
   get owned(): number {
+    this.#catchUp();
     let bytes = 0;
     for (const record of this.#records) bytes += record.owned ?? 0;
     return bytes;
@@ -449,8 +456,17 @@ class Chain implements ContributorRelation {
    * as of its stale rows. A chain of one record catches up in its links.
    */
   #sync() {
+    if (this.#records.length > 1) this.#catchUp();
+  }
+
+  /**
+   * Catches every record up, one alone too: what a relation says of itself
+   * (what fields measure, what it will hold) is of the rows its source
+   * holds, though asked from a listener of the source that runs before the
+   * producers'.
+   */
+  #catchUp() {
     const records = this.#records;
-    if (records.length < 2) return;
     for (let i = records.length - 1; i >= 0; i--) void records[i]!.revision;
   }
 

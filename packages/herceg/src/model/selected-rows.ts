@@ -49,7 +49,6 @@ import type { BandList, Frame, Mark } from "../marks/mark.ts";
 import { rowField } from "../marks/row-bindings.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { ItemViews } from "./item-views.ts";
 import type { ChartModel, DrawnPanel, ScaleInstance } from "./model.ts";
 import type { Picked } from "./pick.ts";
 import { pointRows } from "./point-rows.ts";
@@ -502,13 +501,16 @@ function rowsInRanges(parts: readonly Drawn[], selection: Brushed, out: number[]
 /**
  * What a brush (a range, a rectangle, or a lasso) of `owner` (every
  * panel's, for null) selects of `table`'s rows; undefined when no mark of
- * the table is drawn in its panels, so its selection stays as it is.
+ * the table is drawn in its panels, so its selection stays as it is. A
+ * lasso also adds each row to `byField` under the value field of the series
+ * whose point it holds (`Series.field`).
  */
 export function brushedRows(
   model: ChartModel,
   table: Table,
   selection: Brushed,
   owner: SelectionOwner | null,
+  byField?: Map<string | undefined, number[]>,
 ): DataSelection | undefined {
   // A map's or network's lasso is on its plane: the rows each panel draws inside it.
   const planes = owner?.plane ? owner.panels : !owner && model.layout ? [""] : undefined;
@@ -542,7 +544,13 @@ export function brushedRows(
   if (drawn.length === 0) return undefined;
   if (selection.lasso)
     return selectRows(
-      lassoed(drawn, selection.lasso, table, (panel, px, py) => model.coveredAt(panel, px, py)),
+      lassoed(
+        drawn,
+        selection.lasso,
+        table,
+        (panel, px, py) => model.coveredAt(panel, px, py),
+        byField,
+      ),
     );
   const owners = keys ?? panels.map(({ key }) => key);
   const marks = [...new Set(drawn.map(({ mark }) => mark))];
@@ -552,20 +560,48 @@ export function brushedRows(
   for (const mark of marks) {
     const parts = drawn.filter((d) => d.mark === mark);
     const condition = brushCondition(model, mark, parts, selection, owners);
+    const start = rows.length;
     if (condition === "rows") {
       snapshot = true;
       rowsInRanges(parts, selection, rows);
     } else conditions.push(condition);
+    if (byField)
+      byFieldOf(
+        byField,
+        parts,
+        condition === "rows" ? rows.slice(start) : rowsMeeting(condition, table),
+      );
   }
   const condition = any(conditions);
   if (!snapshot) return selectWhere(condition);
   // One stack needs rows, so the table's selection is rows: those meeting
   // the other marks' conditions as well.
-  if (conditions.length > 0) {
-    const { at } = compileExpression(condition, table);
-    for (let row = 0; row < table.length; row++) if (at(row) === true) rows.push(row);
-  }
+  if (conditions.length > 0) for (const row of rowsMeeting(condition, table)) rows.push(row);
   return selectRows(new RowSet(table).addAll(rows));
+}
+
+/** Positions of `table`'s rows meeting `condition` now. */
+function rowsMeeting(condition: Expression, table: Table): number[] {
+  const { at } = compileExpression(condition, table);
+  const rows: number[] = [];
+  for (let row = 0; row < table.length; row++) if (at(row) === true) rows.push(row);
+  return rows;
+}
+
+/** Adds `rows` to `byField` under the value field of each series of `parts` shown. */
+function byFieldOf(
+  byField: Map<string | undefined, number[]>,
+  parts: readonly Drawn[],
+  rows: readonly number[],
+): void {
+  for (const field of new Set(parts.filter((d) => !d.hidden).map((d) => valueFieldOf(d.series)))) {
+    let ofField = byField.get(field);
+    if (!ofField) {
+      ofField = [];
+      byField.set(field, ofField);
+    }
+    for (const row of rows) ofField.push(row);
+  }
 }
 
 /** The series of one mark in one panel, and what the mark's own lookups read of the panel. */
@@ -661,6 +697,7 @@ function lassoed(
   table: Table,
   /** Whether an inset covers a panel at a pixel, where it draws nothing. */
   covered: (panel: string, px: number, py: number) => boolean,
+  byField?: Map<string | undefined, number[]>,
 ): RowSet {
   const found: number[] = [];
   for (const entry of byMark(drawn)) {
@@ -681,13 +718,21 @@ function lassoed(
     for (const d of entry.parts) {
       if (d.hidden) continue;
       const s = d.series;
+      const field = valueFieldOf(s);
+      let ofField = byField?.get(field);
+      if (byField && !ofField) {
+        ofField = [];
+        byField.set(field, ofField);
+      }
       for (let k = 0; k < s.length; k++) {
         const row = rowOf(s, k);
         const point = anchorOf(entry, d, row);
         if (!point) continue;
         const [px, py] = point;
         if (px < box.left || px > box.right || py < box.top || py > box.bottom) continue;
-        if (inside(polygon, px, py) && !covered(panel.key, px, py)) found.push(row);
+        if (!inside(polygon, px, py) || covered(panel.key, px, py)) continue;
+        found.push(row);
+        ofField?.push(row);
       }
     }
   }
@@ -709,6 +754,8 @@ function inside(polygon: readonly (readonly [number, number])[], px: number, py:
 export interface PointRows {
   table: Table;
   rows: Uint32Array;
+  /** The value field of the point's series: the rows behind its value, through lineage. */
+  field?: string | undefined;
 }
 
 /**
@@ -727,16 +774,25 @@ function layoutAt(model: ChartModel, px: number, py: number): string | undefined
  * stands for, or null for none of theirs.
  */
 function itemRows(
-  items: ItemViews,
+  model: ChartModel,
   panel: string,
   tables: ReadonlySet<Table>,
   key: string,
 ): PointRows | null {
   for (const table of tables) {
-    const rows = items.rowsAt(key, table, panel);
-    if (rows) return { table, rows: Uint32Array.from(rows) };
+    const rows = model.items!.rowsAt(key, table, panel);
+    if (rows) return { table, rows: Uint32Array.from(rows), field: valueField(model, key) };
   }
   return null;
+}
+
+/** The value field of the layout mark an item's key names: what its rows stand behind, through lineage. */
+function valueField(model: ChartModel, key: string): string | undefined {
+  const mark = (JSON.parse(key) as unknown[])[0];
+  const marks = model.config.marks as readonly { spec: { id?: string; value?: unknown } }[];
+  const value = (typeof mark === "number" ? marks[mark] : marks.find((m) => m.spec.id === mark))
+    ?.spec.value;
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
@@ -783,7 +839,7 @@ export function clickedRows(
 ): PointRows | null | undefined {
   const on = clickedOn(model, tables, px, py);
   if (!on) return undefined;
-  if ("layout" in on) return itemRows(model.items!, on.layout, tables, on.key);
+  if ("layout" in on) return itemRows(model, on.layout, tables, on.key);
   const { picked, panel } = on;
   const { part } = picked.item;
   const point = part.kind === "row" ? part.series : part.point;
@@ -838,7 +894,7 @@ export function cursorRows(
   // A layout mark's panel: its item's rows there.
   const { items } = model;
   if (items?.panels.some(({ key }) => key === cursor.panel))
-    return itemRows(items, cursor.panel, tables, cursor.key) ?? undefined;
+    return itemRows(model, cursor.panel, tables, cursor.key) ?? undefined;
   const panel = model.panels().find(({ key }) => key === cursor.panel);
   const drawn = panel && drawnIn(model, [panel]).find((d) => d.series.key === cursor.key);
   if (!drawn?.mark.table || !tables.has(drawn.mark.table) || drawn.hidden) return undefined;
@@ -861,5 +917,17 @@ function rowsOf(
   position: number,
   panel: DrawnPanel,
 ): PointRows {
-  return { table: mark.table!, rows: pointRows(model, mark, series, position, panel) };
+  return {
+    table: mark.table!,
+    rows: pointRows(model, mark, series, position, panel),
+    field: valueFieldOf(series),
+  };
+}
+
+/**
+ * The field a series' values stand for, whose rows its points stand
+ * behind through lineage: none for a band, which stands for both its ends.
+ */
+export function valueFieldOf(s: Series): string | undefined {
+  return s.range ? undefined : s.field;
 }

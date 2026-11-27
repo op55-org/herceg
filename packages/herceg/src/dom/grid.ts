@@ -216,6 +216,8 @@ interface Row {
   y: number;
   width: number;
   selected: SelectionState | null;
+  /** What a partly selected row says of its selection (see `selectionNote`). */
+  note?: string | undefined;
 }
 
 /**
@@ -966,6 +968,13 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
         if (entry.kind === "group") row.element.removeAttribute("aria-selected");
         else row.element.setAttribute("aria-selected", String(selected === "all"));
         row.element.dataset.selection = selected;
+      }
+      // A row partly selected through lineage (data-selection "some") says how much.
+      const note = model.selectionNote?.(index);
+      if (row.note !== note) {
+        row.note = note;
+        if (note) row.element.setAttribute("aria-description", note);
+        else row.element.removeAttribute("aria-description");
       }
       // A table row's cells keep their text while their columns only move or
       // resize; a group's header's first cell names the group, so its text
@@ -1738,11 +1747,11 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   }
 }
 
-/** A grid in `container`; see `Grid`. */
-export function createGrid<S extends Schema>(
+/** A grid in `container`; see `Grid`. `R` is the schema of its model's store's table. */
+export function createGrid<S extends Schema, R extends Schema = S>(
   container: HTMLElement,
-  options: GridOptions<S>,
-): Grid<S> {
+  options: GridOptions<S, GridModel<S, R>>,
+): Grid<S, GridModel<S, R>> {
   return new Grid(container, options);
 }
 

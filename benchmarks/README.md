@@ -328,7 +328,7 @@ Results report the median, p95, and p99 of 15 samples (`--samples`).
 
 `npm run bench:interaction` measures what Herceg's pointer moves cost
 (`src/interaction/`), to catch regressions in the engine's input and
-drawing path; it compares no libraries. Fourteen fixtures, each move
+drawing path; it compares no libraries. Fifteen fixtures, each move
 checked for its effect:
 
 | Fixture | Charts | A move's effect |
@@ -343,6 +343,7 @@ checked for its effect:
 | `pan-view-labels` | `pan-labels`' chart labelled where each line crosses the view's start and end (`view-start`, `view-end`) | A frame of the moved view |
 | `anchor-pan` | One chart of 3 series x 5,000 minutes zoomed to a fifth, with a button anchored 8 px above the highest observation of each of 20 stretches in and around the view (fitted, so those at the plot's top go below their point), dragged 20 px right and back | A frame of the moved view, its anchors placed with it |
 | `cross-filter` | Three histograms of one 50,000-row table sharing a live `rowSelection`, the first brushed | All three drawn after the brush moved |
+| `lineage-hover` | A bar of the 40 groups of a 50,000-row table bound to the table's store through `lineage`, a range of the table selected once; the pointer moves over the bars with the selection unchanged, so a move reads the coverage the bars keep and computes none; a baseline tree without `lineage` cannot mount it, and the candidate runs it alone | The hover on the bar under the pointer, its tooltip saying how many of the group's rows are selected, as counted again from the rows |
 | `crosshair-dashboard` | Ten 600x250 charts of 15 series x 3,000 minutes sharing `interaction.sync.cursor`, the pointer over the first | The other nine reporting the cursor at the new minute (`hover` with cause `"sync"`, reported once drawn) |
 | `crosshair-totals` | `crosshair-dashboard`'s charts, each one's lines totalling their fifteen | As `crosshair-dashboard`'s |
 | `pick-crowd` | One chart of 12 crossing lines x 2,160 minutes (A1's crowd) with `select: "series"`, so every move picks for the cursor, and a `hover` listener; each move lands where two lines cross, inside both strokes | The hover reported there, naming the line picked |

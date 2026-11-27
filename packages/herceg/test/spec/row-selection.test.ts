@@ -5,11 +5,13 @@ import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { Table } from "../../src/data/table.ts";
 import { specToPDF, specToSVG } from "../../src/from-spec.ts";
 import { estimateText } from "../../src/layout/text.ts";
+import { lineage } from "../../src/model/lineage-kit.ts";
 import { membershipOf } from "../../src/model/memberships.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec, RowSelectionSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 function spec(
   rowSelection: RowSelectionSpec | RowSelectionSpec[],
@@ -25,10 +27,52 @@ function spec(
 }
 
 describe("row selections in specs", () => {
+  contractTest(
+    "selection.lineage.spec",
+    () => {
+      const sales: ChartSpec = {
+        data: {
+          sales: {
+            columns: { region: ["N", "N", "S"], day: [1, 2, 1], revenue: [10, 30, 5] },
+          },
+          byRegion: {
+            source: "sales",
+            transform: [
+              { aggregate: [{ op: "sum", field: "revenue", as: "revenue" }], by: ["region"] },
+            ],
+          },
+        },
+        marks: [
+          { type: "bar", data: "byRegion", x: "region", y: "revenue", partial: { fill: "red" } },
+        ],
+        rowSelection: {
+          data: "sales",
+          channel: "days",
+          budget: 1048576,
+          selection: { kind: "predicate", expression: ["<=", ["field", "day"], 1] },
+        },
+      };
+      expect(() => validateSpec(sales)).not.toThrow();
+      const svg = specToSVG(sales);
+      expect(svg).toContain("2 of 3 rows of sales selected.");
+      const model = new ChartModel(loadSpec(sales).config);
+      model.setSize(400, 300, 1);
+      model.config.rowSelection!.highlight(model);
+      const keys = model.scene(estimateText).panels[0]!.marks.map((g) => g.key.split("\u0001")[1]);
+      // North's revenue, 10 of 40, from its base; South's all of it.
+      expect(keys).toEqual(expect.arrayContaining(["upper", "on", "lower"]));
+      expect(() =>
+        validateSpec({ ...sales, rowSelection: { channel: "days", budget: 0 } }),
+      ).toThrow("rowSelection.budget");
+    },
+    "bind the store of a table derived entries come from, through lineage",
+  );
+
   it("bind a store of the table the marks read, made for it or given", () => {
     const made = loadSpec(spec({ channel: "focus" }));
     const store = made.stores.get("trips")!;
     expect(store.source).toBe(made.tables.get("trips"));
+    // Each with the lineage reader, for marks of tables derived from its table.
     expect(made.config.rowSelection?.bindings).toEqual([
       {
         store,
@@ -36,6 +80,7 @@ describe("row selections in specs", () => {
         events: ["brush", "lasso", "click"],
         effect: "highlight",
         live: false,
+        lineage,
       },
     ]);
     // Given tables and stores are used in place of the spec's own.

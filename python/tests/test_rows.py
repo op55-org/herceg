@@ -194,6 +194,49 @@ def test_static_output_draws_the_selection_highlighted():
     assert "2 of 4 rows selected." in svg(hg.col("fare") > 10)
 
 
+def sums():
+    """Fares summed by kind: a table each of whose rows comes from rows of trips."""
+    source = trips()
+    return source, hg.derive(source).aggregate(by="kind", fare=("fare", "sum"))
+
+
+@pytest.mark.contract("selection.lineage.python")
+def test_a_binding_of_a_derived_tables_data_reaches_its_marks():
+    source, summed = sums()
+    binding = SelectionBinding("focus", data=source, budget=4096)
+    chart = hg.Chart(summed, row_selection=binding).bar(
+        x="kind", y="fare", partial=hg.Look(stroke="#000")
+    )
+    spec, _ = chart.to_spec()
+    names = {name for name, table in spec["data"].items() if "source" in table}
+    assert len(names) == 1
+    derived = names.pop()
+    assert spec["data"][derived]["source"] == spec["rowSelection"]["data"]
+    assert spec["marks"][0]["data"] == derived
+    assert spec["rowSelection"] == {"channel": "focus", "data": "data", "budget": 4096}
+    assert spec["marks"][0]["partial"] == {"stroke": "#000"}
+    with pytest.raises(ValueError, match="SelectionBinding budget: expected bytes above 0"):
+        SelectionBinding("c", budget=0)
+    with pytest.raises(ValueError, match="SelectionBinding budget: expected bytes above 0"):
+        SelectionBinding("c", budget=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Look stroke_width: expected a number of at least 0"):
+        hg.Chart(summed).bar(x="kind", y="fare", partial={"stroke_width": -1})
+
+
+def test_static_output_draws_groups_selected_through_lineage():
+    pytest.importorskip("py_mini_racer")
+    source, summed = sums()
+    # Rows 0 and 1: 5 of kind a's 17, 9 of kind b's 29.
+    binding = SelectionBinding("focus", data=source, selection=[0, 1])
+    drawn = hg.Chart(summed, row_selection=binding).bar(x="kind", y="fare").to_svg()
+    assert "2 of 4 rows of data selected." in drawn
+    plain = hg.Chart(summed).bar(x="kind", y="fare").to_svg()
+    # Each bar is drawn as its selected part from the base, and the rest
+    # dimmed above it: one path more, of both bars' parts.
+    assert drawn.count("<path") == plain.count("<path") + 1
+    assert 'fill-opacity="0.25"' in drawn and 'fill-opacity="0.25"' not in plain
+
+
 pytest.importorskip("anywidget")
 
 

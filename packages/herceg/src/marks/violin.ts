@@ -658,6 +658,7 @@ export function violin<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
     ]),
   };
   if (table.name !== undefined) spec.data = table.name;

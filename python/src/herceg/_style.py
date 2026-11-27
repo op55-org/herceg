@@ -436,7 +436,10 @@ class Look:
     Marks' ``selected=`` and ``unselected=`` take one for what a selection
     holds of them (items or series selected, or the rows a row selection
     highlights) and what it does not (by default at a quarter of their
-    opacity). Treemaps' and sunbursts' ``leaf=`` and ``branch=`` take one,
+    opacity); ``partial=``, for an item of a table made from the selected
+    one (a group's mean, say) some of whose rows the selection holds, where
+    no selected part of it can be drawn (by default the unselected look,
+    outlined in the item's color). Treemaps' and sunbursts' ``leaf=`` and ``branch=`` take one,
     of ``fill``, ``fill_opacity``, and ``opacity``, for items without and
     with children::
 
@@ -464,7 +467,7 @@ class Look:
 
 
 def look_spec(value: Any, role: str) -> Any:
-    """The spec of a mark's ``selected=`` or ``unselected=``: an ``hg.Look``,
+    """The spec of a mark's ``selected=``, ``unselected=``, or ``partial=``: an ``hg.Look``,
     or a dict of its arguments."""
     return None if value is None else _spec(_built(value, Look, role))
 

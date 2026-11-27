@@ -30,7 +30,13 @@ import {
 import { stackTracks, type TrackRequest } from "../layout/tracks.ts";
 import { Polyline } from "../lod/polyline.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
-import { isLayoutMark, type LayoutMark, tablesOf, viewOf } from "../marks/layout-mark.ts";
+import {
+  isLayoutMark,
+  type LayoutFrame,
+  type LayoutMark,
+  tablesOf,
+  viewOf,
+} from "../marks/layout-mark.ts";
 import {
   type AxisBands,
   type AxisFormat,
@@ -209,6 +215,7 @@ export type XAxisConfig = XAxisOptions & { breaks?: TimeBreaks | undefined };
 import {
   type AxisInspection,
   type Inspection,
+  type InspectionCoverage,
   type InspectionMode,
   Inspector,
   type MarkSeries,
@@ -422,6 +429,7 @@ export type RangeSource = "fit" | "set" | "drawn";
 
 export type {
   AxisInspection,
+  InspectedCoverage,
   InspectedPoint,
   InspectedTotal,
   Inspection,
@@ -479,6 +487,17 @@ export class ChartModel {
    * layout marks drawing them (maps, trees, networks): set as `highlight` is.
    */
   declare layoutHighlight: Frame["highlighted"];
+  /**
+   * What a binding through lineage holds of each row of a table layout
+   * marks draw (a pie of groups): set as `highlight` is (see
+   * model/lineage-kit.ts).
+   */
+  declare layoutCoverage: LayoutFrame["covered"];
+  /**
+   * A point's coverage, for a mark of a table a binding reaches through
+   * lineage, and what its text adds: set as `highlight` is.
+   */
+  declare coverage: InspectionCoverage | undefined;
   /**
    * Draws the chart's own selection of items or series in its marks' looks,
    * and of layout marks' rows, where no store's highlight does: set by a
@@ -2993,6 +3012,7 @@ export class ChartModel {
         formatX: formatXOf(h, i),
         formatY: formatOf(i),
         formatValue: formatNumbers,
+        coverage: this.coverage,
         writer: this.#writer(
           locale,
           zone,

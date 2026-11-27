@@ -50,8 +50,15 @@ const coverages = /* @__PURE__ */ new WeakMap<
   WeakMap<SelectionStore, Map<string, Map<string | null, WeakRef<Coverage>>>>
 >();
 const forgotten = /* @__PURE__ */ new FinalizationRegistry<() => void>((forget) => forget());
-/** Releases what a coverage held (its relation's links, its membership's history) once it is collected. */
-const released = /* @__PURE__ */ new FinalizationRegistry<() => void>((release) => release());
+/** Releases what a coverage still holds (its relation's links, its membership's history) once it is collected. */
+const released = /* @__PURE__ */ new FinalizationRegistry<Held>((held) => {
+  for (const release of held.releases ?? []) release();
+});
+
+/** What a coverage holds of its relation and history while read: the releases. */
+interface Held {
+  releases: (() => void)[] | null;
+}
 
 /**
  * The coverage of `relation`'s targets by `store`'s `channel`, for the
@@ -113,6 +120,12 @@ interface Sums {
  * What a channel holds of each target's contributors. Reads catch up with
  * the membership and the relation first; between changes they read
  * counts.
+ *
+ * While read, it holds what its relation and the membership's history
+ * build for it (`ContributorRelation.hold`). Readers that keep it hold it
+ * (`hold`): with the last release, what it holds goes at once, its counts
+ * too, and a later read counts again. A read without a hold holds until the
+ * coverage is collected.
  */
 export class Coverage {
   readonly relation: ContributorRelation;
@@ -135,6 +148,11 @@ export class Coverage {
   readonly #removed: Removed = { target: -1, value: Number.NaN };
   /** Measures by field: what fields measure is fixed by the steps producing them. */
   readonly #measures = new Map<string, Measure | undefined>();
+  /** What it holds of its relation and history, shared with the collection's backstop. */
+  readonly #held: Held = { releases: null };
+  #holds = 0;
+  /** A read without a hold took one, kept until the coverage is collected. */
+  #unheld = false;
 
   constructor(relation: ContributorRelation, field: string | undefined, membership: Membership) {
     this.relation = relation;
@@ -142,12 +160,48 @@ export class Coverage {
     this.membership = membership;
     this.#direct = relation.single && relation.classOf(field) === null;
     this.#history = this.#direct ? null : historyOf(membership);
-    // What its relation and membership build for it lasts while it does.
-    const releases = [relation.hold()];
+    released.register(this, this.#held);
+  }
+
+  /**
+   * Holds it for a reader (a chart's binding) until the release returned is
+   * called; with the last release, what it built goes at once.
+   */
+  hold(): () => void {
+    this.#holds++;
+    this.#take();
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.#holds--;
+      this.#letGo();
+    };
+  }
+
+  /** Whether readers hold it (`hold`) or it holds what it built after a read without one. */
+  get held(): boolean {
+    return this.#held.releases !== null;
+  }
+
+  /** Takes what it reads through: its relation's links and its membership's history. */
+  #take() {
+    if (this.#held.releases) return;
+    const releases = [this.relation.hold()];
     if (this.#history) releases.push(this.#history.hold());
-    released.register(this, () => {
-      for (const release of releases) release();
-    });
+    this.#held.releases = releases;
+  }
+
+  /** With no reader left, lets what it holds go, and its counts: a later read counts again. */
+  #letGo() {
+    const held = this.#held;
+    if (this.#holds > 0 || this.#unheld || !held.releases) return;
+    for (const release of held.releases) release();
+    held.releases = null;
+    this.#cursor = null;
+    this.#selected = new Uint32Array(0);
+    this.#total = new Uint32Array(0);
+    this.#sums = null;
   }
 
   /** Moves whenever a count may have changed: readers keep what they draw of them by it. */
@@ -176,6 +230,11 @@ export class Coverage {
   /** Coverage groups its counts have room for. */
   get room(): number {
     return this.#selected.length;
+  }
+
+  /** Whether it keeps sums, or makes them at its next count from scratch. */
+  get sums(): boolean {
+    return this.#summing !== undefined;
   }
 
   /** Selected contributors of `target`. */
@@ -221,24 +280,28 @@ export class Coverage {
     target: number,
     field: string,
   ): { readonly field: string; readonly selected: number; readonly total: number } | undefined {
-    // Caught up first: the target's value is read as of the rows counted.
-    this.#sync();
+    // The producer caught up first, so what the field measures is of the
+    // rows there; sums asked for before counts are made, so they are made once.
+    const relation = this.relation;
+    if (relation.revision !== this.#revision || relation.layout !== this.#layout)
+      this.#measures.clear();
     let measure = this.#measures.get(field);
     if (!this.#measures.has(field)) {
-      measure = this.relation.measureOf(field);
+      measure = relation.measureOf(field);
       this.#measures.set(field, measure);
     }
+    if (measure?.op === "sum" && this.#summing !== measure.field) {
+      this.#summing = measure.field;
+      this.#revision = Number.NaN;
+    }
+    // Caught up: the target's value is read as of the rows counted.
+    this.#sync();
     if (!measure) return undefined;
-    const table = this.relation.target;
+    const table = relation.target;
     const whole = table.has(field)
       ? (table.numbers(field as never)[target] ?? Number.NaN)
       : Number.NaN;
     if (measure.op === "count") return { field, selected: this.selected(target), total: whole };
-    if (this.#summing !== measure.field) {
-      this.#summing = measure.field;
-      this.#revision = Number.NaN;
-    }
-    this.#sync();
     const group = this.relation.groupOf(target);
     const selected = this.selected(target);
     if (selected === 0) return { field, selected: 0, total: whole };
@@ -268,6 +331,11 @@ export class Coverage {
 
   /** Catches up with the relation and the membership. */
   #sync() {
+    // Read without a hold: held from now on until collected.
+    if (!this.#held.releases) {
+      this.#unheld = this.#holds === 0;
+      this.#take();
+    }
     if (this.#direct) {
       void this.relation.revision;
       return;
@@ -497,10 +565,15 @@ export interface LineageCost {
   readonly additional: number;
   /** Bytes producers keep anyway (groups' own arrays), reported beside the budget. */
   readonly owned: number;
+  /** Of `required`, the membership's and its history's, which every relation of one channel shares. */
+  readonly membership: number;
 }
 
 /** A binding's budget by default: bytes per row of the bound table. */
 export const BUDGET_PER_ROW = 16;
+
+/** The least a binding's budget is by default, which what any index keeps at least (64 B) fits. */
+export const BUDGET_FLOOR = 64 * 1024;
 
 /**
  * The bytes lineage keeps for highlighting `fields` of `relation`'s
@@ -519,8 +592,12 @@ export function lineageCost<S extends Schema>(
 ): LineageCost {
   const store = of as unknown as SelectionStore;
   const source = relation.source;
-  const rows = source.length;
   const membership = membershipOf(store, channel);
+  // Of the rows there now: the relation and the membership catch up first
+  // (a source listener may ask before the producers heard of a change).
+  void relation.revision;
+  void membership.revision;
+  const rows = source.length;
   const history = historyBytes(membership);
   // Each part as it is where it is larger: the bytes, with a quarter more
   // room, and transitions up to an eighth of the rows.
@@ -543,15 +620,22 @@ export function lineageCost<S extends Schema>(
   for (const [key, summed] of classes) {
     const coverage = made?.get(key)?.deref();
     const held = coverage?.byteLength ?? 0;
+    // A coverage of the class others made keeps the sums it was asked for.
+    const sums = summed || coverage?.sums === true;
     // Groups past the counts' room move them, at the next read, to half again as many.
     const room = coverage?.room ?? 0;
     const slots = room > 0 && groups > room ? Math.max(groups, room + (room >> 1)) : groups;
-    const bytes = relation.single && key === null ? 0 : slots * (8 + (summed ? 28 : 0));
+    const bytes = relation.single && key === null ? 0 : slots * (8 + (sums ? 28 : 0));
     counts += Math.max(bytes, held);
     built += held;
   }
   const required = membershipBytes + linkBytes + counts;
-  return { required, additional: Math.max(0, required - built), owned: relation.owned };
+  return {
+    required,
+    additional: Math.max(0, required - built),
+    owned: relation.owned,
+    membership: membershipBytes,
+  };
 }
 
 /** MiB, to a tenth, as budgets are told. */
@@ -561,22 +645,27 @@ function mebibytes(bytes: number): string {
 
 /**
  * The refusal of a binding whose lineage needs more than its budget (bytes;
- * `BUDGET_PER_ROW` a row of the bound table by default), or null within it.
- * `target` and `source` name the tables as messages do; `at` is the
- * binding's path.
+ * `BUDGET_PER_ROW` a row of the bound table by default, at least
+ * `BUDGET_FLOOR`), or null within it.
+ * `target` and `source` name the tables as messages do, quoted when named;
+ * `at` is the binding's path, and `fixed` says no option gives it another
+ * budget (a grid's). A refusal of growth after the chart was made is met in
+ * `phase` "render".
  */
 export function budgetRefusal(
-  cost: LineageCost,
+  cost: Pick<LineageCost, "required">,
   budget: number | undefined,
-  names: { target: string; source: string; rows: number; at?: string },
+  names: { target: string; source: string; rows: number; at?: string; fixed?: boolean },
+  phase?: "render",
 ): ChartError | null {
-  const allowed = budget ?? BUDGET_PER_ROW * names.rows;
+  const allowed = budget ?? Math.max(BUDGET_FLOOR, BUDGET_PER_ROW * names.rows);
   if (cost.required <= allowed) return null;
-  const why =
-    budget === undefined ? `${BUDGET_PER_ROW} bytes a row of ${names.source}` : "its budget";
+  const { target, source, fixed, at = "rowSelection" } = names;
+  const why = budget === undefined ? `${BUDGET_PER_ROW} bytes a row of ${source}` : "its budget";
   return new ChartError({
     code: "unsupported",
-    path: `${names.at ?? "rowSelection"}.budget`,
-    message: `rowSelection budget: highlighting "${names.target}" through "${names.source}" needs ${mebibytes(cost.required)} of indexes, past ${mebibytes(allowed)} (${why}); give a larger budget, or bind a store of "${names.target}"`,
+    path: fixed ? at : `${at}.budget`,
+    message: `${fixed ? at : `${at} budget`}: highlighting ${target} through ${source} needs ${mebibytes(cost.required)} of indexes, past ${mebibytes(allowed)} (${why}); ${fixed ? "" : "give a larger budget, or "}bind a store of ${target}`,
+    ...(phase && { phase }),
   });
 }

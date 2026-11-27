@@ -945,6 +945,7 @@ export class ItemViews {
     const laid = mark.draw({
       ...frame,
       selected: model.layoutHighlight ?? model.layoutLooks,
+      covered: model.layoutCoverage,
       drillable: !!model.config.interaction?.zoom,
       id,
       bounds: plot,

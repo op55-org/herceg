@@ -12,16 +12,23 @@ import * as engine from "herceg";
 import {
   type Anchor,
   anchor,
+  bar,
   type Chart,
+  category,
+  col,
+  count as countRows,
   createChart,
   custom,
+  groupRows,
   histogram,
   type Inspection,
   line,
   point,
   rowSelection,
+  rowView,
   rule,
   selectionStore,
+  selectWhere,
   table,
   text,
   time,
@@ -63,6 +70,7 @@ export type FixtureName =
   | "pan-view-labels"
   | "anchor-pan"
   | "cross-filter"
+  | "lineage-hover"
   | "crosshair-dashboard"
   | "crosshair-totals"
   | "pick-crowd"
@@ -71,7 +79,7 @@ export type FixtureName =
 declare global {
   interface Window {
     interaction: {
-      /** The fixtures this build can mount: trees from before segments mount no `segment-hover`. */
+      /** The fixtures this build can mount: trees from before segments or lineage mount no `segment-hover` or `lineage-hover`. */
       fixtures: FixtureName[];
       /**
        * Mounts fixture `name` for `moves` timed moves; a `candidate` build
@@ -984,6 +992,70 @@ const RECT = /M(-?[\d.]+) (-?[\d.]+)h([\d.]+)v([\d.]+)h-[\d.]+Z/g;
 /** How far, in pixels, the tooltip's shadow reaches past its box: 6 px down and 16 of blur (dom/tooltip.ts). */
 const SHADOW = 24;
 
+/** The engine's lineage reader, which trees from before it do not export. */
+const lineageOf = () => (engine as Record<string, unknown>).lineage;
+
+/**
+ * A bar of the 50,000-row table's 40 groups bound to the table's store
+ * through lineage, a brush's range of the table set once: the pointer moves
+ * over the bars with the selection unchanged, so each move reads the
+ * coverage the bars keep and computes none. The move's effect is the hover
+ * on the bar under the pointer, its tooltip saying how many of the group's
+ * rows are selected.
+ */
+async function lineageHover(count: number): Promise<Fixture> {
+  const n = 50_000;
+  const next = random(7);
+  const a = new Float64Array(n);
+  const g = new Array<string>(n);
+  for (let i = 0; i < n; i++) {
+    a[i] = next() * 100;
+    g[i] = `g${String(Math.floor(next() * 40)).padStart(2, "0")}`;
+  }
+  const rows = table({ a, g: category(g) });
+  const store = selectionStore(rows);
+  store.set("brush", selectWhere(col("a").ge(20).and(col("a").le(60))));
+  const groups = groupRows(rowView(rows), { by: ["g"], ops: { n: countRows() } });
+  const chart = createChart(host(800, 400), {
+    marks: [bar(groups.table, { x: "g", y: "n" })],
+    rowSelection: rowSelection({ store, channel: "brush", lineage: lineageOf() } as never),
+  });
+  charts = [chart];
+  await chart.loading;
+  await until(chart);
+  // Low in the plot, inside every bar (each about 1,250 rows).
+  const moves = sweep(chart, count, 0.05, 0.95, 0.9);
+  const checks = [0.27, 0.81, 0.46].map((fx) => inPlot(chart, fx, 0.9));
+  const all = [...moves, ...checks];
+  stops.push(
+    chart.on("hover", ({ cause, pointer, inspection }) => {
+      if (moving() && cause === "pointer" && inspection?.points.length)
+        if (at(chart, pointer, all[armed!.index])) drawn();
+    }),
+  );
+  verify = async (index) => {
+    const box = chart.root.getBoundingClientRect();
+    const move = all[index]!;
+    const point = chart.inspect(move.x - box.left, move.y - box.top)?.points[0];
+    if (!point || point.row === undefined) return "the pointer reads no bar";
+    // The group's rows the brush's range holds, counted again from the rows.
+    const key = groups.keyOf(point.row)[0];
+    let [selected, total] = [0, 0];
+    for (let i = 0; i < n; i++)
+      if (g[i] === key) {
+        total++;
+        if (a[i]! >= 20 && a[i]! <= 60) selected++;
+      }
+    const { coverage } = point as { coverage?: { selected: number; total: number } };
+    if (coverage?.selected !== selected || coverage.total !== total)
+      return `the bar of ${key} covers ${coverage?.selected} of ${coverage?.total} rows, not ${selected} of ${total}`;
+    const shown = tooltipBox(chart)?.textContent ?? "";
+    const said = `${selected.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} rows selected`;
+    if (!shown.includes(said)) return `the tooltip says "${shown}", not ${said}`;
+  };
+  return { moves, checks };
+}
+
 /**
  * What is wrong with the brushed rows a histogram of `values` highlights,
  * if anything: each bin's bar, as its live SVG draws it (layers of
@@ -1438,6 +1510,7 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
   "pan-view-labels": (count) => panLabels(count, "view"),
   "anchor-pan": anchorPan,
   "cross-filter": crossFilter,
+  "lineage-hover": lineageHover,
   "crosshair-dashboard": crosshairDashboard,
   "crosshair-totals": (count) => crosshairDashboard(count, true),
   "pick-crowd": pickCrowd,
@@ -1446,7 +1519,9 @@ const FIXTURES: Record<FixtureName, (count: number) => Promise<Fixture>> = {
 
 window.interaction = {
   fixtures: (Object.keys(FIXTURES) as FixtureName[]).filter(
-    (name) => name !== "segment-hover" || segmentOf() !== undefined,
+    (name) =>
+      (name !== "segment-hover" || segmentOf() !== undefined) &&
+      (name !== "lineage-hover" || lineageOf() !== undefined),
   ),
   mount: (name, count, isCandidate = false) => {
     candidate = isCandidate;

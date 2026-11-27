@@ -71,6 +71,26 @@ export interface InspectedPoint {
    * and sunbursts have them.
    */
   names?: readonly string[];
+  /**
+   * What a row selection holds of the rows behind the point, for a mark of
+   * a table its binding reaches through lineage (a bar of groups bound to
+   * their source's store), while the channel holds a selection: how many
+   * of them are selected, of how many, and for a count or sum, what the
+   * selected ones measure.
+   */
+  coverage?: InspectedCoverage;
+}
+
+/** What a channel holds of the rows behind an inspected point (see `InspectedPoint.coverage`). */
+export interface InspectedCoverage {
+  readonly selected: number;
+  readonly total: number;
+  /** "none" with none selected, "all" with every one, "partial" otherwise. */
+  readonly state: "none" | "partial" | "all";
+  /** Of a count or sum: what the selected rows measure, and what all do. */
+  readonly measure?: { readonly field: string; readonly selected: number; readonly total: number };
+  /** The bound channel. */
+  readonly channel: string;
 }
 
 /**
@@ -201,7 +221,22 @@ export interface DrawnScene {
   formatValue: Formatter;
   /** Writes the fields and content marks' tooltips show, once the chart has loaded what writes them. */
   writer?: TooltipWriter | undefined;
+  /** A point's coverage, of marks of tables a binding reaches through lineage. */
+  coverage?: InspectionCoverage | undefined;
 }
+
+/**
+ * What a binding through lineage holds of the rows behind a point of
+ * `mark` (its target row `row`, its series' value field `field`): the
+ * coverage inspection reports, and what its text adds ("; 12 of 42 rows
+ * selected, revenue 80 of 100"); undefined for none.
+ */
+export type InspectionCoverage = (
+  mark: Mark,
+  field: string | undefined,
+  row: number,
+  format: Formatter,
+) => { coverage: InspectedCoverage; text: string } | undefined;
 
 interface ReadableMark extends InspectedMark {
   axis: YAxisView;
@@ -220,6 +255,7 @@ export class Inspector {
   readonly #formatX: Formatter;
   readonly #formatValue: Formatter;
   readonly #writer: TooltipWriter | undefined;
+  readonly #coverage: InspectionCoverage | undefined;
   /** The marks whose tooltips total a reading, once the writers are here. */
   readonly #totaled: TotaledMark[] = [];
   readonly #left: YAxisView;
@@ -261,6 +297,7 @@ export class Inspector {
     this.#formatX = scene.formatX;
     this.#formatValue = scene.formatValue;
     this.#writer = scene.writer;
+    this.#coverage = scene.coverage;
     this.#left = { frame: scene.frame, formatY: scene.formatY };
     this.#right = scene.right;
     this.marks = scene.marks.map((entry) => {
@@ -791,9 +828,11 @@ export class Inspector {
     // A series of a field's values writes them as the field's display does, over its axis.
     const formatValue = s.write?.(axis) ?? axis;
     const label = mark.pointLabel?.(s, row, format) ?? s.label;
-    const text = mark.pointText?.(s, row, format) ?? formatValue(value);
     // Summarizing marks' series index rows of their summaries.
     const one = mark.summarizes ? undefined : row;
+    const covered =
+      one === undefined ? undefined : this.#coverage?.(mark, s.field, row, format.value);
+    const text = (mark.pointText?.(s, row, format) ?? formatValue(value)) + (covered?.text ?? "");
     return {
       mark: index,
       markId: mark.spec.id,
@@ -806,6 +845,7 @@ export class Inspector {
       text,
       px,
       py,
+      ...(covered && { coverage: covered.coverage }),
     };
   }
 }

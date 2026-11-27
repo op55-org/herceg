@@ -253,6 +253,40 @@ class InspectedPoint:
     #: heads a tooltip showing this point alone: each part's text and style,
     #: as inspected. None for marks without a heading.
     heading: tuple[ContentRun, ...] | None = None
+    #: What a row selection holds of the rows behind the point, for a mark of
+    #: a table its binding reaches through lineage, while the channel holds a
+    #: selection; None otherwise.
+    coverage: Coverage | None = None
+
+
+@dataclass(frozen=True)
+class CoverageMeasure:
+    """What the selected rows behind an aggregate measure of it, for a count or sum."""
+
+    #: The aggregate's column.
+    field: str
+    #: The count or sum of the selected rows.
+    selected: float
+    #: The aggregate's value: the count or sum of all its rows.
+    total: float
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """What a row selection holds of the rows behind an inspected point, for a
+    mark of a table its binding reaches through lineage: a bar of
+    ``hg.group_rows`` bound to its source's selection."""
+
+    #: Rows behind the point the channel holds.
+    selected: int
+    #: Rows behind the point.
+    total: int
+    #: "none" with none selected, "all" with every one, "partial" otherwise.
+    state: Literal["none", "partial", "all"]
+    #: The binding's channel.
+    channel: str
+    #: For a count or sum, what the selected rows measure of it; None otherwise.
+    measure: CoverageMeasure | None = None
 
 
 @dataclass(frozen=True)
@@ -1563,6 +1597,41 @@ def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _coverage(payload: Any) -> Coverage | None:
+    """A point's coverage as the browser wrote it, checked."""
+    if payload is None:
+        return None
+    measure = payload.get("measure") if isinstance(payload, dict) else None
+    if not (
+        isinstance(payload, dict)
+        and isinstance(payload.get("selected"), int)
+        and isinstance(payload.get("total"), int)
+        and payload.get("state") in ("none", "partial", "all")
+        and isinstance(payload.get("channel"), str)
+        and (
+            measure is None
+            or (
+                isinstance(measure, dict)
+                and isinstance(measure.get("field"), str)
+                and _finite(measure.get("selected"))
+                and _finite(measure.get("total"))
+            )
+        )
+    ):
+        raise ValueError(f"expected a point's coverage, not {payload!r}")
+    return Coverage(
+        selected=payload["selected"],
+        total=payload["total"],
+        state=payload["state"],
+        channel=payload["channel"],
+        measure=CoverageMeasure(
+            field=measure["field"], selected=measure["selected"], total=measure["total"]
+        )
+        if measure is not None
+        else None,
+    )
+
+
 def _runs(runs: list[dict[str, Any]] | None) -> tuple[ContentRun, ...] | None:
     """A point's content or heading as the browser wrote it, checked: its runs."""
     if runs is None:
@@ -1657,6 +1726,7 @@ def decode_inspection(payload: Any) -> Inspection | None:
                 names=tuple(point["names"]) if "names" in point else None,
                 content=_runs(point.get("content")),
                 heading=_runs(point.get("heading")),
+                coverage=_coverage(point.get("coverage")),
             )
             for point in payload.get("points", ())
         ),

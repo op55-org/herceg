@@ -1,8 +1,16 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
+import { expectTypeOf } from "vitest";
+import { sum } from "../../src/data/aggregations.ts";
+import { groupRows } from "../../src/data/groups.ts";
 import { type ReadonlyRowSet, RowSet } from "../../src/data/row-set.ts";
-import { selectionStore, selectRows } from "../../src/data/selection.ts";
+import { rowView } from "../../src/data/row-view.ts";
+import { type DataSelection, selectionStore, selectRows } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
+import { createGrid } from "../../src/dom/grid.ts";
+import { createGridModel } from "../../src/grid/model.ts";
+import { lineage } from "../../src/index.ts";
+import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
@@ -11,6 +19,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 declare const element: HTMLElement;
 const trips = table({ km: [1, 2], fare: [5, 9], kind: ["a", "b"] });
 const stops = table({ t: [0, 1], n: [3, 4] });
+type Trips = { km: "number"; fare: "number"; kind: "category" };
 const focus = selectionStore(trips);
 const near = selectionStore(stops);
 
@@ -53,3 +62,27 @@ loadSpec({ marks: [] }, [], { tables: { trips, stops }, stores: { trips: focus }
 const loaded = loadSpec({ marks: [] });
 loadSpec({ marks: [] }, [], { tables: loaded.tables, stores: loaded.stores });
 loadSpec({ marks: [] }, [], { stores: new Map([["trips", focus]]) });
+
+// Through lineage: a bar of groups of trips, bound to a store of trips with
+// the lineage reader, and a grid of the groups to the same store.
+const byKind = groupRows(rowView(trips), { by: ["kind"], ops: { fare: sum("fare") } });
+createChart(element, {
+  marks: [bar(byKind.table, { x: "kind", y: "fare" })],
+  rowSelection: rowSelection({ store: focus, channel: "focus", lineage, budget: 1 << 20 }),
+});
+const kinds = createGridModel({
+  data: rowView(byKind.table),
+  columns: [{ field: "kind" }, { field: "fare" }],
+  selectionStore: focus,
+  channel: "focus",
+  lineage,
+});
+// The grid keeps its store's schema, of trips, and reports selections of them.
+expectTypeOf(kinds.selectionStore).toEqualTypeOf(focus);
+createGrid(element, { model: kinds, ariaLabel: "Kinds" }).on("select", ({ selection }) => {
+  expectTypeOf(selection).toEqualTypeOf<DataSelection<Trips> | null>();
+});
+// @ts-expect-error the lineage reader is the one herceg exports
+rowSelection({ store: focus, channel: "focus", lineage: {} });
+// @ts-expect-error a budget is bytes
+rowSelection({ store: focus, channel: "focus", lineage, budget: "1 MiB" });

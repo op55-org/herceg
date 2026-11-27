@@ -2876,7 +2876,7 @@ export class MountedChart implements Chart, ExportsScene {
       config.marks.map((mark) => viewOf(mark)?.revision),
       [...model.hidden],
       config.navigator?.describe(model),
-      config.rowSelection?.description,
+      config.rowSelection?.describe(config),
       model.items?.summaryKey,
     ]);
     if (this.#described?.config === config && this.#described.key === key) return;

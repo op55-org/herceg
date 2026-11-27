@@ -420,6 +420,8 @@ READ |= {"PinTarget", "ItemMove", "ItemPosition"}
 READ |= {"Provenance", "ProvenanceSource", "ValueGroup", "IntervalGroup"}
 # Points' tooltip content, which inspections report.
 READ |= {"ContentRun", "ContentStyle"}
+# What a point's group holds of a selection through lineage, which inspections report.
+READ |= {"Coverage", "CoverageMeasure"}
 
 # Fields that replace what an object is given above, which are refused together.
 REPLACING = {("Ticks", "every"), ("Ticks", "values"), ("Place", "inside"), ("Label", "content")}

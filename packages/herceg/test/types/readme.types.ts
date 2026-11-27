@@ -17,17 +17,22 @@ import {
   errorbar,
   facet,
   fromRows,
+  groupRows,
   heatmap,
   histogram,
   line,
+  lineage,
   orderedTable,
   point,
   region,
   renderToSVG,
+  rowSelection,
   rowView,
   rule,
   type Schema,
   type SchemaOf,
+  selectionStore,
+  sum,
   sunburst,
   type Table,
   table,
@@ -703,3 +708,28 @@ createChart(element, {
   interaction: { zoom: true, toolbar: false },
   renderTooltip: ({ points: [point] }) => point && ["flare", ...(point.names ?? [])].join("/"),
 });
+
+// Data: groups highlighting their rows, through lineage
+declare const salesElement: HTMLElement;
+declare const regionsElement: HTMLElement;
+declare const salesRows: import("../../src/index.ts").Table<{
+  time: "time";
+  region: "category";
+  revenue: "number";
+}>;
+{
+  const focus = selectionStore(salesRows);
+  const byRegion = groupRows(rowView(salesRows), {
+    by: ["region"],
+    ops: { revenue: sum("revenue") },
+  });
+  createChart(salesElement, {
+    marks: [point(salesRows, { x: "time", y: "revenue" })],
+    interaction: { brush: "x" },
+    rowSelection: rowSelection({ store: focus, channel: "focus" }),
+  });
+  createChart(regionsElement, {
+    marks: [bar(byRegion.table, { x: "region", y: "revenue" })],
+    rowSelection: rowSelection({ store: focus, channel: "focus", lineage }),
+  });
+}

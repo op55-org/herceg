@@ -17,6 +17,7 @@ import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
+import type { RowsCoverage } from "../model/lineage-kit.ts";
 import type {
   ArcGeometry,
   Geometry,
@@ -27,7 +28,10 @@ import type {
 import type { Frozen, MarkTooltipSpec, PieSpec } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
 import {
+  type HeldItems,
+  heldItems,
   heldText,
+  holdRow,
   type ItemInfo,
   type ItemSources,
   type LayoutFrame,
@@ -72,13 +76,6 @@ interface Slice extends PieSlice {
   readonly code: number;
 }
 
-/** What a selection holds of each category, by code: its rows' count and sum, and the rows counted. */
-interface Held {
-  rows: Float64Array;
-  sums: Float64Array;
-  of: Float64Array;
-}
-
 export class PieMark implements LayoutMark {
   declare readonly [MARK]: true;
   readonly layout = true;
@@ -94,7 +91,7 @@ export class PieMark implements LayoutMark {
   /** Totals per category code, of all rows and of each facet panel's. */
   readonly #totals = new RowsCache<Float64Array>();
   /** What highlighted selections hold of each category. */
-  readonly #held = new SelectionCache<Held>();
+  readonly #held = new SelectionCache<HeldItems>();
   /** The one row each category's slice stands for, of all rows and of each facet panel's. */
   readonly #soles = new RowsCache<SoleRows>();
 
@@ -149,24 +146,19 @@ export class PieMark implements LayoutMark {
    * default): how many of them, their sum, and how many rows the category
    * counts, those its sum counts.
    */
-  #heldOf(selected: Uint8Array, rows: Uint32Array | undefined): Held {
+  #heldOf(
+    selected: Uint8Array,
+    rows: Uint32Array | undefined,
+    covered: RowsCoverage | undefined,
+  ): HeldItems {
     return this.#held.get(selected, rows, () => {
       const { codes, dictionary } = this.table.categories(this.spec.category);
       const values =
         this.spec.value === undefined ? undefined : this.table.numbers(this.spec.value);
-      const held = {
-        rows: new Float64Array(dictionary.length),
-        sums: new Float64Array(dictionary.length),
-        of: new Float64Array(dictionary.length),
-      };
+      const held = heldItems(dictionary.length, covered, this.spec.value);
       this.#eachRow(
         rows,
-        (row, code, value) => {
-          held.of[code]!++;
-          if (selected[row] !== 1) return;
-          held.rows[code]!++;
-          held.sums[code]! += value;
-        },
+        (row, code, value) => holdRow(held, code, row, value, selected, covered, this.spec.value),
         codes,
         values,
       );
@@ -289,7 +281,7 @@ export class PieMark implements LayoutMark {
     // With a selection highlighted, each slice's selected share is drawn out
     // from its inner edge, covering that share of its area, the rest dimmed.
     const selected = frame.selected?.(this.table);
-    const held = selected && this.#heldOf(selected, frame.rows);
+    const held = selected && this.#heldOf(selected, frame.rows, frame.covered?.(this.table));
     const heldShare = (slice: Slice) => held!.sums[slice.code]! / slice.value;
     const geometry = draw(slices, ends, r, labeled);
     if (held) {
@@ -369,7 +361,7 @@ export class PieMark implements LayoutMark {
             ? heldText(
                 held.rows[code]!,
                 held.of[code]!,
-                value === undefined
+                value === undefined || !held.measured
                   ? undefined
                   : {
                       field: fieldText?.label(value) ?? value,

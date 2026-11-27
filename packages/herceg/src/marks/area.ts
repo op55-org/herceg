@@ -1219,6 +1219,7 @@ export function area<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
       "itemKey",
       "axis",
       "facet",

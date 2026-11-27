@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from herceg import ItemReference, SeriesReference
+from herceg import Coverage, CoverageMeasure, ItemReference, SeriesReference
 from herceg._events import (
     _EPOCH,
     IntervalGroup,
@@ -177,6 +177,35 @@ def test_inspected_layout_items_carry_their_names():
     assert decode_inspection(named).points[0].names == ("Europe", "France")  # type: ignore[union-attr]
     # Points of series, and of other layouts, have none.
     assert decode_inspection(inspection).points[0].names is None  # type: ignore[union-attr]
+
+
+@pytest.mark.contract("inspection.coverage.python")
+def test_inspected_points_carry_what_a_selection_holds_of_their_rows():
+    point = {"mark": 0, "series": 0, "row": 1, "key": "[0,1]", "label": "b", "text": "29"}
+    inspection = {"axis": "x", "value": "b", "label": "kind", "points": [point]}
+    coverage = {
+        "selected": 1,
+        "total": 2,
+        "state": "partial",
+        "channel": "focus",
+        "measure": {"field": "fare", "selected": 9, "total": 29},
+    }
+    decoded = decode_inspection({**inspection, "points": [{**point, "coverage": coverage}]})
+    assert decoded.points[0].coverage == Coverage(  # type: ignore[union-attr]
+        selected=1,
+        total=2,
+        state="partial",
+        channel="focus",
+        measure=CoverageMeasure(field="fare", selected=9, total=29),
+    )
+    counted = {key: value for key, value in coverage.items() if key != "measure"}
+    without = decode_inspection({**inspection, "points": [{**point, "coverage": counted}]})
+    assert without.points[0].coverage.measure is None  # type: ignore[union-attr]
+    assert decode_inspection(inspection).points[0].coverage is None  # type: ignore[union-attr]
+    with pytest.raises(ValueError, match="expected a point's coverage"):
+        decode_inspection(
+            {**inspection, "points": [{**point, "coverage": {**coverage, "state": "some"}}]}
+        )
 
 
 def _legend_click(references: object) -> dict:

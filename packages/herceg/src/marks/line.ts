@@ -424,6 +424,7 @@ export function line<S extends Schema>(
       "inspect",
       "selected",
       "unselected",
+      "partial",
       ...FEATURES,
     ]),
   } as LineSpec;

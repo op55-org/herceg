@@ -135,21 +135,42 @@ export type Chosen = (series: Series | undefined) => {
 };
 
 /** How a mark draws what a selection holds and what it does not, by its looks. */
-interface Paint {
+export interface Paint {
   /** Whether a look of the mark's own replaces dimming. */
   looked: boolean;
   dim(geometry: Geometry): Geometry[];
   lit(geometry: Geometry): Geometry;
 }
 
+/**
+ * How a mark of a table reached through lineage draws (model/lineage-kit.ts),
+ * with the mark's paints, its frame, and `draw`, which draws parts of its
+ * series (see `part`) keyed `suffix`, hidden as their series are: its
+ * geometry, what each series holds as byte views of its targets (drawn as
+ * rows are), or undefined to draw as it is.
+ */
+export type Covered = (
+  series: readonly Series[],
+  paint: Paint,
+  frame: Frame,
+  draw: (parts: readonly Series[], suffix: string) => Geometry[],
+) => Geometry[] | Chosen | undefined;
+
 export class Highlighter {
   readonly #kit: HighlightKit;
   /** What a mark's series hold: its table's channel's selection, or the chart's; undefined for none. */
   readonly #of: (mark: Mark) => Chosen | undefined;
+  /** How marks of tables reached through lineage draw. */
+  readonly #covered: ((mark: Mark) => Covered | undefined) | undefined;
 
-  constructor(kit: HighlightKit, chosen: (mark: Mark) => Chosen | undefined) {
+  constructor(
+    kit: HighlightKit,
+    chosen: (mark: Mark) => Chosen | undefined,
+    covered?: (mark: Mark) => Covered | undefined,
+  ) {
     this.#kit = kit;
     this.#of = chosen;
+    this.#covered = covered;
   }
 
   /**
@@ -169,10 +190,7 @@ export class Highlighter {
     // Custom marks and segments dim their own items, reading `Frame.highlighted`.
     if (!highlights(mark) || mark.shapeLayout) return undefined;
     const table = mark.table;
-    const chosen = table && this.#of(mark);
-    if (!chosen) return undefined;
     const kit = this.#kit;
-    const selectedOf = (s: Series) => chosen(s).selected;
     const paint = paintOf(kit, mark, frame);
     // Parts of series draw into buffers and keys of their own, hidden as their series are.
     const hidden = (suffix: string) =>
@@ -180,6 +198,18 @@ export class Highlighter {
         ? frame.hidden
         : new Set(series.filter((s) => frame.hidden.has(s.key)).map((s) => s.key + suffix));
     const own = (suffix: string): Frame => ({ ...frame, hidden: hidden(suffix), keyed: false });
+    let chosen = table && this.#of(mark);
+    const covered = table && !chosen && this.#covered?.(mark);
+    if (covered) {
+      const drawn = covered(series, paint, frame, (parts, suffix) =>
+        mark.geometry(parts, own(suffix), key, rows),
+      );
+      if (!drawn || Array.isArray(drawn)) return drawn;
+      // Views of the targets as rows: drawn as a channel's rows are.
+      chosen = drawn;
+    }
+    if (!chosen || !table) return undefined;
+    const selectedOf = (s: Series) => chosen(s).selected;
     if (mark.selectedGeometry) {
       const byKey = new Map(series.map((s) => [s.key, s]));
       // Each part stands for the drawn series of its key, whose slot it keeps.
@@ -460,7 +490,7 @@ function split(kit: HighlightKit, s: Series, selected: Uint8Array): Split {
 }
 
 /** A series cut down to some of its rows, under a key of its own. */
-function part(s: Series, suffix: string, rows: Uint32Array): Series {
+export function part(s: Series, suffix: string, rows: Uint32Array): Series {
   return {
     ...s,
     key: s.key + suffix,
@@ -1475,7 +1505,7 @@ function paintOf(kit: HighlightKit, mark: Mark, frame: Frame): Paint & { looked:
  * A geometry in a look: the paint the look gives in place of its own
  * (colors read as the mark reads its own), the rest as drawn.
  */
-function inLook(geometry: Geometry, look: Look, frame: Frame): Geometry {
+export function inLook(geometry: Geometry, look: Look, frame: Frame): Geometry {
   const color = (value: string | undefined, part: string) =>
     value === undefined ? undefined : frame.paint(value, `${geometry.kind} ${part}`);
   const { fill, stroke, strokeWidth, dash, opacity, radius } = look;
