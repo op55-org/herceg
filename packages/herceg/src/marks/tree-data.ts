@@ -22,6 +22,7 @@ import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
+import type { RowsCoverage } from "../model/lineage-kit.ts";
 import type { Rect, TextGeometry } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { InteractionSpec } from "../spec/spec.ts";
@@ -169,6 +170,8 @@ export interface Held {
   values: Float64Array;
   /** The totals shares are of: the view's, less hidden colors'. */
   of: Float64Array;
+  /** Whether `values` measure what the selection holds of the weights (see `HeldItems.measured`). */
+  measured: boolean;
 }
 
 export class TreeData {
@@ -695,18 +698,25 @@ export class TreeData {
     selected: Uint8Array,
     off: Uint8Array | undefined,
     shown: Float64Array,
+    covered?: RowsCoverage,
   ): Held {
     // Views are kept while what they are of is the same; with colors hidden,
     // which leave out their rows, counted again.
-    if (off) return { ...this.#count(view, selected, off), of: shown };
+    if (off) return { ...this.#count(view, selected, off, covered), of: shown };
     return this.#held.get(selected, view, () => ({
-      ...this.#count(view, selected, undefined),
+      ...this.#count(view, selected, undefined, covered),
       of: view.values,
     }));
   }
 
   /** What `selected` holds of each node of `view`, the rows of the color groups `off` hides left out. */
-  #count(view: TreeView, selected: Uint8Array, off: Uint8Array | undefined): Omit<Held, "of"> {
+  #count(
+    view: TreeView,
+    selected: Uint8Array,
+    off: Uint8Array | undefined,
+    covered: RowsCoverage | undefined,
+  ): Omit<Held, "of"> {
+    const measured = !covered || covered.measured(this.#value);
     const { tree, group } = this.view();
     const { nodeOfRow } = tree;
     const weights = this.#weights();
@@ -716,11 +726,21 @@ export class TreeData {
     eachRow(view, nodeOfRow.length, (row) => {
       const node = nodeOfRow[row]!;
       if (node < 0 || (off && group[node]! >= 0 && off[group[node]!])) return;
+      // As totals weigh rows: one without a weight adds nothing.
+      const weight = weights ? weights[row]! : 1;
+      if (covered) {
+        // Through lineage: the rows behind the row, and its weight's selected part.
+        const field = this.#value;
+        rows[node]! += covered.total(row, field);
+        hits[node]! += covered.selected(row, field);
+        const part = covered.part(row, field);
+        if (part !== undefined && !Number.isNaN(weight))
+          values[node]! += field === undefined ? part * weight : part;
+        return;
+      }
       rows[node]!++;
       if (!selected[row]) return;
       hits[node]!++;
-      // As totals weigh rows: one without a weight adds nothing.
-      const weight = weights ? weights[row]! : 1;
       if (!Number.isNaN(weight)) values[node]! += weight;
     });
     for (let at = tree.size - 1; at > 0; at--) {
@@ -730,12 +750,13 @@ export class TreeData {
       rows[parent]! += rows[node]!;
       values[parent]! += values[node]!;
     }
-    if (!view.nodes) return { hits, rows, values };
+    if (!view.nodes) return { hits, rows, values, measured };
     const nodes = view.nodes;
     return {
       hits: Int32Array.from(nodes, (node) => hits[node]!),
       rows: Int32Array.from(nodes, (node) => rows[node]!),
       values: Float64Array.from(nodes, (node) => values[node]!),
+      measured,
     };
   }
 
@@ -757,7 +778,7 @@ export class TreeData {
     return heldText(
       held.hits[node]!,
       held.rows[node]!,
-      value === undefined
+      value === undefined || !held.measured
         ? undefined
         : { field: text?.label(value) ?? value, held: held.values[node]!, of: held.of[node]! },
       (n) => formatNumber(n, locale),

@@ -919,8 +919,10 @@ the relation up first, so a target's value and its counts agree. It is
 kept per relation, store, channel, and class of fields, so fields reading
 the same rows share it, two stores of one table under one channel name do
 not, and two aggregates of one group reading different finite values do
-not. A coverage holds its relation and the membership's history while it
-lives, and lets them go once collected. No mark draws it yet.
+not. Readers hold a coverage (`hold()`): while held it keeps its
+relation's links and the membership's history, and with the last release
+lets them go at once, its counts too (a later read counts again). A read
+without a hold keeps them until the coverage is collected.
 
 - **Following changes.** Counts are kept per target as two `Uint32Array`s;
   sums as compensated high, low, and error parts with a count of negative
@@ -969,6 +971,76 @@ its table's channel holds a selection.
   `draw/arc.ts` for slices).
 - Exports read the highlight from geometry (`Drawing.opacity`,
   `Drawing.clip`), which SVG, canvas, and the PDF painter apply.
+
+**Bindings through lineage.** A binding's store may be of a table the
+marks' tables come from ([Contributors](data.md#contributors)): a bar of
+`byRegion.table` bound to a store of `sales`.
+
+- **The resolver** (`model/lineage-binding.ts`, eager) is where every
+  comparison of a mark's table with a bound table goes: for each table the
+  marks read it walks the contributor records' sources (at most 64 steps)
+  to the bindings of the table and its ancestors, nearest first, and gives
+  a `Resolution` (table to route: the binding, and for an ancestor's, the
+  kit's route). Gestures (`reaching`), highlighting, descriptions, and the
+  refusals of brushes read it, kept per configuration. A route through
+  lineage without the reader is refused, naming the import; the kit
+  refuses a table reaching two bindings and a binding no table reaches.
+- **The kit** (`model/lineage-kit.ts`) is the `lineage` export: the
+  binding's `lineage` option holds it, and the resolver reaches it through
+  that, so a chart without it loads none of the kit, coverage, or the
+  contributor relations. The spec loader imports it, so specs need no
+  opt-in. A route holds the relation (`relationTo`) and a coverage per
+  class of the fields its marks draw (their value axis's fields, a layout
+  mark's `value`). It refuses marks that draw a selection's shapes of
+  their own (`summarizes`, `selectedGeometry`: their positions are bins
+  and merges, not the table's rows), and layout marks of a table whose
+  rows share contributors (`ContributorRelation.partition` false), whose
+  items' counts would count rows twice.
+- **Drawing.** The highlighter (`model/highlight.ts`) asks the kit how a
+  mark of a routed table draws (`Covered`), with the mark's paints, frame,
+  and its geometry of parts. Glyphs draw parts keyed `\u0001off`,
+  `\u0001on`, and `\u0001partial`; bars of a count, or a sum without
+  negative contributions (`Coverage.negatives`), split a partly selected
+  bar at its share in data values, from its base (`y0`, a stack's), into
+  `\u0001lower` (lit, unrounded) and `\u0001upper` (dimmed), with labels
+  from the whole. The partial look is the mark's `partial`, else its
+  dimmed geometry with an edge or ring in its color. Lines and areas take
+  a byte view per series of the targets with any contributor of its field
+  selected (`Covered` returns a `Chosen`), as rows are drawn. Layout marks read a `RowsCoverage` through their frame
+  (`LayoutFrame.covered`): each row's counts and its value's selected part
+  (`holdRow`), and whether parts measure every row (`measured`).
+- **Gestures** write the source's rows: a click's (and Space's) target rows
+  in the frame drawn, captured at the click, through the hit series' field
+  (a layout item's, its mark's `value`; a band's none, `valueFieldOf`:
+  bands and error bars stand for every row behind them); brushes and lassos their rows'
+  contributors per field (`brushedRows` fills `byField` with each mark's
+  rows under its shown series' fields; plane lassos name none, and take
+  every drawn field); items and series by the mark their keys name
+  (`Reader.key`) and the field of it they name. A brush's condition is
+  rewritten through each derivation's `back` when every step writes it.
+  Walks hold the relation's traces until the route is released. A brush
+  along an axis placed by statistics (its position, range ends, or
+  errors: a measure, a field whose contributors are its finite values, or
+  an aggregate's, rolling aggregate's, or calculated or binned from one,
+  traced through the derivations' steps) is refused with the brushes
+  summaries refuse. Several tables reaching one binding
+  join their selections (the conditions' disjunction, else rows).
+- **Inspection** asks the model's `coverage` hook per point of a routed
+  mark: the target's `InspectedCoverage` and the text it adds;
+  `web/events.ts` copies it to payloads and Python decodes `hg.Coverage`.
+- **Budgets.** A binding's routes share one budget (`lineageCost`, the
+  membership counted once): over it at creation, the binding is refused;
+  checked again per draw and per gesture (`RowLink.#checked`, for
+  bindings that draw nothing) as tables' versions or the coverages' sums
+  change, past it the routes stop, let go of what they hold, report a
+  `"render"`-phase error once, and the description says so. A grid's
+  route checks as its bound table changes and reports through
+  `reportError`. Gestures of a stopped route hold what they walk only
+  while walking.
+- **Release.** Routes hold their coverages. Highlighting lets go of a
+  resolution when the configuration changes and when it stops (the chart
+  destroyed, the binding replaced), and a grid's route when the model is
+  disposed: the relation's links and the membership's history go at once.
 
 **Python numbering.** A widget's rows are numbered as Python numbers them:
 the browser reports row-set identities with the drops and replaces Python

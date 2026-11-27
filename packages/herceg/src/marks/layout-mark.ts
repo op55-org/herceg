@@ -14,6 +14,7 @@ import type { CompiledFeatures } from "../model/features.ts";
 import type { ItemViews } from "../model/item-views.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
+import type { RowsCoverage } from "../model/lineage-kit.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
@@ -152,6 +153,12 @@ export interface LayoutFrame {
    * draws as it is.
    */
   selected?: ((table: Table) => Uint8Array | undefined) | undefined;
+  /**
+   * For a table a row selection reaches through lineage (a pie of groups
+   * bound to their source's store): what it holds of the rows behind each
+   * row, which `selected` gives a byte view of (1 where any is selected).
+   */
+  covered?: ((table: Table) => RowsCoverage | undefined) | undefined;
   /**
    * The item key of the node a tree is drilled into (see
    * `Chart.setDrillRoot`), then its ancestors' nearest first, for a node the
@@ -600,6 +607,65 @@ export class SelectionCache<T> {
     else kept.all = value;
     return value;
   }
+}
+
+/** What a highlighted selection holds of a layout mark's items: rows selected, all rows, and the selected rows' value. */
+export interface HeldItems {
+  rows: Float64Array;
+  sums: Float64Array;
+  of: Float64Array;
+  /**
+   * Whether `sums` measure what the selection holds of the field the mark
+   * sums, which items then say: not for a table reached through lineage
+   * whose field is a mean, say, of which no selected part can be drawn.
+   */
+  measured: boolean;
+}
+
+/** Held counts of `size` items, none yet, of a mark summing `field` (see `HeldItems.measured`). */
+export function heldItems(
+  size: number,
+  covered: RowsCoverage | undefined,
+  field: string | undefined,
+): HeldItems {
+  return {
+    rows: new Float64Array(size),
+    sums: new Float64Array(size),
+    of: new Float64Array(size),
+    measured: !covered || covered.measured(field),
+  };
+}
+
+/**
+ * Adds row `row` of value `value` to item `item` of `held`: of the rows a
+ * selection of the mark's table holds (`selected`), or for a table a
+ * binding reaches through lineage (`covered`), the rows behind it and the
+ * selected part of `field`'s value, none where no part can be drawn (a
+ * mean some of whose rows are selected), so that its item says how many
+ * of its rows are selected but draws no selected share of them.
+ */
+export function holdRow(
+  held: HeldItems,
+  item: number,
+  row: number,
+  value: number,
+  selected: Uint8Array,
+  covered: RowsCoverage | undefined,
+  field: string | undefined,
+): void {
+  if (!covered) {
+    held.of[item]!++;
+    if (selected[row] !== 1) return;
+    held.rows[item]!++;
+    held.sums[item]! += value;
+    return;
+  }
+  held.of[item]! += covered.total(row, field);
+  held.rows[item]! += covered.selected(row, field);
+  const part = covered.part(row, field);
+  // A count of rows (no field) weighs each row as its value does.
+  held.sums[item]! +=
+    part === undefined ? 0 : field === undefined ? part * value : Math.max(0, part);
 }
 
 /**

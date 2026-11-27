@@ -12,7 +12,8 @@ whose data is large or changes often.
   a second y axis, time axes that leave out nights and weekends, and a
   range navigator.
 - **Data.** Columnar, typed-array tables with streaming appends and rolling
-  windows, derived tables, row views, linked row selections, row groups,
+  windows, derived tables, row views, linked row selections (which charts
+  of groups and derived tables follow through their rows), row groups,
   totals, and pivots.
 - **Large data.** Level-of-detail reduction for lines and areas, Canvas for
   dense marks, and WebGL for large point clouds and 3D, chosen per chart.

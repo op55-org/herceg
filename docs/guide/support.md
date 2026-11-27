@@ -62,7 +62,12 @@ the generated [capability matrix](../capabilities.md).
   heatmaps, and 2D histograms highlight the selected share; contours
   select by brush only and draw as they are; annotations of a table and
   dendrograms select no rows; gauges, radars, and 3D charts refuse a
-  binding. [Selected rows](interaction.md#selected-rows)
+  binding. A chart of a derived table bound to its source's store
+  through `lineage` highlights the rows behind its items on bars, points,
+  lines, areas, rugs, error bars, and layout marks; the summaries above,
+  contours, and candlesticks refuse it yet.
+  [Selected rows](interaction.md#selected-rows),
+  [Groups highlighting their rows](data.md#groups-highlighting-their-rows)
 - **Series from color.** A category `color` names series on lines, areas,
   bars, points, histograms, box plots, boxen, violins, error bars, rugs,
   segments, map points, and 3D points; candlesticks color by rise and fall, and

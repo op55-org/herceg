@@ -2051,6 +2051,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2132,6 +2133,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "line selected"),
                 "unselected": look_spec(unselected, "line unselected"),
+                "partial": look_spec(partial, "line partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "line"),
                 "id": id,
@@ -2179,6 +2181,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2349,6 +2352,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "area selected"),
                 "unselected": look_spec(unselected, "area unselected"),
+                "partial": look_spec(partial, "area partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "area"),
                 "id": id,
@@ -2392,6 +2396,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2556,6 +2561,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "bar selected"),
                 "unselected": look_spec(unselected, "bar unselected"),
+                "partial": look_spec(partial, "bar partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "bar"),
                 "id": id,
@@ -2587,6 +2593,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2648,6 +2655,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "rug selected"),
                 "unselected": look_spec(unselected, "rug unselected"),
+                "partial": look_spec(partial, "rug partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rug"),
                 "id": id,
@@ -2823,6 +2831,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2937,6 +2946,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "errorbar selected"),
                 "unselected": look_spec(unselected, "errorbar unselected"),
+                "partial": look_spec(partial, "errorbar partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "errorbar"),
                 "id": id,
@@ -2981,6 +2991,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3174,6 +3185,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "point selected"),
                 "unselected": look_spec(unselected, "point unselected"),
+                "partial": look_spec(partial, "point partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "point"),
                 "id": id,
@@ -3213,6 +3225,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3303,6 +3316,7 @@ class Chart:
                     "pick": pick,
                     "selected": look_spec(selected, "histogram selected"),
                     "unselected": look_spec(unselected, "histogram unselected"),
+                    "partial": look_spec(partial, "histogram partial"),
                     "inspect": inspect,
                     "id": id,
                 },
@@ -3393,6 +3407,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "histogram selected"),
                 "unselected": look_spec(unselected, "histogram unselected"),
+                "partial": look_spec(partial, "histogram partial"),
                 "inspect": inspect,
                 "id": id,
             },
@@ -3423,6 +3438,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -3467,6 +3483,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "candlestick selected"),
                 "unselected": look_spec(unselected, "candlestick unselected"),
+                "partial": look_spec(partial, "candlestick partial"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "candlestick"),
                 "id": id,
@@ -3668,6 +3685,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3756,6 +3774,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "boxplot selected"),
                 "unselected": look_spec(unselected, "boxplot unselected"),
+                "partial": look_spec(partial, "boxplot partial"),
                 "inspect": inspect,
             },
             x,
@@ -3796,6 +3815,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3858,6 +3878,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "boxen selected"),
                 "unselected": look_spec(unselected, "boxen unselected"),
+                "partial": look_spec(partial, "boxen partial"),
                 "inspect": inspect,
             },
             x,
@@ -3896,6 +3917,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3944,6 +3966,7 @@ class Chart:
                 "pick": pick,
                 "selected": look_spec(selected, "violin selected"),
                 "unselected": look_spec(unselected, "violin unselected"),
+                "partial": look_spec(partial, "violin partial"),
                 "inspect": inspect,
             },
             x,
@@ -5153,6 +5176,7 @@ class Chart:
         pick: bool | None = None,
         selected: Look | Mapping[str, Any] | None = None,
         unselected: Look | Mapping[str, Any] | None = None,
+        partial: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -5236,6 +5260,7 @@ class Chart:
             "pick": pick,
             "selected": look_spec(selected, "heatmap selected"),
             "unselected": look_spec(unselected, "heatmap unselected"),
+            "partial": look_spec(partial, "heatmap partial"),
             "inspect": inspect,
             "id": id,
         }
@@ -6575,7 +6600,8 @@ class Chart:
         return self._derived[table] if isinstance(self._tables[table][0], View) else table
 
     def _bound_index(self, binding: SelectionBinding) -> int:
-        """The table a binding selects rows of: its ``data``, or else the chart's
+        """The table a binding selects rows of: its ``data`` (a table the marks
+        read, or one a derived table they read comes from), or else the chart's
         data, or the one table the marks read (a view's data, for views)."""
         read = sorted(
             {self._selected(table) for _, table in self._marks if table is not None}
@@ -6601,12 +6627,21 @@ class Chart:
                 "SelectionBinding data: a view; selections hold rows of its data, so bind that",
                 path=self._binding_path(binding, "data"),
             )
-        if found is None or found not in read:
+        if found is None or not any(found in self._lineage(table) for table in read):
             raise ChartError(
-                "SelectionBinding data: expected an object given to one of the chart's marks",
+                "SelectionBinding data: expected an object given to one of the chart's marks, "
+                "or the data of a derived table one draws",
                 path=self._binding_path(binding, "data"),
             )
         return found
+
+    def _lineage(self, table: int) -> list[int]:
+        """A table and those it is derived from, nearest first: a binding of
+        any of them reaches the rows its marks draw."""
+        tables = [table]
+        while tables[-1] in self._derived:
+            tables.append(self._derived[tables[-1]])
+        return tables
 
     def _binding_path(self, binding: SelectionBinding, option: str | None = None) -> str:
         """Where one of the chart's row selection bindings is, or an option of it."""
@@ -10215,6 +10250,7 @@ def line(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -10250,6 +10286,7 @@ def line(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
@@ -10293,6 +10330,7 @@ def area(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -10340,6 +10378,7 @@ def area(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
@@ -10378,6 +10417,7 @@ def bar(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -10416,6 +10456,7 @@ def bar(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         item_key=item_key,
         id=id,
@@ -10455,6 +10496,7 @@ def scatter(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -10492,6 +10534,7 @@ def scatter(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         tooltip=tooltip,
         id=id,
@@ -10658,6 +10701,7 @@ def heatmap(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -10692,6 +10736,7 @@ def heatmap(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         tooltip=tooltip,
         id=id,
@@ -10852,6 +10897,7 @@ def histogram(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -10884,6 +10930,7 @@ def histogram(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         id=id,
     )
@@ -10999,6 +11046,7 @@ def boxplot(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -11028,6 +11076,7 @@ def boxplot(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         id=id,
     )
@@ -11056,6 +11105,7 @@ def boxen(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -11081,6 +11131,7 @@ def boxen(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         id=id,
     )
@@ -11107,6 +11158,7 @@ def violin(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -11130,6 +11182,7 @@ def violin(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         id=id,
     )
@@ -11456,6 +11509,7 @@ def candlestick(
     pick: bool | None = None,
     selected: Look | Mapping[str, Any] | None = None,
     unselected: Look | Mapping[str, Any] | None = None,
+    partial: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -11481,6 +11535,7 @@ def candlestick(
         pick=pick,
         selected=selected,
         unselected=unselected,
+        partial=partial,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,

@@ -419,3 +419,67 @@ describe("a reading's totals, as each front end reports them", () => {
       `carries the reading's total, in ${where}`,
     );
 });
+
+describe("what a selection holds of a bar's rows, as each front end reports it", () => {
+  // A bar of sums by region, bound to its source's selection of day 1.
+  const spec = sent({
+    data: {
+      sales: {
+        columns: { region: ["N", "N", "S"], day: [1, 2, 1], revenue: [10, 30, 5] },
+      },
+      byRegion: {
+        source: "sales",
+        transform: [
+          { aggregate: [{ op: "sum", field: "revenue", as: "revenue" }], by: ["region"] },
+        ],
+      },
+    },
+    marks: [{ type: "bar", data: "byRegion", x: "region", y: "revenue" }],
+    rowSelection: {
+      data: "sales",
+      channel: "days",
+      events: [],
+      selection: { kind: "predicate", expression: ["<=", ["field", "day"], 1] },
+    },
+  } as unknown as DrawnCase["spec"]);
+
+  /** Clicks North's bar near its base, once the chart has loaded. */
+  async function clickNorth(chart: MountedChart) {
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    chart.render();
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    const at = {
+      // North's band is the first of two.
+      clientX: rect.left + plot.x + plot.width / 4,
+      clientY: rect.top + plot.y + plot.height - 4,
+      bubbles: true,
+    };
+    for (const type of ["pointermove", "pointerdown", "pointerup"])
+      chart.root.dispatchEvent(new PointerEvent(type, { ...at, pointerType: "mouse", button: 0 }));
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  const inspection = {
+    points: [
+      {
+        text: "40; 1 of 2 rows selected, revenue 10 of 40",
+        coverage: {
+          selected: 1,
+          total: 2,
+          state: "partial",
+          channel: "days",
+          measure: { field: "revenue", selected: 10, total: 40 },
+        },
+      },
+    ],
+  };
+  for (const [surface, where, clicks] of surfacesClicking(clickNorth))
+    contractTest(
+      `inspection.coverage.${surface}`,
+      async () => expect(await clicks(spec)).toMatchObject([{ inspection }]),
+      `carries what the selection holds of the bar's rows, in ${where}`,
+    );
+});

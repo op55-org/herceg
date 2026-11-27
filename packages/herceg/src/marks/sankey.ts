@@ -18,6 +18,7 @@ import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
+import type { RowsCoverage } from "../model/lineage-kit.ts";
 import { isLightColor } from "../scale/color.ts";
 import type {
   Geometry,
@@ -32,7 +33,10 @@ import type { Halo } from "../spec/style.ts";
 import { surface } from "../theme.ts";
 import { refuseColor } from "./colored.ts";
 import {
+  type HeldItems,
+  heldItems,
   heldText,
+  holdRow,
   type LayoutFrame,
   type LayoutItem,
   type LayoutMark,
@@ -85,13 +89,6 @@ const LABEL_GAP = 6;
 /** Links thinner than twice this are found this many pixels either side of their middle. */
 const REACH = 2;
 
-/** What a selection holds of each link, by link: its rows' count and sum, and the link's rows. */
-interface Held {
-  rows: Float64Array;
-  sums: Float64Array;
-  of: Float64Array;
-}
-
 /**
  * What a selection holds of each node, by node, over the links drawn into
  * and out of it: their rows, how many of them it holds, and what those
@@ -131,7 +128,7 @@ export class SankeyMark implements LayoutMark {
   /** The flows of all rows and of each facet panel's. */
   readonly #flows = new RowsCache<Flows>();
   /** What highlighted selections hold of each flows' links and nodes. */
-  readonly #held = new SelectionCache<Held>();
+  readonly #held = new SelectionCache<HeldItems>();
   /** Each flows' last layout, and the bounds it is for. */
   readonly #placed = new WeakMap<Flows, { key: string; layout: SankeyLayout }>();
 
@@ -276,20 +273,18 @@ export class SankeyMark implements LayoutMark {
   }
 
   /** What `selected` holds of the links of `flows`, made of `rows` (all rows by default). */
-  #heldOf(selected: Uint8Array, rows: Uint32Array | undefined, flows: Flows): Held {
+  #heldOf(
+    selected: Uint8Array,
+    rows: Uint32Array | undefined,
+    flows: Flows,
+    covered: RowsCoverage | undefined,
+  ): HeldItems {
     return this.#held.get(selected, rows, () => {
       const links = flows.graph.value.length;
-      const held: Held = {
-        rows: new Float64Array(links),
-        sums: new Float64Array(links),
-        of: new Float64Array(links),
-      };
-      this.#eachFlow(flows, rows, (row, link, value) => {
-        held.of[link]!++;
-        if (selected[row] !== 1) return;
-        held.rows[link]!++;
-        held.sums[link]! += value;
-      });
+      const held: HeldItems = heldItems(links, covered, this.spec.value);
+      this.#eachFlow(flows, rows, (row, link, value) =>
+        holdRow(held, link, row, value, selected, covered, this.spec.value),
+      );
       return held;
     });
   }
@@ -395,7 +390,7 @@ export class SankeyMark implements LayoutMark {
     // that thickness along its middle, the rest of it dimmed either side;
     // nodes none of whose links' rows it holds are dimmed.
     const selected = frame.selected?.(this.table);
-    const held = selected && this.#heldOf(selected, frame.rows, flows);
+    const held = selected && this.#heldOf(selected, frame.rows, flows, frame.covered?.(this.table));
     // Nodes count the rows of the links drawn: those closing cycles are left out.
     const nodes: HeldNodes | undefined = held && {
       rows: new Float64Array(graph.nodes),
@@ -499,7 +494,7 @@ export class SankeyMark implements LayoutMark {
             ? heldText(
                 held.rows[link]!,
                 held.of[link]!,
-                measured === undefined
+                measured === undefined || !held.measured
                   ? undefined
                   : { field: label!, held: held.sums[link]!, of: value },
                 (n) => formatNumber(n, locale),

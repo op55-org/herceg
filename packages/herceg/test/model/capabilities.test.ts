@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
+import { deriveTable } from "../../src/data/derive.ts";
 import { fromGeoJSON } from "../../src/data/geojson.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
@@ -55,6 +56,7 @@ import { axisGuide } from "../../src/model/axis-guide.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
+import { lineage } from "../../src/model/lineage-kit.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
 import { panels } from "../../src/model/panels.ts";
@@ -1525,6 +1527,62 @@ describe("capabilities: row selection", () => {
         );
     },
   );
+});
+
+describe("capabilities: row selection through lineage", () => {
+  // Marks of a table derived from another, bound to a store of that one
+  // with `lineage` (model/lineage-kit.ts): those that draw a selection's
+  // shapes of their own are refused yet; the others highlight the rows
+  // behind their items.
+  const kept = deriveTable(samples as unknown as Table, [{ filter: [">=", ["field", "x"], 0] }]);
+  const grid = deriveTable(field as unknown as Table, [{ filter: [">=", ["field", "x"], 0] }]);
+  const refused: { name: string; make: () => ChartMark }[] = [
+    { name: "histogram", make: () => histogram(kept, { x: "y", bins: 3 }) },
+    { name: "histogram 2d", make: () => histogram(kept, { x: "x", y: "y", bins: 2 }) as ChartMark },
+    { name: "boxplot", make: () => boxplot(kept, { x: "category", y: "y" }) },
+    { name: "boxen", make: () => boxen(kept, { x: "category", y: "y" }) },
+    { name: "violin", make: () => violin(kept, { x: "group", y: "y" }) },
+    {
+      name: "candlestick",
+      make: () => candlestick(kept, { x: "x", open: "low", high: "high", low: "low", close: "y" }),
+    },
+    { name: "heatmap", make: () => heatmap(kept, { x: "x", y: "category", color: "y" }) },
+    {
+      name: "contour",
+      make: () => contour(grid, { x: "x", y: "y", color: "z", thresholds: [0.5, 2] }),
+    },
+  ];
+  const highlighted: { name: string; make: () => ChartMark; layout?: true }[] = [
+    { name: "bar", make: () => bar(kept, { x: "x", y: "y" }) },
+    { name: "point", make: () => point(kept, { x: "x", y: "y" }) },
+    { name: "line", make: () => line(kept, { x: "x", y: "y" }) },
+    { name: "area", make: () => area(kept, { x: "x", y: "y" }) },
+    { name: "rug", make: () => rug(kept, { x: "x" }) },
+    { name: "errorbar", make: () => errorbar(kept, { x: "x", y1: "low", y2: "high" }) },
+    { name: "pie", make: () => pie(kept, { category: "note", value: "y" }), layout: true },
+    { name: "funnel", make: () => funnel(kept, { category: "note", value: "y" }), layout: true },
+    { name: "treemap", make: () => treemap(kept, { path: ["note"], value: "y" }), layout: true },
+  ];
+
+  it.each(refused)("$name is refused a store of the table it comes from", (c) => {
+    const store = selectionStore((c.name === "contour" ? field : samples) as unknown as Table);
+    expect(() =>
+      build({ marks: [c.make()], rowSelection: rowSelection({ store, channel: "c", lineage }) }),
+    ).toThrow("which a selection through lineage does not highlight yet");
+  });
+
+  it.each(highlighted)("$name highlights the rows behind its items", (c) => {
+    const store = selectionStore(samples as unknown as Table);
+    const selection = rowSelection({ store, channel: "c", lineage });
+    const { model } = build({ marks: [c.make()], rowSelection: selection });
+    selection.highlight(model);
+    const keys = () => model.scene(estimateText).panels[0]!.marks.map((m) => m.key);
+    const plain = keys();
+    store.set("c", selectRows(new RowSet(samples as unknown as Table).add(0)));
+    const lit = keys();
+    expect(lit.join() !== plain.join()).toBe(true);
+    if (c.layout) expect(lit.some((key) => key.endsWith("-dimmed"))).toBe(true);
+  });
 });
 
 describe("capabilities: legend toggle", () => {

@@ -155,4 +155,11 @@ export interface SelectionLooks {
   selected?: Look;
   /** What it does not, while it holds something; by default at a quarter of its opacity. */
   unselected?: Look;
+  /**
+   * An item some of whose rows a row selection holds, where no selected part
+   * of it can be drawn (a mean of a group bound through lineage, see
+   * `rowSelection`'s `lineage`): by default the unselected look, outlined in
+   * the item's color at full opacity, 1.5 px wide.
+   */
+  partial?: Look;
 }

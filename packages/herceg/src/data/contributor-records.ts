@@ -87,6 +87,13 @@ export interface Removed {
   value: number;
 }
 
+/** An aggregate a producer's table holds: its field's name, its operation, and the field it reads. */
+export interface Aggregated {
+  readonly name: string;
+  readonly op: string;
+  readonly field: string | undefined;
+}
+
 /** What every record tells: its tables, and when what they hold changed. */
 interface Recorded {
   readonly source: Table;
@@ -123,6 +130,8 @@ interface Dropping {
 /** Row groups' levels: their links read what only they hold (member runs, slots). */
 export interface LinkedRecord extends Recorded, Dropping {
   readonly kind: "links";
+  /** The aggregates the groups' tables hold, as their options name them; the other fields are keys. */
+  readonly aggregates: readonly Aggregated[];
   /** The links, top first. */
   links(): readonly ContributorLink[];
   /**
@@ -137,11 +146,7 @@ export interface LinkedRecord extends Recorded, Dropping {
 export interface TotalsRecord extends Recorded, Dropping {
   readonly kind: "totals";
   readonly view: RowView;
-  readonly aggregates: readonly {
-    readonly name: string;
-    readonly op: string;
-    readonly field: string | undefined;
-  }[];
+  readonly aggregates: readonly Aggregated[];
   /** Catches the totals up with their source; false once they stopped. */
   current(): boolean;
 }

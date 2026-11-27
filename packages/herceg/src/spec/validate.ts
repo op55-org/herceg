@@ -2203,7 +2203,7 @@ const placement = {
   inspect: boolean,
 };
 /** Looks of marks drawing rows, items, and series a selection holds (annotations draw none). */
-const looks = { selected: look, unselected: look };
+const looks = { selected: look, unselected: look, partial: look };
 /**
  * A 3D mark's `zIndex`, which its spec leaves out: read, so that its mark
  * refuses any but 0 with why (checkDepthOrder).
@@ -4510,6 +4510,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
             },
             effect: oneOf("highlight", "none"),
             live: boolean,
+            budget: positive,
             selection: (selection, where) => {
               object(selection, where);
               const kind = (selection as { kind?: unknown }).kind;

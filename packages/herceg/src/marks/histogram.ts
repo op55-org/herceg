@@ -1369,6 +1369,7 @@ export function histogram<S extends Schema>(
         "id",
         "selected",
         "unselected",
+        "partial",
       ]),
     } as Histogram2DSpec;
     const { colors, colorDomain } = options as Histogram2DOptions<S>;
@@ -1406,6 +1407,7 @@ export function histogram<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
     ]),
   } as unknown as Histogram1DSpec;
   if (table.name !== undefined) spec.data = table.name;

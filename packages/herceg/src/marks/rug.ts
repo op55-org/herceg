@@ -416,6 +416,7 @@ export function rug<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
       "itemKey",
     ]),
   } as RugSpec;

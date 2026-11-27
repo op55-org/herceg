@@ -268,7 +268,14 @@ export class SunburstMark implements LayoutMark {
     const shown = data.shown(frame.id, view, frame.hidden);
     const selected = frame.selected?.(this.table);
     const counts =
-      selected && data.selectedOf(view, selected, data.hiddenGroups(frame.id, frame.hidden), shown);
+      selected &&
+      data.selectedOf(
+        view,
+        selected,
+        data.hiddenGroups(frame.id, frame.hidden),
+        shown,
+        frame.covered?.(this.table),
+      );
     const spans = new Float64Array(tree.size * 2);
     layoutPartition(tree, shown, data.byValue, spans);
 

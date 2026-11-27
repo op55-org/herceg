@@ -332,11 +332,22 @@ equivalent to measure against, so this is not a comparison.
   parameters take an initial value in the spec, as Herceg's bindings take
   a `selection`.
 
+Bars of groups, totals, or a derived table's aggregates bound to the
+source's store with `lineage` follow the same selection: counts and sums
+draw their selected part from their bases, and means, minimums and
+maximums, and sums with negative contributions draw a group partly
+selected in an outlined "partial" look; their clicks select the groups'
+rows of the source. Two bars of 1,000 groups following a brush over
+1,000,000 rows take ~3 ms a step in Node, 1.5 ms of it the brush's
+condition, which the source's charts share. Vega-Lite's crossfilter
+aggregates again after filtering; the others leave it to the
+application.
+
 Herceg's own limits: lassos select none of a summary's rows, contours (a
-field sampled on a grid) do not show selections, tables a derived table
-aggregates are not linked to its rows, and summaries recount their selected
-parts with each change of the selection rather than following a brush's
-moves incrementally.
+field sampled on a grid) do not show selections, means and other
+statistics of groups show no selected value (only the partial look), and
+summaries recount their selected parts with each change of the selection
+rather than following a brush's moves incrementally.
 
 ## Dashboard
 

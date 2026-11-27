@@ -11,13 +11,15 @@ import { type ReactGridCells, useReactCells } from "./grid/cells.tsx";
 export type { GridComponentProps } from "./grid/base.tsx";
 export type { GridCellRender, ReactGridCell, ReactGridCells } from "./grid/cells.tsx";
 
-export interface GridProps<S extends Schema = Schema> extends GridComponentProps<HercegGrid<S>> {
+/** A grid's props; `R` is the schema of its model's store's table (see `GridModel`). */
+export interface GridProps<S extends Schema = Schema, R extends Schema = S>
+  extends GridComponentProps<HercegGrid<S, GridModel<S, R>>> {
   /**
    * What the grid shows, made with `createGridModel` and owned by the
    * application. Data changes, scrolling, focus, and selection go through it
    * and the grid, never through React; a new model makes a new grid.
    */
-  model: GridModel<S>;
+  model: GridModel<S, R>;
   /**
    * React cells by column id, over the columns' own cells: a render
    * function of the cell (`GridCellContext`), or `{ render, fields,
@@ -40,8 +42,12 @@ export interface GridProps<S extends Schema = Schema> extends GridComponentProps
  * <Grid model={model} ariaLabel="Requests" />
  * ```
  */
-export function Grid<S extends Schema>({ model, cells, ...props }: GridProps<S>): ReactNode {
-  return useGrid<S, HercegGrid<S>>(
+export function Grid<S extends Schema, R extends Schema = S>({
+  model,
+  cells,
+  ...props
+}: GridProps<S, R>): ReactNode {
+  return useGrid<S, HercegGrid<S, GridModel<S, R>>>(
     (container, options) => createGrid(container, { ...options, model }),
     model,
     props,

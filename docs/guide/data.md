@@ -14,6 +14,7 @@ totalling, and pivoting rows without copying them.
 - [Row sets and selection stores](#row-sets-and-selection-stores)
 - [Row groups](#row-groups)
 - [Totals](#totals)
+- [Groups highlighting their rows](#groups-highlighting-their-rows)
 - [Cross-filtering](#cross-filtering)
 - [Row pivots](#row-pivots)
 - [Data in Python](#data-in-python)
@@ -558,6 +559,116 @@ out (a filter or restriction) a byte per row saying which rows it showed.
 1,000 rows appended to a million update the totals in about 0.07 ms, and
 drops from a rolling window in about 0.09 ms; one value changed in place
 computes them again, about 10 ms over a million rows (Node, Apple M6).
+
+## Groups highlighting their rows
+
+A chart of a table made from another (groups of `sales`, a derived
+table's aggregates, totals) can be bound to a selection store of the
+table it was made from. It then highlights how much of each group's rows
+the channel holds, and its clicks select those rows of the source, so a
+bar of revenue by region follows a brush of the sales themselves:
+
+```ts
+import {
+  bar,
+  createChart,
+  groupRows,
+  lineage,
+  point,
+  rowSelection,
+  rowView,
+  selectionStore,
+  sum,
+} from "herceg";
+
+const focus = selectionStore(sales);
+const byRegion = groupRows(rowView(sales), { by: ["region"], ops: { revenue: sum("revenue") } });
+
+createChart(salesElement, {
+  marks: [point(sales, { x: "time", y: "revenue" })],
+  interaction: { brush: "x" },
+  rowSelection: rowSelection({ store: focus, channel: "focus" }),
+});
+createChart(regionsElement, {
+  marks: [bar(byRegion.table, { x: "region", y: "revenue" })],
+  rowSelection: rowSelection({ store: focus, channel: "focus", lineage }),
+});
+```
+
+- **`lineage`** is the code that finds each group's rows and what the
+  channel holds of them. A binding of a table the chart does not draw
+  takes it; without it, the chart is refused with the import named.
+  Bindings of the tables a chart draws need none, and charts that bind
+  only those load none of it. Specs, Python, notebook widgets, Streamlit,
+  and `herceg/web` bring it themselves.
+- **Bars of counts and sums** draw each bar's selected part from its base
+  (in stacks, from its segment's base), lit, and the rest of it dimmed
+  above: a region whose rows the channel holds 30 of 60 of revenue is
+  lit to half its height.
+- **The partial look.** Where no selected part can be drawn, a bar some of
+  whose rows are selected is drawn in the mark's `partial` look: means,
+  minimums and maximums, sums with a contribution below zero, sums of a
+  calculated field, aggregates of aggregates, and rolling windows. By
+  default it is the unselected look outlined in the bar's color, 1.5 px.
+  Groups all of whose rows are selected are drawn selected, and those
+  none of whose rows are, unselected; points draw in the same three
+  looks, and lines and areas draw a group as selected while any of the
+  rows behind their value is.
+- **Layout marks** (pies, funnels, treemaps, sunbursts, Sankey links) draw
+  an item's selected share of a count or sum, and dim the rest. Their
+  items add their rows' counts, so they are refused a table whose rows
+  share contributors (rolling aggregates).
+- **Text.** Tooltips and the keyboard say how many of a group's rows the
+  channel holds, and for counts and sums what they measure ("60; 2 of 3
+  rows selected, revenue 30 of 60"); the text alternative counts the
+  source's rows ("4 of 6 rows of sales selected."). Bands and error bars
+  count the rows behind both their ends. An inspected point
+  carries the same as `coverage`: `selected`, `total`, `state`
+  (`"none"`, `"partial"`, `"all"`), `channel`, and for a count or sum its
+  `measure`.
+- **Grids** of a groups' table take the source's store as charts do:
+  `createGridModel({ data: rowView(byRegion.table), columns,
+  selectionStore: focus, channel: "focus", lineage })`. A click selects
+  the rows behind the row clicked, a row all of whose rows are selected
+  is selected (`aria-selected`), and one partly selected has
+  `data-selection="some"` and says how many in its description ("2 of 3
+  rows selected"). The model keeps the store's schema
+  (`GridModel<S, R>`, `R` the source's), so its `select` events give
+  selections of the source's rows. Grids showing groups of their own
+  (`groups`, or `setGroups` later) are refused a store of another table
+  yet.
+
+What gestures write through lineage is in
+[the interaction guide](interaction.md#selected-rows-through-lineage).
+
+**Budgets.** Following a selection through lineage keeps indexes beside
+the tables: the rows behind each group, the channel's rows as bytes, and
+each group's counts and sums. A binding may keep `budget` bytes of them,
+16 a row of its table by default and at least 64 KiB; past it, the chart
+is refused when made (`"unsupported"`, at `rowSelection.budget`, saying
+how much it needs), and a chart whose tables grow past it later stops
+highlighting them, reports it through `onError` (phase `"render"`), and
+says so in its text alternative. A binding that draws nothing
+(`effect: "none"`) is checked as the tables its gestures walked grow, and
+lets go of what they keep once past it. Grids keep the default budget: past it
+`createGridModel` throws, and a grid whose tables grow past it later
+shows no rows selected and reports it through `reportError` (or
+`console.error`). Clicks still write the rows behind what they select
+once highlighting stops, keeping nothing they find. Destroying the chart
+or grid, or giving the chart another binding, lets go of the indexes at
+once.
+
+**Where it stops.** A chart's table may come from one bound table: a mark
+whose table and its source both have bound stores is refused, as is a
+store of a table no mark's rows come from. Marks that draw shapes of
+their own for a selection (histograms, 2D histograms, contours, box
+plots, violins, boxen plots, candlesticks, and heatmaps) are refused a store
+through lineage yet; bind a store of the table they draw. Selected parts
+of means, minimums, maximums, and quantiles are not drawn yet.
+
+In Python, a binding's `data` may be the data of a derived table the chart
+draws: `hg.Chart(hg.derive(df).aggregate(by="region", revenue=("revenue",
+"sum")), row_selection=hg.SelectionBinding("focus", data=df))`.
 
 ## Cross-filtering
 

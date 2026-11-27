@@ -30,6 +30,16 @@ import { conditionsOf } from "./conditions.ts";
 import { GUIDE_KIT } from "./guides.ts";
 import { Highlighter, type HighlightKit, highlights } from "./highlight.ts";
 import { itemResolver } from "./items.ts";
+import {
+  kitOf,
+  type Reader,
+  type Resolution,
+  type RouteBinding,
+  tablesOf as reaching,
+  resolve,
+  type SelectionLineage,
+} from "./lineage-binding.ts";
+import type { LineageRoute } from "./lineage-kit.ts";
 import { channelSelection, channelsChosen, type Membership, membershipOf } from "./memberships.ts";
 import type { ChangeCause, ChartConfig, ChartModel } from "./model.ts";
 import {
@@ -78,6 +88,21 @@ export interface SelectionBinding<S extends Schema = Schema> {
    * (one write a frame), and its cancel; by default, what is committed only.
    */
   live?: boolean;
+  /**
+   * The lineage reader (`import { lineage } from "herceg"`), for a store of
+   * a table the chart's marks come from rather than one they draw: a bar
+   * of `groupRows(sales, ...)`'s table bound to a store of `sales` draws
+   * each group's selected part, and a click on a bar selects its rows of
+   * `sales`. Bindings of a table the chart draws need none.
+   */
+  lineage?: SelectionLineage | undefined;
+  /**
+   * Bytes the indexes highlighting through lineage may take (coverage of
+   * each group, what derived tables keep of their rows); 16 a row of the
+   * bound table by default. Past it, the chart is refused, or, when tables
+   * grow past it later, stops highlighting and reports it to `onError`.
+   */
+  budget?: number | undefined;
 }
 
 /**
@@ -132,16 +157,19 @@ interface Reporter {
 }
 
 /** A binding with its defaults filled in. */
-interface Bound {
-  store: SelectionStore;
-  table: Table;
-  channel: string;
+interface Bound extends RouteBinding {
   events: ReadonlySet<SelectionGesture>;
   highlight: boolean;
   live: boolean;
   /** Which rows the channel holds, taken on first read and held as long as the binding. */
   membership?: Membership;
 }
+
+/** A binding as a row selection holds it: defaults filled in, the lineage reader and budget as given. */
+export type BindingOptions = Readonly<
+  Required<Omit<SelectionBinding, "lineage" | "budget">> &
+    Pick<SelectionBinding, "lineage" | "budget">
+>;
 
 /** The membership of a bound channel, held by the binding from its first read. */
 function membershipOfBound(bound: Bound): Membership {
@@ -179,14 +207,21 @@ export function rowSelection<const S extends readonly Schema[]>(
 const storeIds = new WeakMap<SelectionStore, number>();
 
 export class RowSelection {
-  readonly bindings: readonly Readonly<Required<SelectionBinding>>[];
+  readonly bindings: readonly BindingOptions[];
   readonly #bound: readonly Bound[];
+  /** How each chart configuration's marks reach the bindings (see `check`). */
+  readonly #resolutions = new WeakMap<ChartConfig, Resolution<Bound>>();
+  /** The lineage reader, where a binding was given it. */
+  readonly #kit;
 
   constructor(bindings: readonly SelectionBinding[]) {
     if (bindings.length === 0)
       throw refused("rowSelection", "rowSelection: expected a binding, { store, channel }");
     this.bindings = bindings.map(
-      ({ store, channel, events = GESTURES, effect = "highlight", live = false }, i) => {
+      (
+        { store, channel, events = GESTURES, effect = "highlight", live = false, lineage, budget },
+        i,
+      ) => {
         // Paths as the spec's: a binding's index among several.
         const at = bindings.length > 1 ? `rowSelection[${i}]` : "rowSelection";
         if (typeof store?.get !== "function" || !store.source)
@@ -215,17 +250,36 @@ export class RowSelection {
             `${at}.live`,
             `rowSelection live: expected true or false; received ${JSON.stringify(live)}`,
           );
-        return Object.freeze({ store, channel, events: Object.freeze([...events]), effect, live });
+        if (budget !== undefined && !(budget > 0))
+          throw refused(
+            `${at}.budget`,
+            `rowSelection budget: expected bytes above 0; received ${JSON.stringify(budget)}`,
+          );
+        return Object.freeze({
+          store,
+          channel,
+          events: Object.freeze([...events]),
+          effect,
+          live,
+          lineage,
+          budget,
+        });
       },
     );
-    this.#bound = this.bindings.map(({ store, channel, events, effect, live }) => ({
-      store,
-      table: store.source,
-      channel,
-      events: new Set(events),
-      highlight: effect === "highlight",
-      live,
-    }));
+    this.#bound = this.bindings.map(
+      ({ store, channel, events, effect, live, lineage, budget }, i) => ({
+        store,
+        table: store.source,
+        channel,
+        events: new Set(events),
+        highlight: effect === "highlight",
+        live,
+        lineage,
+        budget,
+        at: this.bindings.length > 1 ? `rowSelection[${i}]` : "rowSelection",
+      }),
+    );
+    this.#kit = kitOf(this.#bound.find((b) => b.lineage));
     const tables = this.#bound.map(({ table }) => table);
     if (tables.some((table, i) => tables.indexOf(table) !== i))
       throw refused(
@@ -250,24 +304,42 @@ export class RowSelection {
         // A 3D chart's layers draw as one mark, named by the first one's type.
         message: `${(layout.layers?.[0] ?? layout).spec.type} rowSelection: cannot select rows yet; select them in a chart of the same table along x and y, linked by the store`,
       });
-    const read = [...layouts.flatMap(tablesOf), ...marks.map((mark) => mark.table)];
-    for (const [i, bound] of this.#bound.entries()) {
-      if (!read.includes(bound.table))
-        throw refused(
-          "rowSelection",
-          `rowSelection store: no mark reads its table (channel "${bound.channel}"); bind a table the chart draws`,
-        );
-      for (const mark of marks)
-        if (mark.table === bound.table)
-          for (const [brush, path] of brushesOver(mark, config))
-            if (bound.events.has(brush === "lasso" ? "lasso" : "brush"))
-              refuseBrush(mark, brush, path);
+    const all = config.marks as readonly unknown[];
+    const readerOf = (table: Table, mark: Mark | LayoutMark): Reader => {
+      const index = all.indexOf(mark);
+      const name = `${mark.spec.type}${index < 0 ? "" : ` (mark ${index})`}`;
+      return { table, mark, name, key: (mark.spec as { id?: string }).id ?? index };
+    };
+    const readers: Reader[] = [
+      ...marks.flatMap((mark) => (mark.table ? [readerOf(mark.table, mark)] : [])),
+      ...layouts.flatMap((mark) => tablesOf(mark).map((table) => readerOf(table, mark))),
+    ];
+    const resolution = resolve(this.#bound, readers);
+    for (const bound of this.#bound) {
+      const routed = (table: Table | undefined) => resolution.get(table!)?.bound === bound;
+      for (const mark of marks) {
+        const route = resolution.get(mark.table!);
+        if (route?.bound !== bound) continue;
+        for (const [brush, path] of brushesOver(mark, config))
+          if (bound.events.has(brush === "lasso" ? "lasso" : "brush")) {
+            refuseBrush(mark, brush, path);
+            route.through?.refuse(mark, brush, path);
+          }
+      }
       // A layout mark reading the table selects its rows and highlights them.
-      if (layouts.some((layout) => tablesOf(layout).includes(bound.table))) continue;
-      const readers = marks.filter((mark) => mark.table === bound.table);
-      const at = this.#bound.length > 1 ? `rowSelection[${i}]` : "rowSelection";
-      refuseReaders(readers, bound, at);
+      if (layouts.some((layout) => tablesOf(layout).some(routed))) continue;
+      refuseReaders(
+        marks.filter((mark) => routed(mark.table)),
+        bound,
+        bound.at,
+      );
     }
+    this.#resolutions.set(config, resolution);
+  }
+
+  /** How the marks of chart configuration `config` reach the bindings, as `check` found. */
+  resolution(config: ChartConfig): Resolution<Bound> {
+    return this.#resolutions.get(config) ?? NO_ROUTES;
   }
 
   /**
@@ -279,7 +351,13 @@ export class RowSelection {
   highlight(model: ChartModel): () => void {
     const highlighted = this.#bound.filter((b) => b.highlight);
     if (highlighted.length === 0) return () => {};
-    const highlighter = new Highlighter(HIGHLIGHT_KIT, channelsChosen(highlighted));
+    // Marks of tables reached through lineage draw as the kit says.
+    const lineage = this.#kit?.highlight(model, () => this.resolution(model.config));
+    const highlighter = new Highlighter(
+      HIGHLIGHT_KIT,
+      channelsChosen(highlighted),
+      lineage?.covered,
+    );
     // What no bound channel highlights draws the chart's own selection in its looks.
     const draw: NonNullable<ChartModel["highlight"]> = (mark, series, frame, key, rows) =>
       highlighter.geometry(mark, series, frame, key, rows) ??
@@ -288,22 +366,26 @@ export class RowSelection {
     const layout: NonNullable<ChartModel["layoutHighlight"]> = (table, mark, series) => {
       const selection = channelSelection(highlighted, table);
       const bound = selection && highlighted.find((b) => b.table === table);
-      return bound ? membershipOfBound(bound).selected : model.layoutLooks?.(table, mark, series);
+      if (bound) return membershipOfBound(bound).selected;
+      return lineage?.layout(table) ?? model.layoutLooks?.(table, mark, series);
     };
     model.highlight = draw;
     model.layoutHighlight = layout;
     return () => {
       if (model.highlight === draw) model.highlight = undefined;
       if (model.layoutHighlight === layout) model.layoutHighlight = undefined;
+      lineage?.stop();
     };
   }
 
   /**
-   * What the channels the chart highlights hold, for its text alternative:
-   * "42 of 120 rows selected." (naming each table, for several); undefined
-   * while none holds a selection.
+   * What the channels chart configuration `config` highlights hold, for its
+   * text alternative: "42 of 120 rows selected." (naming each table, for
+   * several, or one its marks come from); undefined while none holds a
+   * selection. Routes stopped past their budget say so.
    */
-  get description(): string | undefined {
+  describe(config: ChartConfig): string | undefined {
+    const routes = [...this.resolution(config).values()];
     const shown = this.#bound.filter((b) => b.highlight);
     const several = shown.length > 1;
     const held = shown.flatMap((bound) => {
@@ -312,10 +394,16 @@ export class RowSelection {
       // Rows selected before the table was reset are gone: nothing is selected.
       if (!selection || (selection.kind === "rows" && !selection.rows.current)) return [];
       const count = membershipOfBound(bound).count;
-      const name = several && table.name !== undefined ? ` of ${table.name}` : "";
+      const through = routes.some((route) => route.bound === bound && route.through);
+      const name = (several || through) && table.name !== undefined ? ` of ${table.name}` : "";
       return [`${count} of ${table.length} ${table.length === 1 ? "row" : "rows"}${name}`];
     });
-    return held.length > 0 ? `${held.join("; ")} selected.` : undefined;
+    // Routes stopped past their budget say so.
+    const text = [held.length > 0 ? `${held.join("; ")} selected.` : ""]
+      .concat(routes.map(({ through }) => through?.said ?? ""))
+      .filter(Boolean)
+      .join(" ");
+    return text || undefined;
   }
 
   /**
@@ -336,7 +424,10 @@ export class RowSelection {
     cursor: () => Cursor | null,
     live: { textContent: string | null },
   ): RowLink {
-    if (current?.selection === this) return current;
+    if (current?.selection === this) {
+      current.reconcile();
+      return current;
+    }
     const link = new RowLink(
       this,
       this.#bound,
@@ -360,18 +451,21 @@ export class RowSelection {
    * same while it binds the same stores (by identity), channels, events, and effects.
    */
   toJSON(): unknown {
-    return this.bindings.map(({ store, channel, events, effect, live }) => {
+    return this.bindings.map(({ store, channel, events, effect, live, lineage, budget }) => {
       let id = storeIds.get(store);
       if (id === undefined) {
         id = nextStore++;
         storeIds.set(store, id);
       }
-      return [id, channel, events, effect, live];
+      return [id, channel, events, effect, live, lineage !== undefined, budget ?? null];
     });
   }
 }
 
 let nextStore = 0;
+
+/** Routes of a configuration no check saw: none. */
+const NO_ROUTES: Resolution<Bound> = /* @__PURE__ */ new Map();
 
 /**
  * The brushes drawn over `mark`, with where each is set: in each panel it
@@ -507,6 +601,8 @@ export class RowLink {
     }
   >();
   readonly #stops: (() => void)[] = [];
+  /** The routes gestures last read, of the configuration then. */
+  #used: Resolution<Bound> | undefined;
   /** How deep in writes of the chart's own selections, which leave its brush in place. */
   #writing = 0;
   /**
@@ -524,9 +620,8 @@ export class RowLink {
       }
     | undefined;
   #disposed = false;
-  /** The bindings clicks and Space write, and their tables. */
+  /** The bindings clicks and Space write. */
   readonly #clickable: readonly Bound[];
-  readonly #clicked: ReadonlySet<Table>;
 
   constructor(
     selection: RowSelection,
@@ -542,7 +637,6 @@ export class RowLink {
     this.selection = selection;
     this.#bound = bound;
     this.#clickable = bound.filter((b) => b.events.has("click"));
-    this.#clicked = new Set(this.#clickable.map((b) => b.table));
     this.#model = model;
     this.#chart = chart;
     this.#events = events;
@@ -553,6 +647,8 @@ export class RowLink {
     for (const b of bound) this.#seen.set(b, b.store.get(b.channel));
     for (const store of new Set(bound.map((b) => b.store)))
       this.#stops.push(store.subscribe((change) => this.#changed(store, change)));
+    // Through lineage, the bound table's changes change coverage though the tables drawn stay the same.
+    for (const b of bound) if (b.lineage) this.#stops.push(b.table.subscribe(() => invalidate()));
     this.#stops.push(selection.highlight(model));
   }
 
@@ -650,13 +746,23 @@ export class RowLink {
       return apply(holding.map((b) => ({ bound: b, selection: null })));
     }
     const gesture = selection.kind !== "brush" ? "click" : selection.lasso ? "lasso" : "brush";
-    // Every table's rows are found before any channel changes.
+    const resolution = this.#resolution;
+    // Every table's rows are found before any channel changes: of each
+    // table reaching a binding, written as the bound table's.
     const changes = bound.flatMap((b) => {
       if (!b.events.has(gesture)) return [];
-      const rows =
-        selection.kind === "brush"
-          ? brushedRows(this.#model, b.table, selection, owner)
-          : chosenRows(this.#model, b.table, selection);
+      const found: DataSelection[] = [];
+      for (const table of reaching(resolution, [b])) {
+        const rowsOf = (of: ChartSelection, byField?: Map<string | undefined, number[]>) =>
+          of.kind === "brush"
+            ? brushedRows(this.#model, table, of, owner, byField)
+            : chosenRows(this.#model, table, of);
+        const through = this.#checked(resolution.get(table)!.through);
+        const rows = through ? through.written(selection, rowsOf) : rowsOf(selection);
+        if (rows) found.push(rows);
+      }
+      // Several tables reach a binding only through lineage, whose reader joins them.
+      const rows = found.length > 1 ? kitOf(b)!.join(found, b.table) : found[0];
       return rows ? [{ bound: b, selection: rows }] : [];
     });
     if (commits) this.#brushed.clear();
@@ -691,6 +797,55 @@ export class RowLink {
   /** Whether a binding takes clicks (`events`), which then select rows. */
   get takesClicks(): boolean {
     return this.#clickable.length > 0;
+  }
+
+  /**
+   * `through`, checked against its budget as tables grew, as highlighting
+   * checks it, and reporting through the chart what its walks find as the
+   * tables change: bindings that draw nothing (`effect: "none"`) report the
+   * refusal once too.
+   */
+  #checked<T extends LineageRoute | undefined>(through: T): T {
+    if (!through) return through;
+    through.report = this.#report;
+    const refusal = through.check();
+    if (refusal) this.#report(refusal);
+    return through;
+  }
+
+  /** Reports a refusal through the chart, as its draws do. */
+  readonly #report = (error: ChartError) => this.#model.report?.(error);
+
+  /** Brings the routes gestures read up to the chart's configuration, letting go of those of one replaced. */
+  reconcile(): void {
+    void this.#resolution;
+  }
+
+  get #resolution(): Resolution<Bound> {
+    const now = this.selection.resolution(this.#model.config);
+    // What gestures walked through the routes of a configuration replaced goes with it.
+    if (this.#used !== now) releaseRoutes(this.#used);
+    this.#used = now;
+    return now;
+  }
+
+  /** The tables whose rows clicks and Space select: those reaching a binding taking clicks. */
+  get #clicked(): ReadonlySet<Table> {
+    return reaching(this.#resolution, this.#clickable);
+  }
+
+  /**
+   * Rows found of a table the chart draws as rows of the table bound:
+   * themselves, or the bound table's rows behind them (of `field`'s value)
+   * through lineage, found now.
+   */
+  #behind(found: PointRows): PointRows {
+    const through = this.#checked(this.#resolution.get(found.table)?.through);
+    if (!through) return found;
+    return {
+      table: through.relation.source,
+      rows: through.rows(found.rows, found.field).positions(),
+    };
   }
 
   /**
@@ -729,9 +884,11 @@ export class RowLink {
   clicked(px: number, py: number, keys: Modifiers): (() => ClickedRows | null) | undefined {
     const clickable = this.#clickable;
     if (clickable.length === 0) return undefined;
-    const found = clickedRows(this.#model, this.#clicked, px, py);
+    const hit = clickedRows(this.#model, this.#clicked, px, py);
     const mode = modeOf(keys);
-    if (found === null) return () => null;
+    if (hit === null) return () => null;
+    // The rows behind what it is on, as they are as it is clicked.
+    const found = hit && this.#behind(hit);
     const kept = found && new RowSet(found.table).addAll(found.rows);
     const rows = () => found && { table: found.table, rows: kept!.positions() };
     return () => this.#picked(rows(), mode, "pointer");
@@ -760,8 +917,9 @@ export class RowLink {
     // as the arrow keys move it.
     this.#chart.render();
     const cursor = this.#cursor();
-    const found = cursor && cursorRows(this.#model, this.#clicked, cursor);
-    if (!found) return false;
+    const on = cursor && cursorRows(this.#model, this.#clicked, cursor);
+    if (!on) return false;
+    const found = this.#behind(on);
     event.preventDefault();
     const said = this.#picked(found, modeOf(event), "keyboard").said();
     const live = this.#live;
@@ -821,6 +979,9 @@ export class RowLink {
     this.#disposed = true;
     for (const stop of this.#stops) stop();
     this.#stops.length = 0;
+    // What gestures and highlighting through lineage hold goes at once.
+    releaseRoutes(this.#used);
+    this.#used = undefined;
     // The channels keep what the chart wrote: other views may be showing it.
     this.#brushed.clear();
     if (this.#model.rowLink === this) this.#model.rowLink = undefined;
@@ -1034,4 +1195,9 @@ function held(bound: Bound): RowSet {
     rows.addAll(matching);
   }
   return rows;
+}
+
+/** Lets go of what a resolution's routes through lineage hold. */
+function releaseRoutes(resolution: Resolution<Bound> | undefined): void {
+  for (const route of resolution?.values() ?? []) route.through?.release();
 }

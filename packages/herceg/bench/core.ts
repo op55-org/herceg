@@ -87,6 +87,7 @@ import {
   orderAt,
   standing,
 } from "../src/model/keyboard.ts";
+import { lineage as lineageReader } from "../src/model/lineage-kit.ts";
 import { membershipOf } from "../src/model/memberships.ts";
 import { type ChartConfig, ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
@@ -1885,7 +1886,7 @@ measure(
       ? `${(median * 1000).toFixed(1)} µs ± ${(mad * 1000).toFixed(1)}`
       : `${median.toFixed(3)} ms ± ${mad.toFixed(3)}`;
   };
-  const mean = (times: number[]) => times.reduce((a, b) => a + b, 0) / times.length;
+  const average = (times: number[]) => times.reduce((a, b) => a + b, 0) / times.length;
   /**
    * A lineage case: `step` changes the source or the selection (its time
    * reported as `changed`), then the membership and each coverage read
@@ -1950,7 +1951,7 @@ measure(
     const plain = samples - work.crossings;
     console.log(
       `${name.padEnd(48)} change ${ms(times.changed)}; membership ${ms(times.membership)}; ` +
-        `coverage ${ms(times.coverage)} (mean ${mean(times.coverage).toFixed(3)} ms); ` +
+        `coverage ${ms(times.coverage)} (mean ${average(times.coverage).toFixed(3)} ms); ` +
         `${Math.round(work.incidences / samples).toLocaleString("en-US")} incidences, ${work.rebuilds} rebuilds in ${samples}; ` +
         `${(plain ? work.bytes / plain / 1024 : 0).toFixed(1)} KB made a step` +
         (work.crossings
@@ -2029,6 +2030,215 @@ measure(
       [{ coverage: clicked, field: "s" }],
     );
     verify(clicked, (t) => groups.keyOf(t)[0] as string, "g", "v");
+  }
+
+  // Through charts: a scatter of 1M rows brushed, and bars of 1,000 groups'
+  // sums and means bound to the scatter's store with the lineage reader,
+  // drawing their next scenes (sums' parts from their bases, means in the
+  // partial look). The membership, coverage, and drawing are timed apart:
+  // the brush and membership, then coverage read alone, then the bars' scenes.
+  {
+    const sales = salesOf(M);
+    const store = selectionStore(sales);
+    const groups = groupRows(rowView(sales), {
+      by: ["g"],
+      ops: { s: sum("v"), m: mean("v") },
+    });
+    const target = groups.table as unknown as Table;
+    const stops: (() => void)[] = [];
+    const charts = (["s", "m"] as const).map((y) => {
+      const selection = rowSelection({ store, channel: "brush", lineage: lineageReader });
+      const chart = new ChartModel({
+        marks: [bar(target, { x: "g", y })],
+        rowSelection: selection,
+      });
+      chart.setSize(1200, 400, 1);
+      stops.push(selection.highlight(chart));
+      return chart;
+    });
+    const scatter = new ChartModel({
+      marks: [point(sales, { x: "x", y: "v" })],
+      rowSelection: rowSelection({ store, channel: "brush" }),
+    });
+    scatter.setSize(600, 400, 1);
+    stops.push(scatter.config.rowSelection!.highlight(scatter));
+    const brushMembership = membershipOf(store, "brush");
+    let at = 0;
+    const brush = () => {
+      const a = 10 + (at++ % 20);
+      store.set(
+        "brush",
+        selectWhere(
+          col("x")
+            .ge(a)
+            .and(col("x").le(a + 30)),
+        ),
+      );
+    };
+    brush();
+    for (const chart of [scatter, ...charts]) chart.scene(estimateText, true);
+    measure(
+      "lineage chart: brush 1M rows, scatter and two bars of 1,000 groups draw",
+      () => {
+        brush();
+        for (const chart of [scatter, ...charts]) chart.scene(estimateText, true);
+      },
+      { warmup: 5, samples: 30 },
+    );
+    measure(
+      "lineage chart: the same brush, the bars alone draw",
+      () => {
+        brush();
+        void brushMembership.selected;
+        for (const chart of charts) chart.scene(estimateText, true);
+      },
+      { warmup: 5, samples: 30 },
+    );
+    measure(
+      "lineage chart: the same brush, membership alone",
+      () => {
+        brush();
+        void brushMembership.selected;
+      },
+      { warmup: 5, samples: 30 },
+    );
+    measure(
+      "lineage chart: the bars' next scenes, the selection unchanged",
+      () => {
+        for (const chart of charts) chart.scene(estimateText, true);
+      },
+      { warmup: 5, samples: 30 },
+    );
+    // Gone before the cases after it, which a million rows held would slow.
+    for (const stop of stops) stop();
+    for (const chart of [scatter, ...charts]) chart.dispose();
+  }
+
+  /**
+   * A gesture to its frame, its parts apart: the brush (`brush`, the
+   * store's set), the membership it changes, the bars' coverage (each
+   * group's counts and sums), their scenes (the series split into parts,
+   * and their geometry), and their text alternatives.
+   */
+  const phases = (
+    name: string,
+    brush: () => void,
+    membership: { selected: Uint8Array },
+    coverages: readonly Coverage[],
+    field: string,
+    charts: readonly ChartModel[],
+    { warmup = 5, samples = 30 } = {},
+  ) => {
+    gc?.();
+    const times = {
+      brush: [] as number[],
+      membership: [] as number[],
+      coverage: [] as number[],
+      scenes: [] as number[],
+      text: [] as number[],
+      whole: [] as number[],
+    };
+    for (let k = 0; k < warmup + samples; k++) {
+      const t0 = performance.now();
+      brush();
+      const t1 = performance.now();
+      void membership.selected;
+      const t2 = performance.now();
+      for (const coverage of coverages)
+        for (let t = 0; t < coverage.relation.targets; t++) {
+          coverage.selected(t);
+          coverage.measure(t, field);
+        }
+      const t3 = performance.now();
+      for (const chart of charts) chart.scene(estimateText, true);
+      const t4 = performance.now();
+      for (const chart of charts) chart.config.rowSelection!.describe(chart.config);
+      const t5 = performance.now();
+      if (k < warmup) continue;
+      times.brush.push(t1 - t0);
+      times.membership.push(t2 - t1);
+      times.coverage.push(t3 - t2);
+      times.scenes.push(t4 - t3);
+      times.text.push(t5 - t4);
+      times.whole.push(t5 - t0);
+    }
+    console.log(
+      `${name.padEnd(48)} whole ${ms(times.whole)}: brush ${ms(times.brush)}; membership ${ms(times.membership)}; ` +
+        `coverage ${ms(times.coverage)}; scenes ${ms(times.scenes)}; text ${ms(times.text)}`,
+    );
+  };
+
+  // The data guide's dashboard at 365,000 rows (a day and region a row): a
+  // brush of days, bars of the regions' and the months' revenue bound to
+  // the source's store through lineage following it.
+  {
+    const DAYS = 91_250;
+    const AREAS = ["North", "South", "East", "West"];
+    const n = DAYS * AREAS.length;
+    const days = new Float64Array(n);
+    const revenue = new Float64Array(n);
+    const region = new Array<string>(n);
+    const month = new Array<string>(n);
+    for (let d = 0, i = 0; d < DAYS; d++)
+      for (const area of AREAS) {
+        days[i] = d * 86_400_000;
+        region[i] = area;
+        month[i] = `m${Math.floor(d / 30)}`;
+        revenue[i] = 4000 + ((i * 7919) % 3000);
+        i++;
+      }
+    const sales = table({
+      time: days,
+      region: category(region),
+      month: category(month),
+      revenue,
+    }) as unknown as Table;
+    const store = selectionStore(sales);
+    const view = rowView(sales);
+    const byRegion = groupRows(view, { by: ["region"], ops: { revenue: sum("revenue") } });
+    const byMonth = groupRows(view, { by: ["month"], ops: { revenue: sum("revenue") } });
+    const stops: (() => void)[] = [];
+    const bars = (
+      [
+        [byRegion, "region"],
+        [byMonth, "month"],
+      ] as const
+    ).map(([groups, x]) => {
+      const selection = rowSelection({ store, channel: "days", lineage: lineageReader });
+      const chart = new ChartModel({
+        marks: [bar(groups.table as unknown as Table, { x: x as never, y: "revenue" })],
+        rowSelection: selection,
+      });
+      chart.setSize(800, 300, 1);
+      stops.push(selection.highlight(chart));
+      return chart;
+    });
+    const coverages = [byRegion, byMonth].map((groups) =>
+      coverageOf(relationTo(groups.table as unknown as Table, sales)!, "revenue", store, "days"),
+    );
+    let at = 0;
+    const brush = () => {
+      const from = (at++ % 20) * 1000;
+      store.set(
+        "days",
+        selectWhere(
+          col("time")
+            .ge(from * 86_400_000)
+            .and(col("time").le((from + 30_000) * 86_400_000)),
+        ),
+      );
+    };
+    phases(
+      "lineage dashboard: brush 365,000 rows, bars of 4 regions and 3,042 months follow",
+      brush,
+      membershipOf(store, "days"),
+      coverages,
+      "revenue",
+      bars,
+    );
+    // Gone before the cases after it, which its 365,000 rows would slow.
+    for (const stop of stops) stop();
+    for (const chart of bars) chart.dispose();
   }
 
   // Batches of 1,000 rows appended to a brushed table, which grows, then to one keeping its last million.

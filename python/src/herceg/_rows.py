@@ -42,6 +42,11 @@ class SelectionBinding:
     the channel follows the brush (a widget's views, and other views of
     the data, then change as it moves). ``data`` is the table, an object
     given to the chart or one of its marks; by default, the chart's data.
+    A chart drawing a table made from it (``hg.group_by``, totals, pivots,
+    derived tables) highlights what of each group or total the channel
+    holds, through its lineage; ``budget`` caps the bytes of the indexes
+    this takes (16 per row of the table by default), beyond which
+    highlighting stops and the chart says so.
     ``fields`` are more of its columns to send with the chart than its
     marks read, so that conditions set from Python (``widget.row_selection
     = hg.col("fare") > 20``, or another widget's brush) can test them.
@@ -58,6 +63,7 @@ class SelectionBinding:
     fields: Sequence[str] = ()
     selection: Any = field(default=None, repr=False)
     live: bool = False
+    budget: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.live, bool):
@@ -89,6 +95,15 @@ class SelectionBinding:
                 'SelectionBinding fields: expected a list of column names, such as ["fare"]; '
                 f"received {shown(self.fields)}"
             )
+        if self.budget is not None and (
+            isinstance(self.budget, bool)
+            or not isinstance(self.budget, (int, float))
+            or not self.budget > 0
+            or self.budget == float("inf")
+        ):
+            raise ChartError(
+                f"SelectionBinding budget: expected bytes above 0; received {shown(self.budget)}"
+            )
         if self.selection is not None:
             # Positions are checked against the data once the chart knows it.
             encode(self.selection, None, "SelectionBinding selection")
@@ -106,6 +121,8 @@ class SelectionBinding:
             spec["effect"] = self.effect
         if self.live:
             spec["live"] = True
+        if self.budget is not None:
+            spec["budget"] = self.budget
         if self.selection is not None:
             selection, buffers = encode(self.selection, length, "SelectionBinding selection")
             if selection is not None:

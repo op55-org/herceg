@@ -273,7 +273,14 @@ export class TreemapMark implements LayoutMark {
     // others none of whose rows it holds are dimmed.
     const selected = frame.selected?.(this.table);
     const counts =
-      selected && data.selectedOf(view, selected, data.hiddenGroups(frame.id, hidden), shown);
+      selected &&
+      data.selectedOf(
+        view,
+        selected,
+        data.hiddenGroups(frame.id, hidden),
+        shown,
+        frame.covered?.(this.table),
+      );
     const share = (node: number) => (counts && !container[node] ? data.shareOf(counts, node) : 1);
     // Parents first, so their children are drawn over them; then by color
     // group (the legend's order), the dimmed before the lit, and by look.

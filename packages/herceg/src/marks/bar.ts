@@ -1920,6 +1920,7 @@ export function bar<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
       "itemKey",
       "axis",
       "facet",

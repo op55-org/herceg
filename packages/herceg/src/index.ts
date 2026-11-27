@@ -235,9 +235,12 @@ export type { DrillRoot, DrillStep } from "./marks/tree-data.ts";
 export { type TreemapOptions, treemap } from "./marks/treemap.ts";
 export { type ViolinOptions, violin } from "./marks/violin.ts";
 export { type Facet, type FacetOptions, facet } from "./model/facet.ts";
+export type { SelectionLineage } from "./model/lineage-binding.ts";
+export { lineage } from "./model/lineage-kit.ts";
 export type {
   AxisInspection,
   ChartConfig,
+  InspectedCoverage,
   InspectedPoint,
   InspectedTotal,
   Inspection,

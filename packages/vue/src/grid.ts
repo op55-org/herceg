@@ -18,15 +18,16 @@ import { type GridCellSlots, useVueCells, type VueGridCells } from "./grid/cells
 export type { GridComponentProps, GridInstance, GridListeners } from "./grid/base.ts";
 export type { GridCellRender, GridCellSlots, VueGridCell, VueGridCells } from "./grid/cells.ts";
 
-export type GridProps<S extends Schema = Schema> = GridComponentProps &
-  GridListeners<GridModel<S>> & {
+/** A grid's props; `R` is the schema of its model's store's table (see `GridModel`). */
+export type GridProps<S extends Schema = Schema, R extends Schema = S> = GridComponentProps &
+  GridListeners<GridModel<S, R>> & {
     /**
      * What the grid shows, made with `createGridModel` and owned by the
      * application (kept as it is: not in `ref()` or `reactive()`). Data
      * changes, scrolling, focus, and selection go through it and the grid,
      * never through Vue; a new model makes a new grid.
      */
-    model: GridModel<S>;
+    model: GridModel<S, R>;
     /**
      * Vue cells by column id, over the columns' own cells: a render function
      * of the cell (`GridCellContext`), or `{ render, fields, interaction }` as
@@ -42,9 +43,9 @@ export type GridProps<S extends Schema = Schema> = GridComponentProps &
 
 /** `<Grid>` as templates and TSX check it: generic in its model's schema. */
 export interface GridComponent {
-  new <S extends Schema>(
-    props: GridProps<S> & PublicProps,
-  ): GridInstance<GridProps<S>, HercegGrid<S>, GridCellSlots<S>>;
+  new <S extends Schema, R extends Schema = S>(
+    props: GridProps<S, R> & PublicProps,
+  ): GridInstance<GridProps<S, R>, HercegGrid<S, GridModel<S, R>>, GridCellSlots<S>>;
 }
 
 /**

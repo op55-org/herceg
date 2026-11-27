@@ -1,5 +1,14 @@
 // Compile-time tests of <Grid>: checked by `npm run typecheck`, never executed.
-import { count, rowTotals, rowView, table } from "herceg";
+import {
+  count,
+  type DataSelection,
+  groupRows,
+  lineage,
+  rowTotals,
+  rowView,
+  selectionStore,
+  table,
+} from "herceg";
 import { createGridModel, type Grid as HercegGrid } from "herceg/grid";
 import { createPivotGridModel, type PivotGrid as PivotGridHandle } from "herceg/grid/pivot";
 import {
@@ -123,6 +132,32 @@ export function WrongCells() {
           interaction: "button",
           render: () => null,
         },
+      }}
+    />
+  );
+}
+
+// Through lineage: a grid of groups of requests reports selections of requests.
+const focus = selectionStore(requests);
+export function Hosts() {
+  const model = useMemo(
+    () =>
+      createGridModel({
+        data: rowView(groupRows(rowView(requests), { by: ["host"], ops: { n: count() } }).table),
+        columns: [{ field: "host" }, { field: "n" }],
+        selectionStore: focus,
+        channel: "focus",
+        lineage,
+      }),
+    [],
+  );
+  return (
+    <Grid
+      model={model}
+      ariaLabel="Hosts"
+      onSelect={({ selection }) => {
+        const rows: DataSelection<Requests> | null = selection;
+        return rows;
       }}
     />
   );

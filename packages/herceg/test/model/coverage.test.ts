@@ -377,6 +377,44 @@ describe("coverage", () => {
     expect(coverage.of(0, "s")).toEqual({ selected: 1, total: 1, state: "all" });
   });
 
+  it("measure nothing of a pivot frozen by a change heard before it heard it", () => {
+    const source = untyped({ r: ["R", "R"], k: ["x", "x"], v: [1, 2] }, { maxRows: 2 });
+    const measured: unknown[] = [];
+    // Heard before the pivot hears the same change.
+    source.subscribe(() => measured.push(relation.measureOf("s")));
+    const pivot = pivotRows(rowView(source), {
+      rows: "r",
+      pivot: "k",
+      ops: { s: sum("v") },
+      limits: { generatedColumns: 1 },
+    });
+    const relation = relationTo(pivot.table, source)!;
+    expect(relation.measureOf("s")).toEqual({ op: "sum", field: "v" });
+    source.append({ r: ["R"], k: ["y"], v: [5] });
+    expect(pivot.failure?.limit).toBe("generatedColumns");
+    expect(measured).toEqual([undefined]);
+  });
+
+  it("count every incidence once for a first read of a sum", () => {
+    const n = 10_000;
+    const source = untyped({
+      g: Array.from({ length: n }, (_, i) => `g${i % 100}`),
+      v: Float64Array.from({ length: n }, (_, i) => i),
+    });
+    const store = selectionStore(source);
+    store.set("c", selectWhere(col("v").lt(5000)));
+    const groups = groupRows(rowView(source), { by: ["g"], ops: { s: sum("v") } });
+    const coverage = coverageOf(relationTo(groups.table, source)!, "s", store, "c");
+    const [rebuilds, incidences] = [coverageWork.rebuilds, coverageWork.incidences];
+    expect(coverage.measure(0, "s")?.selected).toBe(
+      Array.from({ length: 50 }, (_, i) => i * 100).reduce((a, b) => a + b, 0),
+    );
+    expect([coverageWork.rebuilds - rebuilds, coverageWork.incidences - incidences]).toEqual([
+      1,
+      n,
+    ]);
+  });
+
   it("measure what the rows hold when read before the producer heard of them", () => {
     const source = untyped({ v: [1, 2] });
     const store = selectionStore(source);
@@ -625,9 +663,13 @@ describe("lineage budgets", () => {
     expect(built.required).toBe(cost.required);
     expect(built.additional).toBeLessThanOrEqual(4 * (n / 8));
     expect(
-      budgetRefusal(cost, undefined, { target: "byRegion", source: "sales", rows: n }),
+      budgetRefusal(cost, undefined, { target: '"byRegion"', source: '"sales"', rows: n }),
     ).toBeNull();
-    const refused = budgetRefusal(cost, 2 ** 17, { target: "byRegion", source: "sales", rows: n });
+    const refused = budgetRefusal(cost, 2 ** 17, {
+      target: '"byRegion"',
+      source: '"sales"',
+      rows: n,
+    });
     expect(refused?.code).toBe("unsupported");
     expect(refused?.message).toBe(
       `rowSelection budget: highlighting "byRegion" through "sales" needs ${(cost.required / 2 ** 20).toFixed(1)} MiB of indexes, past 0.1 MiB (its budget); give a larger budget, or bind a store of "byRegion"`,
@@ -762,6 +804,81 @@ describe("lineage costs as built", () => {
     coverage.selected(0);
     expect(membership.room).toBeGreaterThanOrEqual(source.length);
     expect(cost.required).toBeGreaterThanOrEqual(retained(coverage, store, "c"));
+  });
+
+  it("count sums a shared coverage holds, though only a count is asked for", () => {
+    const n = 10_000;
+    const source = untyped({
+      g: Array.from({ length: n }, (_, i) => `g${i % 3000}`),
+      v: Float64Array.from({ length: n }, (_, i) => i),
+    });
+    const store = selectionStore(source);
+    store.set("c", selectWhere(col("v").lt(5000)));
+    const groups = groupRows(rowView(source), { by: ["g"], ops: { s: sum("v"), k: count("v") } });
+    const relation = relationTo(groups.table, source)!;
+    // One coverage for both: they read v's finite values.
+    const coverage = coverageOf(relation, "s", store, "c");
+    expect(coverageOf(relation, "k", store, "c")).toBe(coverage);
+    coverage.measure(0, "s");
+    source.append({ g: ["new"], v: [1] });
+    const cost = lineageCost(relation, ["k"], store, "c");
+    coverage.measure(3000, "s");
+    expect(cost.required).toBeGreaterThanOrEqual(retained(coverage, store, "c"));
+  });
+
+  it("count a membership's growth once rows dropped from the front move its start", () => {
+    const n = 10_000;
+    const source = untyped(
+      {
+        g: Array.from({ length: n }, (_, i) => `g${i % 2550}`),
+        v: Float64Array.from({ length: n }, (_, i) => i),
+      },
+      { maxRows: n },
+    );
+    const store = selectionStore(source);
+    store.set("c", selectWhere(col("v").lt(5000)));
+    const groups = groupRows(rowView(source), { by: ["g"], ops: { s: sum("v") } });
+    const relation = relationTo(groups.table, source)!;
+    const coverage = coverageOf(relation, "s", store, "c");
+    coverage.measure(0, "s");
+    const batch = (rows: number) =>
+      source.append({
+        g: Array.from({ length: rows }, () => "g0"),
+        v: Float64Array.from({ length: rows }, () => 1),
+      });
+    batch(2500);
+    coverage.measure(0, "s");
+    // The drop moves the bytes' start past their room, though `room` is as before.
+    batch(1);
+    const cost = lineageCost(relation, ["s"], store, "c");
+    coverage.measure(0, "s");
+    expect(cost.required).toBeGreaterThanOrEqual(retained(coverage, store, "c"));
+  });
+
+  it("count a chain's derivations as of the rows they will read, asked before they heard of them", () => {
+    const source = untyped({ g: ["a"], v: [1] });
+    const store = selectionStore(source);
+    store.set("c", selectWhere(true));
+    const asked: [number, number][] = [];
+    // Heard before either derivation hears the same change.
+    source.subscribe(() => {
+      const cost = lineageCost(relation, ["t"], store, "c");
+      coverage.measure(0, "t");
+      asked.push([cost.required, retained(coverage, store, "c")]);
+    });
+    const counts = deriveTable(source, [{ aggregate: [{ op: "count", as: "n" }], by: ["g"] }]);
+    const total = deriveTable(counts, [
+      { aggregate: [{ op: "sum", field: "n", as: "t" }], by: [] },
+    ]);
+    const relation = relationTo(total, source)!;
+    const coverage = coverageOf(relation, "t", store, "c");
+    coverage.selected(0);
+    source.append({
+      g: Array.from({ length: 1000 }, (_, i) => `n${i}`),
+      v: Float64Array.from({ length: 1000 }, () => 1),
+    });
+    const [[required, kept]] = asked as [[number, number]];
+    expect(required).toBeGreaterThanOrEqual(kept);
   });
 
   it("count a log kept for one relation and a trace another builds", () => {

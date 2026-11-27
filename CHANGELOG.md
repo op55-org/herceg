@@ -693,3 +693,23 @@ styles](docs/guide/styling.md#role-styles) and
   the data's `<svg>` the first time something draws there, so a chart
   nothing draws over keeps no more nodes. See [Layers in the
   browser](docs/architecture/rendering.md#layers-in-the-browser).
+- **Groups highlight their rows.** A chart of groups, totals, or a derived
+  table's aggregates binds a selection store of the table they come from
+  (`rowSelection({ store, channel, lineage })` with `import { lineage }
+  from "herceg"`; specs, the widget, Streamlit, and `herceg/web` need no
+  import; `hg.SelectionBinding(channel, data=df)` on a chart of
+  `hg.derive(df)` in Python): it highlights what each group holds of the
+  channel's rows, bars of counts and sums from their bases and the others
+  in the marks' new `partial` look (`partial=` in Python), and its clicks,
+  lassos, items, and brushes along its groups write the source's rows, or
+  a brush's condition on the source's fields. Tooltips, the keyboard, and
+  the text alternative say how many of the rows are selected ("60; 2 of 3
+  rows selected, revenue 30 of 60"; "4 of 6 rows of sales selected."), and
+  inspected points carry `coverage` (`hg.Coverage` in Python). Grids of a
+  groups' table take the source's store with `lineage`, their model typed
+  by it (`GridModel<S, R>`). A binding's
+  `budget` caps the indexes this keeps (16 bytes a row by default); past
+  it a chart is refused, or stops highlighting and says so. Marks that
+  draw a selection's shapes of their own (histograms, box plots,
+  candlesticks, heatmaps) are refused a store through lineage yet. See
+  [Groups highlighting their rows](docs/guide/data.md#groups-highlighting-their-rows).

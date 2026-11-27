@@ -263,6 +263,14 @@ export interface InspectionPayload {
     content?: { text: string; style?: PartStyle }[];
     /** The heading its mark's `tooltip.heading` wrote, as `content`. */
     heading?: { text: string; style?: PartStyle }[];
+    /** What a binding through lineage holds of the rows behind it (see `InspectedPoint.coverage`). */
+    coverage?: {
+      selected: number;
+      total: number;
+      state: "none" | "partial" | "all";
+      measure?: { field: string; selected: number; total: number };
+      channel: string;
+    };
   }[];
   /** Each mark's total of a reading along an axis (`tooltip.total`), where any mark has one. */
   totals?: {
@@ -780,6 +788,12 @@ export function inspectionPayload(
       ...(point.fields && { fields: point.fields.map((field) => ({ ...field })) }),
       ...(point.content && { content: runs(point.content) }),
       ...(point.heading && { heading: runs(point.heading) }),
+      ...(point.coverage && {
+        coverage: {
+          ...point.coverage,
+          ...(point.coverage.measure && { measure: { ...point.coverage.measure } }),
+        },
+      }),
     })),
     ...(inspection.axis !== "item" &&
       inspection.totals && {

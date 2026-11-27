@@ -665,6 +665,7 @@ export class RowGroups<
       kind: "links",
       source,
       target: level.table,
+      aggregates: this.aggregates,
       get revision() {
         groups.#update();
         return groups.#lineage;

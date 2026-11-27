@@ -1486,6 +1486,7 @@ export function point<S extends Schema>(
       "id",
       "selected",
       "unselected",
+      "partial",
       "axis",
       "facet",
       "panel",

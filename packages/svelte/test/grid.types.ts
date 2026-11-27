@@ -2,7 +2,16 @@
 // (svelte-check). Markup is checked through the same component signatures
 // these calls use: the schema is inferred from `model`, and `cells`'
 // snippets, `fields`, and the bound `grid` follow it.
-import { count, rowTotals, rowView, table } from "herceg";
+import {
+  count,
+  type DataSelection,
+  groupRows,
+  lineage,
+  rowTotals,
+  rowView,
+  selectionStore,
+  table,
+} from "herceg";
 import { createGridModel, type GridCellContext, type Grid as HercegGrid } from "herceg/grid";
 import { createPivotGridModel } from "herceg/grid/pivot";
 import { createRemoteGridModel, type GridSource } from "herceg/grid/remote";
@@ -48,6 +57,22 @@ Grid(internals, {
 });
 // @ts-expect-error grids need an accessible name
 Grid(internals, { model });
+
+// Through lineage: a grid of groups of requests reports selections of requests.
+Grid(internals, {
+  model: createGridModel({
+    data: rowView(groupRows(rowView(requests), { by: ["host"], ops: { n: count() } }).table),
+    columns: [{ field: "host" }, { field: "n" }],
+    selectionStore: selectionStore(requests),
+    channel: "focus",
+    lineage,
+  }),
+  ariaLabel: "Hosts",
+  onselect: ({ selection }) => {
+    const rows: DataSelection<Requests> | null = selection;
+    return rows;
+  },
+});
 // @ts-expect-error copy is false or its limits
 Grid(internals, { model, ariaLabel: "Requests", copy: true });
 Grid(internals, {

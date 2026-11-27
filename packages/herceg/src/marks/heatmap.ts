@@ -1529,6 +1529,7 @@ export function heatmap<S extends Schema>(
     "id",
     "selected",
     "unselected",
+    "partial",
     "facet",
     "panel",
     "clip",

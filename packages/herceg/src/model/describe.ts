@@ -124,7 +124,7 @@ export function describeChart(model: ChartModel): string {
     ...model.legendSummaries(),
     ...model.annotationSummaries(),
     config.navigator?.describe(model),
-    config.rowSelection?.description,
+    config.rowSelection?.describe(config),
   );
   return parts.filter(Boolean).join(" ");
 }

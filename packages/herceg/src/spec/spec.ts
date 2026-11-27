@@ -1239,6 +1239,16 @@ export interface RowSelectionSpec {
    */
   live?: boolean;
   /**
+   * Bytes the indexes highlighting through lineage may take, for marks of
+   * tables that come from the bound one (derived tables): coverage of each
+   * of their rows, what derivations keep of their rows. 16 a row of the
+   * bound table by default, at least 64 KiB. Past it, the chart is refused,
+   * or, when tables grow past it later, stops highlighting them and reports
+   * it.
+   * @exclusiveMinimum 0
+   */
+  budget?: number;
+  /**
    * What the channel holds once loaded, in a store `loadSpec` makes (a
    * store given in its options keeps what it holds), which static exports
    * of the spec draw: a condition (rows appended later that meet it are

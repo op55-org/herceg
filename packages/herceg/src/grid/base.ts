@@ -987,6 +987,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   /** How much of a row is selected; a group's header is partly when some of its rows are. */
   abstract selectionState(rowIndex: number): SelectionState;
 
+  /**
+   * What a row partly selected says of it: through lineage, how many of
+   * the rows behind it the channel holds ("12 of 42 rows selected").
+   */
+  selectionNote?(rowIndex: number): string | undefined;
+
   /** Rows selected; null when a condition selects them that the grid cannot count. */
   abstract get selectedCount(): number | null;
 

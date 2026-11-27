@@ -15,13 +15,17 @@ import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
+import type { RowsCoverage } from "../model/lineage-kit.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { Geometry, RectGeometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
 import type { Frozen, FunnelSpec, MarkTooltipSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { refuseColor } from "./colored.ts";
 import {
+  type HeldItems,
+  heldItems,
   heldText,
+  holdRow,
   type ItemInfo,
   type LayoutFrame,
   type LayoutItem,
@@ -73,13 +77,6 @@ interface Stage {
   code: number;
 }
 
-/** What a selection holds of each stage, by code: its rows' count and sum, and the stage's rows. */
-interface Held {
-  rows: Float64Array;
-  sums: Float64Array;
-  of: Float64Array;
-}
-
 export class FunnelMark implements LayoutMark {
   declare readonly [MARK]: true;
   readonly layout = true;
@@ -94,7 +91,7 @@ export class FunnelMark implements LayoutMark {
   /** Totals and row counts per category code, of all rows and of each facet panel's. */
   readonly #totals = new RowsCache<{ sums: Float64Array; rows: Uint32Array }>();
   /** What highlighted selections hold of each stage. */
-  readonly #held = new SelectionCache<Held>();
+  readonly #held = new SelectionCache<HeldItems>();
   /** The one row each stage stands for, of all rows and of each facet panel's. */
   readonly #soles = new RowsCache<SoleRows>();
 
@@ -167,20 +164,17 @@ export class FunnelMark implements LayoutMark {
   }
 
   /** What `selected` holds of each stage's rows among `of` (all rows by default). */
-  #heldOf(selected: Uint8Array, of: Uint32Array | undefined): Held {
+  #heldOf(
+    selected: Uint8Array,
+    of: Uint32Array | undefined,
+    covered: RowsCoverage | undefined,
+  ): HeldItems {
     return this.#held.get(selected, of, () => {
       const size = this.table.categories(this.spec.category).dictionary.length;
-      const held = {
-        rows: new Float64Array(size),
-        sums: new Float64Array(size),
-        of: new Float64Array(size),
-      };
-      this.#eachRow(of, (row, code, value) => {
-        held.of[code]!++;
-        if (selected[row] !== 1) return;
-        held.rows[code]!++;
-        held.sums[code]! += value;
-      });
+      const held = heldItems(size, covered, this.spec.value);
+      this.#eachRow(of, (row, code, value) =>
+        holdRow(held, code, row, value, selected, covered, this.spec.value),
+      );
       return held;
     });
   }
@@ -285,7 +279,7 @@ export class FunnelMark implements LayoutMark {
     // With a selection highlighted, each bar's selected share is a bar of
     // that width in its middle, the rest of it dimmed either side.
     const selected = frame.selected?.(this.table);
-    const held = selected && this.#heldOf(selected, frame.rows);
+    const held = selected && this.#heldOf(selected, frame.rows, frame.covered?.(this.table));
     let lit = rects;
     if (held) {
       lit = rects.slice();
@@ -334,7 +328,7 @@ export class FunnelMark implements LayoutMark {
         text += heldText(
           held.rows[code]!,
           held.of[code]!,
-          field === undefined
+          field === undefined || !held.measured
             ? undefined
             : { field: fieldText?.label(field) ?? field, held: held.sums[code]!, of: value },
           (count) => formatNumber(count, locale),

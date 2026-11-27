@@ -36,14 +36,16 @@ export interface GridComponentProps<M = unknown>
   onrender?: ((event: GridEvents["render"]) => void) | undefined;
 }
 
-export interface GridProps<S extends Schema = Schema> extends GridComponentProps<GridModel<S>> {
+/** `<Grid>`'s props; `R` is the schema of its model's store's table (see `GridModel`). */
+export interface GridProps<S extends Schema = Schema, R extends Schema = S>
+  extends GridComponentProps<GridModel<S, R>> {
   /**
    * What the grid shows, made with `createGridModel` and owned by the
    * application (kept as it is: not in `$state`). Data changes, scrolling,
    * focus, and selection go through it and the grid, never through Svelte;
    * a new model makes a new grid.
    */
-  model: GridModel<S>;
+  model: GridModel<S, R>;
   /**
    * Svelte cells by column id, over the columns' own cells: a snippet of
    * the cell (`GridCellContext`), or `{ render, fields, interaction }` as
@@ -55,7 +57,7 @@ export interface GridProps<S extends Schema = Schema> extends GridComponentProps
    */
   cells?: SvelteGridCells<NoInfer<S>> | undefined;
   /** The underlying grid once mounted (`bind:grid`), for imperative calls such as `focusCell`. */
-  grid?: HercegGrid<S> | null;
+  grid?: HercegGrid<S, GridModel<S, R>> | null;
 }
 
 export interface RemoteGridProps<S extends Schema = Schema>

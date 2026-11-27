@@ -63,6 +63,7 @@ import { itemPlaces, TextMark } from "../marks/text.ts";
 import { TreemapMark } from "../marks/treemap.ts";
 import { ViolinMark } from "../marks/violin.ts";
 import { Facet } from "../model/facet.ts";
+import { lineage } from "../model/lineage-kit.ts";
 import type { ChartConfig } from "../model/model.ts";
 import { rangeNavigator } from "../model/navigator.ts";
 import { Panels } from "../model/panels.ts";
@@ -301,7 +302,7 @@ function loadRowSelection(
   const read = [...new Set(marks.flatMap((mark) => tablesOf(mark)))];
   const bindings = (Array.isArray(spec) ? spec : [spec]) as readonly RowSelectionSpec[];
   return rowSelection(
-    ...bindings.map(({ data, channel, events, effect, selection }, i) => {
+    ...bindings.map(({ data, channel, events, effect, selection, budget }, i) => {
       const path = Array.isArray(spec) ? `rowSelection[${i}]` : "rowSelection";
       let name = data;
       if (name === undefined) {
@@ -339,9 +340,12 @@ function loadRowSelection(
         }
       }
       stores.set(name!, store);
+      // Marks of tables derived from the bound one highlight it through lineage.
       return {
         store,
         channel,
+        lineage,
+        budget,
         ...(events && { events }),
         ...(effect && { effect }),
       };
