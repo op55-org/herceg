@@ -369,6 +369,108 @@ describe("streaming names", () => {
     expect(plots.size).toBe(1);
     expect(grown.size).toBeGreaterThan(1);
   });
+
+  it("are shortened as a chart made at each frame shortens them, each name fitted once", () => {
+    const live = table({ time: time([0, MINUTE]), ms: [100, 200], service: ["api", "db"] });
+    const config: ChartConfig = {
+      y: { domain: [0, 600] },
+      marks: [line(live, { x: "time", y: "ms", series: "service", labels: A1 })],
+    };
+    const streamed = model(config);
+    const { measure, measured } = recording();
+    const names = ["api", "a-much-longer-service-name", "db", "x", "queue-workers-eu-west"];
+    for (let k = 2; k < 40; k++) {
+      live.append({
+        time: [k * MINUTE],
+        ms: [100 + (k % 5) * 50],
+        service: [names[k % names.length]!],
+      });
+      if (k > 10) live.dropFirst(1);
+      measured.length = 0;
+      const scene = streamed.scene(measure);
+      expect(textsOf(scene)).toEqual(textsOf(sceneOf(config)));
+      // Once every name has been drawn, none is fitted again.
+      if (k >= 2 + names.length) expect(tried(measured, scene)).toEqual([]);
+    }
+    expect(textsOf(streamed.scene(estimateText))).toContainEqual(
+      expect.stringMatching(/^a-much.*…$/),
+    );
+  });
+});
+
+/** A measurer recording the text it measures. */
+function recording() {
+  const measured: string[] = [];
+  const measure: typeof estimateText = (text, font) => {
+    measured.push(text);
+    return estimateText(text, font);
+  };
+  return { measure, measured };
+}
+
+/** The shortened text `measured` that `scene` draws no label of: tried in fitting labels. */
+function tried(measured: readonly string[], scene: Scene): string[] {
+  const drawn = new Set(textsOf(scene));
+  return measured.filter((text) => text.endsWith("…") && !drawn.has(text));
+}
+
+describe("names fitted to their room", () => {
+  it("are each chart's own, fitted again in another theme or with another measurer", () => {
+    const config = { ...named(), theme: "auto" } satisfies ChartConfig;
+    const { measure, measured } = recording();
+    const fitted = (chart: ChartModel, by = measure) => {
+      measured.length = 0;
+      const scene = chart.scene(by);
+      expect(textsOf(scene)).toEqual(textsOf(sceneOf(named())));
+      return tried(measured, scene).length;
+    };
+    const chart = model(config);
+    expect(fitted(chart)).toBeGreaterThan(0);
+    expect(fitted(chart)).toBe(0);
+    // Another chart fits its own.
+    expect(fitted(model(config))).toBeGreaterThan(0);
+    expect(fitted(chart)).toBe(0);
+    // On a dark page, its theme another.
+    expect(chart.refreshTheme({ dark: true })).toBe(true);
+    expect(fitted(chart)).toBeGreaterThan(0);
+    expect(fitted(chart)).toBe(0);
+    // Another measurer, as faces loaded give.
+    const other = recording();
+    measured.length = 0;
+    const scene = chart.scene(other.measure);
+    expect(tried(other.measured, scene).length).toBeGreaterThan(0);
+  });
+
+  it("fit labels of parts by their parts, though another label has their text", () => {
+    // The same text, "payments at …", the series' name larger in one, the value in the other.
+    const larger = (part: "series" | "value") =>
+      line(metrics, {
+        x: "time",
+        y: "payments",
+        labels: {
+          at: "last",
+          content: [
+            { series: true, ...(part === "series" && { style: { fontSize: 16 } }) },
+            " at ",
+            { value: true, ...(part === "value" && { style: { fontSize: 16 } }) },
+          ],
+          place: { outside: true, room: 120 },
+        },
+      });
+    const partsOf = (scene: Scene) =>
+      labelsOf(scene.panels[0]!).map(({ text, paint }) => [text, paint.size]);
+    const alone = (part: "series" | "value") =>
+      partsOf(sceneOf({ y: { domain: [0, 600] }, marks: [larger(part)] }));
+    const both = partsOf(
+      sceneOf({ y: { domain: [0, 600] }, marks: [larger("series"), larger("value")] }),
+    );
+    expect(both).toEqual([...alone("series"), ...alone("value")]);
+    // Each shortened in its value: by more where the name is the larger.
+    const cut = (part: "series" | "value") => alone(part).at(-1)![0] as string;
+    expect(cut("series")).toMatch(/^\d+…$/);
+    expect(cut("value")).toMatch(/^\d+…$/);
+    expect(cut("series")).not.toBe(cut("value"));
+  });
 });
 
 describe("rules' labels outside the plot", () => {

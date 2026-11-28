@@ -3,12 +3,13 @@
 // the first frame and as names stream in; those wider than the room are
 // shortened to it as the browser measures them, in SVG and Canvas alike;
 // and static SVG, measured as the browser measures, draws what the live
-// chart draws.
-import { afterEach, expect } from "vitest";
+// chart draws. Names are shortened again as faces loaded later measure them.
+import { afterEach, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import { measurer } from "../../src/dom/measurers.ts";
+import { prepareFonts } from "../../src/fonts.ts";
 import { line } from "../../src/marks/line.ts";
 import { EXPORT_SCENE, type ExportsScene } from "../../src/render/export-scene.ts";
 import { renderToSVG } from "../../src/render/static.ts";
@@ -160,3 +161,38 @@ contractTest(
   },
   "holds the plot still as names stream in; static SVG draws the live chart's shortened names",
 );
+
+it("shortens names again as faces that load later measure them", async () => {
+  // Measured in a fallback until another chart brings the family.
+  const theme = { style: { text: { font: "LaterNames, monospace" } } };
+  const config = { ...options("svg"), theme };
+  const plain = await mount(config);
+  expect(namesOf(sceneOf(plain))[2]!.text).toMatch(/^recomm.*…$/);
+  const data = await (
+    await fetch(new URL("../fixtures/pdf-fonts/sans.ttf", import.meta.url))
+  ).arrayBuffer();
+  const other = createChart(document.body.appendChild(document.createElement("div")), {
+    theme,
+    marks: [line(metrics, { x: "time", y: "auth" })],
+    fonts: prepareFonts([{ family: "LaterNames", data: new Uint8Array(data) }]),
+  });
+  const loading = other.loading;
+  other.root.parentElement!.remove();
+  other.destroy();
+  await loading;
+  plain.render();
+  // Shortened as a chart made now shortens them: the most of the name that
+  // fits the room as the family measures it.
+  const after = namesOf(sceneOf(plain));
+  expect(after.map(({ text }) => text)).toEqual(
+    namesOf(sceneOf(await mount(config))).map(({ text }) => text),
+  );
+  const cut = after[2]!;
+  const measure = measurer(document);
+  const reach = (cut.halo?.width ?? 0) / 2;
+  const kept = Array.from(cut.text).length - 1;
+  expect(measure(cut.text, cut.paint.css) + reach).toBeLessThanOrEqual(ROOM);
+  expect(
+    measure(`${"recommendations-engine".slice(0, kept + 1)}…`, cut.paint.css) + reach,
+  ).toBeGreaterThan(ROOM);
+});

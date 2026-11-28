@@ -9,7 +9,12 @@
 // labels make no rows.
 
 import type { Bounds } from "../../guides/axes.ts";
-import { type AttachedLabel, type LabelOwner, placeAttached } from "../../layout/attached.ts";
+import {
+  type AttachedLabel,
+  type FittedLabels,
+  type LabelOwner,
+  placeAttached,
+} from "../../layout/attached.ts";
 import type { PanelDrawing } from "../../layout/placer.ts";
 import type { FeatureKit, MarkFeatures } from "../../model/features.ts";
 import type { AreaGeometry, Geometry, LineGeometry, Rect } from "../../scene/scene.ts";
@@ -266,12 +271,14 @@ export function placing(
 /**
  * Places the series labels of a panel's marks, `drawings`, together
  * (layout/attached.ts), adding each mark's to its geometry; the boxes of
- * the labels drawn.
+ * the labels drawn. Those shortened to their room are as `fitted`, the
+ * chart's, has fitted them.
  */
 export function panelLabels(
   kit: FeatureKit,
   drawings: readonly PanelDrawing[],
   of: (mark: Mark) => MarkFeatures | undefined,
+  fitted: FittedLabels,
 ): Rect[] {
   let labels: AttachedLabel[] | undefined;
   let frame: Frame | undefined;
@@ -287,7 +294,7 @@ export function panelLabels(
     }
   }
   if (!labels || !frame) return [];
-  const { geometry, boxes } = placeAttached(labels, frame, kit);
+  const { geometry, boxes } = placeAttached(labels, frame, kit, fitted);
   for (const [owner, parts] of geometry) drawingOf.get(owner)!.geometry.push(...parts);
   return boxes;
 }

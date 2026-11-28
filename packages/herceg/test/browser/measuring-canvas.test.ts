@@ -2,8 +2,9 @@
 // document, which their measurer replaces every 1,000 strings it measures, as
 // Chrome's keeps what it shaped of every distinct string for as long as it
 // lives. Widths stay those of any canvas of the page, counting labels lay
-// out frame by frame as on one canvas, old canvases go, and in Chrome the
-// memory of tens of thousands of strings measured stays bounded.
+// out frame by frame as on one canvas, old canvases go (charts that fitted
+// labels on them kept), and in Chrome the memory of tens of thousands of
+// strings measured stays bounded.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { commands, server } from "vitest/browser";
 import { table } from "../../src/data/table.ts";
@@ -12,8 +13,9 @@ import { facesLoaded, measurer } from "../../src/dom/measurers.ts";
 import { SvgLayer } from "../../src/dom/svg-layer.ts";
 import { canvasMeasurer, type MeasuringContext } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { line } from "../../src/marks/line.ts";
 import type { LabelsGeometry, Scene } from "../../src/scene/scene.ts";
-import { collectGarbage } from "./helpers.ts";
+import { collectGarbage, collectUntilGone } from "./helpers.ts";
 
 const FONT = "12px system-ui, sans-serif";
 const BOLD = "700 13px Georgia, serif";
@@ -92,6 +94,32 @@ describe("the document's measuring canvas", () => {
     contexts.clear();
     await collectGarbage();
     expect(old.map((ref) => ref.deref() === undefined)).toEqual([true, true]);
+  });
+
+  it("goes once replaced, while a chart that shortened its names on it stays", async () => {
+    // Firefox keeps a context a weak reference watches (see above).
+    if (server.browser === "firefox") return;
+    facesLoaded(document);
+    const names = ["recommendations-engine", "payments-and-billing"];
+    const data = table({ t: [0, 1], [names[0]!]: [1, 2], [names[1]!]: [2, 1] });
+    const chart = await mount({
+      animation: false,
+      legend: false,
+      marks: [
+        line(data, {
+          x: "t",
+          y: names,
+          labels: { at: "last", place: { outside: true, room: 64 } },
+        }),
+      ],
+    });
+    const drawn = chart.root.querySelectorAll("text");
+    expect([...drawn].filter((text) => text.textContent?.endsWith("…"))).toHaveLength(2);
+    const first = [new WeakRef(measurer(document).context!)];
+    for (const text of fresh(1000)) measurer(document)(text, FONT);
+    await collectUntilGone(first);
+    expect(first[0]!.deref()).toBeUndefined();
+    expect(chart.root.isConnected).toBe(true);
   });
 
   it("lays out counting labels of parts frame by frame as one canvas does", async () => {

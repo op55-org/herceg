@@ -581,7 +581,14 @@ left out when only the ellipsis fits. Outside, they go in side tracks
 (`Frame.outside`), reserving room unless `reserve` is false: what they
 measure, or held within their `place.room`'s bounds, those wider than its
 most shortened as inside labels are (`fitLabel`, which rules' labels
-outside the plot share). A mark whose labels have a fixed room is not
+outside the plot share). Each chart keeps its plain labels as fitted, by
+text, font, and width (`FittedLabels`, held by its compiled features), so
+that a label shortened to its room is fitted once rather than every
+frame. They are forgotten when the chart measures with another measurer
+(faces loaded, or the chart's fonts changed) or on another canvas (the
+document's measurer takes a new one every 1,000 strings), when its theme
+changes, and after 512. Labels of parts are fitted each time, as their
+parts fit by their own looks. A mark whose labels have a fixed room is not
 placed as drawn (`Mark.roomPlaced`): its compiled features keep the room
 from its options, so the chart reads it before anything is drawn. Extents
 include halos and box outlines. Every series label of a panel (all its
