@@ -987,6 +987,16 @@ export class ChartModel {
   }
 
   /**
+   * Where a y view synced charts share on panel `panel` lands before a
+   * scene says (see `PanelLayout.syncedY`); undefined without facets or
+   * subplots, whose one panel either reads views from the model or, drawn
+   * by a layout mark, has no y axis.
+   */
+  syncedY(panel: string | undefined): "y" | "yRight" | undefined {
+    return this.#panels?.syncedY(panel, this.#marks, this.#config);
+  }
+
+  /**
    * The instance of scale `scale` that panel `panel` of the last scene
    * draws with (see `instanceIn`), undefined when it has no such axis.
    * Throws, naming `where`, for a panel the chart does not have, and where

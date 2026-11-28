@@ -279,6 +279,23 @@ describe("integration.streamlit", () => {
       page.remove();
     }
   });
+
+  // So with a chart a run replaced, while the run's own chart is shown.
+  it.skipIf(server.browser !== "chromium")("lets go of a chart a run replaced", async () => {
+    const page = document.createElement("div");
+    page.style.width = "600px";
+    document.body.append(page);
+    try {
+      const shown = await streamlit.show(page, { ...specOf("line")!, height: 300 });
+      const replaced = [shown.chart(), shown.chart().root].map((held) => new WeakRef(held));
+      await shown.change!({ title: "Updated" });
+      await collectUntilGone(replaced);
+      expect(replaced.map((ref) => ref.deref())).toEqual([undefined, undefined]);
+      shown.close();
+    } finally {
+      page.remove();
+    }
+  });
 });
 
 /**

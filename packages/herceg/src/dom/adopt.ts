@@ -114,13 +114,23 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
   const buttons = [...legend.children];
   if (buttons.length !== state.legend.length) throw unlike();
   const entries = new Map<string, Entry>();
-  state.legend.forEach(([key, targets, panel], i) => {
+  state.legend.forEach(({ id, key, label: name, targets, selects, panel, action }, i) => {
     const button = buttons[i] as HTMLButtonElement;
     const [swatch, label] = button.children as unknown as [HTMLSpanElement, HTMLSpanElement];
     if (button.tagName !== "BUTTON" || !swatch || !label) throw unlike();
     // A label in a box holds its text in an element of its own.
     const text = (label.firstElementChild as HTMLSpanElement | null) ?? label;
-    entries.set(key, { button, swatch, label, text, shown: "", targets, panel });
+    entries.set(id, {
+      button,
+      swatch,
+      label,
+      text,
+      shown: "",
+      targets: targets ?? key,
+      panel,
+      // What a click is on until a frame draws the legend: the server's.
+      drawn: { guide: { panel, action }, item: { key, label: name, targets, selects } },
+    });
   });
   return {
     id,

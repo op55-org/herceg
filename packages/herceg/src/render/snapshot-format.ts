@@ -3,6 +3,7 @@
 // take its nodes over without drawing them again.
 
 import type { Fonts } from "../fonts/registry.ts";
+import type { LegendAction } from "../spec/guides.ts";
 
 /** The snapshot format this herceg writes and reads. */
 export const SNAPSHOT_VERSION = 1;
@@ -50,8 +51,25 @@ export interface SnapshotState {
   guides: number;
   /** Whether the layer made the chart's own clip path, for marks cut to the chart. */
   chartClip: boolean;
-  /** Each legend button's key, the keys it hides and shows, and for a panel's legend, there. */
-  legend: [id: string, targets: string | readonly string[], panel?: string][];
+  /** Each legend button, in order. */
+  legend: SnapshotLegendEntry[];
+}
+
+/**
+ * A legend button: its key among the legend's buttons (`entryId`), and its
+ * item and legend as a click on it reads them, which the runtime reports
+ * the click on until a frame draws the legend.
+ */
+export interface SnapshotLegendEntry {
+  id: string;
+  key: string;
+  label: string;
+  /** The keys it hides and shows, when not its own key (`LegendItem.targets`). */
+  targets?: readonly string[] | undefined;
+  selects?: readonly string[] | undefined;
+  /** A panel's legend: the subplot it hides and shows marks in. */
+  panel?: string | undefined;
+  action?: LegendAction | undefined;
 }
 
 /**

@@ -23,10 +23,14 @@ export interface Entry {
   drawn?: LegendClick | undefined;
 }
 
-/** A legend entry clicked: its legend and item, as drawn when the click came. */
+/**
+ * A legend entry clicked: what a click reads of its legend and item, as
+ * drawn when the click came (or for markup the chart took over, as the
+ * server drew them, see dom/adopt.ts).
+ */
 export interface LegendClick {
-  guide: LegendGuide;
-  item: LegendItem;
+  guide: Pick<LegendGuide, "panel" | "action">;
+  item: Pick<LegendItem, "key" | "label" | "targets" | "selects">;
 }
 
 /**

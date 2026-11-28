@@ -108,7 +108,7 @@ without padding, and needs no compiler.
 | `type` | `"linear"`, `"log"`, `"time"`. A continuous axis is a time axis when a mark places times on it. |
 | `domain` | Fixed ends; on a category axis, the categories in their bands' order ([How bands are ordered](#how-bands-are-ordered)). |
 | `nice`, `zero` | Round the ends to ticks; include zero (bars' value axes do by default). |
-| `padding` | Room past the data: automatic for markers and bar labels, a share, or pixels (Python `hg.Pixels`). A set `domain` takes none unless given. Category axes refuse it: their bands keep room of their own, a fifth of a band's step at each end as between bands (none where a heatmap's cells are on the axis), in which the pointer names the outer band ([`pointer.categories`](interaction.md#events)). |
+| `padding` | Room past the data: automatic for markers, rug ticks, and bar labels, a share, or pixels (Python `hg.Pixels`). A set `domain` takes none unless given. Category axes refuse it: their bands keep room of their own, a fifth of a band's step at each end as between bands (none where a heatmap's cells are on the axis), in which the pointer names the outer band ([`pointer.categories`](interaction.md#events)). |
 | `scope` | Which panels share the scale ([Layout](layout.md#sharing-scales)). |
 | `repeat` | `"outer"` (default) or `"all"`: which panels sharing the scale label it. |
 | `title`, `show`, `grid` | The axis title; hide the axis; grid lines (`{ zIndex }` to draw them over data). |

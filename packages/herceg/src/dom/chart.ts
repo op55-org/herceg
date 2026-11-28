@@ -420,8 +420,10 @@ export class MountedChart implements Chart, ExportsScene {
           this.#member.receive(channel, value);
       };
       if (this.#later(panel !== undefined || scale !== "x" || channel === "selection", later)) {
-        // Until then, it is what its panel's view is asked to be (`getViewport`).
-        if (channel === "viewport") this.#asked.push([panel, { [scale]: value } as ViewChange]);
+        // Until then, it is what its panel's view is asked to be (`getViewport`),
+        // on the axis that frame takes it on, if any.
+        const axis = channel === "viewport" && (scale === "y" ? this.#model.syncedY(panel) : scale);
+        if (axis) this.#asked.push([panel, { [axis]: value } as ViewChange]);
         return;
       }
       const take = () => {

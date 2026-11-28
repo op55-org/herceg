@@ -193,8 +193,9 @@ hg.Chart(requests).point(x="latency", y="duration").rug(x="latency")
   right).
 - `length` in pixels (8 by default), clipped to the plot; ticks stay at the
   edge through zoom and pan.
-- A rug counts only toward its value axis' domain. Repeated values stay
-  separate observations; the keyboard visits them in value order.
+- A rug counts only toward its value axis' domain, whose automatic padding
+  keeps the ticks of the least and greatest values whole. Repeated values
+  stay separate observations; the keyboard visits them in value order.
 - A y rug uses only the left value axis.
 
 ## Contours

@@ -382,7 +382,7 @@ class Picture:
             assert (
                 ends[0] + clear <= box.top - 1 / SCALE and box.bottom + 2 / SCALE <= ends[1] - clear
             ), f"{place.what} too thin to tell from its neighbours"
-        wide = 1 if place.edge else max(2, int(np.ceil(place.across * SCALE)))
+        wide = max(2, int(np.ceil(place.across * SCALE)))
         return bool(self.blocks(place.color, place.opacity, box, place.layers, wide)[0].any())
 
     def measure(self, place: Place) -> tuple[float, float] | None:
@@ -640,8 +640,8 @@ class Drawn:
             snapshot = self.chart.to_snapshot(id_prefix="express", fonts=FONTS)
             button = re.search(r'<button[^>]*title="Hide ([^"]*)"', snapshot["html"])
             assert button is not None, "the chart has a legend"
-            _, targets, *_ = snapshot["state"]["legend"][0]
-            return button[1], [targets] if isinstance(targets, str) else list(targets)
+            entry = snapshot["state"]["legend"][0]
+            return button[1], list(entry.get("targets", [entry["key"]]))
 
         return self._once("legend", read)
 

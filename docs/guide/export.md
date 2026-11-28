@@ -290,6 +290,9 @@ snapshot = chart.to_snapshot(id_prefix="latency")
   the snapshot does not describe is refused and left as it is.
 - Canvas charts swap the server's SVG for their canvas in the same task;
   GPU charts keep the markup until they draw.
+- A legend entry clicked before the chart's first frame is reported as a
+  click on the entry the markup shows, once the chart's interaction code
+  has loaded, even if a listener has taken the legend away since.
 - Specs: `specToSnapshot(spec, buffers, env)` (`herceg/spec`), hydrated
   with `hydrateChart(host, loadSpec(spec, buffers).config, initial)`.
 - Adapters take the snapshot as `initial={hydration(snapshot)}` (see

@@ -336,7 +336,7 @@
         "is a scale of categories",
         "no panel \"",
         "the id of one of the panels",
-        "expected a spec with panels",
+        "the chart has no panels",
         "need it drawn in the panel",
         "the chart has no subplots",
         "the chart has one panel",

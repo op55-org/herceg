@@ -140,9 +140,6 @@ class Place:
     series: str | None = None
     layers: int = 1
     across: float = 0.0
-    #: A vertical stroke on the plot's edge, which clips half of it away:
-    #: it shows one pixel across.
-    edge: bool = False
     #: The values a fill spans along y, which its probe must lie within,
     #: clear of the strokes on its edges: a fill too thin for that, whose
     #: neighbours' paint would reach the probe, fails the fixture.
@@ -802,22 +799,11 @@ def _ecdf_places(frame: pd.DataFrame, tables: Tables, shown: tuple[str, ...]) ->
 
 
 def _rug_places(frame: pd.DataFrame, tables: Tables, shown: tuple[str, ...]) -> list[Place]:
-    """Each value's tick; the least and greatest on the plot's edges (its
-    axis ends at them), half clipped."""
+    """Each value's tick, whole: the axis leaves room past the least and
+    greatest for theirs."""
     values = tables["values"]
-    ends = {
-        values["v"][np.isin(values["h"], shown)].min(),
-        values["v"][np.isin(values["h"], shown)].max(),
-    }
     return [
-        Place(
-            f"{h}'s tick at {v:g}",
-            v,
-            Along(0, "bottom", inset=4),
-            COLORS[h],
-            series=h,
-            edge=v in ends,
-        )
+        Place(f"{h}'s tick at {v:g}", v, Along(0, "bottom", inset=4), COLORS[h], series=h)
         for h, v in zip(values["h"], values["v"], strict=True)
         if h in shown
     ]
@@ -1053,9 +1039,8 @@ def _added_ecdf(more: pd.DataFrame, tables: Tables) -> list[Place]:
 def _added_ticks(rule: bool) -> Callable[[pd.DataFrame, Tables], list[Place]]:
     def places(more: pd.DataFrame, tables: Tables) -> list[Place]:
         y = Along(0.5, "bottom") if rule else Along(0, "bottom", inset=4)
-        # The greatest value of all, which the axis ends at.
-        top = more["v"].max()
-        return [Place(f"the added mark at {v:g}", v, y, ADDED, edge=v == top) for v in more["v"]]
+        # Whole at the greatest value of all too: the rug leaves room past it.
+        return [Place(f"the added mark at {v:g}", v, y, ADDED) for v in more["v"]]
 
     return places
 

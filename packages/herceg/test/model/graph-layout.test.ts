@@ -264,17 +264,33 @@ describe("settling and data changes, from review", () => {
       for (const v of placeOf(model, name)) expect(Number.isFinite(v)).toBe(true);
   });
 
-  it("lay a large new component out over frames, ending as a whole layout does", () => {
-    const run = (clock: boolean) => {
-      const links = table({ from: ["a"], to: ["b"] });
-      const model = new ChartModel({
-        locale: "en-US",
-        marks: [graph(links, { source: "from", target: "to" })],
-      });
-      model.setSize(600, 400, 1);
-      if (clock) mount(model);
+  /**
+   * Lays out a and b, then a new component of 6,000 nodes, reaching neither:
+   * at once, unmounted, or mounted, over frames of the chart's time, or with
+   * `steps`, of one step of work each. `interrupted` adds the component after
+   * the first layout's first step, before it ends.
+   */
+  const component = ({ mounted = true, steps = false, interrupted = false } = {}) => {
+    const links = table({ from: ["a"], to: ["b"] });
+    const model = new ChartModel({
+      locale: "en-US",
+      marks: [graph(links, { source: "from", target: "to" })],
+    });
+    model.setSize(600, 400, 1);
+    if (mounted) mount(model);
+    // A clock every look at is past the frame's deadline: one step a frame.
+    let now = 0;
+    const late = () => vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+    let clock = steps || interrupted ? late() : undefined;
+    try {
       model.scene(estimateText);
-      // A new component of 6,000 nodes, reaching neither a nor b.
+      if (!steps) {
+        clock?.mockRestore();
+        clock = undefined;
+      }
+      // The first layout ends before the data changes, however long its first frame took.
+      for (let frame = 0; frame < 10_000 && !interrupted && model.items!.pending; frame++)
+        model.scene(estimateText);
       const from = Array.from({ length: 6000 }, (_, i) => `c${i + 1}`);
       links.append({ from, to: from.map((_, i) => `c${Math.floor(i / 2)}`) });
       model.scene(estimateText);
@@ -284,10 +300,25 @@ describe("settling and data changes, from review", () => {
       for (let frame = 0; frame < 100_000 && model.items!.pending; frame++)
         model.scene(estimateText);
       return { pending, places: ["a", "c1", "c3000"].map((name) => placeOf(model, name)) };
-    };
-    const sliced = run(true);
-    expect(sliced.pending).toBe(true);
-    expect(sliced.places).toEqual(run(false).places);
+    } finally {
+      clock?.mockRestore();
+    }
+  };
+
+  it("lay a large new component out over frames, ending as a whole layout does, however frames slice the work", () => {
+    const whole = component({ mounted: false });
+    for (const sliced of [component(), component({ steps: true })]) {
+      expect(sliced.pending).toBe(true);
+      expect(sliced.places).toEqual(whole.places);
+    }
+  });
+
+  it("carry a first layout the data changed while it ran on, ending alike however frames slice the work", () => {
+    // Another layout than a change after the first layout ended: it goes on
+    // as a first layout, packing the components at its end.
+    const sliced = component({ interrupted: true });
+    expect(sliced.places).toEqual(component({ interrupted: true, steps: true }).places);
+    expect(sliced.places).not.toEqual(component().places);
   });
 
   it("show every node of a layered network the data grew while its layout ran, with reduced motion", () => {

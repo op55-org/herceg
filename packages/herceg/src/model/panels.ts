@@ -473,6 +473,15 @@ export class Panels implements PanelLayout {
   }
 
   /**
+   * See `PanelLayout.syncedY`: nowhere without a key, as which instance a
+   * channel naming no panel lands on (insets', panels of layout marks
+   * aside) only a scene resolves.
+   */
+  syncedY(key: string | undefined, marks: readonly Mark[]): "y" | "yRight" | undefined {
+    return key === undefined ? undefined : this.#draws("y", key, marks) ? "y" : "yRight";
+  }
+
+  /**
    * Panels sharing a scale must agree on how it is set up: as the chart's
    * settings with their own, and for y with the type their marks on that
    * side give. An x scale takes the chart's type unless they set one. They
