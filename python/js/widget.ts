@@ -1236,6 +1236,8 @@ class Widget {
           view.positions.clear();
           this.#mount(view, true);
         }
+        // A chart the engine refuses is shown in each display's place, and Python hears it once.
+        if (this.#error !== undefined) this.#refused(this.#error);
         return;
       case "options":
         // Changes of view asked for before go, as in Python: the options may change the scales.

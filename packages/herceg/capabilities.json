@@ -499,7 +499,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -601,7 +601,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -703,7 +703,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -805,7 +805,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -907,7 +907,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1009,7 +1009,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1103,7 +1103,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1237,7 +1237,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1356,7 +1356,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1497,7 +1497,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1638,7 +1638,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1779,7 +1779,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -1904,7 +1904,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2006,7 +2006,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2106,7 +2106,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2209,7 +2209,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2312,7 +2312,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2451,7 +2451,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2648,7 +2648,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2783,7 +2783,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -2959,7 +2959,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -3102,7 +3102,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -3278,7 +3278,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -3421,7 +3421,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -3597,7 +3597,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -3699,7 +3699,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -4015,7 +4015,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -4225,7 +4225,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -4427,7 +4427,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -4665,7 +4665,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -4887,7 +4887,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -5129,7 +5129,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -5351,7 +5351,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -5545,7 +5545,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -5734,7 +5734,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -5923,7 +5923,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -6163,7 +6163,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -6411,7 +6411,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
@@ -6657,7 +6657,7 @@
         "integration.react": { "state": "works" },
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
-        "integration.widget": { "state": "unproved" },
+        "integration.widget": { "state": "works" },
         "integration.streamlit": { "state": "unproved" },
         "integration.web": { "state": "unproved" }
       }
