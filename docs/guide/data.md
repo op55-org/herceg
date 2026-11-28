@@ -905,10 +905,10 @@ const model = createGridModel({
 });
 ```
 
-The grid keeps the row at its top in place as rows come back above it,
-so clearing a filter can leave it scrolled down the list:
-`model.scrollTo({ top: 0 })` on a filter step shows it from its first row
-([how a grid follows its view](grids.md#a-grid)).
+A filter step is a new query of the grid's view: at its first row, the
+grid shows the rows a cleared filter brings back from the top; scrolled
+down, it keeps its scroll offset ([how a grid follows its
+view](grids.md#a-grid)).
 
 **What a filter step costs.** A channel's change tells the views that
 follow it. Groups follow their view at once: within the `set` call, the

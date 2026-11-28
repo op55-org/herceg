@@ -437,7 +437,10 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   #viewHeight = 0;
   #top = 0;
   #left = 0;
-  /** The row at the top and how far it is scrolled past, kept in place as rows come and go. */
+  /**
+   * The row at the top and how far it is scrolled past, kept in place as
+   * rows come and go; none at the first row.
+   */
   #anchor: { ref: GridRef; offset: number } | null = null;
   #focus: Focus | null = null;
   /** Where Shift ranges start. */
@@ -1339,10 +1342,13 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     return [top, left];
   }
 
-  /** Remembers the row at the top, to keep it there. */
+  /**
+   * Remembers the row at the top, to keep it there. Scrolled to the first
+   * row, the grid keeps none: rows arriving above show at the top.
+   */
   #remember() {
     const { length } = this.#display!;
-    if (length === 0) {
+    if (length === 0 || this.#top === 0) {
       this.#anchor = null;
       return;
     }

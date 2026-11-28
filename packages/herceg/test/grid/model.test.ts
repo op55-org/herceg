@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { sum } from "../../src/data/aggregations.ts";
 import { category, time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { geometry } from "../../src/data/geometry.ts";
+import { groupRows } from "../../src/data/groups.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore, selectRows, selectWhere } from "../../src/data/selection.ts";
@@ -297,6 +299,90 @@ describe("grid scrolling", () => {
     model.cycleSort("x");
     expect(model.top).toBe(130);
     expect(model.textAt(13, 0)).toBe("54");
+  });
+
+  it("shows rows arriving above at the top, and keeps the top row once scrolled", () => {
+    const t = table({ x: Float64Array.from({ length: 40 }, (_, i) => i * 2) });
+    const data = rowView(t, { sort: [{ field: "x" }] });
+    const model = createGridModel({ data, columns: [{ field: "x" }], rowHeight: 10 });
+    model.setViewport(100, 50);
+    t.append({ x: [1, -1, 101] });
+    expect(model.top).toBe(0);
+    expect(column(model, "x").slice(0, 3)).toEqual(["-1", "0", "1"]);
+    // Rows appended below change nothing at the top.
+    t.append({ x: [200] });
+    expect([model.top, model.textAt(0, 0)]).toEqual([0, "-1"]);
+    // Scrolled one row down, the row there keeps its place.
+    model.scrollTo({ top: 10 });
+    t.append({ x: [-3, -2] });
+    expect(model.top).toBe(30);
+    expect(model.textAt(3, 0)).toBe("0");
+    // Back at the first row, rows arriving above show again.
+    model.scrollTo({ top: 0 });
+    t.append({ x: [-4] });
+    expect([model.top, model.textAt(0, 0)]).toEqual([0, "-4"]);
+  });
+
+  /** The cross-filtering dashboard's grid: groups of a view following the other panels' channels, newest first. */
+  function dashboard() {
+    const months = ["2025-10", "2025-11", "2025-12"];
+    const regions = ["North", "South", "East", "West"];
+    const sales = table({
+      month: category(months.flatMap((month) => regions.map(() => month))),
+      region: category(months.flatMap(() => regions)),
+      revenue: Float64Array.from({ length: 12 }, (_, i) => 100 + i),
+    });
+    const filters = selectionStore(sales);
+    const groups = groupRows(rowView(sales, { selection: { store: filters, excluding: "grid" } }), {
+      by: ["month", "region"],
+      ops: { revenue: sum("revenue") },
+    });
+    const model = createGridModel({
+      data: rowView(groups.table, { sort: [{ field: "month", order: "descending" }] }),
+      columns: [{ field: "month" }, { field: "region" }],
+      rowHeight: 10,
+    });
+    model.setViewport(200, 20);
+    const shown = (index: number) => `${model.textAt(index, 0)} ${model.textAt(index, 1)}`;
+    return { filters, model, shown };
+  }
+
+  it("shows groups a cleared filter brings back above at the top, and keeps the row held once scrolled", () => {
+    const { filters, model, shown } = dashboard();
+    // A brush leaving out the newest month: its groups come back after the
+    // others, in their keys' order, so the sorted view shows them above.
+    const older = selectWhere(col("month").ne("2025-12"));
+    filters.set("months", older);
+    expect(shown(0)).toBe("2025-11 North");
+    filters.set("months", null);
+    expect(model.top).toBe(0);
+    expect(shown(0)).toBe("2025-12 North");
+
+    filters.set("months", older);
+    model.scrollTo({ top: 10 });
+    expect(shown(1)).toBe("2025-11 South");
+    filters.set("months", null);
+    // Scrolled one row down, the row held keeps its place below December's four.
+    expect(model.top).toBe(50);
+    expect(shown(5)).toBe("2025-11 South");
+  });
+
+  it("keeps the offset when groups coming back before others start their table over", () => {
+    const { filters, model, shown } = dashboard();
+    // West's groups are each month's last: the others come back before them
+    // in their places, and the groups' table starts over, as after a reset.
+    const west = selectWhere(col("region").eq("West"));
+    filters.set("regions", west);
+    filters.set("regions", null);
+    expect(model.top).toBe(0);
+    expect(shown(0)).toBe("2025-12 North");
+
+    filters.set("regions", west);
+    model.scrollTo({ top: 10 });
+    expect(shown(1)).toBe("2025-11 West");
+    filters.set("regions", null);
+    expect(model.top).toBe(10);
+    expect(shown(1)).toBe("2025-12 South");
   });
 
   it("stays clamped when rows go and the view resizes", () => {

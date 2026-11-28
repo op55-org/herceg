@@ -543,6 +543,49 @@ describe("grid sorting", () => {
     expect(latency.hasAttribute("aria-sort")).toBe(false);
     expect(said(grid)).toBe("Not sorted");
   });
+
+  it("number the marks only while two or more keys show on headers", () => {
+    const columns = COLUMNS.map((column) =>
+      column.field === "host" ? { ...column, hidden: true } : column,
+    );
+    const grid = mount(
+      model(requests(100), columns, {
+        sort: [{ field: "ms", order: "descending" }, { field: "host" }],
+      }),
+    );
+    const marks = () =>
+      [...grid.root.querySelectorAll<HTMLElement>("[role=columnheader]")].map((cell) => [
+        cell.textContent,
+        cell.getAttribute("aria-sort"),
+      ]);
+    // One shown key of two: no number beside it.
+    expect(marks()).toEqual([
+      ["id", null],
+      ["Latency▼", "descending"],
+      ["at", null],
+    ]);
+    // Both shown: their places in the sort.
+    grid.model.setColumnVisible("host", true);
+    grid.render();
+    expect(marks()).toEqual([
+      ["id", null],
+      ["Latency▼1", "descending"],
+      ["at", null],
+      ["host▲2", null],
+    ]);
+    grid.model.setColumnVisible("host", false);
+    grid.render();
+    expect(marks()[1]).toEqual(["Latency▼", "descending"]);
+    // A number is the key's place among all the keys. With the first key's
+    // column hidden, no header carries aria-sort.
+    grid.model.setSort([{ field: "host" }, { field: "ms" }, { field: "id" }]);
+    grid.render();
+    expect(marks()).toEqual([
+      ["id▲3", null],
+      ["Latency▲2", null],
+      ["at", null],
+    ]);
+  });
 });
 
 describe("streaming grids", () => {
@@ -599,6 +642,19 @@ describe("streaming grids", () => {
     await frames();
     expect(scroller(grid).getAttribute("aria-rowcount")).toBe("51");
     expect(visibleRows(grid).at(-1)).toBe(49);
+  });
+
+  it("show sorted rows arriving above at the top while scrolled to the first row", async () => {
+    const t = requests(300);
+    const data = rowView(t, { sort: [{ field: "id", order: "descending" }] });
+    const grid = mount(createGridModel({ data, columns: [{ field: "id" }] }));
+    await frames();
+    expect(texts(rowAt(grid, visibleRows(grid)[0]!))).toEqual(["299"]);
+    t.append({ id: [400, 401], ms: [0, 0], at: [0, 0], host: ["a", "a"] });
+    await frames();
+    expect(scroller(grid).scrollTop).toBe(0);
+    expect(visibleRows(grid)[0]).toBe(0);
+    expect(texts(rowAt(grid, 0))).toEqual(["401"]);
   });
 });
 
