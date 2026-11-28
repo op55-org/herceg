@@ -512,32 +512,116 @@ test("Vitest's and pytest's reports are read into contract executions", () => {
   );
 });
 
+/**
+ * Writes a run of `suite` in `directory` as scripts/contracts/run.mjs does:
+ * the report, and its record (a browser suite's, one per engine it ran).
+ */
+function writeRun(directory, suite, { engines = [], report = { testResults: [] }, ...fields }) {
+  const text = JSON.stringify(report);
+  const name = engines.length > 0 ? `${suite}.${engines.join("+")}.json` : `${suite}.json`;
+  writeFileSync(join(directory, name), text);
+  const reportHash = createHash("sha256").update(text).digest("hex");
+  const record = { suite, revision: "abc", sourceHash: "def", browsers: engines, exitCode: 0 };
+  Object.assign(record, { report: name, reportHash, ...fields });
+  for (const engine of engines.length > 0 ? engines : [undefined])
+    writeFileSync(
+      join(directory, `${suite}${engine ? `.${engine}` : ""}.run.json`),
+      JSON.stringify(engine ? { ...record, engine } : record),
+    );
+}
+
 test("evidence is a suite's complete run of this source, whose report is the one it wrote", () => {
   const directory = mkdtempSync(join(tmpdir(), "contracts-"));
-  const report = JSON.stringify({ testResults: [] });
-  const hash = createHash("sha256").update(report).digest("hex");
-  writeFileSync(join(directory, "react.json"), report);
   const source = { revision: "abc", sourceHash: "def" };
-  const read = () => readEvidence(directory, ["react"], source).errors;
-  const record = (fields) =>
-    writeFileSync(
-      join(directory, "react.run.json"),
-      JSON.stringify({ suite: "react", ...source, exitCode: 0, reportHash: hash, ...fields }),
-    );
+  const read = () => readEvidence(directory, ["react", "herceg-unit"], source).errors;
   assert.deepEqual(read(), [
     "react: no complete run of this source; run npm run test:browser -w @herceg/react",
+    "herceg-unit: no complete run of this source; run npm test",
   ]);
-  record({ reportHash: "other" });
-  assert.match(read()[0], /its report is not the one its run wrote/);
-  record({ exitCode: 1 });
-  assert.match(read()[0], /ended with exit code 1/);
+  writeRun(directory, "herceg-unit", {});
+  const run = (fields) => writeRun(directory, "react", { engines: ENGINES, ...fields });
+  run({ reportHash: "other" });
+  assert.deepEqual(read(), [
+    "react: the report of chromium, firefox, webkit is not the one its run wrote; run npm run test:browser -w @herceg/react again",
+  ]);
+  run({ exitCode: 1 });
+  assert.match(read()[0], /^react: its run of chromium, firefox, webkit ended with exit code 1/);
   // A record copied from another run proves nothing here.
   for (const other of [{ suite: "vue" }, { revision: "abd" }, { sourceHash: "deg" }]) {
-    record(other);
-    assert.match(read()[0], /its run record is of another suite or source/);
+    run(other);
+    assert.deepEqual(
+      read().map((error) => error.slice(0, error.indexOf(":"))),
+      ENGINES.map((engine) => `react (${engine})`),
+    );
+    assert.match(read()[0], /its run record is of another suite, engine, or source/);
   }
-  record({});
+  run({});
   assert.deepEqual(read(), []);
+  writeRun(directory, "herceg-unit", { exitCode: 1 });
+  assert.match(read()[0], /^herceg-unit: its run ended with exit code 1/);
+});
+
+test("a browser suite's evidence in each engine is its last run there, alone or with others", () => {
+  const directory = mkdtempSync(join(tmpdir(), "contracts-"));
+  const source = { revision: "abc", sourceHash: "def" };
+  const name = join(process.cwd(), "packages/react/test/x.test.tsx");
+  const report = (status, engines) => ({
+    testResults: engines.map((engine) => ({
+      name,
+      assertionResults: [
+        { fullName: "[contract:a.b]", status, meta: { contract: "a.b", engine } },
+        // No engine: refused by the check, so kept from every run read.
+        { fullName: "[contract:a.c]", status: "passed", meta: {} },
+      ],
+    })),
+  });
+  const read = () => {
+    const { errors, executions, runs } = readEvidence(directory, ["react"], source);
+    const ran = executions.map(({ id, engine, status }) => `${id} ${engine} ${status}`);
+    return { errors, ran, browsers: runs.react?.browsers };
+  };
+  // CI's steps: a run of each engine, the second failing.
+  writeRun(directory, "react", { engines: ["chromium"], report: report("passed", ["chromium"]) });
+  assert.deepEqual(read().browsers, ["chromium"]);
+  const failed = { exitCode: 1, report: report("failed", ["firefox"]) };
+  writeRun(directory, "react", { engines: ["firefox"], ...failed });
+  writeRun(directory, "react", { engines: ["webkit"], report: report("passed", ["webkit"]) });
+  assert.deepEqual(read(), {
+    errors: [
+      "react: its run of firefox ended with exit code 1; every test, setup, and teardown must pass",
+    ],
+    ran: [
+      "a.b chromium passed",
+      "a.c undefined passed",
+      "a.b firefox failed",
+      "a.c undefined passed",
+      "a.b webkit passed",
+      "a.c undefined passed",
+    ],
+    browsers: ENGINES,
+  });
+  // A run of every engine replaces them all; a later run of one replaces that one's alone.
+  writeRun(directory, "react", { engines: ENGINES, report: report("passed", ENGINES) });
+  writeRun(directory, "react", {
+    engines: ["webkit"],
+    ...failed,
+    report: report("failed", ["webkit"]),
+  });
+  assert.deepEqual(read(), {
+    errors: [
+      "react: its run of webkit ended with exit code 1; every test, setup, and teardown must pass",
+    ],
+    ran: [
+      "a.b chromium passed",
+      "a.c undefined passed",
+      "a.b firefox passed",
+      "a.c undefined passed",
+      "a.c undefined passed",
+      "a.b webkit failed",
+      "a.c undefined passed",
+    ],
+    browsers: ENGINES,
+  });
 });
 
 test("the docs list each cell's state, each proof's file once, and notes of refusals and reasons", () => {
@@ -1325,12 +1409,8 @@ test("the check reports what the runs do not prove beside what it cannot read of
   // A complete run of python-web that proves nothing, and none of python's.
   const directory = mkdtempSync(join(tmpdir(), "contracts-"));
   const source = { revision: "abc", sourceHash: "def" };
-  const report = JSON.stringify({ testResults: [] });
-  writeFileSync(join(directory, "python-web.json"), report);
-  const reportHash = createHash("sha256").update(report).digest("hex");
-  const record = { suite: "python-web", ...source, exitCode: 0, reportHash };
-  writeFileSync(join(directory, "python-web.run.json"), JSON.stringify(record));
   const engines = ["chromium"];
+  writeRun(directory, "python-web", { engines });
   const checked = checkContracts({ suites: ["python-web", "python"], engines, source, directory });
   assert.ok(checked.errors.some((error) => /^python: no complete run/.test(error)));
   const lacking = checkEvidence({ ...checked, engines });

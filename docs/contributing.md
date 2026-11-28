@@ -85,8 +85,11 @@ unreferenced object survives.
 The engine's, adapters', and Python's browser suites run headless in the
 installed Google Chrome and Playwright's Firefox and WebKit; the
 ease-of-use samples run in Chrome only. `HERCEG_BROWSERS=chromium` runs one
-engine. `scripts/browser/` holds the engines (`browsers.ts`) and the
-commands tests run in Node where Playwright has nothing for all three:
+engine, and a list (`firefox,webkit`) some; the samples run only when Chrome
+is among them. `npm run test:browser` (`scripts/browser/run.mjs`) runs every suite
+even after one fails, and fails if any did. `scripts/browser/` holds the
+engines (`browsers.ts`) and the commands tests run in Node where Playwright
+has nothing for all three:
 
 - **Accessibility trees** come from Chrome's DevTools protocol, Firefox's
   remote debugging protocol, and WebKit's inspector protocol, written alike
@@ -101,8 +104,11 @@ commands tests run in Node where Playwright has nothing for all three:
   and WebKit's `Heap.gc`. Leak tests read weak references only after
   collecting.
 - **Firefox** gets an application data folder of its own (`MOZ_APP_DATA`).
-- **Linux CI** runs browser tests under `xvfb-run` so Firefox has WebGL
-  (Mesa's llvmpipe through `libegl-mesa0`); Chrome uses SwiftShader.
+- **Linux CI** runs browser tests in a step per engine, each with its own
+  time limit, so an engine that hangs is named by its step and the others
+  still report. WebKit's test files run one at a time there (`CI` set), as
+  WebKit on Linux has hung while files ran at once. They run under `xvfb-run` so Firefox has WebGL (Mesa's
+  llvmpipe through `libegl-mesa0`); Chrome uses SwiftShader.
   Firefox and WebKit deliver the mouse at whole CSS pixels at a ratio of 1,
   so tests read values from where a press lands.
 
@@ -147,7 +153,9 @@ API audit passes; and every proof they oblige passed in its suite's last
 complete run of this exact source, in every browser engine. Suites run
 through `scripts/contracts/run.mjs`, which records reports under
 `tmp/contracts/<revision>-<hash>/`, so a report proves only the source it
-ran on.
+ran on. A browser suite's runs are recorded per engine: a run of some
+engines replaces only their evidence, so CI's steps, one per engine, leave
+every engine's.
 
 **The API audit** (`scripts/contracts/api.mjs`) compares every option,
 choice, event, and handle member of the spec with each surface's: the mark

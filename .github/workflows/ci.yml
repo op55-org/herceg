@@ -41,13 +41,35 @@ jobs:
           key: playwright-${{ steps.playwright.outputs.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
       # Downloads only builds missing from the cache; the system packages
       # they need are installed every run.
-      - run: npx playwright install --with-deps firefox webkit
+      - id: browsers
+        run: npx playwright install --with-deps firefox webkit
+      # A step per engine, each with its own time limit: one that fails or
+      # hangs is named by its step, and the others still run and report.
+      # They take 3-4, 6-7, and 5-6 minutes; each limit is twice the longest or more.
+      # `timeout` stops the step's whole process group (Playwright then
+      # closes its browsers), which a step's own limit would leave running
+      # into the next step; that limit is the backstop.
       # Firefox has WebGL only with a display: Xvfb's, drawn by Mesa's
       # software renderer (llvmpipe), as Chrome draws with SwiftShader.
-      # It takes about 10 minutes; a browser that hangs fails it at 30.
-      - run: xvfb-run --auto-servernum npm run test:browser
-        timeout-minutes: 30
-      # The suites' reports, which the contracts job checks.
+      - name: Browser tests in Chrome
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
+        run: timeout --verbose --kill-after=1m 10m xvfb-run --auto-servernum npm run test:browser
+        env:
+          HERCEG_BROWSERS: chromium
+        timeout-minutes: 12
+      - name: Browser tests in Firefox
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
+        run: timeout --verbose --kill-after=1m 15m xvfb-run --auto-servernum npm run test:browser
+        env:
+          HERCEG_BROWSERS: firefox
+        timeout-minutes: 17
+      - name: Browser tests in WebKit
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
+        run: timeout --verbose --kill-after=1m 15m xvfb-run --auto-servernum npm run test:browser
+        env:
+          HERCEG_BROWSERS: webkit
+        timeout-minutes: 17
+      # The suites' reports of every engine, which the contracts job checks.
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -33,7 +33,13 @@ const engines: BrowserInstanceOption[] = [
       },
     }),
   },
-  { browser: "webkit", provider: playwright() },
+  {
+    browser: "webkit",
+    // On Linux CI, WebKit has hung in a file, or closed its page mid-file,
+    // while files ran at once; there its files run one at a time.
+    fileParallelism: !process.env.CI,
+    provider: playwright(),
+  },
 ];
 
 const chosen = process.env.HERCEG_BROWSERS?.split(",").map((name) => name.trim());

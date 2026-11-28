@@ -41,15 +41,16 @@ const firstRow = (inspection: unknown) =>
   (inspection as { points?: { row?: number }[] } | undefined)?.points?.[0]?.row;
 
 describe("ties", () => {
-  it("go to the earlier observation through the pointer, what it is on, the chart's API, and showCursor (A7)", async () => {
-    // Times, numbers near 0 and far from it, and times on a reversed range.
-    const variants = [
-      { x: TIMES, time: true },
-      { x: TIMES.map((t) => t - T0), time: false },
-      { x: TIMES.map((t) => t - T0 + 1e12), time: false },
-      { x: TIMES, time: true, reversed: true },
-    ];
-    for (const [variant, { x, time: timed, reversed }] of variants.entries()) {
+  // Times, numbers near 0 and far from it, and times on a reversed range:
+  // a test each, as each hovers at more than 200 ties.
+  it.each([
+    { axis: "times", x: TIMES, timed: true },
+    { axis: "numbers near 0", x: TIMES.map((t) => t - T0), timed: false },
+    { axis: "numbers far from 0", x: TIMES.map((t) => t - T0 + 1e12), timed: false },
+    { axis: "times on a reversed range", x: TIMES, timed: true, reversed: true },
+  ])(
+    "go to the earlier observation through the pointer, what it is on, the chart's API, and showCursor, on $axis (A7)",
+    async ({ x, timed, reversed }) => {
       const data = table({ x: timed ? time(x) : x, v: x.map((_, k) => heightOf(k)) });
       const into = host(1000, 300);
       const chart = await mount(
@@ -98,11 +99,9 @@ describe("ties", () => {
         const read = firstRow(hovers.at(-1)!.inspection);
         if (read !== k) later.push(`shown ${k}: row ${read}`);
       }
-      expect(later, `variant ${variant}`).toEqual([]);
-      // Out of the page, so that the next chart is in view, where frames are drawn.
-      into.remove();
-    }
-  });
+      expect(later).toEqual([]);
+    },
+  );
 
   it("are ties on screen: on log axes midway between decades, and between bands", async () => {
     const log = await mount({
