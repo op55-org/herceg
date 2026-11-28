@@ -749,3 +749,11 @@ styles](docs/guide/styling.md#role-styles) and
   static exports, and Python's notebook and HTML output still carry every
   mark and load specs synchronously. See [Payloads and page
   fragments](docs/guide/export.md#payloads-and-page-fragments).
+- **Grids show what arrives above their first row.** Scrolled to the
+  first row, a grid keeps no row at its top, so sorted rows streaming in
+  and groups a cleared filter brings back show there; scrolled down, it
+  keeps the row at its top in place as before. A header's sort mark
+  numbers its key (▲2) only while two or more keys' fields have shown
+  columns, so a key on a hidden column no longer puts a lone "1" beside
+  the other; `aria-sort` is unchanged. See [A
+  grid](docs/guide/grids.md#a-grid).

@@ -835,6 +835,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     const sort = this.model.sort;
     const changed = this.#header?.layout !== layout || this.#header.sort !== sort;
     this.#header = { layout, sort };
+    // A mark's number is its key's place in the sort, written while two or
+    // more keys show on headers: beside one alone it would count hidden keys.
+    const numbered =
+      sort.filter(({ field }) => layout.some((column) => column.field === field)).length > 1;
     const moving = this.#controls.moving;
     for (const cell of cells) {
       const column = layout[cell.column]!;
@@ -845,9 +849,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       setAttribute(cell.element, "title", column.content.description);
       const at = sort.findIndex(({ field }) => field === column.field);
       const order = at < 0 ? undefined : (sort[at]!.order ?? "ascending");
-      const mark = order
-        ? `${order === "ascending" ? "▲" : "▼"}${sort.length > 1 ? at + 1 : ""}`
-        : "";
+      const mark = order ? `${order === "ascending" ? "▲" : "▼"}${numbered ? at + 1 : ""}` : "";
       setText(cell.sort!, mark);
       // One header at a time carries aria-sort: the first key's.
       if (at === 0) cell.element.setAttribute("aria-sort", order!);

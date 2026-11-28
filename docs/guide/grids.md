@@ -70,10 +70,14 @@ grids of the same rows share the view and the selection store.
 The grid follows its table and view as they change:
 
 - Rows appended below those in view cost nothing to draw.
-- When rows drop out of a rolling window, or sorted rows arrive above the
-  top row (groups a cleared filter brings back, too), the rows in view
-  stay where they are. `model.scrollTo({ top: 0 })` goes back to the
-  first row.
+- At the first row, rows arriving above it show at the top: sorted rows
+  streaming in, or groups a cleared filter brings back.
+- Scrolled down, the rows in view stay where they are as rows drop out of
+  a rolling window or sorted rows arrive above the top row. A new query
+  of the view keeps the scroll offset instead, as does a reset of its
+  table (a groups' table has one when a group leaves, or comes back
+  before others). `model.scrollTo({ top: 0 })` goes back to the first
+  row.
 - The focused cell keeps to its row through sorting and streaming, or goes
   to the row taking its place.
 
@@ -87,8 +91,9 @@ a grid's container gets 320 pixels. Grids take the charts'
 
 - **Sorting.** Clicking a header sorts by its field: ascending, descending,
   then not at all. Shift adds the field to the other keys.
-  `model.setSort(keys)` does the same. Sorting goes through the view,
-  keeping its filter.
+  `model.setSort(keys)` does the same. A sorted header shows ▲ or ▼, and
+  its key's place among the keys (▲2) while two or more keys' fields
+  have shown columns. Sorting goes through the view, keeping its filter.
 - **Selecting.** Clicking a row selects it; Ctrl or Cmd toggles it; Shift
   selects the range from the last one clicked, in the grid's order.
 - **The selection** is a row set in the model's

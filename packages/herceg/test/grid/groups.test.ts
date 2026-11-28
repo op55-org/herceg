@@ -324,6 +324,17 @@ describe("grouped grids", () => {
     expect(model.textAt(1, 0)).toBe("3");
   });
 
+  it("show a group streaming into the lead at the top while scrolled to the first row", () => {
+    const { t, model } = grouped();
+    model.setViewport(500, 20);
+    model.setGroupSort([{ field: "n", order: "descending" }]);
+    expect(shown(model).slice(0, 2)).toEqual(["web (4)", "api (3)"]);
+    t.append({ id: [10, 11, 12], host: ["db", "db", "db"], ms: [1, 2, 3], at: [0, 0, 0] });
+    // db leads with 5 rows: its header shows at the top, web's below it.
+    expect(model.top).toBe(0);
+    expect(shown(model).slice(0, 2)).toEqual(["db (5)", "web (4)"]);
+  });
+
   it("order groups by their final aggregates when listeners of the groups' table read the grid", () => {
     const { t, groups, model } = grouped();
     model.setGroupSort([{ field: "total", order: "descending" }]);
