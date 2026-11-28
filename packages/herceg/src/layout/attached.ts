@@ -58,7 +58,7 @@ import type {
 } from "../scene/scene.ts";
 import type { Overlap } from "../spec/encoding.ts";
 import type { ResolvedHalo, TextPaint } from "../style/style.ts";
-import type { surface } from "../theme.ts";
+import type { surface, Theme } from "../theme.ts";
 import { type Baseline, baseline, measureX } from "./baseline.ts";
 import { anchorBlock, type BlockAnchor } from "./block.ts";
 import { LabelBoxes } from "./label-boxes.ts";
@@ -172,12 +172,14 @@ export function paintedMiddle(context: MeasuringContext | undefined, paint: Text
  * then its labels), and the boxes of the labels drawn, which other labels
  * keep off. Sets each owner's `room`: what its outside labels that reserve
  * it take in the left and right tracks, in pixels. Labels of hidden series
- * are left out.
+ * are left out. Those wider than their room are shortened as `fitted`, the
+ * chart's, has fitted them.
  */
 export function placeAttached(
   labels: readonly AttachedLabel[],
   frame: Frame,
   { fitText, textLines, textItem, textItemMarkup, surface, markupOf, n }: AttachedKit,
+  fitted = new FittedLabels(),
 ): { geometry: Map<LabelOwner, Geometry[]>; boxes: Rect[] } {
   const { plot, measure } = frame;
   // Each label's block, unturned.
@@ -211,9 +213,9 @@ export function placeAttached(
       ? (room?.max ?? Number.POSITIVE_INFINITY) - left - right - reach
       : plot.width - left - right - 2 * reach;
     if (lines.width > fits) {
-      const fitted = fitLabel(text, parts, fits, paint.css, measure, fitText);
-      if (!fitted) return;
-      [text, parts] = fitted;
+      const fit = fitted.fit(text, parts, fits, paint.css, measure, fitText);
+      if (!fit) return;
+      [text, parts] = fit;
       lines = parts?.lines ?? textLines(text, paint, measure);
     }
     if (place.outside) {
@@ -396,6 +398,62 @@ export function fitLabel(
   return fitted.some((line, k) => line === "…" && measure(lines[k]!, font) > width)
     ? undefined
     : [fitted.join("\n"), undefined];
+}
+
+/** How many plain labels a chart keeps fitted before it forgets them all. */
+const FITTED = 512;
+
+/**
+ * One chart's plain labels as `fitLabel` fits them, by text, font, and
+ * width, so that a label shortened to its room is fitted once rather than
+ * every frame: null where it does not fit. They hold for the measurer and
+ * the canvas it measured on, and are forgotten when either changes (faces
+ * loaded or the chart's fonts changed give a new measurer; a document's
+ * measures on a new canvas every 1,000 strings, `canvasMeasurer`), when
+ * the theme does, and when there are more than `FITTED`. Labels of parts
+ * are fitted each time: their parts fit by their own looks.
+ */
+export class FittedLabels {
+  readonly #texts = new Map<string, string | null>();
+  // Held weakly, so that a measurer replaced or a canvas renewed goes,
+  // and what the browser keeps of the text measured on it.
+  #measure: WeakRef<MeasureText> | undefined;
+  #context: WeakRef<MeasuringContext> | undefined;
+  #theme: Theme | undefined;
+
+  /** Forgets what was fitted in another theme. */
+  use(theme: Theme): void {
+    if (theme !== this.#theme) this.#texts.clear();
+    this.#theme = theme;
+  }
+
+  /** `fitLabel`, kept for plain labels. */
+  fit(
+    text: string,
+    parts: PartText | undefined,
+    width: number,
+    font: string,
+    measure: MeasureText,
+    fit: typeof fitText,
+  ): [string, PartText | undefined] | undefined {
+    if (parts) return fitLabel(text, parts, width, font, measure, fit);
+    const texts = this.#texts;
+    const { context } = measure;
+    if (measure !== this.#measure?.deref() || context !== this.#context?.deref()) {
+      texts.clear();
+      this.#measure = new WeakRef(measure);
+      this.#context = context && new WeakRef(context);
+    }
+    // A width has no space, and the font's length says where it ends.
+    const key = `${width} ${font.length} ${font}${text}`;
+    let fitted = texts.get(key);
+    if (fitted === undefined) {
+      fitted = fitLabel(text, undefined, width, font, measure, fit)?.[0] ?? null;
+      if (texts.size >= FITTED) texts.clear();
+      texts.set(key, fitted);
+    }
+    return fitted === null ? undefined : [fitted, undefined];
+  }
 }
 
 /**

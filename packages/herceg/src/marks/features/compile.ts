@@ -22,7 +22,7 @@ import {
 import { Rank } from "../../encoding/ranks.ts";
 import type { ChartFields } from "../../fields/chart.ts";
 import { formatWriter, formed } from "../../format/patterns.ts";
-import { fitLabel } from "../../layout/attached.ts";
+import { FittedLabels } from "../../layout/attached.ts";
 import { baseline } from "../../layout/baseline.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
@@ -235,6 +235,8 @@ function compile(
   }
   // The chart's palette slots of identity keys, which each scene hands over first.
   const chart: { slot: ((key: string) => number) | undefined } = { slot: undefined };
+  // Labels shortened to their room, as fitted for the chart.
+  const fitted = new FittedLabels();
   const colors = new Map<string, IdentityColors>();
   /**
    * The scale `name` of a mark drawn in `panel`: the chart's, or for a
@@ -555,7 +557,7 @@ function compile(
     else if (spec.type === "region" && (mark.spec as { encode?: object }).encode) {
       const looks = rowLooks(mark.spec as RowStyleSpec, mark.table, read, path, kit.isColor);
       byMark.set(mark, {
-        ...labelFeatures(kit, mark, zone, path, where, config, fields, shown),
+        ...labelFeatures(kit, mark, zone, path, where, config, fields, shown, fitted),
         ...looks,
       });
       const { label } = mark.spec as { label?: string | { field?: string } };
@@ -571,7 +573,7 @@ function compile(
           ),
         });
     } else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
-      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config, fields, shown));
+      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config, fields, shown, fitted));
     else
       throw new Error(
         `${path}: encode, style, markers, continuity, and where are not options of ${spec.type} marks`,
@@ -671,7 +673,7 @@ function compile(
       };
     },
     of: (mark) => byMark.get(mark),
-    labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark)),
+    labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark), fitted),
     listDomains: (entries, plain, parts) => {
       let out = itemNames?.write(entries, parts, theme, paint) ?? [...entries];
       // Marks colored by display colors show a key of them, which they own
@@ -741,6 +743,7 @@ function compile(
     update(t, slot, p) {
       theme = t;
       paint = p;
+      fitted.use(t);
       itemNames?.scene();
       chart.slot = slot;
       for (const scale of scales.values()) scale.update();
@@ -1494,7 +1497,8 @@ function barFeatures(
  * Annotations' labels in pattern formats, and of parts (`content`): a
  * field of their table's, or a rule's value at its place; and the steps of
  * rules and regions at a field's thresholds, whose labels write the step's
- * value through the field's display.
+ * value through the field's display. Rules' labels shortened to their room
+ * are as `fitted`, the chart's, has fitted them.
  */
 function labelFeatures(
   kit: FeatureKit,
@@ -1505,6 +1509,7 @@ function labelFeatures(
   config: ChartConfig,
   fields: ChartFields | undefined,
   shown: LabelContent | undefined,
+  fitted: FittedLabels,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const { locale } = config;
   const placed = mark.thresholds && placedSteps(kit, mark, config, fields, path);
@@ -1546,7 +1551,7 @@ function labelFeatures(
     labelRoom: bounds && {
       bounds,
       fit: (text, parts, width, font, measure) =>
-        fitLabel(text, parts, width, font, measure, kit.fitText),
+        fitted.fit(text, parts, width, font, measure, kit.fitText),
     },
   };
 }
