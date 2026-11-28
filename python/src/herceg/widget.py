@@ -11,6 +11,7 @@ from __future__ import annotations
 import functools
 import inspect
 import math
+import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -27,7 +28,7 @@ except ImportError as error:  # pragma: no cover - depends on the environment
 import numpy as np
 
 from . import _render
-from ._chart import Camera, Chart, ChartUpdate, Unpack
+from ._chart import Camera, Chart, ChartUpdate
 from ._data import listlike
 from ._derive import Expr, _fields_of
 from ._errors import (
@@ -91,6 +92,12 @@ from ._interaction import SNAPS, Snap
 from ._live import ExpressData, LiveChart, Message
 from ._rows import RowSelection, decode, encode
 from .express._common import call_of
+
+# Annotations read at runtime (typing.get_type_hints) need Unpack too.
+if sys.version_info >= (3, 11):
+    from typing import Unpack
+else:
+    from typing_extensions import Unpack
 
 if TYPE_CHECKING:
     from ._chart import Chart

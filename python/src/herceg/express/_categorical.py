@@ -10,10 +10,11 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._chart import _POINT_CHANNELS, Chart, Jitter
+from .._chart import Chart
 from .._data import Column
 from .._encoding import Encodings
 from .._errors import ChartError, is_integer, is_number
+from .._marks.series import _POINT_CHANNELS, Jitter
 from . import _numerics as numerics
 from . import _swarm
 from ._common import (

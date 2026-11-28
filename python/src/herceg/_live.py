@@ -24,7 +24,6 @@ from ._chart import (
     assemble_spec,
     check_layout_options,
     columns_spec,
-    remaining_moves,
     spec_options,
     table_name,
 )
@@ -33,6 +32,7 @@ from ._derive import Ordered
 from ._errors import ChartError, UnknownOption, key_path, located, shown
 from ._events import _milliseconds
 from ._guides import guides_spec
+from ._marks.networks import remaining_moves
 from ._rows import bound_tables
 from .express._common import Call, call_of, panel_plots, remake
 

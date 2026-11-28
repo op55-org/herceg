@@ -22,7 +22,7 @@ from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
 
-from .._chart import AxisOptions, Chart, HelperOptions, Panel, _chart_of, _colors, helper
+from .._chart import AxisOptions, Chart, HelperOptions, Panel
 from .._data import Column, Table, listlike
 from .._encoding import LabelPart
 from .._errors import (
@@ -38,6 +38,8 @@ from .._errors import (
     shown,
 )
 from .._fields import Match
+from .._helpers import _chart_of, helper
+from .._marks.common import _colors
 from .._rows import SelectionBinding
 from .._style import Theme, Tokens, _built
 from ._numerics import ErrorFunction, Estimator
