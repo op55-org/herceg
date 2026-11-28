@@ -214,6 +214,17 @@ export function tableBytes(table: GridTable): number {
   return table.columns.reduce((sum, column) => sum + column.byteLength, 0);
 }
 
+/**
+ * The fixture's own bytes, the denominator of the grid's memory ratios:
+ * its column buffers and its categories' labels (two bytes a code unit).
+ */
+export function dataBytes(table: GridTable): number {
+  let labels = 0;
+  for (const dictionary of table.dictionaries)
+    for (const label of dictionary) labels += label.length;
+  return tableBytes(table) + 2 * labels;
+}
+
 // Formatting shared by every grid: the same locale, number format, UTC time
 // format, and missing-value text. Herceg's adapter passes these options to its
 // columns; the other adapters call the functions below when they render.

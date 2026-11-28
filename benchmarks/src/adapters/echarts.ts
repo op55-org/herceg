@@ -17,8 +17,8 @@ import {
   type PointData,
   type SeriesData,
 } from "../datasets.ts";
-import type { Adapter, ChartHandle, ChartOptions } from "../page/adapter.ts";
-import { clientPoint, color, FALL, RISE } from "../page/adapter.ts";
+import type { Adapter, ChartHandle, ChartOptions, Drawn, SeriesShown } from "../page/adapter.ts";
+import { clientPoint, color, FALL, RISE, readoutText } from "../page/adapter.ts";
 
 echarts.use([
   LineChart,
@@ -76,6 +76,115 @@ function lineOption(
   };
 }
 
+/** Series 0's raw item as the adapter gave it: its x (or undefined for an item's index) and value. */
+type ItemOf = (raw: unknown) => [x: number | undefined, value: number];
+
+/** Pairs, rows, and plain values, by chart kind. */
+const ITEMS = {
+  pair: ((raw) => [(raw as number[])[0], (raw as number[])[1]!]) as ItemOf,
+  value: ((raw) => [undefined, raw as number]) as ItemOf,
+  cell: ((raw) => [undefined, (raw as number[])[2]!]) as ItemOf,
+  candle: ((raw) => [(raw as number[])[0], (raw as number[])[2]!]) as ItemOf,
+};
+
+// ECharts keeps its model behind internal accessors; the observer reads it
+// only, at the chart's `rendered` event.
+interface Model {
+  getComponent(type: string, index: number): { axis?: Axis; coordinateSystem?: Grid } | undefined;
+  /** A series' data as given, before sampling or zoom filtered it. */
+  getSeriesByIndex(index: number): { getRawData(): RawData } | undefined;
+}
+interface RawData {
+  count(): number;
+  getRawDataItem(i: number): unknown;
+}
+interface Axis {
+  scale: { getExtent(): [number, number] };
+}
+interface Grid {
+  getRect(): { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * What an ECharts chart drew, read at its `rendered` event (after each
+ * frame zrender draws): the size, the grid's rectangle and axis extents,
+ * and series 0's raw data; the tooltip's text from its element before the
+ * frame paints, and the item it reads from the `updateAxisPointer` and
+ * `mouseover` events.
+ */
+function observe(chart: echarts.ECharts, container: HTMLElement, itemOf: ItemOf): () => Drawn {
+  const model = () => (chart as unknown as { getModel(): Model }).getModel();
+  let draws = 0;
+  let last: Omit<Drawn, "draws" | "readout"> = { width: 0, height: 0 };
+  let index: number | undefined;
+  let tooltip: HTMLElement | undefined;
+  chart.on("rendered", () => {
+    draws++;
+    const m = model();
+    const rect = m.getComponent("grid", 0)?.coordinateSystem?.getRect();
+    const x = m.getComponent("xAxis", 0)?.axis?.scale.getExtent();
+    const y = m.getComponent("yAxis", 0)?.axis?.scale.getExtent();
+    const raw = m.getSeriesByIndex(0)?.getRawData();
+    let shown: SeriesShown | undefined;
+    if (raw && raw.count() > 0) {
+      const n = raw.count();
+      const [firstX, first] = itemOf(raw.getRawDataItem(0));
+      const [lastX, lastValue] = itemOf(raw.getRawDataItem(n - 1));
+      shown = { count: n, firstX: firstX ?? 0, lastX: lastX ?? n - 1, first, last: lastValue };
+    }
+    last = {
+      width: chart.getWidth(),
+      height: chart.getHeight(),
+      ...(rect && { plot: { left: rect.x, top: rect.y, width: rect.width, height: rect.height } }),
+      ...(x && { x: [x[0], x[1]] as const }),
+      ...(y && { y: [y[0], y[1]] as const }),
+      ...(shown && { series: shown }),
+    };
+  });
+  // The axis pointer's value is series 0's x it snapped to; items name their index.
+  chart.on("updateAxisPointer", (event) => {
+    const value = (event as { axesInfo?: { axisDim: string; value: number }[] }).axesInfo?.find(
+      (info) => info.axisDim === "x",
+    )?.value;
+    const raw = model().getSeriesByIndex(0)?.getRawData();
+    if (value === undefined || !raw) return;
+    let lo = 0;
+    let hi = raw.count() - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if ((itemOf(raw.getRawDataItem(mid))[0] ?? mid) < value) lo = mid + 1;
+      else hi = mid;
+    }
+    index = lo;
+  });
+  chart.on("mouseover", (event) => {
+    const item = event as { seriesIndex?: number; dataIndex?: number };
+    if (item.seriesIndex === 0) index = item.dataIndex;
+  });
+  return () => {
+    // ECharts' tooltip is a div it adds to the container (z-index 9999999).
+    tooltip ??= [...container.querySelectorAll("div")].find(
+      (element) => element.style.zIndex === "9999999",
+    );
+    const visible =
+      tooltip &&
+      tooltip.style.display !== "none" &&
+      tooltip.style.visibility !== "hidden" &&
+      tooltip.style.opacity !== "0";
+    const box = container.getBoundingClientRect();
+    return {
+      ...last,
+      draws,
+      ...(last.plot && {
+        plot: { ...last.plot, left: box.left + last.plot.left, top: box.top + last.plot.top },
+      }),
+      ...(visible && {
+        readout: { text: readoutText(tooltip), ...(index !== undefined && { index }) },
+      }),
+    };
+  };
+}
+
 type EChartsHandle<T> = ChartHandle<T> & {
   apply(next: object): void;
   /** Runs a change and tracks rendering until ECharts emits `finished`. */
@@ -93,6 +202,7 @@ function mount<T>(
   options: ChartOptions,
   option: object,
   update: (data: T) => object,
+  itemOf: ItemOf,
 ): EChartsHandle<T> {
   const chart = echarts.init(container, undefined, {
     renderer: "canvas",
@@ -113,6 +223,7 @@ function mount<T>(
     change();
   };
   const apply = (next: object) => track(() => chart.setOption(next as echarts.EChartsCoreOption));
+  const drawn = observe(chart, container, itemOf);
   apply(option);
   return {
     apply,
@@ -125,6 +236,7 @@ function mount<T>(
       return clientPoint(container, px!, py!);
     },
     resize: (width, height) => chart.resize({ width, height }),
+    drawn,
     destroy: () => chart.dispose(),
   };
 }
@@ -150,6 +262,7 @@ function lineKind(area: boolean) {
           current = next;
           return { series: seriesPairs(next).map((points) => ({ data: points })) };
         },
+        ITEMS.pair,
       );
       return {
         ...chart,
@@ -241,6 +354,8 @@ function extent(values: Float64Array): [number, number] {
 
 export const adapter: Adapter = {
   id: "echarts",
+  verification:
+    "the chart's rendered event (after each frame zrender draws): the grid's rectangle, the axes' extents, series 0's raw data; the tooltip element's text before paint, and the item from updateAxisPointer and mouseover events",
   renderer: { normal: "canvas", large: "canvas (sampling: minmax, large: true)" },
   line: lineKind(false),
   area: lineKind(true),
@@ -262,6 +377,7 @@ export const adapter: Adapter = {
           })),
         },
         (next) => ({ series: prepareBar(next).map((values) => ({ data: values })) }),
+        ITEMS.value,
       );
     },
   },
@@ -288,6 +404,7 @@ export const adapter: Adapter = {
           ],
         },
         (next) => ({ series: [{ data: scatterPairs(next) }] }),
+        ITEMS.pair,
       );
       return {
         ...chart,
@@ -314,6 +431,7 @@ export const adapter: Adapter = {
           series: [{ type: "heatmap", data: heatmapTriples(data) }],
         },
         (next) => ({ series: [{ data: heatmapTriples(next) }] }),
+        ITEMS.cell,
       );
     },
   },
@@ -346,6 +464,7 @@ export const adapter: Adapter = {
           ],
         },
         (next) => ({ series: [{ data: candleRows(next) }] }),
+        ITEMS.candle,
       );
     },
   },
@@ -362,6 +481,7 @@ export const adapter: Adapter = {
           ...bubbleOption(data),
         },
         bubbleOption,
+        ITEMS.pair,
       );
     },
   },

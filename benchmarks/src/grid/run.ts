@@ -3,6 +3,7 @@
 //   npm run bench:grid -- [--lib ag-grid,glide] [--size 10k,100k] [--filter sort-]
 //                         [--scenario grid-10k-mount,...] [--out results/grid.json]
 //                         [--headless] [--sample-scale 0.5] [--timeout 120] [--dpr 2]
+//                         [--order-seed N] [--seed N]
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -14,7 +15,6 @@ import {
   chromium,
   type Page,
 } from "playwright";
-import { random } from "../datasets.ts";
 import type { Metric } from "../page/harness.ts";
 import { buildPage, ROOT, serve } from "../runner/build.ts";
 import {
@@ -31,6 +31,9 @@ import {
   scaleFactorArg,
 } from "../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
+import { driverFor } from "../runner/input.ts";
+import { orderSeed, schedule } from "../runner/order.ts";
+import { GRID_RATIOS, ratios } from "../runner/ratios.ts";
 import { type Summary, summarize } from "../runner/stats.ts";
 import { GRID_HEIGHT, GRID_WIDTH } from "./adapter.ts";
 import type { GridBench, GridResult } from "./harness.ts";
@@ -63,8 +66,8 @@ const { values: args } = parseArgs({
     timeout: { type: "string" },
     /** Device pixel ratio: 1 by default, 2 for high-density displays. */
     dpr: { type: "string", default: "1" },
-    /** Seeds the order libraries run in within each scenario. */
-    "order-seed": { type: "string", default: "1" },
+    /** Seeds the order scenarios, and libraries within each, run in; a new seed (recorded) when not given. */
+    "order-seed": { type: "string" },
     /** Seeds the fixture's values. */
     seed: { type: "string", default: "1" },
   },
@@ -83,6 +86,7 @@ const libraries = (args.lib ? args.lib.split(",") : Object.keys(LIBRARIES)).filt
   return true;
 });
 const seed = Number(args.seed);
+const order = orderSeed(args["order-seed"]);
 const sizes = args.size?.split(",");
 for (const size of sizes ?? [])
   if (!(size in SIZES)) throw new Error(`--size must be among ${Object.keys(SIZES).join(", ")}`);
@@ -133,7 +137,10 @@ async function memorySample(
 ): Promise<Record<string, number>> {
   const step = (body: () => unknown) => page.evaluate(body);
   const baseline = await heapBytes(cdp);
-  const columnBytes = await page.evaluate((scenario) => window.gridBench.memory.data(scenario), s);
+  const { columnBytes, dataBytes } = await page.evaluate(
+    (scenario) => window.gridBench.memory.data(scenario),
+    s,
+  );
   const data = await heapBytes(cdp);
   await step(() => window.gridBench.memory.reference());
   const checked = await heapBytes(cdp);
@@ -163,6 +170,7 @@ async function memorySample(
   const released = await heapBytes(cdp);
   return {
     columnBytes,
+    dataBytes,
     sourceBytes: data.total - baseline.total,
     inputBytes: input.total - checked.total,
     retainedBytes: mounted.total - input.total,
@@ -225,21 +233,16 @@ async function driveWheel(page: Page, cdp: CDPSession, done: Promise<unknown>): 
   };
   done.then(finish, finish);
   const at = { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2 };
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });
+  const driver = await driverFor(page, "chrome", cdp);
+  await driver.step({ type: "move", ...at });
   let active: number | null = null;
-  const sent = new Set<Promise<unknown>>();
   const timer = setInterval(() => {
-    if (active === null) return;
-    const event = cdp
-      .send("Input.dispatchMouseEvent", {
-        type: "mouseWheel",
-        ...at,
-        deltaX: 0,
-        deltaY: WHEEL_STEP,
-      })
-      .catch(() => {});
-    sent.add(event);
-    event.then(() => sent.delete(event));
+    // Never skipped: the browser coalesces what the page has not taken.
+    if (active !== null)
+      driver.send(
+        { type: "wheel", ...at, deltaX: 0, deltaY: WHEEL_STEP },
+        Number.POSITIVE_INFINITY,
+      );
   }, WHEEL_INTERVAL_MS);
   try {
     while (!finished) {
@@ -247,7 +250,7 @@ async function driveWheel(page: Page, cdp: CDPSession, done: Promise<unknown>): 
       if (active !== null && trial !== active) {
         const stopped = active;
         active = null;
-        await Promise.all(sent);
+        await driver.drain();
         await page.evaluate((id) => window.gridBench.wheelStopped(id), stopped);
       }
       active = trial;
@@ -256,16 +259,6 @@ async function driveWheel(page: Page, cdp: CDPSession, done: Promise<unknown>): 
   } finally {
     clearInterval(timer);
   }
-}
-
-/** Library order within a scenario, shuffled so drift over a run does not favor one library. */
-function shuffled(ids: string[], next: () => number): string[] {
-  const out = [...ids];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
 }
 
 async function main() {
@@ -286,7 +279,6 @@ async function main() {
 
   const rows: ResultRow[] = [];
   const configurations: Record<string, Pick<GridBench, "renderer" | "processing">> = {};
-  const order = random(Number(args["order-seed"]));
   /** Browser-level DevTools sessions, for memory dumps; one per browser launched. */
   const browserSessions = new WeakMap<Browser, CDPSession>();
   const browserSession = async (context: BrowserContext) => {
@@ -378,6 +370,7 @@ async function main() {
     const opened: { page?: Page; cdp?: CDPSession } = {};
     let timer: ReturnType<typeof setTimeout> | undefined;
     let result: Attempt;
+    const started = performance.now();
     try {
       result = await Promise.race([
         measure(context, library, s, pass, opened),
@@ -409,50 +402,80 @@ async function main() {
       if (isPaced) realtime = await launch(true);
       else latency = await launch(false);
     }
+    attempts.push({
+      scenario: s.id,
+      library,
+      pass,
+      status: result.status,
+      seconds: (performance.now() - started) / 1000,
+    });
     return result;
   };
 
+  // Scenarios shuffled, and libraries within each (runner/order.ts).
+  const planned = schedule(order, scenarios, () => libraries);
+  /** Each run as it happened, in order. */
+  const attempts: {
+    scenario: string;
+    library: string;
+    pass: string;
+    status: string;
+    seconds: number;
+  }[] = [];
   let complete = false;
   try {
-    for (const s of scenarios) {
-      for (const library of shuffled(libraries, order)) {
-        const started = performance.now();
-        const result = await attempt(library, s, "main");
-        let fullCostReason: string | undefined;
-        if (s.operation === "memory" && result.status === "measured") {
-          const process = await attempt(library, s, "process");
-          if (process.status === "measured") Object.assign(result.metrics, process.metrics);
-          else fullCostReason = `${process.status}: ${process.reason}`;
-        }
-        const metrics = Object.fromEntries(
-          Object.entries(result.metrics).map(([name, m]) => [
-            name,
-            { ...m, summary: summarize(m.samples) },
-          ]),
-        );
-        rows.push({
-          scenario: s.id,
-          library,
-          status: result.status,
-          reason: result.reason,
-          ...(fullCostReason && { fullCostReason }),
-          metrics,
-        });
-        const headline = Object.entries(metrics)[0];
-        const text =
-          result.status === "measured"
-            ? `${headline?.[0]} median ${headline?.[1].summary.median.toFixed(2)} ${headline?.[1].unit}`
-            : `${result.status} (${result.reason})`;
-        const seconds = ((performance.now() - started) / 1000).toFixed(1);
-        console.log(`${library.padEnd(15)} ${s.id.padEnd(32)} ${text} [${seconds}s]`);
+    for (const { block: s, member: library } of planned) {
+      const started = performance.now();
+      let result = await attempt(library, s, "main");
+      let fullCostReason: string | undefined;
+      if (s.operation === "memory" && result.status === "measured") {
+        const process = await attempt(library, s, "process");
+        if (process.status === "measured") Object.assign(result.metrics, process.metrics);
+        // Wrong in either pass, the grid is incorrect here: no readings at all.
+        else if (process.status === "incorrect") result = process;
+        else fullCostReason = `${process.status}: ${process.reason}`;
       }
+      if (s.operation === "memory" && result.status === "measured") {
+        const bytes = result.metrics.dataBytes?.samples[0] ?? 0;
+        Object.assign(result.metrics, ratios(result.metrics, bytes, GRID_RATIOS));
+      }
+      const metrics = Object.fromEntries(
+        Object.entries(result.metrics).map(([name, m]) => [
+          name,
+          { ...m, summary: summarize(m.samples) },
+        ]),
+      );
+      rows.push({
+        scenario: s.id,
+        library,
+        status: result.status,
+        reason: result.reason,
+        ...(fullCostReason && { fullCostReason }),
+        metrics,
+      });
+      const headline = Object.entries(metrics)[0];
+      const text =
+        result.status === "measured"
+          ? `${headline?.[0]} median ${headline?.[1].summary.median.toFixed(2)} ${headline?.[1].unit}`
+          : `${result.status} (${result.reason})`;
+      const seconds = ((performance.now() - started) / 1000).toFixed(1);
+      console.log(`${library.padEnd(15)} ${s.id.padEnd(32)} ${text} [${seconds}s]`);
     }
     complete = true;
   } finally {
     await latency.browser.close().catch(() => {});
     await realtime?.browser.close().catch(() => {});
     server.close();
-    writeResults({ rows, configurations, gpu, userAgent, browserVersion, complete });
+    writeResults({
+      rows,
+      configurations,
+      gpu,
+      userAgent,
+      browserVersion,
+      complete,
+      planned: planned.map(({ block, member }) => [block.id, member]),
+      attempts,
+    });
   }
 }
 
@@ -463,6 +486,8 @@ function writeResults(run: {
   userAgent: string;
   browserVersion: string;
   complete: boolean;
+  planned: [string, string][];
+  attempts: { scenario: string; library: string; pass: string; status: string; seconds: number }[];
 }) {
   const output = {
     schema: 1,
@@ -477,10 +502,12 @@ function writeResults(run: {
       memory:
         "CDP Runtime.getHeapUsage after forced GC: V8 heap + Blink heap + ArrayBuffer backing stores, one fresh page per sample; reserved = committed heap growth over a step without GC (not a peak)",
       processMemory: `separate pages, as many as heap samples, from native input prepared to grid mounted, each reading after forced GC and a ${PROCESS_SETTLE_MS} ms pause: rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump lists (webgl buffers and drawing buffers, canvas resources shared with the GPU process, cc tile memory); gpuProcessBytes = the GPU process's phys_footprint`,
+      ratios:
+        "memory amplification over dataBytes (the fixture's column buffers and its labels' UTF-16 bytes), each sample a fresh page: heapRatio = (inputBytes + retainedBytes) / dataBytes (converting the columns and mounting; compare with charts' firstHeapRatio), mountRatio = retainedBytes / dataBytes, processMountRatio and gpuMountRatio = rendererBytes and gpuBytes / dataBytes over the mount from the native input (the conversion not included), canvasRatio = canvasBytes / dataBytes",
       sampleScale,
-      orderSeed: Number(args["order-seed"]),
       seed,
     },
+    order: { seed: order, planned: run.planned, attempts: run.attempts },
     environment: {
       ...machine(),
       browser: `Chrome ${run.browserVersion}`,
@@ -524,7 +551,7 @@ function writeResults(run: {
     : join(ROOT, "..", "tmp", "benchmarks", `grid-${stamp}.json`);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(output, null, 1)}\n`);
-  console.log(`\nWrote ${out}`);
+  console.log(`\nWrote ${out} (order seed ${order})`);
 }
 
 await main();

@@ -5,6 +5,10 @@
 //
 //   npm run bench:grid-export -- [--lib herceg,ag-grid] [--size 100k,1m]
 //                                [--values text,raw] [--no-copy] [--out results/grid-export.json]
+//                                [--order-seed N]
+//
+// Cases (size and values), and the libraries within each, run in a seeded
+// order (runner/order.ts), recorded with the results.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -22,6 +26,8 @@ import {
   trace,
 } from "../../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../../runner/environment.ts";
+import { driverFor } from "../../runner/input.ts";
+import { orderSeed, schedule } from "../../runner/order.ts";
 import { type Summary, summarize } from "../../runner/stats.ts";
 import type { exportBench } from "./page.ts";
 
@@ -53,8 +59,10 @@ const { values: args } = parseArgs({
     out: { type: "string" },
     headless: { type: "boolean", default: false },
     seed: { type: "string", default: "1" },
+    "order-seed": { type: "string" },
   },
 });
+const order = orderSeed(args["order-seed"]);
 
 const libraries = args.lib ? args.lib.split(",") : Object.keys(LIBRARIES);
 for (const id of libraries) if (!LIBRARIES[id]) throw new Error(`unknown library ${id}`);
@@ -233,88 +241,100 @@ async function main() {
     size: string;
     library: string;
     values: string;
+    /** What the library's export got wrong, where it did: then it is not timed. */
+    incorrect?: string;
     metrics: Record<string, Metric>;
     bytes: number;
     peakNotPassed?: number[];
   }[] = [];
   const checks: Record<string, unknown> = {};
-  for (const size of sizes) {
+  const cases = sizes.flatMap((size) => valueCases.map((values) => ({ size, values })));
+  const planned = schedule(order, cases, () => libraries);
+  for (const {
+    block: { size, values },
+    member: library,
+  } of planned) {
     const { rows, samples, warmup } = SIZES[size]!;
-    for (const values of valueCases) {
-      if (rows <= 100_000 && libraries.length === 2) {
-        // Both grids' output, cell by cell: the comparison is of the same export.
-        const context = await browser.newContext({ viewport: VIEWPORT });
-        const page = await context.newPage();
-        await page.goto(`${origin}/grid-export.html`);
-        await page.waitForFunction(() => window.exportBench !== undefined);
-        await page.evaluate(([r, seed]) => window.exportBench.prepare(r, seed), [
-          rows,
-          SEED,
-        ] as const);
-        const check = await page.evaluate((v) => window.exportBench.check(v), values);
-        await context.close();
-        checks[`${size} ${values}`] = check;
-        console.log(
-          `check ${size} ${values}: rows ${check.rows.join(" and ")}, ${check.differ ?? "same cells"}`,
-        );
-      }
-      for (const library of libraries) {
-        const metrics: Record<string, Metric> = {
-          time: { unit: "ms", samples: [] },
-          longestTask: { unit: "ms", samples: [] },
-          busy: { unit: "ms", samples: [] },
-          peakBytes: { unit: "bytes", samples: [] },
-          heldRendererBytes: { unit: "bytes", samples: [] },
-          heldBrowserBytes: { unit: "bytes", samples: [] },
-        };
-        let bytes = 0;
-        const { page, cdp } = await open(browser, origin, rows, library);
-        for (let i = 0; i < warmup + samples; i++) {
-          await heapBytes(cdp);
-          const run = await page.evaluate((v) => window.exportBench.run(v), values);
-          bytes = run.bytes;
-          if (i >= warmup) metrics.time!.samples.push(run.ms);
-        }
-        const pid = await rendererPid(cdp);
-        for (let i = 0; i < TRACES; i++) {
-          await heapBytes(cdp);
-          const events = await trace(cdp, ["toplevel", "blink.user_timing", "__metadata"], () =>
-            page.evaluate((v) => window.exportBench.run(v), values),
-          );
-          const tasks = tasksOf(events, pid);
-          metrics.longestTask!.samples.push(tasks.longest);
-          metrics.busy!.samples.push(tasks.busy);
-        }
-        await page.context().close();
-        const notPassed: number[] = [];
-        for (let i = 0; i < MEMORY; i++) {
-          const one = await memory(browser, origin, rows, library, values);
-          if (!one) continue;
-          if (one.peak === null) notPassed.push(one.earlierPeak);
-          else metrics.peakBytes!.samples.push(one.peak);
-          metrics.heldRendererBytes!.samples.push(one.heldRenderer);
-          if (one.heldBrowser !== null) metrics.heldBrowserBytes!.samples.push(one.heldBrowser);
-        }
-        for (const metric of Object.values(metrics))
-          if (metric.samples.length > 0) metric.summary = summarize(metric.samples);
-        results.push({
-          size,
-          library,
-          values,
-          metrics,
-          bytes,
-          ...(notPassed.length > 0 && { peakNotPassed: notPassed }),
-        });
-        const m = (id: string) => metrics[id]!.summary?.median;
-        const mib = (id: string) => {
-          const value = m(id);
-          return value === undefined ? "n/a" : `${(value / 2 ** 20).toFixed(1)} MiB`;
-        };
-        console.log(
-          `${size} ${values} ${library}: ${m("time")!.toFixed(0)} ms (p95 ${metrics.time!.summary!.p95.toFixed(0)}), longest task ${m("longestTask")!.toFixed(1)} ms, busy ${m("busy")!.toFixed(0)} ms, peak ${mib("peakBytes")}${notPassed.length ? ` (${notPassed.length} under the mount's peak)` : ""}, held ${mib("heldRendererBytes")} renderer, ${mib("heldBrowserBytes")} browser; ${(bytes / 2 ** 20).toFixed(1)} MiB`,
-        );
+    {
+      // Untimed, in a page of its own: the library's output, cell by cell,
+      // against the fixture's cells; a library that writes anything else is
+      // incorrect and not timed.
+      const context = await browser.newContext({ viewport: VIEWPORT });
+      const page = await context.newPage();
+      await page.goto(`${origin}/grid-export.html`);
+      await page.waitForFunction(() => window.exportBench !== undefined);
+      await page.evaluate(([r, seed]) => window.exportBench.prepare(r, seed), [
+        rows,
+        SEED,
+      ] as const);
+      const check = await page.evaluate(([l, v]) => window.exportBench.check(l, v), [
+        library as "herceg" | "ag-grid",
+        values,
+      ] as const);
+      await context.close();
+      checks[`${size} ${values} ${library}`] = check;
+      console.log(
+        `check ${size} ${values} ${library}: ${check.rows} rows, ${check.wrong ?? "every cell the fixture's"}`,
+      );
+      if (check.wrong) {
+        results.push({ size, library, values, incorrect: check.wrong, metrics: {}, bytes: 0 });
+        continue;
       }
     }
+    const metrics: Record<string, Metric> = {
+      time: { unit: "ms", samples: [] },
+      longestTask: { unit: "ms", samples: [] },
+      busy: { unit: "ms", samples: [] },
+      peakBytes: { unit: "bytes", samples: [] },
+      heldRendererBytes: { unit: "bytes", samples: [] },
+      heldBrowserBytes: { unit: "bytes", samples: [] },
+    };
+    let bytes = 0;
+    const { page, cdp } = await open(browser, origin, rows, library);
+    for (let i = 0; i < warmup + samples; i++) {
+      await heapBytes(cdp);
+      const run = await page.evaluate((v) => window.exportBench.run(v), values);
+      bytes = run.bytes;
+      if (i >= warmup) metrics.time!.samples.push(run.ms);
+    }
+    const pid = await rendererPid(cdp);
+    for (let i = 0; i < TRACES; i++) {
+      await heapBytes(cdp);
+      const events = await trace(cdp, ["toplevel", "blink.user_timing", "__metadata"], () =>
+        page.evaluate((v) => window.exportBench.run(v), values),
+      );
+      const tasks = tasksOf(events, pid);
+      metrics.longestTask!.samples.push(tasks.longest);
+      metrics.busy!.samples.push(tasks.busy);
+    }
+    await page.context().close();
+    const notPassed: number[] = [];
+    for (let i = 0; i < MEMORY; i++) {
+      const one = await memory(browser, origin, rows, library, values);
+      if (!one) continue;
+      if (one.peak === null) notPassed.push(one.earlierPeak);
+      else metrics.peakBytes!.samples.push(one.peak);
+      metrics.heldRendererBytes!.samples.push(one.heldRenderer);
+      if (one.heldBrowser !== null) metrics.heldBrowserBytes!.samples.push(one.heldBrowser);
+    }
+    for (const metric of Object.values(metrics))
+      if (metric.samples.length > 0) metric.summary = summarize(metric.samples);
+    results.push({
+      size,
+      library,
+      values,
+      metrics,
+      bytes,
+      ...(notPassed.length > 0 && { peakNotPassed: notPassed }),
+    });
+    const m = (id: string) => metrics[id]!.summary?.median;
+    const mib = (id: string) => {
+      const value = m(id);
+      return value === undefined ? "n/a" : `${(value / 2 ** 20).toFixed(1)} MiB`;
+    };
+    console.log(
+      `${size} ${values} ${library}: ${m("time")!.toFixed(0)} ms (p95 ${metrics.time!.summary!.p95.toFixed(0)}), longest task ${m("longestTask")!.toFixed(1)} ms, busy ${m("busy")!.toFixed(0)} ms, peak ${mib("peakBytes")}${notPassed.length ? ` (${notPassed.length} under the mount's peak)` : ""}, held ${mib("heldRendererBytes")} renderer, ${mib("heldBrowserBytes")} browser; ${(bytes / 2 ** 20).toFixed(1)} MiB`,
+    );
   }
   const copies: Record<string, unknown> = {};
   if (!args["no-copy"] && libraries.includes("herceg")) {
@@ -325,18 +345,31 @@ async function main() {
       ["100k rows, default limits", COPY_ROWS, undefined],
       ["5k rows, default limits", 5_000, undefined],
     ] as const) {
-      const { page } = await open(browser, origin, rows, "herceg", limits);
+      const { page, cdp } = await open(browser, origin, rows, "herceg", limits);
+      const driver = await driverFor(page, "chrome", cdp);
       await page.evaluate(() => window.exportBench.selectAll());
       const times: number[] = [];
       let last: { chars: number; taken: boolean; said: string } | null = null;
-      for (let i = 0; i < COPIES.warmup + COPIES.samples; i++) {
+      // Every copy checked, untimed, against the rows it must hold (or the refusal).
+      const expected = name === "100k rows, default limits" ? ("refused" as const) : { rows };
+      let wrong: string | null = null;
+      for (let i = 0; i < COPIES.warmup + COPIES.samples && !wrong; i++) {
         await page.evaluate(() => window.exportBench.armCopy());
-        await page.keyboard.press("ControlOrMeta+c");
+        await driver.step({ type: "key", key: "ControlOrMeta+c" });
         const one = await page.evaluate(() => window.exportBench.copied());
+        wrong = await page.evaluate(([e, said]) => window.exportBench.checkCopy(e, said), [
+          expected,
+          one.said,
+        ] as const);
         if (i >= COPIES.warmup) times.push(one.ms);
         last = one;
       }
       await page.context().close();
+      if (wrong) {
+        copies[name] = { incorrect: wrong };
+        console.log(`copy ${name}: incorrect: ${wrong}`);
+        continue;
+      }
       copies[name] = { time: { unit: "ms", samples: times, summary: summarize(times) }, ...last };
       const summary = summarize(times);
       console.log(
@@ -357,13 +390,17 @@ async function main() {
       agGrid:
         "api.getDataAsCsv() to a Blob, as exportDataAsCsv does before downloading. Text: the columns' valueFormatter (used by exports by default). Raw: a processCellCallback writing times as ISO 8601 and missing values empty; every value quoted, no formula escaping (its defaults)",
       check:
-        "at 100,000 rows, both grids' CSV parsed and compared cell by cell (quoting aside, they write the same cells)",
+        "before a library is timed in a case, its CSV of every row, in a page of its own, parsed and checked cell by cell against the fixture's cells (the field names as the header; text: the grid suite's formats; raw: the values, times as ISO 8601, missing values empty); a library that writes anything else is incorrect, with no metrics",
       time: "from the call to the Blob, in the page; the grid mounted, garbage collected before each export",
       tasks: `the renderer main thread's tasks between the export's marks (Chrome trace, 'toplevel'), ${TRACES} traced exports: the longest, and their total (busy)`,
       memory: `${MEMORY} fresh pages, the grid mounted: the renderer's peak footprint (macOS phys_footprint_peak) over its footprint before the export, where the export passed the peak mounting left (else listed under peakNotPassed as an upper bound); and after garbage collection, holding the output, the renderer's and the browser process's footprints over before (Blobs are stored in the browser process)`,
-      copy: `Herceg only (AG Grid's clipboard is Enterprise): every row selected, Ctrl+C (Cmd+C) pressed, timed from the copy event reaching the window to a listener after the grid's; ${COPIES.samples} copies after ${COPIES.warmup}`,
+      copy: `Herceg only (AG Grid's clipboard is Enterprise): every row selected, Ctrl+C (Cmd+C) pressed as trusted input through the DevTools Protocol, timed from the copy event reaching the window to a listener after the grid's; ${COPIES.samples} copies after ${COPIES.warmup}, each checked after its time was taken: the rows' cells as the grid suite formats them, tab-separated, a row a line, or, at 100k rows with the default limits, a refusal; a case with a copy that is anything else is incorrect, with no times`,
       sizes: SIZES,
       seed: SEED,
+    },
+    order: {
+      seed: order,
+      planned: planned.map(({ block, member }) => [block.size, block.values, member]),
     },
     environment: {
       ...machine(),
@@ -390,7 +427,7 @@ async function main() {
     : join(ROOT, "..", "tmp", "benchmarks", `grid-export-${stamp}.json`);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(output, null, 1)}\n`);
-  console.log(`\nWrote ${out}`);
+  console.log(`\nWrote ${out} (order seed ${order})`);
 }
 
 await main();

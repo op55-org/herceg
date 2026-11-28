@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { SeriesData } from "../datasets.ts";
 import type { Adapter, ChartHandle, ChartKind, ChartOptions } from "../page/adapter.ts";
-import { appendTo, columnsOf, pixelOf, seriesTable } from "./herceg.ts";
+import { appendTo, columnsOf, observe, pixelOf, seriesIn, seriesTable } from "./herceg.ts";
 
 // Herceg through its React adapter, to measure what React adds. Mounting and
 // resizing go through React props (rendered synchronously with flushSync, as
@@ -15,7 +15,7 @@ function lineKind(fill: boolean): ChartKind<SeriesData> {
     prepare: seriesTable,
     create(container: HTMLElement, data: SeriesData, options: ChartOptions) {
       const source = seriesTable(data);
-      const fields = data.ys.map((_, s) => `s${s}`);
+      const fields = data.names;
       const ref: { current: HercegChart | null } = { current: null };
       const root = createRoot(container);
       const Mark = fill ? Area : Line;
@@ -29,13 +29,15 @@ function lineKind(fill: boolean): ChartKind<SeriesData> {
         );
       render(options.width, options.height);
       const chart = () => ref.current!;
+      const drawn = observe(chart(), () => seriesIn(source, "t", fields[0]!), fields[0]);
       const handle: ChartHandle<SeriesData> = {
         setData: (next) => source.reset(columnsOf(next)),
-        append: (x, ys, keep) => appendTo(source, x, ys, keep),
+        append: (x, ys, keep) => appendTo(source, x, ys, keep, data.names),
         // The adapter exposes the chart through `ref` for imperative calls.
         setViewport: (x0, x1) => chart().setViewport([x0, x1]),
         pixelOf: (_series, _index, x, y) => pixelOf(chart(), x, y),
         resize: (width, height) => render(width, height),
+        drawn,
         destroy: () => root.unmount(),
       };
       return handle;
@@ -45,6 +47,7 @@ function lineKind(fill: boolean): ChartKind<SeriesData> {
 
 export const adapter: Adapter = {
   id: "herceg-react",
+  verification: "as herceg's, on the chart <Chart> made",
   renderer: { normal: "auto, through <Chart>", large: "auto, through <Chart>" },
   line: lineKind(false),
   area: lineKind(true),

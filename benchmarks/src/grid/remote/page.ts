@@ -36,7 +36,7 @@ import {
   type GridSource,
   type RemoteGridModel,
 } from "herceg/grid/remote";
-import { checkedFrame, settle } from "../frames.ts";
+import { checkedFrame, settle } from "../../page/frames.ts";
 
 ModuleRegistry.registerModules([InfiniteRowModelModule, ScrollApiModule]);
 

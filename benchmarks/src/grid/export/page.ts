@@ -57,6 +57,8 @@ let agGrid: GridApi<RowObject> | null = null;
 /** The last export, kept until the next, as a page offering it for download would. */
 let kept: Blob | null = null;
 let copied: Promise<{ ms: number; chars: number; taken: boolean; said: string }> | null = null;
+/** What the last copy put on the clipboard, read after its time was taken. */
+let copiedText = "";
 
 function stage(): HTMLElement {
   const element = document.createElement("div");
@@ -112,9 +114,8 @@ function agGridCsv(api: GridApi<RowObject>, values: "text" | "raw"): Blob {
   return new Blob([csv ?? ""], { type: "text/csv;charset=utf-8" });
 }
 
-/** Rows of an RFC 4180 CSV text, for checking that both grids wrote the same cells. */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
+/** The rows of an RFC 4180 CSV text, one at a time, for checking a grid's export cell by cell. */
+function* csvRows(text: string): Generator<string[]> {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
@@ -132,7 +133,7 @@ function parseCsv(text: string): string[][] {
       cell = "";
     } else if (char === "\r" && text[i + 1] === "\n") {
       row.push(cell);
-      rows.push(row);
+      yield row;
       row = [];
       cell = "";
       i++;
@@ -140,9 +141,8 @@ function parseCsv(text: string): string[][] {
   }
   if (cell || row.length > 0) {
     row.push(cell);
-    rows.push(row);
+    yield row;
   }
-  return rows;
 }
 
 export const exportBench = {
@@ -171,24 +171,54 @@ export const exportBench = {
   },
 
   /**
-   * Both grids' CSV of the same rows, parsed and compared cell by cell:
-   * the rows each wrote, and the first cell they differ in.
+   * One library's CSV of every row, parsed and checked cell by cell against
+   * the fixture's own cells: the field names as the header; for text, the
+   * grid suite's formats; for raw values, the values themselves (times as
+   * ISO 8601, missing values empty). The rows it wrote, and the first cell
+   * that differs, if any.
    */
   async check(
+    library: "herceg" | "ag-grid",
     values: "text" | "raw",
-  ): Promise<{ rows: [number, number]; differ: string | null; sample: string[] }> {
-    const ours = mountHerceg(stage());
-    const theirs = mountAgGrid(stage());
-    const a = parseCsv(await (await exportGrid(ours.model, { values })).text());
-    const b = parseCsv(await agGridCsv(theirs, values).text());
-    ours.grid.destroy();
-    theirs.destroy();
-    let differ: string | null = null;
-    for (let r = 0; r < Math.max(a.length, b.length) && !differ; r++)
-      for (let c = 0; c < 20 && !differ; c++)
-        if (a[r]?.[c] !== b[r]?.[c])
-          differ = `row ${r}, column ${c}: ${JSON.stringify(a[r]?.[c])} and ${JSON.stringify(b[r]?.[c])}`;
-    return { rows: [a.length, b.length], differ, sample: a[1] ?? [] };
+  ): Promise<{ rows: number; wrong: string | null }> {
+    const element = stage();
+    let text: string;
+    if (library === "herceg") {
+      const mounted = mountHerceg(element);
+      text = await (await exportGrid(mounted.model, { values })).text();
+      mounted.grid.destroy();
+    } else {
+      const api = mountAgGrid(element);
+      text = await agGridCsv(api, values).text();
+      api.destroy();
+    }
+    element.remove();
+    const { fields, length } = fixture!;
+    const objects = rowObjects(fixture!);
+    const cell = (field: (typeof fields)[number], value: number | string | undefined) =>
+      values === "text"
+        ? formatValue(field.kind, value)
+        : value === undefined
+          ? ""
+          : field.kind === "time"
+            ? new Date(value as number).toISOString()
+            : String(value);
+    let rows = 0;
+    for (const row of csvRows(text)) {
+      if (rows > length) return { rows, wrong: `more rows than the fixture's ${length}` };
+      const expected =
+        rows === 0
+          ? fields.map((field) => field.name)
+          : fields.map((field) => cell(field, objects[rows - 1]![field.name]));
+      for (let c = 0; c < Math.max(row.length, expected.length); c++)
+        if (row[c] !== expected[c])
+          return {
+            rows,
+            wrong: `row ${rows}, column ${c}: ${JSON.stringify(row[c])}, not ${JSON.stringify(expected[c])}`,
+          };
+      rows++;
+    }
+    return { rows, wrong: rows === length + 1 ? null : `${rows} rows, not ${length + 1}` };
   },
 
   /** Selects every row of Herceg's grid and focuses its first cell, for Ctrl+C. */
@@ -212,9 +242,10 @@ export const exportBench = {
         window.removeEventListener("copy", begin, true);
         document.removeEventListener("copy", end);
         const live = container!.querySelector(".herceg-grid > [aria-live]");
+        copiedText = event.clipboardData!.getData("text/plain");
         resolve({
           ms,
-          chars: event.clipboardData!.getData("text/plain").length,
+          chars: copiedText.length,
           taken: event.defaultPrevented,
           said: live?.textContent?.trim() ?? "",
         });
@@ -226,6 +257,32 @@ export const exportBench = {
 
   /** What the copy armed for heard. */
   copied: () => copied!,
+
+  /**
+   * What is wrong with the last copy, if anything: with `rows`, it must
+   * hold those first rows of the fixture, every cell as the grid suite
+   * formats it, tab-separated, a row a line (CRLF), no header, as the copy
+   * of a selection writes them; with `refused`, nothing, the grid saying
+   * the selection is too large to copy.
+   */
+  checkCopy(expected: { rows: number } | "refused", said: string): string | null {
+    if (expected === "refused")
+      return copiedText === "" && /too many/i.test(said)
+        ? null
+        : `copied ${copiedText.length} characters ("${said}"), not a refusal`;
+    const { fields } = fixture!;
+    const objects = rowObjects(fixture!);
+    const lines = copiedText.split("\r\n");
+    if (lines.length !== expected.rows) return `copied ${lines.length} rows, not ${expected.rows}`;
+    for (let r = 0; r < expected.rows; r++) {
+      const line = fields
+        .map((field) => formatValue(field.kind, objects[r]![field.name]))
+        .join("\t");
+      if (lines[r] !== line)
+        return `row ${r + 1}: ${JSON.stringify(lines[r])}, not ${JSON.stringify(line)}`;
+    }
+    return null;
+  },
 
   destroy(): void {
     herceg?.grid.destroy();

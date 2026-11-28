@@ -7,8 +7,6 @@
 // write) is reported apart from the rest.
 
 import { random } from "../datasets.ts";
-import type { Adapter, GridHandle } from "./adapter.ts";
-import { appendBatch, type GridTable, gridTable, updateValues } from "./fixture.ts";
 import {
   afterFrame,
   beforePaint,
@@ -16,7 +14,9 @@ import {
   nextFrame,
   refreshInterval,
   settle,
-} from "./frames.ts";
+} from "../page/frames.ts";
+import type { Adapter, GridHandle } from "./adapter.ts";
+import { appendBatch, type GridTable, gridTable, updateValues } from "./fixture.ts";
 import {
   applyQuery,
   type GridResult,
