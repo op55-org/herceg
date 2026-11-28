@@ -12,8 +12,8 @@
     "lineplot": {
       "title": "lineplot (estimate and interval)",
       "inventory": "lineplot",
-      "works": ["placement.panel"],
-      "unproved": [
+      "works": [
+        "placement.panel",
         "legend.toggle",
         "export.svg",
         "export.pdf",
@@ -24,7 +24,7 @@
     "barplot": {
       "title": "barplot (estimate and error bars)",
       "inventory": "barplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -36,7 +36,7 @@
     "pointplot": {
       "title": "pointplot (estimates and error bars)",
       "inventory": "pointplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -48,7 +48,7 @@
     "stripplot": {
       "title": "stripplot",
       "inventory": "stripplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -60,7 +60,7 @@
     "swarmplot": {
       "title": "swarmplot",
       "inventory": "swarmplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -72,7 +72,7 @@
     "boxplot": {
       "title": "boxplot",
       "inventory": "boxplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -84,7 +84,7 @@
     "boxenplot": {
       "title": "boxenplot",
       "inventory": "boxenplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -96,7 +96,7 @@
     "violinplot": {
       "title": "violinplot (density and box)",
       "inventory": "violinplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -108,7 +108,7 @@
     "histplot": {
       "title": "histplot",
       "inventory": "histplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -120,7 +120,7 @@
     "kdeplot": {
       "title": "kdeplot",
       "inventory": "kdeplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -132,7 +132,7 @@
     "ecdfplot": {
       "title": "ecdfplot",
       "inventory": "ecdfplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -144,7 +144,7 @@
     "rugplot": {
       "title": "rugplot",
       "inventory": "rugplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -156,7 +156,7 @@
     "regplot": {
       "title": "regplot (points, fit, and band)",
       "inventory": "regplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -168,7 +168,7 @@
     "residplot": {
       "title": "residplot",
       "inventory": "residplot",
-      "unproved": [
+      "works": [
         "placement.panel",
         "legend.toggle",
         "export.svg",
@@ -180,7 +180,7 @@
     "pairplot": {
       "title": "pairplot (grid of panels)",
       "inventory": "pairplot",
-      "unproved": [
+      "works": [
         "legend.toggle",
         "export.svg",
         "export.pdf",
@@ -204,7 +204,7 @@
     "jointplot": {
       "title": "jointplot (joint and marginal panels)",
       "inventory": "jointplot",
-      "unproved": [
+      "works": [
         "legend.toggle",
         "export.svg",
         "export.pdf",
@@ -228,7 +228,7 @@
     "clustermap": {
       "title": "clustermap (heatmap and dendrograms)",
       "inventory": "clustermap",
-      "unproved": ["export.svg", "export.pdf", "express.statistics", "express.recompute"],
+      "works": ["export.svg", "export.pdf", "express.statistics", "express.recompute"],
       "refused": {
         "placement.panel": {
           "error": {
