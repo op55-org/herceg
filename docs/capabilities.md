@@ -14,7 +14,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 2182 cells: 1464 proved to work, 180 supported but not yet proved, 356 refused, and 182 not applicable.
+Of 2182 cells: 1503 proved to work, 141 supported but not yet proved, 356 refused, and 182 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Events](#events) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -22,46 +22,46 @@ Of 2182 cells: 1464 proved to work, 180 supported but not yet proved, 356 refuse
 
 | Mark | ✓ | ○ | ✗ | · |
 | --- | ---: | ---: | ---: | ---: |
-| line | 46 | 2 | 3 | 1 |
-| line along y | 46 | 2 | 3 | 1 |
-| area | 46 | 2 | 3 | 1 |
-| area between two fields | 46 | 2 | 3 | 1 |
-| bar | 46 | 2 | 3 | 1 |
-| stacked bars | 46 | 2 | 3 | 1 |
-| point | 47 | 2 | 2 | 1 |
-| histogram | 42 | 2 | 7 | 1 |
-| 2D histogram | 42 | 2 | 4 | 4 |
-| boxplot | 41 | 2 | 8 | 1 |
-| boxen | 41 | 2 | 8 | 1 |
-| violin | 41 | 2 | 8 | 1 |
-| rug | 43 | 2 | 6 | 1 |
-| errorbar | 46 | 2 | 3 | 1 |
-| candlestick | 45 | 2 | 2 | 3 |
-| heatmap | 44 | 2 | 2 | 4 |
-| calendar heatmap | 44 | 2 | 2 | 4 |
-| contour | 35 | 7 | 7 | 3 |
-| dendrogram | 27 | 2 | 11 | 12 |
-| rule (constant) | 31 | 2 | 1 | 18 |
-| rules of a table | 31 | 2 | 9 | 10 |
-| region (constant) | 30 | 2 | 2 | 18 |
-| regions of a table | 31 | 2 | 9 | 10 |
-| text (constant) | 30 | 2 | 2 | 18 |
-| text of a table | 31 | 2 | 9 | 10 |
-| segment | 46 | 2 | 3 | 1 |
+| line | 47 | 1 | 3 | 1 |
+| line along y | 47 | 1 | 3 | 1 |
+| area | 47 | 1 | 3 | 1 |
+| area between two fields | 47 | 1 | 3 | 1 |
+| bar | 47 | 1 | 3 | 1 |
+| stacked bars | 47 | 1 | 3 | 1 |
+| point | 48 | 1 | 2 | 1 |
+| histogram | 43 | 1 | 7 | 1 |
+| 2D histogram | 43 | 1 | 4 | 4 |
+| boxplot | 42 | 1 | 8 | 1 |
+| boxen | 42 | 1 | 8 | 1 |
+| violin | 42 | 1 | 8 | 1 |
+| rug | 44 | 1 | 6 | 1 |
+| errorbar | 47 | 1 | 3 | 1 |
+| candlestick | 46 | 1 | 2 | 3 |
+| heatmap | 45 | 1 | 2 | 4 |
+| calendar heatmap | 45 | 1 | 2 | 4 |
+| contour | 36 | 6 | 7 | 3 |
+| dendrogram | 28 | 1 | 11 | 12 |
+| rule (constant) | 32 | 1 | 1 | 18 |
+| rules of a table | 32 | 1 | 9 | 10 |
+| region (constant) | 31 | 1 | 2 | 18 |
+| regions of a table | 32 | 1 | 9 | 10 |
+| text (constant) | 31 | 1 | 2 | 18 |
+| text of a table | 32 | 1 | 9 | 10 |
+| segment | 47 | 1 | 3 | 1 |
 | custom | 45 | 0 | 2 | 5 |
-| pie | 31 | 2 | 17 | 2 |
-| treemap | 31 | 2 | 17 | 2 |
-| sunburst | 32 | 2 | 16 | 2 |
-| gauge | 25 | 2 | 19 | 6 |
-| funnel | 27 | 2 | 17 | 6 |
-| radar | 27 | 2 | 21 | 2 |
-| sankey | 27 | 2 | 17 | 6 |
-| graph (network) | 33 | 2 | 15 | 2 |
-| geoshape | 33 | 2 | 14 | 3 |
-| geopoint | 33 | 2 | 14 | 3 |
-| point3d | 26 | 2 | 20 | 4 |
-| line3d | 25 | 2 | 21 | 4 |
-| surface | 24 | 2 | 20 | 6 |
+| pie | 32 | 1 | 17 | 2 |
+| treemap | 32 | 1 | 17 | 2 |
+| sunburst | 33 | 1 | 16 | 2 |
+| gauge | 26 | 1 | 19 | 6 |
+| funnel | 28 | 1 | 17 | 6 |
+| radar | 28 | 1 | 21 | 2 |
+| sankey | 28 | 1 | 17 | 6 |
+| graph (network) | 34 | 1 | 15 | 2 |
+| geoshape | 34 | 1 | 14 | 3 |
+| geopoint | 34 | 1 | 14 | 3 |
+| point3d | 27 | 1 | 20 | 4 |
+| line3d | 26 | 1 | 21 | 4 |
+| surface | 25 | 1 | 20 | 6 |
 
 ## Placement
 
@@ -577,51 +577,51 @@ Of 2182 cells: 1464 proved to work, 180 supported but not yet proved, 356 refuse
 - **Vue**: The row's mark component in a Vue &lt;Chart> draws what the chart of its spec draws, reports the datum under the pointer and a refused option through its hover and error events, takes a new prop on the chart it made, and leaves nothing when unmounted. Proved in [contracts.test.ts](../packages/vue/test/contracts.test.ts).
 - **Svelte**: The row's mark component in a Svelte &lt;Chart> draws what the chart of its spec draws, reports the datum under the pointer and a refused option through its onhover and onerror props, takes a new prop on the chart it made, and leaves nothing when unmounted. Proved in [contracts.test.svelte.ts](../packages/svelte/test/contracts.test.svelte.ts).
 - **Notebook widget**: The row's chart sent from Python to the notebook widget draws what the chart of its spec draws, reports the datum under the pointer and a refused change back to Python, takes a change of options on the chart it made, and leaves nothing when closed. Proved in [contracts.test.ts](../python/js/test/contracts.test.ts).
-- **Streamlit**: The row's chart sent from Python to the Streamlit component draws what the chart of its spec draws, reports the datum under the pointer and a refused change, takes new options on the chart it made, and leaves nothing when removed.
+- **Streamlit**: The row's chart sent from Python to the Streamlit component draws what the chart of its spec draws, reports the datum under a click as the click's value and a refused chart as the alert it shows in the chart's place, takes new options from a rerun, which draws them in a chart made in the old one's place (the old one removed), and leaves nothing when removed. Proved in [contracts.test.ts](../python/js/test/contracts.test.ts).
 - **Web fragment**: The row's chart written as a web fragment by Python draws, once mounted, what the chart of its spec draws, reports the datum under the pointer and a refused payload, and leaves nothing when unmounted.
 
 | Mark | React | Vue | Svelte | Notebook widget | Streamlit | Web fragment |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| line | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| line along y | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| area | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| area between two fields | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| bar | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| stacked bars | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| point | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| histogram | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| 2D histogram | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| boxplot | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| boxen | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| violin | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| rug | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| errorbar | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| candlestick | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| heatmap | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| calendar heatmap | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| contour | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| dendrogram | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| rule (constant) | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| rules of a table | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| region (constant) | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| regions of a table | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| text (constant) | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| text of a table | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| segment | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
+| line | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| line along y | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| area | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| area between two fields | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| bar | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| stacked bars | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| point | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| histogram | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| 2D histogram | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| boxplot | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| boxen | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| violin | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| rug | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| errorbar | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| candlestick | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| calendar heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| contour | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| dendrogram | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| rule (constant) | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| rules of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| region (constant) | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| regions of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| text (constant) | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| text of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| segment | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
 | custom | ✓ | ✓ | ✓ | ·89 | ·89 | ·89 |
-| pie | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| treemap | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| sunburst | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| gauge | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| funnel | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| radar | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| sankey | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| graph (network) | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| geoshape | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| geopoint | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| point3d | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| line3d | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
-| surface | ✓ | ✓ | ✓ | ✓ | ○ | ○ |
+| pie | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| treemap | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| sunburst | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| gauge | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| funnel | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| radar | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| sankey | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| graph (network) | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| geoshape | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| geopoint | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| point3d | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| line3d | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
+| surface | ✓ | ✓ | ✓ | ✓ | ✓ | ○ |
 
 - ·89 Not applicable: It is a TypeScript function: a spec sent from Python cannot hold it.
 

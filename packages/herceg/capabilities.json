@@ -392,7 +392,7 @@
     },
     "integration.streamlit": {
       "title": "Streamlit",
-      "works": "The row's chart sent from Python to the Streamlit component draws what the chart of its spec draws, reports the datum under the pointer and a refused change, takes new options on the chart it made, and leaves nothing when removed.",
+      "works": "The row's chart sent from Python to the Streamlit component draws what the chart of its spec draws, reports the datum under a click as the click's value and a refused chart as the alert it shows in the chart's place, takes new options from a rerun, which draws them in a chart made in the old one's place (the old one removed), and leaves nothing when removed.",
       "na": "A custom mark is a TypeScript function: a spec sent from Python cannot hold it."
     },
     "integration.web": {
@@ -500,7 +500,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -602,7 +602,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -704,7 +704,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -806,7 +806,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -908,7 +908,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1010,7 +1010,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1104,7 +1104,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1238,7 +1238,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1357,7 +1357,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1498,7 +1498,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1639,7 +1639,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1780,7 +1780,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -1905,7 +1905,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2007,7 +2007,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2107,7 +2107,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2210,7 +2210,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2313,7 +2313,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2452,7 +2452,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2649,7 +2649,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2784,7 +2784,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -2960,7 +2960,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -3103,7 +3103,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -3279,7 +3279,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -3422,7 +3422,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -3598,7 +3598,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -3700,7 +3700,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -4016,7 +4016,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -4226,7 +4226,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -4428,7 +4428,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -4666,7 +4666,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -4888,7 +4888,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -5130,7 +5130,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -5352,7 +5352,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -5546,7 +5546,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -5735,7 +5735,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -5924,7 +5924,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -6164,7 +6164,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -6412,7 +6412,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     },
@@ -6658,7 +6658,7 @@
         "integration.vue": { "state": "works" },
         "integration.svelte": { "state": "works" },
         "integration.widget": { "state": "works" },
-        "integration.streamlit": { "state": "unproved" },
+        "integration.streamlit": { "state": "works" },
         "integration.web": { "state": "unproved" }
       }
     }

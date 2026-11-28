@@ -123,5 +123,5 @@ The long-term target covers the major chart families. Not yet available:
 ## Proofs
 
 - Tests proving the capability cells declared to work but not yet proved
-  (the notebook widget's, Streamlit's, web fragments', and most Express
-  recipes'), shown as ○ in the [capability matrix](capabilities.md).
+  (web fragments' and most Express recipes'), shown as ○ in the
+  [capability matrix](capabilities.md).

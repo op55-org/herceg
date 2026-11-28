@@ -7,14 +7,17 @@ import { describe, expect, it, vi } from "vitest";
 import { server } from "vitest/browser";
 import { type Chart, MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
 import type { ChartErrorInfo } from "../../../packages/herceg/src/spec/errors.ts";
+import type { ChartSpec } from "../../../packages/herceg/src/spec/spec.ts";
 import { validateSpec } from "../../../packages/herceg/src/spec/validate.ts";
 import type { InputEventPayload } from "../../../packages/herceg/src/web/events.ts";
-import { press } from "../../../packages/herceg/test/browser/contracts/pointer.ts";
+import { click, press } from "../../../packages/herceg/test/browser/contracts/pointer.ts";
 import { collectUntilGone } from "../../../packages/herceg/test/browser/helpers.ts";
 import { specOf } from "../../../packages/herceg/test/contracts/matrix.ts";
 import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
+import component from "../streamlit.ts";
 import widgetModule, { type Snapshot, type Update } from "../widget.ts";
-import { proveIntegration, type Surface } from "./integration.ts";
+import { proveIntegration, type Reported, type Surface } from "./integration.ts";
+import { payload } from "./streamlit-payload.ts";
 import { MockModel, snapshot } from "./widget-model.ts";
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -162,8 +165,138 @@ async function closed(page: HTMLElement, model: MockModel): Promise<WeakRef<obje
   return [new WeakRef(chart), new WeakRef(chart.root)];
 }
 
+/**
+ * Streamlit's component as Streamlit runs it: each script run calls it with
+ * the payload Python builds, the script reacting to clicks (`on_click=`), and
+ * it reports them as the run's `click` trigger. A run with new bytes draws a
+ * new chart in the old one's place; a chart the engine refuses shows as an
+ * alert there, which is all Streamlit shows of it.
+ */
+const streamlit: Surface = {
+  name: "streamlit",
+  changes: "in its place",
+  refusals: "message",
+  async show(host, spec) {
+    const clicks: InputEventPayload[] = [];
+    let cleanup = () => {};
+    // A script run sending `sent`; Streamlit runs the cleanup it got last.
+    const rerun = (sent: ChartSpec) => {
+      cleanup = component({
+        data: payload(sent, [], ["click"], 3, EPOCH, itemEpochOf(sent)),
+        parentElement: host,
+        setStateValue: () => {},
+        setTriggerValue: (name, value) => {
+          if (name === "click") clicks.push(value as InputEventPayload);
+        },
+      });
+    };
+    let current = spec;
+    let chart = made(host, () => rerun(spec));
+    return {
+      chart: () => chart,
+      async readAt(at) {
+        const before = clicks.length;
+        click(chart, at);
+        await expect.poll(() => clicks.length).toBeGreaterThan(before);
+        return clicks.at(-1)!.inspection;
+      },
+      async change(options) {
+        current = { ...current, ...options };
+        chart = made(host, () => rerun(current));
+        for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+        return chart;
+      },
+      async refuse(refused) {
+        // Every alert shown meanwhile, even one a later run took away.
+        const added: Node[] = [];
+        const record = (records: MutationRecord[]) =>
+          added.push(...records.flatMap(({ addedNodes }) => [...addedNodes]));
+        const alerts = new MutationObserver(record);
+        alerts.observe(host, { childList: true, subtree: true });
+        // The component logs the error's stack for the app's developer.
+        const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { root } = chart;
+        try {
+          rerun(refused);
+          // A run that comes while the chart restores what the user had waits for it.
+          await expect.poll(() => host.querySelector(ALERT)).not.toBeNull();
+          // The alert shows in the chart's place: the chart is gone.
+          expect(root.isConnected, "the chart the alert replaced").toBe(false);
+          expect([...host.children].map((child) => child.matches(ALERT))).toEqual([true]);
+          // The script's next run draws its chart in the alert's place.
+          chart = made(host, () => rerun(current));
+          expect(host.querySelector(ALERT), "the alert, once the chart is back").toBeNull();
+          await chart.loading;
+        } finally {
+          logged.mockRestore();
+          record(alerts.takeRecords());
+          alerts.disconnect();
+        }
+        return added
+          .filter((node): node is Element => node instanceof Element && node.matches(ALERT))
+          .map(alerted);
+      },
+      close() {
+        cleanup();
+      },
+    };
+  },
+};
+
+/** What the component shows in place of a chart it cannot draw. */
+const ALERT = '[role="alert"]';
+
+/** The refusal an alert of Streamlit's shows, below its heading. */
+function alerted(alert: Element): Reported {
+  const [heading, ...message] = (alert.textContent ?? "").split("\n");
+  expect(heading).toBe("Chart could not be rendered");
+  return { message: message.join("\n") };
+}
+
+/** Python's digest of the proofs' data, which no run changes. */
+const EPOCH = "contract-data";
+
+/** Python's epoch of a chart's networks' layouts (`_item_epoch`): of its graph marks, none without. */
+function itemEpochOf(spec: ChartSpec): string | undefined {
+  return spec.marks.some((mark) => mark.type === "graph") ? "contract-graph" : undefined;
+}
+
+describe("integration.streamlit", () => {
+  proveIntegration(streamlit);
+
+  // What each row's proof leaves to this: what the component held of its
+  // charts goes once it is removed. Chrome alone collects exactly (see the
+  // widget's).
+  it.skipIf(server.browser !== "chromium")("lets go of its charts once removed", async () => {
+    const page = document.createElement("div");
+    page.style.width = "600px";
+    document.body.append(page);
+    try {
+      const drawn = await removed(page);
+      await collectUntilGone(drawn);
+      expect(drawn.map((ref) => ref.deref())).toEqual([undefined, undefined, undefined, undefined]);
+    } finally {
+      page.remove();
+    }
+  });
+});
+
+/**
+ * Shows a line chart in `page` through Streamlit's driver, runs the script
+ * again with a new title, drawn in a chart made in its place, and removes
+ * the component. Returns weak references to both charts and their roots.
+ */
+async function removed(page: HTMLElement): Promise<WeakRef<object>[]> {
+  const shown = await streamlit.show(page, { ...specOf("line")!, height: 300, theme: "light" });
+  const first = shown.chart();
+  const second = await shown.change!({ title: "Updated" });
+  shown.close();
+  expect(page.childElementCount).toBe(0);
+  return [first, first.root, second, second.root].map((held) => new WeakRef(held));
+}
+
 describe("integration of a custom mark", () => {
-  for (const surface of ["streamlit", "web"])
+  for (const surface of ["web"])
     contractTest(`custom.integration.${surface}`, () => {
       // The row has no spec, and a spec naming the mark is refused.
       expect(specOf("custom")).toBeUndefined();
