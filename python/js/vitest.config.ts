@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
+import { commands } from "../../scripts/browser/commands.ts";
 
 const engine = (file: string) =>
   new URL(`../../packages/herceg/src/${file}`, import.meta.url).pathname;
@@ -22,6 +23,7 @@ export default defineConfig({
       enabled: true,
       headless: true,
       instances: browsers,
+      commands,
     },
   },
 });

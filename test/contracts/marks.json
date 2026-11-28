@@ -54,12 +54,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -152,12 +153,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -250,12 +252,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -348,12 +351,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -446,12 +450,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -544,12 +549,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -643,12 +649,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -726,12 +733,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -868,12 +876,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -979,12 +988,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1131,12 +1141,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1279,12 +1290,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1432,12 +1444,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1566,12 +1579,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1663,12 +1677,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1750,12 +1765,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1838,12 +1854,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1920,10 +1937,10 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "integration.widget"
       ],
       "unproved": [
-        "integration.widget",
         "integration.streamlit",
         "integration.web",
         "events.click",
@@ -2060,10 +2077,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet": {
           "error": {
@@ -2244,11 +2262,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.item-move",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -2326,10 +2345,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -2486,10 +2506,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -2578,10 +2599,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -2738,10 +2760,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -2830,10 +2853,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -3001,12 +3025,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items",
         "selection.series"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -3180,11 +3205,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -3417,12 +3443,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "events.drill",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -3656,12 +3683,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "events.drill",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -3878,11 +3906,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -4138,11 +4167,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -4376,11 +4406,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -4654,11 +4685,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -4897,12 +4929,13 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "events.item-move",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -5117,10 +5150,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -5325,10 +5359,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -5526,10 +5561,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet": {
           "error": {
@@ -5793,10 +5829,11 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet": {
           "error": {
@@ -6069,11 +6106,12 @@
         "integration.react",
         "integration.vue",
         "integration.svelte",
+        "integration.widget",
         "events.click",
         "events.pin",
         "selection.items"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": ["integration.streamlit", "integration.web"],
       "refused": {
         "placement.facet": {
           "error": {

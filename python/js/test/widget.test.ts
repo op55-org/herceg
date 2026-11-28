@@ -541,6 +541,31 @@ describe("notebook widget", () => {
     expect(end - start).toBeLessThan(2);
   });
 
+  it.each([0, 2])(
+    "tells Python once of a chart sent again that the engine refuses, with %i displays",
+    (displays) => {
+      const model = new MockModel({ _chart: snapshot(), _listening: [] });
+      const shown = mount(model, displays);
+      const { spec, buffers } = snapshot();
+      const [line] = spec.marks;
+      model.receive(
+        {
+          type: "chart",
+          revision: 1,
+          spec: { ...spec, marks: [{ ...line!, panel: "nowhere" }] },
+          rows: {},
+        },
+        buffers as DataView[],
+      );
+      expect(model.messages("error")).toMatchObject([
+        { error: { code: "invalid-option", path: "marks[0].panel" } },
+      ]);
+      // Each display shows it in the chart's place.
+      for (const host of shown)
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain("marks[0].panel");
+    },
+  );
+
   it("changes options in place and removes those set to null", () => {
     const model = new MockModel({ _chart: snapshot(), _listening: [] });
     const [host] = mount(model);
