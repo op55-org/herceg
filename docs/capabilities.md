@@ -14,7 +14,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 2182 cells: 1503 proved to work, 141 supported but not yet proved, 356 refused, and 182 not applicable.
+Of 2182 cells: 1600 proved to work, 44 supported but not yet proved, 356 refused, and 182 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Events](#events) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -629,28 +629,28 @@ Of 2182 cells: 1503 proved to work, 141 supported but not yet proved, 356 refuse
 
 Each recipe is all the marks it draws, proved together in Python.
 
-- **Statistics**: hx.statistics(chart) gives what the recipe computed (estimates, intervals, densities, fits, bins), equal to the fixture's values computed apart, and with panel= those of the plot drawn in that panel.
-- **Recompute**: hx.recompute(chart, data) makes the recipe again from new data: what it draws and its statistics follow the new rows, together (an estimate with its band), and marks added after it read the new table.
+- **Statistics**: hx.statistics(chart) gives what the recipe computed (estimates, intervals, densities, fits, bins), equal to the fixture's values computed apart, and with panel= those of the plot drawn in that panel. Proved in [test_capabilities.py](../python/tests/test_capabilities.py).
+- **Recompute**: hx.recompute(chart, data) makes the recipe again from new data: what it draws and its statistics follow the new rows, together (an estimate with its band), and marks added after it read the new table. Proved in [test_capabilities.py](../python/tests/test_capabilities.py).
 
 | Recipe | Named panel | Toggle | SVG | PDF | Statistics | Recompute |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| lineplot (estimate and interval) | ✓ | ○ | ○ | ○ | ○ | ○ |
-| barplot (estimate and error bars) | ○ | ○ | ○ | ○ | ○ | ○ |
-| pointplot (estimates and error bars) | ○ | ○ | ○ | ○ | ○ | ○ |
-| stripplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| swarmplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| boxplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| boxenplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| violinplot (density and box) | ○ | ○ | ○ | ○ | ○ | ○ |
-| histplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| kdeplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| ecdfplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| rugplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| regplot (points, fit, and band) | ○ | ○ | ○ | ○ | ○ | ○ |
-| residplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| pairplot (grid of panels) | ✗90 | ○ | ○ | ○ | ○ | ○ |
-| jointplot (joint and marginal panels) | ✗90 | ○ | ○ | ○ | ○ | ○ |
-| clustermap (heatmap and dendrograms) | ✗90 | ·91 | ○ | ○ | ○ | ○ |
+| lineplot (estimate and interval) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| barplot (estimate and error bars) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| pointplot (estimates and error bars) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| stripplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| swarmplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| boxplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| boxenplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| violinplot (density and box) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| histplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| kdeplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| ecdfplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| rugplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| regplot (points, fit, and band) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| residplot | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| pairplot (grid of panels) | ✗90 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| jointplot (joint and marginal panels) | ✗90 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| clustermap (heatmap and dendrograms) | ✗90 | ·91 | ✓ | ✓ | ✓ | ✓ |
 
 - ✗90 Refused: `pairplot panel: draws several panels, in a chart of its own; drop panel` (for pairplot (grid of panels)). Instead: Draw it as a chart of its own, which a page or dashboard places beside others. ([test_capabilities.py](../python/tests/test_capabilities.py))
 - ·91 Not applicable: It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide. ([test_capabilities.py](../python/tests/test_capabilities.py))
