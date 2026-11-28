@@ -24,16 +24,16 @@ import { boxPlotFormError } from "../marks/boxplot-input.ts";
 import { contourFormError } from "../marks/contour-input.ts";
 import { checkLeaves, checkLinkage } from "../marks/dendrogram-data.ts";
 import { errorBarForm } from "../marks/errorbar.ts";
-import { heatmapFormError } from "../marks/heatmap.ts";
+import { heatmapFormError } from "../marks/heatmap-input.ts";
 import { histogramFormError, perAxisBins } from "../marks/histogram-input.ts";
 import { pointSizeForm } from "../marks/point.ts";
 import { REGION_ROOM, regionFormError } from "../marks/region.ts";
 import { ruleFormError, VERTICAL_ROOM } from "../marks/rule.ts";
-import { treeFormError } from "../marks/tree-data.ts";
+import { treeFormError } from "../marks/tree-input.ts";
 import { Bindings } from "../model/bindings.ts";
 import { GUIDE_KIT } from "../model/guides.ts";
 import { panelInteraction } from "../model/panel-interaction.ts";
-import { checkBreaks } from "../scale/breaks.ts";
+import { checkBreaks } from "../scale/break-rules.ts";
 import { MARK_CHANNELS } from "./channels.ts";
 import type {
   AreaLabelsSpec,

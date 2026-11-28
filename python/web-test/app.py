@@ -52,6 +52,16 @@ def layout() -> hg.Chart:
     return chart
 
 
+def dashboard() -> hg.Chart:
+    """Series, a heatmap, and a pie in one chart, each in its panel."""
+    chart = hg.Chart(series(), height=400, title="Dashboard")
+    left, middle, right = chart.columns([2, 2, 1])
+    left.panel("latency", title="Latency").line(x="time", y="value", series="region")
+    middle.panel("cells", title="Cells").heatmap(x="time", y="region", color="value")
+    right.panel("share", title="Share").pie("region", "value")
+    return chart
+
+
 def inset() -> hg.Chart:
     chart = hg.Chart(series(), height=300, title="Inset")
     parent = chart.columns([1])[0].panel("main")
@@ -89,6 +99,7 @@ KINDS: dict[str, Callable[[], hg.Chart]] = {
     ),
     "facets": lambda: hg.Chart(series(), facet="region").line(x="time", y="value"),
     "layout": layout,
+    "dashboard": dashboard,
     "inset": inset,
     "map": lambda: hg.choropleth(regions(), "rate", label_field="name"),
     "network": lambda: hg.graph(LINKS, "source", "target"),

@@ -37,6 +37,7 @@ import {
   SoleRows,
 } from "./layout-mark.ts";
 import { CATEGORY, requireField } from "./mark.ts";
+import { treeFormError } from "./tree-input.ts";
 
 /**
  * How a spec names a tree (a path of category fields, or node and parent
@@ -56,18 +57,6 @@ export interface TreeFields {
 export interface Branch {
   node: number;
   label: string;
-}
-
-/** Why a tree's fields name it neither or both ways (a path, or node and parent), if they do. */
-export function treeFormError(
-  fields: { path?: unknown; node?: unknown; parent?: unknown },
-  role: string,
-): string | undefined {
-  if (fields.path !== undefined && (fields.node !== undefined || fields.parent !== undefined))
-    return `${role}: a path, or node and parent fields, not both; drop one`;
-  if (fields.path === undefined && (fields.node === undefined || fields.parent === undefined))
-    return `${role}: needs a path of category fields, or node and parent fields`;
-  return undefined;
 }
 
 /**
