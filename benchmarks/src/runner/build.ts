@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import { extname, join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { type PageServer, serve as servePages, type Throttle } from "./server.ts";
 import { svelte } from "./svelte.ts";
+
+export { ISOLATION } from "./server.ts";
 
 export const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** Herceg is bundled from source so benchmarks always measure the working tree. */
@@ -39,17 +41,18 @@ const OUT = join(ROOT, ".build");
 
 /**
  * The chart harness and adapters, or the grid harness and grid adapters.
- * `first` is imported before the adapter, so it runs before library code.
+ * `first` is imported before the adapter, so it runs before library code:
+ * the input listeners that hear every event first, and the WebGL tracking.
  */
 const SUITES: Record<
   "charts" | "grid",
-  { adapters: string; harness: string; install: string; first?: string }
+  { adapters: string; harness: string; install: string; first?: string[] }
 > = {
   charts: {
     adapters: "./src/adapters",
     harness: "./src/page/harness.ts",
     install: "installHarness",
-    first: "./src/page/webgl.ts",
+    first: ["./src/page/input.ts", "./src/page/webgl.ts"],
   },
   grid: {
     adapters: "./src/grid/adapters",
@@ -72,7 +75,7 @@ export async function buildPage(
   await esbuild.build({
     stdin: {
       contents: [
-        ...(first ? [`import "${first}";`] : []),
+        ...(first ?? []).map((module) => `import "${module}";`),
         `import { adapter } from "${adapters}/${library}";`,
         `import { ${install} } from "${harness}";`,
         `${install}(adapter);`,
@@ -110,43 +113,7 @@ function page(library: string): string {
 </head><body><div id="stage"></div><script type="module" src="/${library}.js"></script></body></html>`;
 }
 
-// Cross-origin isolation raises performance.now() resolution from 100 µs to 5 µs.
-export const ISOLATION = {
-  "cross-origin-opener-policy": "same-origin",
-  "cross-origin-embedder-policy": "require-corp",
-};
-
-const TYPES: Record<string, string> = {
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".html": "text/html",
-};
-
-export function serve(): Promise<{ server: Server; origin: string }> {
-  const server = createServer((request, response) => {
-    const path = new URL(request.url ?? "/", "http://localhost").pathname;
-    const html = /^\/([\w-]+)\.html$/.exec(path);
-    if (html) {
-      response.writeHead(200, { "content-type": "text/html", ...ISOLATION });
-      response.end(page(html[1]!));
-      return;
-    }
-    const file = join(OUT, path.replace(/^\//, ""));
-    if (!file.startsWith(OUT) || !existsSync(file)) {
-      response.writeHead(404).end();
-      return;
-    }
-    response.writeHead(200, {
-      "content-type": TYPES[extname(file)] ?? "application/octet-stream",
-      ...ISOLATION,
-    });
-    response.end(readFileSync(file));
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      resolve({ server, origin: `http://127.0.0.1:${port}` });
-    });
-  });
+/** Serves the built pages (`/<library>.html`) and their assets; see server.ts. */
+export function serve(options: { throttle?: Throttle; host?: string } = {}): Promise<PageServer> {
+  return servePages(OUT, page, options);
 }

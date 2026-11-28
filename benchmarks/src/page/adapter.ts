@@ -29,6 +29,69 @@ export interface Point {
   y: number;
 }
 
+/** A rectangle in client (viewport) CSS pixels. */
+export interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Series 0 as the library drew it, from the data its last draw read: its
+ * first and last items' x (epoch ms, or the item's index where a chart has
+ * no x: bars, cells, values to bin) and values (y, a bar's value, a cell's
+ * value, a candle's close, a 3D point's z), and how many items it drew
+ * from. `count` is left out where the library draws from a reduction of
+ * the data it was given.
+ */
+export interface SeriesShown {
+  count?: number;
+  firstX: number;
+  lastX: number;
+  first: number;
+  last: number;
+}
+
+/**
+ * What a chart showed when its library last drew, read at the library's
+ * draw boundary (a render event or a draw hook) or, for what a library
+ * shows in the DOM or SVG, from those elements just before the frame
+ * paints. The harness compares it with what each operation asked
+ * (expect.ts), the same comparison for every library: adapters report,
+ * they do not judge. Each adapter's `verification` says where it reads.
+ */
+export interface Drawn {
+  /** Draws the library has finished since the chart was created; a draw after an operation began counts it as drawn. */
+  draws: number;
+  /** The chart's size as last drawn, CSS px. */
+  width: number;
+  height: number;
+  /** The plot (the data's area) as last drawn, client px; 2D charts. */
+  plot?: Box;
+  /** The x and y domains the plot showed, in data units (epoch ms on time axes, indices on category axes). */
+  x?: readonly [number, number];
+  y?: readonly [number, number];
+  series?: SeriesShown;
+  /** The hover readout shown now (a tooltip, or uPlot's live legend). */
+  readout?: Readout;
+  /** A 3D chart's camera as last drawn, degrees. */
+  camera?: { azimuth: number; elevation: number };
+}
+
+export interface Readout {
+  /** Its text. */
+  text: string;
+  /**
+   * Series 0's value as it writes it, where the adapter can tell that part
+   * apart: uPlot's legend cell, TanStack's row in series 0's color,
+   * Plotly's label of series 0's trace.
+   */
+  value?: string;
+  /** Series 0's item it reads, where the library says which. */
+  index?: number;
+}
+
 export interface ChartHandle<T> {
   /** Replace the complete dataset with one of the same shape. */
   setData(data: T): void | Promise<void>;
@@ -45,6 +108,8 @@ export interface ChartHandle<T> {
    */
   pixelOf(series: number, index: number, x: number, y: number): Point;
   resize(width: number, height: number): void | Promise<void>;
+  /** What the chart showed when the library last drew (see `Drawn`). */
+  drawn(): Drawn;
   destroy(): void;
   /**
    * Append points to every series and keep only the newest `keep` points,
@@ -83,6 +148,8 @@ export interface Adapter {
   id: string;
   /** Renderer used by the normal and large configurations. */
   renderer: { normal: string; large: string };
+  /** Where `drawn()` reads what the library drew, recorded with the results. */
+  verification: string;
   line?: ChartKind<SeriesData>;
   area?: ChartKind<SeriesData>;
   bar?: ChartKind<CategoryData>;
@@ -131,4 +198,19 @@ export function rollArray<T>(target: T[], values: ArrayLike<T>, keep: number): v
 export function clientPoint(element: Element, x: number, y: number): Point {
   const rect = element.getBoundingClientRect();
   return { x: rect.left + x, y: rect.top + y };
+}
+
+/**
+ * An element's text with its text nodes apart ("series 1 108.4", not
+ * "series 1108.4"), without the layout `innerText` would force.
+ */
+export function readoutText(element: Element | null | undefined): string {
+  if (!element) return "";
+  const parts: string[] = [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.nodeValue?.trim();
+    if (text) parts.push(text);
+  }
+  return parts.join(" ");
 }

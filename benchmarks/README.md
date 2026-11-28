@@ -18,6 +18,8 @@ npm run bench:grid-sparklines        # sparkline cells (see "Sparklines") -> tmp
 npm run bench:grid-export            # grid export and copy (see "Grid export") -> tmp/benchmarks/grid-export-<time>.json
 npm run bench:first-hover -- --out results/first-hover.json   # first hover (see "First hover")
 npm run bench:interaction -- --baseline "$PWD/../herceg-main/packages/herceg/src"   # pointer moves against another tree (see "Pointer interactions")
+npm run bench -- --order-seed 3310985814   # repeat a recorded run's order (see "Run order")
+npm run bench:device -- --udid UDID        # the suite on an attached iPhone (see "Device runner")
 npm run bench:report                 # regenerate the tables in docs/comparison.md
 npm run bench:express -- --out results/express.json   # herceg.express timings (Python)
 ```
@@ -31,10 +33,11 @@ otherwise idle while it runs.
 | Path | Contents |
 | --- | --- |
 | `src/datasets.ts` | Deterministic dataset generators (seeded PRNG). Every library receives identical values. |
-| `src/scenarios.ts` | Scenario catalog: chart type, size, operation, sample counts. |
-| `src/page/` | In-page harness and the adapter contract. |
+| `src/scenarios/` | Scenario catalog, a file per area (`init.ts`, `update.ts`, `stream.ts`, `interaction.ts`, `dashboard.ts`, `memory.ts`, `three-d.ts`, `sustained.ts`) listed in order by `index.ts`: chart type, size, operation, sample counts. |
+| `src/page/` | In-page harness and the adapter contract (`adapter.ts`): what each operation must show (`expect.ts`), verified frames (`verify.ts`, `frames.ts`), the input the page receives (`input.ts`), the screenshot check (`pixels.ts`), timed and paced operations (`timed.ts`, `paced.ts`), page loads (`load.ts`). |
 | `src/adapters/` | One adapter per library. Each documents the configuration it uses. |
-| `src/runner/` | Node runner: builds pages, serves them, drives Chrome, Firefox, or WebKit, records results. |
+| `src/runner/` | Node runner: builds pages, serves them (`server.ts`, with the latency case's throttle), drives Chrome, Firefox, or WebKit with trusted input (`input.ts`), in a seeded order (`order.ts`), and records results with memory ratios (`ratios.ts`). |
+| `src/device/` | The device runner: the chart suite in Safari through `safaridriver`, on an iPhone or this Mac (see "Device runner"). |
 | `src/size/` | Bundle size benchmark and its entry points. JavaScript and required CSS are reported separately. |
 | `src/grid/` | The grid suite: fixture, reference, scenarios, harness, runner, report, and one adapter per grid in `src/grid/adapters/`; the remote grid benchmark in `src/grid/remote/`, sparklines in `src/grid/sparklines/`, and export and copy in `src/grid/export/`. |
 | `src/first-hover/`, `src/interaction/` | Herceg-only benchmarks: the first hover while the interaction controller loads, and the cost of pointer moves (see "First hover" and "Pointer interactions"). |
@@ -43,6 +46,22 @@ otherwise idle while it runs.
 | `python/express.py` | Timings of `herceg.express` (Python), with Seaborn's and statsmodels' computations beside them; run in the Python package's uv environment. |
 | `results/` | Committed results with environment details. |
 
+### Adding a scenario or an engine microbenchmark
+
+A chart scenario is an entry in its area's file in `src/scenarios/` (a new
+area is a new file listed in `index.ts`); its `operation` picks what the
+page does and checks (`src/page/harness.ts`), and every adapter that has
+the chart type runs it, checked before it is timed. A new operation needs
+its expectation in `src/page/expect.ts`, so the harness can tell a frame
+that shows its result from one that does not, and every adapter's
+`drawn()` to report what that expectation reads. Engine microbenchmarks
+(`npm run bench:core`) are in `packages/herceg/bench/core/`, a file per
+area exporting `run()`; a case goes in its area's file, and a new area is
+a file listed in `run.ts`'s `AREAS` (`--area NAME` runs one). The areas
+run in one process in `AREAS`' order, which keeps the order the cases had
+in one file: a case's figures depend on what ran before it (the JIT's
+state, the heap), so add new areas at the end and do not reorder them.
+
 ## Methodology
 
 ### Builds and pages
@@ -50,8 +69,11 @@ otherwise idle while it runs.
 Each library gets its own production bundle (esbuild, minified,
 `NODE_ENV=production`, Vue's production flags, Svelte components compiled
 with `svelte/compiler`) containing the harness and that library's adapter,
-so a page never loads two chart libraries. Every scenario runs in a fresh
-page.
+so a page never loads two chart libraries. The bundle runs the input
+listeners (`src/page/input.ts`) and the WebGL tracking
+(`src/page/webgl.ts`) before any library code. Every scenario runs in a
+fresh page. Pages are served with `no-store`, their scripts and styles
+cacheable for an hour (they do not change within a run).
 
 ### Browser
 
@@ -93,16 +115,143 @@ of Safari, not Safari itself) and `--browser firefox` in its Firefox build
 Results record the Playwright version, the browser build, and the idle
 frame cadence.
 
+### Run order
+
+Scenarios run in an order shuffled from a seed, and the libraries within
+each scenario in a shuffled order of their own, so drift over a session (a
+warming machine, other work) falls on every library alike rather than on
+whichever runs first, while a scenario's libraries still run close
+together in time. The seed is `--order-seed` or, when not given, a new
+one; results record it with the order planned and each attempt as it
+happened (`order.planned`, `order.attempts`: scenario, library, pass,
+status, seconds), and the same seed gives the same order. The grid
+runner does the same, attempts included. The remote grid, sparkline,
+export, first-hover, interaction, and layout runners shuffle their cases
+and libraries (or builds, or shapes) the same way and record the seed and
+the order planned; they stop at their first failure, so what ran is the
+plan up to it. A scenario's extra passes (the WebGL-done run, first
+mounts, page loads) run right after its main run, in the same place of
+the order.
+
+### Input
+
+Pointer moves, presses, drags, wheel turns, and keys are the browser's own
+(trusted) events, never events a script dispatches: in Chrome through the
+DevTools Protocol's `Input` domain, in Firefox and WebKit through
+Playwright's mouse and keyboard, which wait until the page received each
+one (`src/runner/input.ts`). The page records each event's arrival in a
+capture listener on the window, before any library's listener, and timings
+of input start there (`src/page/input.ts`); an event a script made
+(`isTrusted` false) never starts one. Sustained traces send moves on a
+fixed schedule without waiting, at most four unanswered, so a page busy
+drawing receives coalesced moves as with a real pointer; moves skipped
+because four were unanswered are counted.
+
 ### Timing
 
-An operation starts when the harness calls the library and ends when the
-library reports rendering complete and the next frame has been produced: a
-`MessageChannel` message posted from inside `requestAnimationFrame`, after
-the frame's style, layout, and paint, so work deferred to
-`requestAnimationFrame` or `ResizeObserver` counts. Libraries that render
-progressively (ECharts scatter and heatmap series) report completion
-through their adapter, so timings cover the complete render; Herceg's large
-point series wait for its WebGL painter the same way (`chart.loading`).
+An operation starts when the harness calls the library (or when its input
+arrived in the page) and ends with the first frame that shows its result:
+the end of that frame, timed with a `MessageChannel` message posted from
+inside `requestAnimationFrame`, after the frame's style, layout, and paint,
+so work deferred to `requestAnimationFrame` or `ResizeObserver` counts.
+
+#### Verified frames
+
+Each frame after the start is checked just before it paints (a
+`ResizeObserver` callback on a probe the harness resizes every frame,
+after the frame's animation callbacks and layout; `src/page/frames.ts`).
+The check compares what the library last drew with what the operation
+asked (`src/page/expect.ts`), the same comparison for every library; a
+frame that does not show it is refused (`rejectedFrames`), and the timing
+runs on to the next. The watch is armed before the library is called, so
+a frame the library draws in at once is the first one checked. What each
+operation asks:
+
+| Operation | A frame shows the result when |
+| --- | --- |
+| mount (`init`, and every scenario's starting chart) | the library has drawn at the chart's size, series 0 from the new data: its item count, first and last x, first and last value |
+| `update`, `stream`, `dashboard` refresh | the library drew after the call, series 0 from the new data (for streams, the new window) |
+| `zoom` | the library drew after the call, its x domain the range asked within a CSS pixel |
+| `resize` | the library drew after the call, at the new size |
+| `rotate` | the library drew after the call, its camera at the angles asked within 0.5° |
+| `hover` | the readout (tooltip, or uPlot's live legend) writes an item under the pointer, to the decimals it shows: for lines, series 0's value for series 0 (the number right after its name, with only spaces or a colon between, as every library writes them, or the part the adapter tells apart as series 0's value, which must be that number alone: uPlot's legend cell, TanStack's row in series 0's color or its single point's y where that point is series 0's, Plotly's label of series 0's trace; a readout with neither writes nothing for it), of an item within 1.5 px along x; for points, the y of an item within 4 px both ways as the readout's last number (every library's point readout ends with its y); where a library says which item it reads, that item |
+
+What a library drew is read where it says it has drawn: a snapshot of its
+model's state (data, domains, size, camera) taken at that draw boundary,
+not after the operation's call returns (each adapter's `drawn()`, its
+`verification` recorded with the results). Every library but TanStack
+Charts shows its series under the dataset's names (`series 1`, ...),
+Herceg's fields too; TanStack's marks carry no names, so its adapter finds
+series 0's value by its row's color or the mark its tooltip's point is in:
+
+| Library | Read at |
+| --- | --- |
+| Herceg | the chart's `render` event after each frame's draw: the size it drew at (its root's style, which each draw sets), the first panel's plot and axis domains, series 0's rows, the camera; the tooltip element's text before paint, and the row from the `hover` event |
+| ECharts | the `rendered` event after each frame zrender draws: the grid's rectangle, the axes' extents, series 0's raw data; the tooltip element's text before paint, and the item from `updateAxisPointer` and `mouseover` |
+| Chart.js | a plugin's draw hooks: `afterDraw` (size, chart area, scales, series 0's items) and `afterTooltipDraw` (the tooltip's text and series 0's point, as drawn on the canvas) |
+| Plotly | at `plotly_afterplot`, or after a call's promise (Plotly has drawn) where that event did not fire during it: the layout's size, plot area, axis ranges, series 0's trace, the 3D camera; the hover layer's text before paint, with series 0's label and the point from `plotly_hover` |
+| TanStack Charts | the host's scene (its renderer's output, new on each render) before paint, a new scene counting as a draw: size, plot bounds, scale domains, the first mark's points and their count; the tooltip element's text, and series 0's row by its swatch's color, or a single point's y where `onFocusChange` says the point is in series 0's mark (TanStack names no point index, so any of series 0's items under the pointer counts) |
+| uPlot | the `draw` hook after each redraw: size, scales, series 0's data; the plot's place and the live legend's value for series 0 before paint, with the cursor's index |
+
+A library whose progressive rendering reports completion (ECharts' scatter
+and heatmap series, Herceg's WebGL painter through `chart.loading`) is
+checked once it has completed, so timings cover the complete render. A
+frame that shows the result within 120 s of the start (2 s for a hover)
+ends the operation; otherwise, or when 15 s after the call returned (and
+progressive rendering finished) frames still show something else, the
+operation is incorrect. The checks' cost is inside the timing and recorded
+as `checkTime`, their total over an operation's frames; frames in which
+the pre-paint observer did not run are never credited and are counted as
+`unobservedFrames`. What each adapter reads at its library's draw boundary
+(a few values: sizes, domain ends, two items of series 0, a tooltip's
+text, a binary search for the hovered item; for TanStack, a walk of the
+first mark's points in its scene, which has no count to read) is inside
+the timings and not in `checkTime`.
+
+These checks read what the library drew with, at the moment it says it
+drew: its model's data, domains, size, and camera. They do not read back
+pixels in every frame, which would change the timings, nor walk each
+library's geometry, which would cost libraries unequally; the screenshot
+before timing (below) is where pixels are checked.
+
+#### Checked before timing
+
+Before a scenario is timed for a library, a page of its own mounts the
+scenario's charts and runs its operation once (a move to the first target
+for hover and traces), each verified as above, then takes a screenshot and
+checks that it shows the marks where the drawing says
+(`src/page/pixels.ts`): pixels in the marks' colors in at least a 400th of
+the plot, and for lines, series 0's color (or its fill's, for areas)
+within 3 px of where its points and segments run by the drawn domains, in
+a dozen columns across the plot; where other series run within 3 px of
+it, the color of one of them counts too, since the one drawn later covers
+it and no pixel tells them apart. Series 0 must run through at least 4 of
+the columns and show in at least half of them; a pixel in the page's
+white never counts as a mark. The check's page collects its garbage
+before it closes, and the timed page opens a second after: the screenshot
+is decoded in the page, and without that pause its teardown ran into the
+first timed samples (small mounts 0.1-0.6 ms slower in Chrome).
+A library failing the check, or failing to show any operation's result in
+any timed pass (the main run, the WebGL-done run, a first mount, a page
+load), is recorded `incorrect` with the reason and no timings, not as a
+partial row. An error in an extra pass (a crash, a time-out) keeps the
+main run's timings, says why in `fullCostReason`, and drops every sample
+of the extra passes, all or none (`withPasses` in `src/runner/results.ts`,
+tested in `results.test.ts`). The tests in `src/page/broken.test.ts` hold
+the page to it with broken adapters: a chart that never draws, one that
+reports a draw it never painted, one that zooms to the wrong range, a
+blank heatmap, and one that goes wrong after the check passed.
+
+The pixel check covers lines and areas in detail and other chart types by
+their colors only; 3D charts are checked for saturated pixels. Paced
+operations (`ingest`, `orbit`, `trace`) record which frames showed which
+tick or move rather than refusing frames (a tick shows when every chart's
+series 0 keeps the window it leaves: its count, and its first and last x
+and value), and each ends with a verified frame showing its last tick,
+move, or camera: a run whose last input never shows within 15 s is
+incorrect. `orbit`'s frames before its last are not checked.
+
+#### Notes
 
 These frame timings (`timeToFrame`, `tickToFrame`, `pointerToFrame`,
 `viewportToFrame`, `resizeToFrame`, `cameraToFrame`, ...) end with the main
@@ -112,7 +261,7 @@ and SVG, compositing) is not in them.
 - Animations are disabled in every library; tooltips are enabled unless a
   scenario says otherwise.
 - Each scenario discards warmup iterations, then takes measured samples
-  (`src/scenarios.ts`; `--sample-scale` scales both). Reports show the
+  (`src/scenarios/`; `--sample-scale` scales both). Reports show the
   median and median absolute deviation; raw samples, p95, and p99 are in
   the JSON.
 - Libraries that need another input format (row objects, `[x, y]` pairs)
@@ -158,12 +307,58 @@ only when it delays frames.
 | `init` | Create a chart and finish rendering it; the chart is destroyed between samples. |
 | `update` | Replace the complete dataset with another of the same shape. |
 | `stream` | Append points to every series, drop the oldest to keep a fixed window, finish rendering; repeat. Each adapter uses the library's documented live-data API. |
-| `ingest` | A timer appends data at a fixed rate (10, 60, or 100 Hz) for five seconds of wall-clock time while the display runs at its normal refresh rate. Records frame intervals, dropped frames (each frame interval spanning k refresh periods counts k - 1), long animation frames (over 50 ms), time spent inside append calls, and the ingestion rate actually achieved: a library that blocks the main thread receives fewer ticks. |
-| `hover` | Real pointer moves dispatched through the DevTools Protocol, aimed at data points (mapped to pixels through each library's own coordinate API) so every library has a point to hit, to the next frame. Moves are spaced 70 ms apart so throttled hover handlers run for every event. |
+| `ingest` | A timer appends data at a fixed rate (10, 60, or 100 Hz) for five seconds of wall-clock time (sixty in `ingest-chart-60hz-60s`) while the display runs at its normal refresh rate. Records frame intervals, dropped frames (each frame interval spanning k refresh periods counts k - 1), long animation frames (over 50 ms), time spent inside append calls, the ingestion rate actually achieved (a library that blocks the main thread receives fewer ticks), and each tick's time to the first frame showing it (`tickToShownFrame`), with the ticks a later one superseded before they showed and those never shown. |
+| `hover` | Trusted pointer moves (see "Input"), aimed at data points (mapped to pixels through each library's own coordinate API) so every library has a point to hit, from the move's arrival to the first frame whose readout shows the point (`pointerToFrame`). Moves are spaced 70 ms apart so throttled hover handlers run for every event. |
+| `trace` | Trusted moves every 8 ms for sixty seconds, sweeping back and forth over series 0's points, with the display's refresh on: frame intervals, each move's time from its arrival to the first frame whose readout shows its item or a later move's (`moveToShownFrame`), moves superseded and never shown, the share of frames showing the latest move received (`currentFrames`), and the moves sent and skipped. |
 | `resize` | Toggle the container between 800x400 and 600x300. |
 | `zoom` | Show a sequence of x ranges covering 50%, 10%, and 1% of the data in turn, each centered further along (so ranges both zoom and pan), to the next frame. Each adapter uses the library's documented zoom or axis-range path: ECharts `dataZoom` (an `inside` component, `dispatchAction`), Chart.js scale `min`/`max` with `update('none')`, Plotly `relayout` of `xaxis.range`, uPlot `setScale`, TanStack Charts a new definition whose x scale is bound to the window with visible rows filtered (its zoom guide leaves filtering to the application), Herceg `setViewport`. |
 | `dashboard` | Mount ten 600x250 line charts (15 series x 3,000 points each), then refresh all ten in one task. |
 | `memory` | See below. |
+
+### Page loads
+
+Five initial-render scenarios (`line-small-init`, `line-medium-init`,
+`bar-small-init`, `scatter-medium-init`, `heatmap-medium-init`, flagged
+`load`) also time loading the page: from navigation start to the chart's
+first verified frame, in a new browser context per sample (five, scaled by
+`--sample-scale`), with the time to the script evaluated
+(`...Evaluated`), the data made (`...Fixture`), the chart created to its
+frame (`...CreateToFrame`), and the bytes transferred (`...TransferBytes`):
+
+- `cold`: nothing cached;
+- `warmAsset`: after one earlier visit in the same context cached the
+  page's script and styles;
+- `latency`: cold, through the server's throttle: 150 ms before each
+  response's headers and 1.6 Mbit/s shared by every response body under
+  way, sent in 16 KB chunks (Chrome's "Slow 4G" profile, applied by the
+  server so it is the same in every browser and on a phone).
+
+The page's bundle holds the harness and the library's whole adapter (every
+chart type it draws), so transfer sizes are the benchmark page's, not an
+application's; `npm run bench:size` measures the libraries' own bytes.
+The scenarios' own timings are the warm case: the page loaded, the
+library's code run through the warmup iterations. Where the browser
+reports transfer sizes, each load is checked to have been what its case
+says (cold and latency loads fetched the scripts and styles, warm-asset
+loads took them from the cache) and fails otherwise; each row keeps its
+cases' first resources with their bytes on the wire (`loads`).
+
+### Sustained runs
+
+`ingest-chart-60hz-60s` and `hover-trace-line-medium-60s` run for sixty
+seconds with the display's refresh on, one trial each (the trace after a
+five-second warmup), and keep every frame's interval and every tick's or
+move's time to its shown frame as raw samples (p50, p95, p99 in the
+summaries). Each also records a histogram of frame intervals by the
+refreshes they span (`distributions.frameInterval`: edges at 1.5, 2.5,
+3.5, and 4.5 refresh intervals, counts for one refresh, two, three, four,
+and five or more), so stalls a five-second run misses show. Frame
+intervals cover the offered run; after it, the ledger keeps watching until
+no tick or move waits (each is given up as unshown once it has waited
+15 s), so a late frame still counts for the input it shows, and the trace
+records that wait as `drainTime`. Each ingest trial continues after the
+ticks the earlier ones appended, so every window it checks is the data
+actually kept.
 
 ### Memory
 
@@ -213,6 +408,30 @@ failed dump or a restarted GPU process fails the sample. Firefox and
 WebKit are not measured: after collection their content processes kept
 freed memory that Chrome's does not count, and neither attributes GPU
 memory to a page.
+
+#### Memory amplification
+
+Memory is also given as ratios over the source data's own bytes,
+`dataBytes`: the typed arrays' bytes (each byte of a buffer once, however
+many arrays view it, so charts sharing an x column count it once) and
+strings at two bytes a UTF-16 code unit, as the harness made the data, the
+same for every library (`src/runner/ratios.ts`; for grids, the fixture's
+column buffers and its categories' labels). Each ratio is computed per
+sample and left out where its reading was not taken. What each reading
+spans differs between the suites, and the names say so:
+
+| Ratio | Charts | Grids |
+| --- | --- | --- |
+| `heapRatio` | `retainedBytes / dataBytes`: the median of mounts repeated in one page, from the data prepared (the adapter's conversion included) | `(inputBytes + retainedBytes) / dataBytes`: converting the columns to the grid's input and mounting it, each sample a fresh page; compare with charts' `firstHeapRatio` |
+| `firstHeapRatio` | `firstRetainedBytes / dataBytes`: the first mount in a fresh page | — |
+| `mountRatio` | — | `retainedBytes / dataBytes`: mounting from the native input alone |
+| `processRatio`, `gpuRatio` | `rendererBytes`, `gpuBytes` over `dataBytes`: the first mount in a fresh page, from the data prepared | — |
+| `processMountRatio`, `gpuMountRatio` | — | `rendererBytes`, `gpuBytes` over `dataBytes`: the mount from the native input (the conversion not included) |
+| `canvasRatio` | `canvasBytes / dataBytes` | `canvasBytes / dataBytes` |
+
+A ratio of 0.06 is a library keeping 6 bytes for every 100 of its data;
+one over 1 keeps more than the data itself. The readings overlap as their
+numerators do, so the ratios are not added up.
 
 ### What each metric counts, per browser
 
@@ -321,13 +540,31 @@ while its interaction controller may still be loading
 (`src/first-hover/`). Each sample is a fresh page load, in headless Chrome
 with the frame rate limit off, of a production build split into chunks as
 an application's bundler would. The page mounts one line chart (two series
-of 1,440 minutes) or ten, then moves the pointer onto the first chart 0,
-10, 25, 50, or 100 ms after `createChart` returns. `drawn` runs to the
-tooltip's box being shown (a `MutationObserver`), `frame` to the animation
-frame after it. Caches are `cold` (HTTP cache off), `warm` (chunks cached),
-and `slow` (cold, with 100 ms of latency per request). `--baseline DIR`
-builds another herceg source tree into the same page for comparison.
-Results report the median, p95, and p99 of 15 samples (`--samples`).
+of 1,440 minutes) or ten, and 0, 10, 25, 50, or 100 ms after
+`createChart` returns it asks the runner for a trusted move onto the first
+chart (`sinceMount` records the delay to the move's arrival, the runner's
+dispatch included). From the move's arrival, `drawn` runs to the tooltip's
+box being shown (a `MutationObserver`), `frame` to the animation frame
+after it, and `shown` to the end of the first frame whose pre-paint check
+saw the tooltip write series a's value under the pointer. Frames are
+checked from when the chart's `loading` settles (its interaction
+controller among what it loads), since no frame shows the tooltip before:
+checking every frame from the move would draw frames back to back while
+the controller's code loads, which delays it (by 13-19 ms at 0 ms, cold or
+slow). A sample in which a frame showed the tooltip before the checks
+began fails the run. `frame` is a scheduling diagnostic rather than a
+latency: after a frame that a trusted move started, Chrome often waits a
+display refresh before the next one (about 20 ms after `drawn`), which it
+does not after a synthetic event; `shown` is the figure to compare. A
+trusted move costs more than a synthetic event dispatched in the page
+would: with one chart at 0 ms, while the controller still loads, the
+tooltip comes about 13 ms later (cold and warm caches). Caches are
+`cold` (HTTP cache off), `warm` (chunks cached), and `slow` (cold, with
+100 ms of latency per request and no bandwidth limit, Chrome's network
+emulation). `--baseline DIR` builds another herceg source tree into the
+same page for comparison; cases, and builds within each, run in a seeded
+order (`--order-seed`). Results report the median, p95, and p99 of 15
+samples (`--samples`).
 
 ### Pointer interactions
 
@@ -356,8 +593,9 @@ checked for its effect:
 
 A block is a fresh page in headless Chrome (the frame rate limit off,
 device pixel ratio 2, cross-origin isolated) of a production build:
-mounting, 10 warmup moves, and 30 measured, real pointer moves through
-the DevTools Protocol. `latency` runs from a move's first `pointermove`
+mounting, 10 warmup moves, and 30 measured, trusted pointer moves through
+the DevTools Protocol (see "Input"); fixtures and modes run in a seeded
+order (`--order-seed`), blocks within them AB, BA as below. `latency` runs from a move's first `pointermove`
 to a `MessageChannel` message posted from the animation frame after its
 effect was drawn. An effect counts only from reports made after the
 move's input arrived (the hover at the move's position, the view, the
@@ -514,10 +752,10 @@ node --experimental-strip-types benchmarks/src/grid/report.ts <results file>   #
 
 Options: `--lib`, `--size` (`10k`, `100k`, `1m`, `1m-wide`), `--scenario`,
 `--filter`, `--sample-scale`, `--timeout` (seconds), `--headless`, `--dpr`
-(device pixel ratio, 1 by default, which Chrome also draws at), `--seed` (the fixture's values), and
-`--order-seed` (libraries run in a seeded random order within each scenario,
-so drift over a run does not favor one of them). Every scenario runs in a fresh page; a crash or timeout is
-recorded as an error and the browser is restarted.
+(device pixel ratio, 1 by default, which Chrome also draws at), `--seed`
+(the fixture's values), and `--order-seed` (the run order, as the chart
+suite's: see "Run order"). Every scenario runs in a fresh page; a crash or
+timeout is recorded as an error and the browser is restarted.
 
 ### Fixture
 
@@ -720,7 +958,8 @@ growth is the heap V8 committed while mounting, without collecting. The
 heap a second after destroying a grid, and after rounds of five more
 mounts, shows what a library keeps once destroyed. `rendererBytes` and
 `gpuBytes` span mounting the grid, as for charts; a DOM grid's GPU memory
-is its cells' compositor tiles, Glide's its canvas.
+is its cells' compositor tiles, Glide's its canvas. The ratios over the
+fixture's bytes are defined in "Memory amplification".
 
 ### Configurations
 
@@ -864,10 +1103,18 @@ its x range with an indicator. It uses a production build, a 1000 × 600 px
 Canvas chart, and headless Chrome at DPR 2, in five fresh pages per shape,
 alternating: 19 mounts per page after the first (`createChart` and a
 synchronous `render()`), 40 resizes alternating 900 and 1000 px wide
-(synchronous renders), and 120 pointer moves across the panels, each the
-event's synchronous handling plus the chart's part of the next frame (from
-the frame's timestamp to a callback requested after the chart's). Pointer
-times differ in what a tooltip lists as well: the one panel's tooltip
+(synchronous renders), and 120 trusted pointer moves across the panels
+(see "Input"), each the event's handling (from its arrival in the page to
+a window listener after the chart's) plus the chart's part of the next
+frame (to a callback requested after the chart's, from the frame's
+timestamp, or, where Chrome dispatched the move at the start of that
+frame, after its timestamp, from the end of the event's handling, so the
+event is not counted twice). Thirty further moves to the first targets, apart so the checks
+do not add to the work, time each move from its arrival to the first
+frame whose pre-paint check saw the tooltip write series s0's value at a
+minute under the pointer (`shown`); a move whose tooltip never shows it
+fails the run. Each round's two shapes run in a seeded order
+(`--order-seed`). Pointer times differ in what a tooltip lists as well: the one panel's tooltip
 lists fifteen series, a dashboard panel's three. This is a Herceg workload
 measurement; competitors' layouts have not been measured. Results are in
 `benchmarks/results/layouts.json`.
@@ -885,3 +1132,59 @@ CDP reports JavaScript heap and backing storage separately; canvas raster
 storage is estimated from panel device-pixel area. The JSON keeps every
 frame time and the environment. This is a Herceg workload measurement;
 competitor 3D subplot timings have not been measured.
+
+## Device runner
+
+`npm run bench:device` (`src/device/`) runs the chart suite's scenarios in
+Safari through `safaridriver` (WebDriver): on an attached iPhone with
+`--udid UDID`, or in Safari on this Mac with `--desktop`. Pages, adapters,
+verified frames, and the check before timing are the browser suite's; the
+runner loads each page afresh through WebDriver, calls the page's harness,
+and sends input as WebDriver actions, which Safari dispatches as trusted
+events: taps on the phone, which has no hover (a hover scenario times a
+tap from its `pointerdown` to the readout, as `tapToFrame`), and mouse
+moves on the Mac. Scenarios run in the seeded order of "Run order"; the
+default set is initial renders, updates, streaming, 60 Hz ingestion, zoom,
+resize, hover, and the dashboard (`--scenario` picks others; memory and
+sustained traces need Chrome's protocol and a driver that sends without
+waiting, and do not run here). Options: `--lib`, `--scenario`,
+`--sample-scale`, `--order-seed`, `--out`, and `--host`, the address the
+phone loads pages from (this Mac's first network address otherwise).
+
+```sh
+npm run bench:device -- --desktop --sample-scale 0   # a dry run in Safari on this Mac
+npm run bench:device -- --udid 00008130-XXXXXXXXXXXXXXXX --out results/device-iphone.json
+```
+
+Results record Safari's version, the page's viewport and scale, its
+device pixel ratio, whether it is cross-origin isolated, and the timer's
+resolution, but not the UDID. Safari runs at the display's refresh (no
+flags turn it off), so every timing includes waiting for a frame. The
+phone loads the pages over plain HTTP from the Mac's address, which is not
+a secure context: pages there are not cross-origin isolated, and
+`performance.now()` has Safari's coarser resolution, recorded with the
+results. The pages set no viewport, so the phone lays them out 980 CSS px
+wide, scaled to fit, as it shows desktop pages.
+
+Set up once, on the Mac:
+
+1. Safari > Settings > Advanced: turn on "Show features for web
+   developers".
+2. Safari > Develop: turn on "Allow Remote Automation".
+3. In a terminal, run `safaridriver --enable` (it asks for an
+   administrator password).
+
+and for an iPhone, in addition:
+
+4. On the iPhone, Settings > Apps > Safari > Advanced: turn on "Web
+   Inspector" and "Remote Automation".
+5. Connect it to the Mac by cable, unlock it, and trust the Mac. Keep it
+   unlocked and awake for the run (Settings > Display & Brightness >
+   Auto-Lock: Never, while it runs).
+6. Find its UDID: in Finder, select the iPhone and click the line under
+   its name until the UDID shows, or run `xcrun xctrace list devices`.
+7. Keep the iPhone and the Mac on the same network, and let the macOS
+   firewall accept connections to Node, which serves the pages.
+
+When a session cannot start, the runner prints these steps and exits with
+status 2 without running anything.

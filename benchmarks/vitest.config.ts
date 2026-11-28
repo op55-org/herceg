@@ -38,18 +38,57 @@ export default defineConfig({
     ],
   },
   test: {
-    // The common-task samples (src/ease): each one mounts and draws; and
-    // the interaction benchmark's checks (src/interaction/checks.ts).
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    browser: {
-      enabled: true,
-      headless: true,
-      // Chrome only: these check that the samples' code stays valid and draws;
-      // the library's own suites cover Firefox and WebKit (scripts/browser).
-      provider: playwright({ launchOptions: { channel: "chrome" } }),
-      instances: [{ browser: "chromium" }],
-      // Room for the 640 px charts, which the default 414 px viewport would cut off.
-      viewport: { width: 1024, height: 900 },
-    },
+    projects: [
+      {
+        // The harness's own logic, in Node: seeded order, memory ratios, rows' results, the page server, the WebDriver client.
+        extends: true,
+        test: {
+          name: "unit",
+          include: [
+            "src/runner/order.test.ts",
+            "src/runner/ratios.test.ts",
+            "src/runner/results.test.ts",
+            "src/runner/server.test.ts",
+            "src/device/webdriver.test.ts",
+          ],
+          environment: "node",
+        },
+      },
+      {
+        // The driver's input in Chrome, Firefox, and WebKit, each launched as the runners launch them.
+        extends: true,
+        test: {
+          name: "driver",
+          include: ["src/runner/input.test.ts"],
+          environment: "node",
+          testTimeout: 60_000,
+        },
+      },
+      {
+        // In Chrome: the common-task samples (src/ease), each of which mounts
+        // and draws; the interaction benchmark's checks
+        // (src/interaction/checks.ts); and the page harness's verified frames
+        // and checks against broken adapters (src/page).
+        extends: true,
+        test: {
+          name: "browser",
+          include: [
+            "src/ease/**/*.test.tsx",
+            "src/interaction/**/*.test.ts",
+            "src/page/**/*.test.ts",
+          ],
+          browser: {
+            enabled: true,
+            headless: true,
+            // Chrome only: these check that the samples' code stays valid and draws;
+            // the library's own suites cover Firefox and WebKit (scripts/browser).
+            provider: playwright({ launchOptions: { channel: "chrome" } }),
+            instances: [{ browser: "chromium" }],
+            // Room for the 800 px charts, which the default 414 px viewport would cut off.
+            viewport: { width: 1024, height: 900 },
+          },
+        },
+      },
+    ],
   },
 });

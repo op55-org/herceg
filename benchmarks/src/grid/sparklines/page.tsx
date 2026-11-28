@@ -47,7 +47,13 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { checkedFrame, droppedFrames, nextFrame, refreshInterval, settle } from "../frames.ts";
+import {
+  checkedFrame,
+  droppedFrames,
+  nextFrame,
+  refreshInterval,
+  settle,
+} from "../../page/frames.ts";
 import {
   BOX,
   COLUMN,

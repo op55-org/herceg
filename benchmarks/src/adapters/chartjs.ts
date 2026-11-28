@@ -23,7 +23,7 @@ import {
   type PointData,
   type SeriesData,
 } from "../datasets.ts";
-import type { Adapter, ChartHandle, ChartOptions } from "../page/adapter.ts";
+import type { Adapter, ChartHandle, ChartOptions, Drawn } from "../page/adapter.ts";
 import { clientPoint, color } from "../page/adapter.ts";
 
 Chart.register(
@@ -43,6 +43,104 @@ Chart.register(
 );
 
 type XY = { x: number; y: number };
+
+/** What each chart drew, kept by the observer plugin below. */
+interface Observed {
+  draws: number;
+  drawn: Omit<Drawn, "draws">;
+  /** Whether the draw under way has drawn its tooltip. */
+  tooltipDrawn: boolean;
+}
+const observed = new WeakMap<Chart, Observed>();
+
+/** Series 0's items: the points a draw read (Chart.js keeps them in `_data` when it decimates). */
+function itemsOf(chart: Chart): unknown[] {
+  const dataset = chart.data.datasets[0] as { data: unknown[]; _data?: unknown[] } | undefined;
+  return dataset?._data ?? dataset?.data ?? [];
+}
+
+/** An item's x (or undefined for a bar's index) and value. */
+function itemOf(item: unknown): [number | undefined, number] {
+  return typeof item === "number" ? [undefined, item] : [(item as XY).x, (item as XY).y];
+}
+
+// Reads what each chart drew at its own draw hooks: after the whole draw
+// (size, chart area, scales, series 0's items), and after the tooltip is
+// drawn on the canvas (its text and series 0's point).
+Chart.register({
+  id: "benchmarkObserver",
+  beforeDraw(chart: Chart) {
+    const state = observed.get(chart);
+    if (state) state.tooltipDrawn = false;
+  },
+  afterTooltipDraw(chart: Chart, args: { tooltip: Chart["tooltip"] }) {
+    const state = observed.get(chart);
+    const tooltip = args.tooltip;
+    if (!state || !tooltip || tooltip.opacity === 0) return;
+    state.tooltipDrawn = true;
+    const lines = [
+      ...tooltip.title,
+      ...tooltip.body.flatMap((part) => [...part.before, ...part.lines, ...part.after]),
+      ...tooltip.footer,
+    ];
+    const point = tooltip.dataPoints.find((p) => p.datasetIndex === 0);
+    let index: number | undefined;
+    if (point) {
+      const items = itemsOf(chart);
+      if (items[point.dataIndex] === point.raw) index = point.dataIndex;
+      else {
+        // A decimated line's point: find its x among the items drawn from.
+        const x = (point.raw as XY).x;
+        let lo = 0;
+        let hi = items.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if ((items[mid] as XY).x < x) lo = mid + 1;
+          else hi = mid;
+        }
+        index = lo;
+      }
+    }
+    state.drawn.readout = { text: lines.join(" "), ...(index !== undefined && { index }) };
+  },
+  afterDraw(chart: Chart) {
+    const state = observed.get(chart) ?? {
+      draws: 0,
+      drawn: { width: 0, height: 0 },
+      tooltipDrawn: false,
+    };
+    observed.set(chart, state);
+    state.draws++;
+    const items = itemsOf(chart);
+    const n = items.length;
+    const [firstX, first] = itemOf(items[0]);
+    const [lastX, last] = itemOf(items[n - 1]);
+    const area = chart.chartArea;
+    const { x, y } = chart.scales;
+    state.drawn = {
+      width: chart.width,
+      height: chart.height,
+      plot: { left: area.left, top: area.top, width: area.width, height: area.height },
+      ...(x && { x: [x.min, x.max] as const }),
+      ...(y && { y: [y.min, y.max] as const }),
+      series: { count: n, firstX: firstX ?? 0, lastX: lastX ?? n - 1, first, last },
+      ...(state.tooltipDrawn && state.drawn.readout && { readout: state.drawn.readout }),
+    };
+  },
+});
+
+/** What `chart` drew, its plot placed in client px before the frame paints. */
+function drawnBy(chart: Chart): Drawn {
+  const state = observed.get(chart);
+  if (!state) return { draws: 0, width: 0, height: 0 };
+  const box = chart.canvas.getBoundingClientRect();
+  const plot = state.drawn.plot;
+  return {
+    ...state.drawn,
+    draws: state.draws,
+    ...(plot && { plot: { ...plot, left: box.left + plot.left, top: box.top + plot.top } }),
+  };
+}
 
 // Chart.js' internal (pre-parsed) format is one {x, y} object per point.
 function seriesPoints(data: SeriesData): XY[][] {
@@ -88,6 +186,7 @@ function handle<T>(chart: Chart, setData: (data: T) => void): ChartHandle<T> {
       box.style.height = `${height}px`;
       chart.resize(width, height);
     },
+    drawn: () => drawnBy(chart),
     destroy() {
       const box = chart.canvas.parentElement!;
       chart.destroy();
@@ -197,6 +296,8 @@ function bubblePoints(data: BubbleData): {
 
 export const adapter: Adapter = {
   id: "chartjs",
+  verification:
+    "a plugin's draw hooks: afterDraw (size, chart area, scales, series 0's items) and afterTooltipDraw (the tooltip's text and series 0's point, as drawn on the canvas)",
   renderer: { normal: "canvas", large: "canvas (parsing: false, min-max decimation)" },
   line: lineKind(false),
   area: lineKind(true),

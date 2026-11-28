@@ -6,12 +6,14 @@
 // of its own. Caches: "cold" (the HTTP cache off), "warm" (the chunk cached
 // by an earlier load), and "slow" (cold, 100 ms of network latency). A
 // baseline build of `--baseline` (a source tree without the split) has
-// nothing to load.
+// nothing to load. The move is trusted input through the DevTools Protocol,
+// sent when the page says its delay has passed; times run from its arrival
+// in the page. Cases, and the builds within each, run in a seeded order.
 //
 // Run from the repository root:
 //   node --experimental-strip-types benchmarks/src/first-hover/run.ts \
 //     [--baseline DIR --baseline-label COMMIT] [--samples 15] \
-//     [--out benchmarks/results/first-hover.json]
+//     [--order-seed N] [--out benchmarks/results/first-hover.json]
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -23,6 +25,8 @@ import { type Browser, chromium } from "playwright";
 import { HERCEG_ALIAS } from "../runner/build.ts";
 import { LATENCY_ARGS } from "../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
+import { driverFor } from "../runner/input.ts";
+import { orderSeed, schedule } from "../runner/order.ts";
 import { summarize } from "../runner/stats.ts";
 
 const { values: args } = parseArgs({
@@ -32,8 +36,10 @@ const { values: args } = parseArgs({
     /** What the baseline is (its commit), for the results. */
     "baseline-label": { type: "string" },
     samples: { type: "string", default: "15" },
+    "order-seed": { type: "string" },
   },
 });
+const seed = orderSeed(args["order-seed"]);
 const SAMPLES = Number(args.samples);
 const DELAYS = [0, 10, 25, 50, 100];
 const CACHES = ["cold", "warm", "slow"] as const;
@@ -91,58 +97,84 @@ const browser: Browser = await chromium.launch({
   args: LATENCY_ARGS,
 });
 const browserVersion = browser.version();
+const CASES = DASHBOARDS.flatMap((charts) =>
+  CACHES.flatMap((cache) => DELAYS.map((delay) => ({ charts, cache, delay }))),
+);
+const planned = schedule(seed, CASES, () => builds.map(([name]) => name));
 const results = [];
 try {
-  for (const [name] of builds)
-    for (const charts of DASHBOARDS)
-      for (const cache of CACHES)
-        for (const delay of DELAYS) {
-          const samples: number[] = [];
-          const frames: number[] = [];
-          for (let i = 0; i < SAMPLES; i++) {
-            const context = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
-            const page = await context.newPage();
-            const cdp = await context.newCDPSession(page);
-            await cdp.send("Network.enable");
-            if (cache === "warm") {
-              // An earlier visit, whose chart loaded what charts load, caches the chunks.
-              await page.goto(`${origin}/${name}/`);
-              await page.waitForFunction(() => window.firstHover !== undefined);
-              await page.evaluate(() => window.firstHover.warm());
-            } else await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
-            if (cache === "slow")
-              await cdp.send("Network.emulateNetworkConditions", {
-                offline: false,
-                latency: 100,
-                downloadThroughput: -1,
-                uploadThroughput: -1,
-              });
-            await page.goto(`${origin}/${name}/`);
-            await page.waitForFunction(() => window.firstHover !== undefined);
-            const [drawn, frame] = await page.evaluate(
-              (options) => window.firstHover.run(options),
-              { delay, charts },
-            );
-            samples.push(drawn);
-            frames.push(frame);
-            await context.close();
-          }
-          const summary = summarize(samples);
-          const frame = summarize(frames);
-          results.push({
-            build: name,
-            charts,
-            cache,
-            delay,
-            drawn: summary,
-            frame,
-            samples,
-            frames,
-          });
-          console.log(
-            `${name.padEnd(8)} ${String(charts).padStart(2)} chart(s) ${cache.padEnd(4)} +${String(delay).padStart(3)} ms: drawn p50 ${summary.median.toFixed(1)} p95 ${summary.p95.toFixed(1)} p99 ${summary.p99.toFixed(1)}; next frame p50 ${frame.median.toFixed(1)} ms`,
-          );
-        }
+  for (const {
+    block: { charts, cache, delay },
+    member: name,
+  } of planned) {
+    const samples: number[] = [];
+    const frames: number[] = [];
+    const shown: number[] = [];
+    const rejected: number[] = [];
+    const sinceMount: number[] = [];
+    for (let i = 0; i < SAMPLES; i++) {
+      const context = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
+      const page = await context.newPage();
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Network.enable");
+      if (cache === "warm") {
+        // An earlier visit, whose chart loaded what charts load, caches the chunks.
+        await page.goto(`${origin}/${name}/`);
+        await page.waitForFunction(() => window.firstHover !== undefined);
+        await page.evaluate(() => window.firstHover.warm());
+      } else await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+      if (cache === "slow")
+        await cdp.send("Network.emulateNetworkConditions", {
+          offline: false,
+          latency: 100,
+          downloadThroughput: -1,
+          uploadThroughput: -1,
+        });
+      await page.goto(`${origin}/${name}/`);
+      await page.waitForFunction(() => window.firstHover !== undefined);
+      const driver = await driverFor(page, "chrome", cdp);
+      const target = await page.evaluate((options) => window.firstHover.mount(options), {
+        delay,
+        charts,
+      });
+      await driver.step({ type: "move", ...target });
+      const result = await page.evaluate(() => window.firstHover.result());
+      await context.close();
+      if ("error" in result)
+        throw new Error(
+          `first-hover: ${name}, ${charts} chart(s), ${cache}, +${delay} ms: ${result.error}`,
+        );
+      samples.push(result.drawn);
+      frames.push(result.frame);
+      shown.push(result.shown);
+      rejected.push(result.rejected);
+      sinceMount.push(result.sinceMount);
+    }
+    const summary = summarize(samples);
+    const frame = summarize(frames);
+    const verified = summarize(shown);
+    results.push({
+      build: name,
+      charts,
+      cache,
+      delay,
+      drawn: summary,
+      frame,
+      shown: verified,
+      sinceMount: summarize(sinceMount),
+      // From createChart returning, sample by sample: the delay asked, the
+      // dispatch, and the move's verified frame.
+      mountToShown: summarize(sinceMount.map((since, k) => since + shown[k]!)),
+      samples,
+      frames,
+      shownSamples: shown,
+      rejectedFrames: rejected,
+      sinceMountSamples: sinceMount,
+    });
+    console.log(
+      `${name.padEnd(8)} ${String(charts).padStart(2)} chart(s) ${cache.padEnd(4)} +${String(delay).padStart(3)} ms: drawn p50 ${summary.median.toFixed(1)} p95 ${summary.p95.toFixed(1)} p99 ${summary.p99.toFixed(1)}; next frame p50 ${frame.median.toFixed(1)}; shown p50 ${verified.median.toFixed(1)}, from mount ${summarize(sinceMount.map((since, k) => since + shown[k]!)).median.toFixed(1)} ms`,
+    );
+  }
 } finally {
   await browser.close();
   server.close();
@@ -160,13 +192,22 @@ if (args.out) {
         date: new Date().toISOString(),
         commit: commit(),
         method:
-          "Chrome (headless, frame rate limit and vsync off), a fresh page per sample; esbuild production build with code splitting; input is a synthetic pointermove dispatched a set delay after createChart returns; drawn runs to the tooltip's box being shown (a MutationObserver), frame to the animation frame after; caches: cold (HTTP cache disabled), warm (chunks cached by an earlier load), slow (cold, 100 ms added latency)",
+          "Chrome (headless, frame rate limit and vsync off), a fresh page per sample; esbuild production build with code splitting; input is a trusted pointer move through the DevTools Protocol's Input domain, sent once the page says a set delay has passed since createChart returned (sinceMount: the delay to its arrival, dispatch included); times from its arrival in the page: drawn to the tooltip's box being shown (a MutationObserver), frame to the animation frame after, shown to the end of the first frame whose pre-paint check saw the tooltip write series a's value under the pointer, its frames watched from when chart.loading settled (watching from the move would draw frames back to back while the controller's code loads, delaying it); frame, the animation frame after drawn, is a scheduling diagnostic: after a trusted move's frame Chrome often waits a refresh before the next, which it does not after a synthetic event; compare shown; mountToShown, per sample, sinceMount plus shown; caches: cold (HTTP cache disabled), warm (chunks cached by an earlier load), slow (cold, 100 ms added latency, no bandwidth limit); cases, and builds within each, in the order `order` records",
         environment: {
           ...machine(),
           browser: `Chrome ${browserVersion}`,
           herceg: packageVersion("herceg"),
         },
         baseline: args.baseline ? (args["baseline-label"] ?? "unnamed") : null,
+        order: {
+          seed,
+          planned: planned.map(({ block, member }) => [
+            member,
+            block.charts,
+            block.cache,
+            block.delay,
+          ]),
+        },
         results,
       },
       null,

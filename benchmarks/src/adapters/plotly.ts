@@ -12,8 +12,8 @@ import {
   type SeriesData,
   type SurfaceData,
 } from "../datasets.ts";
-import type { Adapter, ChartHandle, ChartOptions } from "../page/adapter.ts";
-import { clientPoint, color, FALL, RISE } from "../page/adapter.ts";
+import type { Adapter, ChartHandle, ChartOptions, Drawn, SeriesShown } from "../page/adapter.ts";
+import { clientPoint, color, FALL, RISE, readoutText } from "../page/adapter.ts";
 
 type Root = Plotly.PlotlyHTMLElement;
 
@@ -21,11 +21,122 @@ type Root = Plotly.PlotlyHTMLElement;
 interface Axis {
   d2l(value: number): number;
   l2p(value: number): number;
+  r2l(value: number | string): number;
+  range: [number | string, number | string];
 }
 interface FullLayout {
+  width: number;
+  height: number;
   xaxis: Axis;
   yaxis: Axis;
-  _size: { l: number; t: number };
+  _size: { l: number; t: number; w: number; h: number };
+  scene?: { camera: { eye: { x: number; y: number; z: number } } };
+}
+
+const fullLayout = (root: Root) => (root as unknown as { _fullLayout: FullLayout })._fullLayout;
+
+/** Series 0's items in the trace Plotly drew: x (or undefined for an index) and values, flattening a grid of rows. */
+type SeriesOf = (trace: Record<string, unknown>) => SeriesShown;
+
+const flat = (rows: ArrayLike<ArrayLike<number>>) => {
+  const last = rows[rows.length - 1]!;
+  return {
+    count: rows.length * rows[0]!.length,
+    firstX: 0,
+    lastX: rows.length * rows[0]!.length - 1,
+    first: rows[0]![0]!,
+    last: last[last.length - 1]!,
+  };
+};
+const along = (x: ArrayLike<number> | undefined, values: ArrayLike<number>): SeriesShown => {
+  const n = values.length;
+  return {
+    count: n,
+    firstX: x ? x[0]! : 0,
+    lastX: x ? x[n - 1]! : n - 1,
+    first: values[0]!,
+    last: values[n - 1]!,
+  };
+};
+const SERIES = {
+  xy: ((t) => along(t.x as ArrayLike<number>, t.y as ArrayLike<number>)) as SeriesOf,
+  values: ((t) => along(undefined, t.y as ArrayLike<number>)) as SeriesOf,
+  bins: ((t) => along(undefined, t.x as ArrayLike<number>)) as SeriesOf,
+  grid: ((t) => flat(t.z as ArrayLike<ArrayLike<number>>)) as SeriesOf,
+  candles: ((t) => along(t.x as ArrayLike<number>, t.close as ArrayLike<number>)) as SeriesOf,
+  xz: ((t) => along(t.x as ArrayLike<number>, t.z as ArrayLike<number>)) as SeriesOf,
+};
+
+/**
+ * What a Plotly chart drew, read at the `plotly_afterplot` event, or once
+ * a Plotly call the adapter makes has finished (its promise resolves after
+ * Plotly has drawn) where that event did not fire during it: the layout's size, plot area, and axis ranges,
+ * series 0's trace, the 3D camera; the hover label's text from the SVG
+ * before the frame paints, with the point from the `plotly_hover` event.
+ */
+function observer(root: Root, seriesOf: SeriesOf) {
+  let draws = 0;
+  let last: Omit<Drawn, "draws" | "readout"> = { width: 0, height: 0 };
+  let index: number | undefined;
+  const drew = () => {
+    draws++;
+    const layout = fullLayout(root);
+    const size = layout._size;
+    const eye = layout.scene?.camera.eye;
+    const range = (axis: Axis | undefined) =>
+      axis?.range ? ([axis.r2l(axis.range[0]), axis.r2l(axis.range[1])] as const) : undefined;
+    const x = range(layout.xaxis);
+    const y = range(layout.yaxis);
+    last = {
+      width: layout.width,
+      height: layout.height,
+      plot: { left: size.l, top: size.t, width: size.w, height: size.h },
+      ...(x && { x }),
+      ...(y && { y }),
+      series: seriesOf((root as unknown as { data: Record<string, unknown>[] }).data[0]!),
+      ...(eye && {
+        camera: {
+          azimuth: (Math.atan2(eye.y, eye.x) * 180) / Math.PI,
+          elevation: (Math.atan2(eye.z, Math.hypot(eye.x, eye.y)) * 180) / Math.PI,
+        },
+      }),
+    };
+  };
+  root.on("plotly_afterplot", drew);
+  root.on("plotly_hover", (event) => {
+    index = event.points.find((point) => point.curveNumber === 0)?.pointNumber as
+      | number
+      | undefined;
+  });
+  const drawn = (): Drawn => {
+    const box = root.getBoundingClientRect();
+    const text = readoutText(root.querySelector(".hoverlayer"));
+    // Series 0's label: the one naming its trace, or the only one of a
+    // chart of one trace (Plotly names no trace there).
+    const traces = (root as unknown as { data: { name?: string }[] }).data;
+    const labels = [...root.querySelectorAll(".hoverlayer g.hovertext")];
+    const label =
+      labels.find((g) => g.querySelector("text.name")?.textContent === traces[0]?.name) ??
+      (traces.length === 1 && labels.length === 1 ? labels[0] : undefined);
+    const value = label?.querySelector("text.nums")?.textContent;
+    return {
+      ...last,
+      draws,
+      ...(last.plot && {
+        plot: { ...last.plot, left: box.left + last.plot.left, top: box.top + last.plot.top },
+      }),
+      ...(text && {
+        readout: { text, ...(value && { value }), ...(index !== undefined && { index }) },
+      }),
+    };
+  };
+  /** Makes a Plotly call and awaits it, then captures what it drew unless `plotly_afterplot` did meanwhile. */
+  const after = async (call: () => Promise<unknown>) => {
+    const before = draws;
+    await call();
+    if (draws === before) drew();
+  };
+  return { drew, after, drawn };
 }
 
 const config = (options: ChartOptions): Partial<Plotly.Config> => ({
@@ -107,10 +218,16 @@ function handle<T>(
   root: Root,
   setData: (data: T) => Promise<unknown>,
   plotLayout: Partial<Plotly.Layout>,
-): ChartHandle<T> {
+  seriesOf: SeriesOf,
+): ChartHandle<T> & { after(call: () => Promise<unknown>): Promise<void> } {
+  const observed = observer(root, seriesOf);
+  // newPlot resolved before the observer listened.
+  observed.drew();
   return {
+    after: observed.after,
+    drawn: observed.drawn,
     async setData(data) {
-      await setData(data);
+      await observed.after(() => setData(data));
     },
     pixelOf(_series, _index, x, y) {
       const layout = (root as unknown as { _fullLayout: FullLayout })._fullLayout;
@@ -123,7 +240,7 @@ function handle<T>(
     async resize(width, height) {
       plotLayout.width = width;
       plotLayout.height = height;
-      await Plotly.relayout(root, { width, height });
+      await observed.after(() => Plotly.relayout(root, { width, height }));
     },
     destroy() {
       Plotly.purge(root);
@@ -142,25 +259,28 @@ function lineKind(fill: boolean) {
     ): Promise<ChartHandle<SeriesData>> {
       const plotLayout = layout(options, { xaxis: { type: "date" } });
       const root = await mount(container, lineTraces(data, options, fill), plotLayout, options);
+      const base = handle<SeriesData>(
+        root,
+        (next) => Plotly.react(root, lineTraces(next, options, fill), plotLayout, config(options)),
+        plotLayout,
+        SERIES.xy,
+      );
       return {
-        ...handle<SeriesData>(
-          root,
-          (next) =>
-            Plotly.react(root, lineTraces(next, options, fill), plotLayout, config(options)),
-          plotLayout,
-        ),
+        ...base,
         async append(x, ys, keep) {
           // extendTraces with maxPoints is Plotly's documented rolling-window
           // API. Batches must match the typed arrays the traces were built with.
-          await Plotly.extendTraces(
-            root,
-            { x: ys.map(() => x as unknown as number[]), y: ys as unknown as number[][] },
-            ys.map((_, s) => s),
-            keep,
+          await base.after(() =>
+            Plotly.extendTraces(
+              root,
+              { x: ys.map(() => x as unknown as number[]), y: ys as unknown as number[][] },
+              ys.map((_, s) => s),
+              keep,
+            ),
           );
         },
         async setViewport(x0, x1) {
-          await Plotly.relayout(root, { "xaxis.range": [x0, x1] });
+          await base.after(() => Plotly.relayout(root, { "xaxis.range": [x0, x1] }));
         },
       };
     },
@@ -291,16 +411,19 @@ function surfaceTraces(data: SurfaceData): Partial<Plotly.Data>[] {
   ];
 }
 
-function camera3d(root: Root) {
-  return async (azimuth: number, elevation: number) => {
-    await Plotly.relayout(root, {
-      "scene.camera.eye": eye(azimuth, elevation),
-    } as Partial<Plotly.Layout>);
-  };
+function camera3d(root: Root, after: (call: () => Promise<unknown>) => Promise<void>) {
+  return (azimuth: number, elevation: number) =>
+    after(() =>
+      Plotly.relayout(root, {
+        "scene.camera.eye": eye(azimuth, elevation),
+      } as Partial<Plotly.Layout>),
+    );
 }
 
 export const adapter: Adapter = {
   id: "plotly",
+  verification:
+    "after each Plotly call's promise resolves (Plotly has drawn) and at plotly_afterplot: the layout's size, plot area, axis ranges, series 0's trace, the 3D camera; the hover layer's SVG text before paint, with the point from plotly_hover",
   renderer: { normal: "svg", large: "webgl (scattergl)" },
   line: lineKind(false),
   area: {
@@ -316,6 +439,7 @@ export const adapter: Adapter = {
         root,
         (next) => Plotly.react(root, barTraces(next), plotLayout, config(options)),
         plotLayout,
+        SERIES.values,
       );
     },
   },
@@ -324,14 +448,16 @@ export const adapter: Adapter = {
     async create(container, data, options) {
       const plotLayout = layout(options, { hovermode: options.tooltip ? "closest" : false });
       const root = await mount(container, scatterTraces(data, options), plotLayout, options);
+      const base = handle<PointData>(
+        root,
+        (next) => Plotly.react(root, scatterTraces(next, options), plotLayout, config(options)),
+        plotLayout,
+        SERIES.xy,
+      );
       return {
-        ...handle<PointData>(
-          root,
-          (next) => Plotly.react(root, scatterTraces(next, options), plotLayout, config(options)),
-          plotLayout,
-        ),
+        ...base,
         async setViewport(x0, x1) {
-          await Plotly.relayout(root, { "xaxis.range": [x0, x1] });
+          await base.after(() => Plotly.relayout(root, { "xaxis.range": [x0, x1] }));
         },
       };
     },
@@ -345,6 +471,7 @@ export const adapter: Adapter = {
         root,
         (next) => Plotly.react(root, heatmapTraces(next), plotLayout, config(options)),
         plotLayout,
+        SERIES.grid,
       );
     },
   },
@@ -361,6 +488,7 @@ export const adapter: Adapter = {
         root,
         (next) => Plotly.react(root, candleTraces(next), plotLayout, config(options)),
         plotLayout,
+        SERIES.candles,
       );
     },
   },
@@ -373,6 +501,7 @@ export const adapter: Adapter = {
         root,
         (next) => Plotly.react(root, bubbleTraces(next), plotLayout, config(options)),
         plotLayout,
+        SERIES.xy,
       );
     },
   },
@@ -386,6 +515,7 @@ export const adapter: Adapter = {
         root,
         (next) => Plotly.react(root, histogramTraces(next), plotLayout, config(options)),
         plotLayout,
+        SERIES.bins,
       );
     },
   },
@@ -394,14 +524,13 @@ export const adapter: Adapter = {
     async create(container, data, options) {
       const plotLayout = scene3d(options);
       const root = await mount(container, scatter3dTraces(data), plotLayout, options);
-      return {
-        ...handle<Point3Data>(
-          root,
-          (next) => Plotly.react(root, scatter3dTraces(next), plotLayout, config(options)),
-          plotLayout,
-        ),
-        setCamera: camera3d(root),
-      };
+      const base = handle<Point3Data>(
+        root,
+        (next) => Plotly.react(root, scatter3dTraces(next), plotLayout, config(options)),
+        plotLayout,
+        SERIES.xz,
+      );
+      return { ...base, setCamera: camera3d(root, base.after) };
     },
   },
   surface: {
@@ -409,14 +538,13 @@ export const adapter: Adapter = {
     async create(container, data, options) {
       const plotLayout = scene3d(options);
       const root = await mount(container, surfaceTraces(data), plotLayout, options);
-      return {
-        ...handle<SurfaceData>(
-          root,
-          (next) => Plotly.react(root, surfaceTraces(next), plotLayout, config(options)),
-          plotLayout,
-        ),
-        setCamera: camera3d(root),
-      };
+      const base = handle<SurfaceData>(
+        root,
+        (next) => Plotly.react(root, surfaceTraces(next), plotLayout, config(options)),
+        plotLayout,
+        SERIES.grid,
+      );
+      return { ...base, setCamera: camera3d(root, base.after) };
     },
   },
 };

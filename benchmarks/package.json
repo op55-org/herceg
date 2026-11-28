@@ -12,7 +12,8 @@
     "grid-sparklines": "node --experimental-strip-types src/grid/sparklines/run.ts",
     "grid-export": "node --experimental-strip-types src/grid/export/run.ts",
     "first-hover": "node --experimental-strip-types src/first-hover/run.ts",
-    "interaction": "node --experimental-strip-types src/interaction/run.ts"
+    "interaction": "node --experimental-strip-types src/interaction/run.ts",
+    "device": "node --experimental-strip-types src/device/run.ts"
   },
   "devDependencies": {
     "@types/d3-interpolate": "3.0.4",

@@ -1,4 +1,4 @@
-// Frame timing for the grid harness.
+// Frame timing shared by the chart and grid harnesses.
 //
 // A timed operation ends with the first frame that shows the correct result.
 // The harness reads what a grid shows just before a frame paints: a

@@ -3,6 +3,8 @@
 // effect. With `--baseline DIR` (another herceg source tree, main's say) it
 // builds the page against both and alternates them in one Chrome session,
 // in blocks ordered AB, BA, AB, ..., and compares them block by block.
+// Fixtures and modes run in a seeded order (`--order-seed`, recorded); moves
+// are trusted input through the DevTools Protocol (runner/input.ts).
 //
 // Two modes. "sustained" sends each move as soon as the last one's effect
 // has been drawn, so the input keeps the CPU out of its idle states, as a
@@ -15,7 +17,8 @@
 // Run from the repository root:
 //   node --experimental-strip-types benchmarks/src/interaction/run.ts \
 //     [--baseline DIR --baseline-label COMMIT] [--fixture NAME,...] [--mode sustained|quiet|both] \
-//     [--blocks 6] [--moves 30] [--warmup 10] [--out benchmarks/results/interaction.json]
+//     [--blocks 6] [--moves 30] [--warmup 10] [--order-seed N] \
+//     [--out benchmarks/results/interaction.json]
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -37,6 +40,8 @@ import { chromium, type Page } from "playwright";
 import { HERCEG_ALIAS, ISOLATION } from "../runner/build.ts";
 import { LATENCY_ARGS, scaleFactorArg } from "../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
+import { driverFor } from "../runner/input.ts";
+import { orderSeed, schedule } from "../runner/order.ts";
 import { type Summary, summarize } from "../runner/stats.ts";
 import type { FixtureName } from "./page.ts";
 
@@ -80,8 +85,10 @@ const { values: args } = parseArgs({
     blocks: { type: "string", default: "6" },
     moves: { type: "string", default: "30" },
     warmup: { type: "string", default: "10" },
+    "order-seed": { type: "string" },
   },
 });
+const seed = orderSeed(args["order-seed"]);
 const BLOCKS = Number(args.blocks);
 const MOVES = Number(args.moves);
 const WARMUP = Number(args.warmup);
@@ -211,21 +218,25 @@ async function runBlock(
       [fixture, WARMUP + MOVES, name === "candidate"] as const,
     );
     const cdp = await context.newCDPSession(page);
+    const driver = await driverFor(page, "chrome", cdp);
     const taskTime = async () => {
       const { metrics } = await cdp.send("Performance.getMetrics");
       return (metrics.find((m) => m.name === "TaskDuration")?.value ?? 0) * 1000;
     };
     if (work) await cdp.send("Performance.enable");
+    // Where the pointer is, so a drag is released where it ended.
+    let at = press ?? { x: 0, y: 0 };
     if (press) {
-      await page.mouse.move(press.x, press.y);
-      await page.mouse.down();
+      await driver.step({ type: "move", ...press });
+      await driver.step({ type: "press", ...press });
     }
     const samples: (number | null)[] = [];
     for (const [i, move] of moves.entries()) {
       if (mode === "quiet") await page.waitForTimeout(QUIET_GAP_MS);
       const before = work ? await taskTime() : 0;
       await page.evaluate((index) => window.interaction.arm(index), i);
-      await page.mouse.move(move.x, move.y);
+      await driver.step({ type: "move", x: move.x, y: move.y });
+      at = move;
       const ms = await page.evaluate(() => window.interaction.result());
       const sample = work && ms !== null ? (await taskTime()) - before : ms;
       if (i >= WARMUP) samples.push(sample);
@@ -236,7 +247,8 @@ async function runBlock(
     for (const [j, move] of checks.entries()) {
       const index = moves.length + j;
       await page.evaluate((index) => window.interaction.arm(index), index);
-      await page.mouse.move(move.x, move.y);
+      await driver.step({ type: "move", x: move.x, y: move.y });
+      at = move;
       if ((await page.evaluate(() => window.interaction.result())) === null) {
         wrong = `check move ${j + 1} drew no effect within 1 s`;
         break;
@@ -251,7 +263,7 @@ async function runBlock(
         break;
       }
     }
-    if (press) await page.mouse.up();
+    if (press) await driver.step({ type: "release", x: at.x, y: at.y });
     await page.evaluate(() => window.interaction.unmount());
     if (errors.length) throw new Error(`interaction: ${fixture} (${name}): ${errors[0]}`);
     if (wrong)
@@ -267,13 +279,22 @@ async function runBlock(
 /** A block's samples whose move drew its effect. */
 const valid = (block: Block) => block.samples.filter((ms): ms is number => ms !== null);
 
-interface Result {
+/**
+ * A fixture's figures in one mode and build, or, where a measured move drew
+ * no effect within 1 s in either pass, none: the moves that missed say
+ * where (pass, block, move), and the result is incorrect.
+ */
+type Result = {
   fixture: FixtureName;
   mode: Mode;
   build: string;
-  latency: { blocks: Block[]; summary: Summary };
-  work: { blocks: Block[]; summary: Summary };
-}
+} & (
+  | {
+      latency: { blocks: Block[]; summary: Summary };
+      work: { blocks: Block[]; summary: Summary };
+    }
+  | { incorrect: string; missedMoves: { pass: "latency" | "work"; block: number; move: number }[] }
+);
 
 /** The fixtures a build's page can mount: an older tree's lacks those of marks it has not. */
 async function mountable(name: string): Promise<FixtureName[]> {
@@ -288,58 +309,74 @@ async function mountable(name: string): Promise<FixtureName[]> {
   }
 }
 
+const planned = schedule(seed, fixtures, () => MODES);
 const results: Result[] = [];
 let missedTotal = 0;
 try {
   const mounts = new Map<string, FixtureName[]>();
   for (const [name] of builds) mounts.set(name, await mountable(name));
-  for (const fixture of fixtures)
-    for (const mode of MODES) {
-      // A fixture runs in the builds that can mount it, compared only where both do.
-      const running = builds.filter(([name]) => mounts.get(name)!.includes(fixture));
-      const left = builds.filter((build) => !running.includes(build)).map(([name]) => name);
-      if (left.length > 0) console.log(`${fixture}: the ${left.join(", ")} build cannot mount it`);
-      const runs = new Map(
-        running.map(([name]) => [name, { latency: [] as Block[], work: [] as Block[] }]),
-      );
-      // Unrecorded, a block of each build first: a session's first pages run
-      // slower (5.2 ms against 1.3-1.5 in later blocks), which the block
-      // order would charge to the candidate.
-      for (const [name] of running) await runBlock(name, fixture, mode, false);
-      for (const work of [false, true])
-        for (let block = 0; block < BLOCKS; block++) {
-          const order = block % 2 ? [...running].reverse() : running;
-          for (const [position, [name]] of order.entries()) {
-            const run = await runBlock(name, fixture, mode, work);
-            missedTotal += run.missed;
-            runs.get(name)![work ? "work" : "latency"].push({ block, position, ...run });
-          }
+  for (const { block: fixture, member: mode } of planned) {
+    // A fixture runs in the builds that can mount it, compared only where both do.
+    const running = builds.filter(([name]) => mounts.get(name)!.includes(fixture));
+    const left = builds.filter((build) => !running.includes(build)).map(([name]) => name);
+    if (left.length > 0) console.log(`${fixture}: the ${left.join(", ")} build cannot mount it`);
+    const runs = new Map(
+      running.map(([name]) => [name, { latency: [] as Block[], work: [] as Block[] }]),
+    );
+    // Unrecorded, a block of each build first: a session's first pages run
+    // slower (5.2 ms against 1.3-1.5 in later blocks), which the block
+    // order would charge to the candidate.
+    for (const [name] of running) await runBlock(name, fixture, mode, false);
+    for (const work of [false, true])
+      for (let block = 0; block < BLOCKS; block++) {
+        const order = block % 2 ? [...running].reverse() : running;
+        for (const [position, [name]] of order.entries()) {
+          const run = await runBlock(name, fixture, mode, work);
+          missedTotal += run.missed;
+          runs.get(name)![work ? "work" : "latency"].push({ block, position, ...run });
         }
-      for (const [name, { latency, work }] of runs) {
-        const result: Result = {
-          fixture,
-          mode,
-          build: name,
-          latency: { blocks: latency, summary: summarize(latency.flatMap(valid)) },
-          work: { blocks: work, summary: summarize(work.flatMap(valid)) },
-        };
-        results.push(result);
-        console.log(
-          `${fixture.padEnd(20)} ${mode.padEnd(9)} ${name.padEnd(9)} latency p50 ${result.latency.summary.median.toFixed(2)} p95 ${result.latency.summary.p95.toFixed(2)} ms; work ${result.work.summary.median.toFixed(2)} ms/move`,
-        );
       }
+    for (const [name, { latency, work }] of runs) {
+      const missedMoves = (["latency", "work"] as const).flatMap((pass) =>
+        (pass === "latency" ? latency : work).flatMap(({ block, samples }) =>
+          samples.flatMap((ms, move) => (ms === null ? [{ pass, block, move }] : [])),
+        ),
+      );
+      const label = `${fixture.padEnd(20)} ${mode.padEnd(9)} ${name.padEnd(9)}`;
+      if (missedMoves.length > 0) {
+        const incorrect = `${missedMoves.length} measured moves drew no effect within 1 s`;
+        results.push({ fixture, mode, build: name, incorrect, missedMoves });
+        console.log(`${label} incorrect: ${incorrect}`);
+        continue;
+      }
+      const result = {
+        fixture,
+        mode,
+        build: name,
+        latency: { blocks: latency, summary: summarize(latency.flatMap(valid)) },
+        work: { blocks: work, summary: summarize(work.flatMap(valid)) },
+      };
+      results.push(result);
+      console.log(
+        `${label} latency p50 ${result.latency.summary.median.toFixed(2)} p95 ${result.latency.summary.p95.toFixed(2)} ms; work ${result.work.summary.median.toFixed(2)} ms/move`,
+      );
     }
+  }
 } finally {
   await browser.close();
   server.close();
   for (const [, directory] of builds) rmSync(directory, { recursive: true, force: true });
 }
 
+/** Results with figures: an incorrect one is compared with nothing. */
+const measured = results.filter(
+  (r): r is Extract<Result, { latency: unknown }> => !("incorrect" in r),
+);
 const comparisons = args.baseline
-  ? results
+  ? measured
       .filter((r) => r.build === "candidate")
       .flatMap((candidate) => {
-        const baseline = results.find(
+        const baseline = measured.find(
           (r) =>
             r.build === "baseline" && r.fixture === candidate.fixture && r.mode === candidate.mode,
         );
@@ -383,13 +420,14 @@ if (args.out) {
         date: new Date().toISOString(),
         commit: commit(),
         method:
-          "Chrome (headless, frame rate limit and vsync off, device pixel ratio 2, viewport 1280x1400, cross-origin isolated pages), a fresh page per block; esbuild production build; real pointer moves through the DevTools Protocol, each checked for its effect; latency runs from the move's first pointermove to a MessageChannel message posted from the requestAnimationFrame after its effect was drawn (null when not drawn within 1 s); work is the main-thread TaskDuration between a reading before each move is armed and one after its latency resolved (the move's work and the harness's evaluations), in a separate pass; sustained mode sends each move once the last was drawn, quiet mode waits 70 ms before each; with a baseline, blocks alternate AB/BA and comparisons are medians of the ratios of paired blocks' medians",
+          "Chrome (headless, frame rate limit and vsync off, device pixel ratio 2, viewport 1280x1400, cross-origin isolated pages), a fresh page per block; esbuild production build; trusted pointer moves through the DevTools Protocol's Input domain, fixtures and modes in the seeded order `order` records, each move checked for its effect; latency runs from the move's first pointermove to a MessageChannel message posted from the requestAnimationFrame after its effect was drawn (a result where any measured move drew no effect within 1 s, in either pass, is incorrect: no figures, the missed moves listed, no comparison); work is the main-thread TaskDuration between a reading before each move is armed and one after its latency resolved (the move's work and the harness's evaluations), in a separate pass; sustained mode sends each move once the last was drawn, quiet mode waits 70 ms before each; with a baseline, blocks alternate AB/BA and comparisons are medians of the ratios of paired blocks' medians",
         environment: {
           ...machine(),
           browser: `Chrome ${browserVersion}`,
           herceg: packageVersion("herceg"),
         },
         builds: made,
+        order: { seed, planned: planned.map(({ block, member }) => [block, member]) },
         blocks: BLOCKS,
         moves: MOVES,
         warmup: WARMUP,

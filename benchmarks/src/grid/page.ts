@@ -1,6 +1,7 @@
 // In-page helpers shared by the grid scenario runners: mounting a grid on
 // the stage, waiting for its first correct frame, and checking its model.
 
+import { checkedFrame } from "../page/frames.ts";
 import type { Metric } from "../page/harness.ts";
 import {
   type Adapter,
@@ -11,7 +12,6 @@ import {
   type SortKey,
 } from "./adapter.ts";
 import type { GridTable } from "./fixture.ts";
-import { checkedFrame } from "./frames.ts";
 import { type Expected, type Reference, verifyOrder, verifyVisible } from "./reference.ts";
 
 export interface GridResult {

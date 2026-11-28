@@ -2,15 +2,12 @@
 //
 // Every timed operation starts when the harness calls the adapter and ends
 // with the first frame whose visible rows, cells, selection, and row count
-// match the reference (see reference.ts and frames.ts). A grid that renders
+// match the reference (see reference.ts and page/frames.ts). A grid that renders
 // over several frames is timed to the frame where it is complete; one that
 // never shows the correct result is reported incorrect instead of timed.
 // Untimed verification also compares the library's full display order with
 // the reference. Streaming scenarios are in stream.ts.
 
-import type { Adapter, Operation } from "./adapter.ts";
-import { COLUMN_WIDTH, GRID_HEIGHT, GRID_WIDTH, ROW_HEIGHT } from "./adapter.ts";
-import { type GridTable, gridTable, tableBytes } from "./fixture.ts";
 import {
   afterTimers,
   beforePaint,
@@ -19,7 +16,10 @@ import {
   refreshInterval,
   settle,
   withLongFrames,
-} from "./frames.ts";
+} from "../page/frames.ts";
+import type { Adapter, Operation } from "./adapter.ts";
+import { COLUMN_WIDTH, GRID_HEIGHT, GRID_WIDTH, ROW_HEIGHT } from "./adapter.ts";
+import { dataBytes, type GridTable, gridTable, tableBytes } from "./fixture.ts";
 import {
   applyQuery,
   box,
@@ -455,8 +455,8 @@ export interface GridBench {
   wheelStopped(trial: number): void;
   /** Memory steps, called in this order with heap readings in between. */
   memory: {
-    /** Creates the fixture; returns its column buffer bytes. */
-    data(s: GridScenario): number;
+    /** Creates the fixture; returns its column buffers' bytes, and those with its labels' (`dataBytes`). */
+    data(s: GridScenario): { columnBytes: number; dataBytes: number };
     /** Computes what the sort step should show, so its memory is not counted later. */
     reference(): void;
     /** Converts the fixture to the library's native input and keeps both. */
@@ -532,7 +532,7 @@ export function installGridHarness(adapter: Adapter): void {
       data(s) {
         const table = gridTable(s.size, s.seed);
         held = { scenario: s, table };
-        return tableBytes(table);
+        return { columnBytes: tableBytes(table), dataBytes: dataBytes(table) };
       },
       reference() {
         const { scenario, table } = held!;

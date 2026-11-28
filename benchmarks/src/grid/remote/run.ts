@@ -4,6 +4,10 @@
 //
 //   npm run bench:grid-remote -- [--lib herceg,ag-grid] [--latency 0,20,100]
 //                                [--jumps 40] [--out results/grid-remote.json] [--headless]
+//                                [--order-seed N]
+//
+// Latencies (and the memory rounds), and the libraries within each, run in
+// a seeded order (runner/order.ts), recorded with the results.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -14,6 +18,7 @@ import { random } from "../../datasets.ts";
 import { HERCEG_ALIAS, ROOT, serve } from "../../runner/build.ts";
 import { heapBytes, LATENCY_ARGS, REALTIME_ARGS } from "../../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../../runner/environment.ts";
+import { orderSeed, schedule } from "../../runner/order.ts";
 import { type Summary, summarize } from "../../runner/stats.ts";
 
 const LIBRARIES: Record<string, string> = { herceg: "herceg", "ag-grid": "ag-grid-community" };
@@ -28,8 +33,10 @@ const { values: args } = parseArgs({
     out: { type: "string" },
     headless: { type: "boolean", default: false },
     seed: { type: "string", default: "1" },
+    "order-seed": { type: "string" },
   },
 });
+const order = orderSeed(args["order-seed"]);
 
 const libraries = args.lib ? args.lib.split(",") : Object.keys(LIBRARIES);
 for (const id of libraries) if (!LIBRARIES[id]) throw new Error(`unknown library ${id}`);
@@ -123,8 +130,10 @@ async function main() {
   const places = Array.from({ length: MEMORY_JUMPS }, () => Math.floor(pick() * (ROWS - 50)));
   const results: { library: string; latency: number | null; metrics: Record<string, Metric> }[] =
     [];
-  for (const library of libraries) {
-    for (const latency of latencies) {
+  // A latency's jumps and traces for each library, or (null) the memory rounds.
+  const planned = schedule(order, [...latencies, null], () => libraries);
+  for (const { block: latency, member: library } of planned) {
+    if (latency !== null) {
       const metrics: Record<string, Metric> = { mount: { unit: "ms", samples: [] } };
       // Jumps, with the frame rate limit off: times are the grids' own.
       for (const settle of settles) {
@@ -189,6 +198,7 @@ async function main() {
           .map(line)
           .join(", ")}`,
       );
+      continue;
     }
     // Memory: heap after scrolling to fifty places, over the page's before mounting.
     const page = await open(fast, origin);
@@ -249,6 +259,10 @@ async function main() {
       traceTrials: TRACE_TRIALS,
       seed: Number(args.seed),
     },
+    order: {
+      seed: order,
+      planned: planned.map(({ block, member }) => [block === null ? "memory" : block, member]),
+    },
     environment: {
       ...machine(),
       browser: `Chrome ${browserVersion}`,
@@ -272,7 +286,7 @@ async function main() {
     : join(ROOT, "..", "tmp", "benchmarks", `grid-remote-${stamp}.json`);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(output, null, 1)}\n`);
-  console.log(`\nWrote ${out}`);
+  console.log(`\nWrote ${out} (order seed ${order})`);
 }
 
 await main();

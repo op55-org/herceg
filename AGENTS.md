@@ -42,8 +42,8 @@ npm run build            # build herceg and the React, Vue, and Svelte adapters
 npm run lint             # biome lint + format check
 npm run format           # apply biome formatting and safe fixes
 npm run typecheck        # type check all TypeScript, including compile-time tests
-npm test                 # unit tests (vitest, Node)
-npm run test:browser     # browser tests: herceg, the adapters, and python/js in Chrome, Firefox, and WebKit (HERCEG_BROWSERS=chromium for one), then the ease-of-use samples in Chrome
+npm test                 # unit tests (vitest, Node): herceg's and the benchmark harness's
+npm run test:browser     # browser tests: herceg, the adapters, and python/js in Chrome, Firefox, and WebKit (HERCEG_BROWSERS=chromium for one), then the benchmark harness's: ease-of-use samples and page checks in Chrome, trusted input in Chrome, Firefox, and WebKit
 npm run test:package     # test installed npm tarballs (run build first)
 npm run bench:core       # engine microbenchmarks (Node)
 npm run bench:size       # bundle size benchmark
@@ -55,6 +55,7 @@ npm run bench:grid-sparklines # sparkline cells over a million series rows: herc
 npm run bench:grid-export # grid CSV export (herceg/grid vs AG Grid Community) and copy of a 100k-row selection (Chrome)
 npm run bench:first-hover # first-hover latency while the interaction controller loads (Chrome)
 npm run bench:interaction # per-move latency and work of pointer interactions, against another tree with --baseline DIR (Chrome)
+npm run bench:device     # the chart suite in Safari through safaridriver: --udid UDID on an iPhone, --desktop on this Mac
 npm run bench:report     # regenerate result tables in docs/comparison.md
 npm run bench:express    # herceg.express timings in Python (-- --out results/express.json)
 npm run build:python     # bundle herceg's JavaScript into the Python package
