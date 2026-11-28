@@ -239,13 +239,17 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
   const plane = planeKeys.get("");
   const compatiblePlane = plane === previous?.plane && (plane?.startsWith("map:") || sameItems);
   const brushed = new WeakSet<object>();
+  // What the callbacks below read of the chart this one replaces: closures
+  // made here share one scope, which the new chart's listeners keep, so
+  // none may read `previous`, or the replaced chart stays with them.
+  const [movedBefore, epochBefore] = [previous?.positions, previous?.epoch];
   const settle = (): Promise<void> | undefined => {
     // Networks of the same items keep their nodes' moves, before views and lassos over them.
     if (sameItems)
       for (const panel of moves) {
         const held: ItemPositionsPayload = {};
         positions.set(panel, held);
-        showItemPositions(chart, previous!.positions.get(panel) ?? {}, held, true, panel);
+        showItemPositions(chart, movedBefore?.get(panel) ?? {}, held, true, panel);
       }
     const restoring =
       kept &&
@@ -359,7 +363,7 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
         const selection = store.get(channel);
         const now = JSON.stringify([header.epoch, rowsValue(selection)]);
         const sent = instance.reported.get(`${nameOf(store.source)}\u0000${channel}`);
-        if (now !== (sent ?? JSON.stringify([previous?.epoch, null])))
+        if (now !== (sent ?? JSON.stringify([epochBefore, null])))
           reportRows({ table: store.source, channel, selection });
       }
   };

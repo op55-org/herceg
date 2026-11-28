@@ -210,6 +210,32 @@ const [lifter, lifted] = [
   }),
 ];
 lifter.setViewport({ y: [2, 4] });
+// So with a subplot's panel drawing only a right y axis, read before that frame.
+const rightOnly = mount("lift-panel", {
+  panels: panels([{ id: "p" }]),
+  marks: [line(lines, { x: "x", y: "y", axis: "right", panel: "p" })],
+  interaction: { zoom: "y", sync: { viewport: { group: "lift-panel", scale: "y", panel: "p" } } },
+});
+broadcast("viewport", "lift-panel", { receive() {} }, [2, 4]);
+const liftedEarly = rightOnly.getViewport({ panel: "p" });
+// On a channel naming no panel: facets drawing only a right y axis take it
+// there; subplots, sharing no y axis by default, nowhere.
+const facetedRight = mount("lift-facets", {
+  marks: [
+    line(table({ x: [0, 10], y: [1, 2], host: ["a", "b"] }), { x: "x", y: "y", axis: "right" }),
+  ],
+  facet: facet("host"),
+  interaction: { zoom: "y", sync: { viewport: { group: "lift-facets", scale: "y" } } },
+});
+const unshared = mount("lift-none", {
+  panels: panels([{ id: "p" }, { id: "q" }]),
+  marks: ["p", "q"].map((panel) => line(lines, { x: "x", y: "y", panel })),
+  interaction: { zoom: "y", sync: { viewport: { group: "lift-none", scale: "y" } } },
+});
+for (const group of ["lift-facets", "lift-none"])
+  broadcast("viewport", group, { receive() {} }, [2, 4]);
+const facetedRightEarly = facetedRight.getViewport({ panel: "a" });
+const unsharedEarly = unshared.getViewport({ panel: "p" });
 // A chart's own y view, then a newer one a synced chart shares: the newer
 // stands on both; so with selections.
 const ordered = {
@@ -413,6 +439,15 @@ it("sets a view of a subplot's panel, or of a network, set before the first fram
 it("takes a y view on the y axis the chart draws, and only on channels it still syncs as then", async () => {
   await Promise.all([lifted.ready, moved.ready]);
   expect(lifted.getViewport().yRight).toEqual([2, 4]);
+  // Read before the first frame as that frame takes it.
+  expect(liftedEarly).toEqual({ x: null, y: null, yRight: [2, 4] });
+  await rightOnly.ready;
+  expect(rightOnly.getViewport({ panel: "p" })).toEqual({ x: null, y: null, yRight: [2, 4] });
+  expect(facetedRightEarly).toEqual({ x: null, y: null, yRight: [2, 4] });
+  expect(unsharedEarly).toEqual({ x: null, y: null, yRight: null });
+  await Promise.all([facetedRight.ready, unshared.ready]);
+  expect(facetedRight.getViewport({ panel: "a" })).toEqual(facetedRightEarly);
+  expect(unshared.getViewport({ panel: "p" })).toEqual(unsharedEarly);
   await older.ready;
   for (const chart of [newer, older]) {
     expect(chart.getViewport().y).toEqual([1, 3]);

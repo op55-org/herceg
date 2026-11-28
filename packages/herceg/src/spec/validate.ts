@@ -4752,7 +4752,8 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     );
   // Marks name panels the chart has; with panels, every mark names one.
   const panels = chart.panels as { id: string }[] | undefined;
-  if (chart.layout !== undefined && !panels) fail("layout", "a spec with panels", chart.layout);
+  const unpanelled = "the chart has no panels; drop it";
+  if (chart.layout !== undefined && !panels) throw refusal("layout", unpanelled);
   if (chart.facet !== undefined && panels)
     throw refusal(
       "facet",
@@ -4762,7 +4763,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
   const ids = new Set(panels?.map(({ id }) => id));
   for (const [i, item] of (chart.marks as Record<string, unknown>[]).entries()) {
     const panel = item.panel;
-    if (!panels && panel !== undefined) fail(`marks[${i}].panel`, "a spec with panels", panel);
+    if (!panels && panel !== undefined) throw refusal(`marks[${i}].panel`, unpanelled);
     if (panels && panel !== "*" && !ids.has(panel as string))
       fail(`marks[${i}].panel`, `"*" or the id of one of the panels`, panel);
   }

@@ -86,6 +86,25 @@ describe("rug", () => {
     expect(other.domain[1]).toBeGreaterThan(other.domain[0]);
   });
 
+  it.each(["x", "y"] as const)("draws its end ticks whole on a fitted %s domain", (axis) => {
+    // Ends the domain would otherwise stop at: y rounds to them, x fits them.
+    const t = table({ v: [1, 3] });
+    const mark =
+      axis === "x" ? rug(t, { x: "v", strokeWidth: 4 }) : rug(t, { y: "v", strokeWidth: 4 });
+    const { model, scene } = build({ marks: [mark] });
+    const { plot } = scene.panels[0]!;
+    const scale = axis === "x" ? xScale(model)! : yScale(model)!;
+    const [low, high] =
+      axis === "x" ? [plot.x, plot.x + plot.width] : [plot.y, plot.y + plot.height];
+    const ends = [scale.map(1), scale.map(3)].sort((a, b) => a - b);
+    // Each tick reaches half its width past its value.
+    expect(ends[0]! - 2).toBeGreaterThanOrEqual(low - 1e-9);
+    expect(ends[1]! + 2).toBeLessThanOrEqual(high + 1e-9);
+    // An explicit domain is kept exact.
+    const fixed = build({ marks: [mark], [axis]: { domain: [1, 3] } });
+    expect((axis === "x" ? xScale(fixed.model) : yScale(fixed.model))!.domain).toEqual([1, 3]);
+  });
+
   it("leaves companion domains alone, including log and category axes", () => {
     const t = table({ x: [1, 2], y: [100, 200], c: ["a", "b"] });
     for (const y of ["y", "c"] as const) {

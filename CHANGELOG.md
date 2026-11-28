@@ -773,3 +773,18 @@ styles](docs/guide/styling.md#role-styles) and
   own, so charts whose data never changes and one-off static exports do
   not load it. See [Heatmap cells](docs/architecture/marks.md#heatmap-cells)
   and [Heatmap rasters](docs/architecture/rendering.md#heatmap-rasters).
+- **A hydrated chart's legend answers clicks before its first frame.** An
+  entry clicked while the chart waits for code its first frame needs is
+  reported as a click on the entry the server drew, and a legend that
+  selects selects its series, even once a listener has taken the legend
+  away: snapshots carry what a click on each entry reads (its key, label,
+  what it hides or selects, and its legend's panel and action). See
+  [Server rendering](docs/guide/export.md#server-rendering).
+- **Rugs draw their end ticks whole.** On a fitted domain, automatic
+  padding leaves half a tick's width past the least and greatest values,
+  as it leaves room for markers, so the clip no longer cuts half of each
+  end tick away (`hx.rugplot`, and rugs over histograms). See
+  [Rugs](docs/guide/statistical-charts.md#rugs).
+- **A spec naming panels without panels says how to correct it**, as the
+  chart does: `marks[0].panel: the chart has no panels; drop it`, and so
+  for `layout`.

@@ -741,6 +741,19 @@ export interface PanelLayout {
   /** Whether the panels split the mark's rows (see `Mark.series`), rather than draw it whole. */
   splits(mark: Mark): boolean;
   /**
+   * Where a y view synced charts share lands before a scene says, as the
+   * chart takes it once one has: on panel `key`'s left y axis, or its right
+   * one where its marks of `marks` (the chart's along axes) place values
+   * only there (see `yAxesOf`); without a key, on the y axis every panel
+   * shares under `config`'s scopes, the left one first. Undefined where it
+   * lands nowhere, or where only a scene can tell.
+   */
+  syncedY(
+    key: string | undefined,
+    marks: readonly Mark[],
+    config: ScaledConfig & { readonly marks: readonly ChartMark[] },
+  ): "y" | "yRight" | undefined;
+  /**
    * Which panels share each position scale, as the chart's scales' settings
    * say (see `scopesOf`): by default y's scope is each panel in subplots,
    * the whole chart in facets.

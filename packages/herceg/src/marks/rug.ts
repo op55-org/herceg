@@ -2,6 +2,7 @@ import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
+import { clearDomain } from "../model/clearance.ts";
 import type { SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, Frozen, RugSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
@@ -87,6 +88,12 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
   readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
+  /**
+   * Half a tick's width, along its axis: automatic padding keeps the ticks
+   * of the least and greatest values whole inside the plot.
+   */
+  readonly inset: { x: number; y: number };
+  readonly clearDomain = clearDomain;
   readonly #field: string;
   readonly #split: SeriesSplitter;
   readonly #ordered = new MarkRowsCache<ReturnType<SeriesSplitter["sources"]>>();
@@ -120,6 +127,8 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
       throw new TypeError(
         `rug strokeWidth: expected 0 or more pixels; received ${spec.strokeWidth}`,
       );
+    const half = (spec.strokeWidth ?? 1) / 2;
+    this.inset = this.tooltip === "x" ? { x: half, y: 0 } : { x: 0, y: half };
     requireField(table, this.#field, NUMERIC, `rug ${this.tooltip}`);
     if (spec.series !== undefined) requireField(table, spec.series, CATEGORY, "rug series");
     this.#split = new SeriesSplitter(

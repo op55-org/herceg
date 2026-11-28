@@ -174,14 +174,15 @@ function stateOf(
     guides: hash(guidesMarkup(scene, idPrefix, false)),
     chartClip: cutToChart(scene),
     legend: legends.flatMap((legend) =>
-      legend.entries.map((item): SnapshotState["legend"][number] => {
-        const entry: SnapshotState["legend"][number] = [
-          entryId(legends, legend, item),
-          item.targets ?? item.key,
-        ];
-        if (legend.panel !== undefined) entry.push(legend.panel);
-        return entry;
-      }),
+      legend.entries.map((item) => ({
+        id: entryId(legends, legend, item),
+        key: item.key,
+        label: item.label,
+        targets: item.targets,
+        selects: item.selects,
+        panel: legend.panel,
+        action: legend.action,
+      })),
     ),
   };
 }

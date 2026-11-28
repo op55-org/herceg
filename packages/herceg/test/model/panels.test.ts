@@ -320,8 +320,18 @@ describe("panels", () => {
         } as never,
         [],
       );
+    // A spec is refused as the chart is: where, the problem, and the correction.
     expect(spec({ layout: { type: "grid", columns: [1, 1] } })).toThrow(
-      "layout: expected a spec with panels",
+      expect.objectContaining({
+        path: "layout",
+        message: "layout: the chart has no panels; drop it",
+      }),
+    );
+    expect(spec({ marks: [{ type: "line", x: "t", y: "a", panel: "nowhere" }] })).toThrow(
+      expect.objectContaining({
+        path: "marks[0].panel",
+        message: "marks[0].panel: the chart has no panels; drop it",
+      }),
     );
     expect(spec({ panels: [{ id: "top" }] })).toThrow("marks[0].panel");
     expect(

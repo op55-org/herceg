@@ -12,7 +12,7 @@ import { aligned } from "../layout/place.ts";
 import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CustomSpec } from "../marks/custom.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
-import type { BandContext, ChartBands, Mark } from "../marks/mark.ts";
+import type { BandContext, ChartBands, ChartMark, Mark } from "../marks/mark.ts";
 import type { MarkRows } from "../marks/rows.ts";
 import type { Series } from "../marks/series.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
@@ -43,6 +43,7 @@ import {
   type PanelSplit,
   type ScaleGroups,
   typedGroups,
+  yAxesOf,
 } from "./panel-layout.ts";
 import { listedCategories, type ScaledConfig, type Scopes, scopesOf } from "./scales.ts";
 import { HEADER_GAP, uniformPlacement } from "./uniform-grid.ts";
@@ -230,6 +231,21 @@ export class Facet implements PanelLayout {
   /** Marks over a table split its rows, unless they repeat. */
   splits(mark: Mark): boolean {
     return mark.table !== undefined && mark.spec.facet !== "repeat";
+  }
+
+  /** See `PanelLayout.syncedY`: each panel draws every mark. */
+  syncedY(
+    key: string | undefined,
+    marks: readonly Mark[],
+    config: ScaledConfig & { readonly marks: readonly ChartMark[] },
+  ): "y" | "yRight" | undefined {
+    const { left, right } = yAxesOf(marks);
+    if (key !== undefined) return left ? "y" : "yRight";
+    const { y, yRight } = this.scopes(config);
+    // Panels of layout marks have no axes.
+    if (!marks.length) return undefined;
+    if (left) return y === "chart" ? "y" : undefined;
+    return right && yRight === "chart" ? "yRight" : undefined;
   }
 
   /** Splits one chart's series into panels, keeping splits from one scene to the next. */
