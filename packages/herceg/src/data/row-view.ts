@@ -1,12 +1,16 @@
 // Row views: a table's rows filtered and ordered, without copying its
 // columns. A view holds the positions of the rows it shows; grids and charts
 // read the table's columns through them. Derived tables (derive.ts) are for
-// computed rows; a view only chooses and orders existing ones.
+// computed rows; a view only chooses and orders existing ones. A view may
+// follow channels of a selection store of its table (a cross-filtered
+// dashboard's panels): it shows the rows its own filter and every channel
+// it follows leave, and filters again as those channels change.
 
 import { Expr } from "./expr.ts";
 import { compileExpression, type Expression } from "./expression.ts";
 import { rowComparator, type SortKey } from "./order.ts";
 import type { ReadonlyRowSet } from "./row-set.ts";
+import type { DataSelection, SelectionStore } from "./selection.ts";
 import {
   type PositionField,
   type Schema,
@@ -20,6 +24,22 @@ export interface RowQuery<S extends Schema = Schema> {
   filter?: Expr | Expression | boolean | undefined;
   /** Orders rows by these keys, in priority order; table order without. */
   sort?: readonly SortKey<PositionField<S>>[] | undefined;
+  /** Shows only the rows the channels of a selection store hold too (see `ViewSelection`). */
+  selection?: ViewSelection<S> | undefined;
+}
+
+/**
+ * The channels of a store of the view's table that the view follows: it
+ * shows the rows each of their conditions holds and each of their row sets
+ * holds (rows appended later meet a condition or not, and are in no row
+ * set), filtering again as they change. Every channel the store holds, now
+ * or later, by default; `channels` lists them, or `excluding` leaves some
+ * out (a panel's own, so that its brush or selected bar stays in place).
+ */
+export interface ViewSelection<S extends Schema = Schema> {
+  store: SelectionStore<S>;
+  channels?: readonly string[] | undefined;
+  excluding?: string | readonly string[] | undefined;
 }
 
 /**
@@ -63,20 +83,35 @@ export interface RowSnapshot {
 }
 
 /**
- * A table's rows, filtered by an expression, restricted to a row set, and
- * sorted by keys, as positions into the table: no column is copied. Changes
- * to the table mark the view out of date at once and are caught up on the
- * next `read`: appended rows are filtered and merged into the order, dropped
- * rows leave it, and rows whose filtered or sorted fields were updated leave
- * it and are merged back where they now belong, unless so many changed that
- * rebuilding it costs less. Views follow their table until disposed or
- * collected.
+ * A table's rows, filtered by an expression and the channels of a selection
+ * store it follows, restricted to row sets, and sorted by keys, as
+ * positions into the table: no column is copied. Changes to the table mark
+ * the view out of date at once and are caught up on the next `read`:
+ * appended rows are filtered and merged into the order, dropped rows leave
+ * it, and rows whose filtered or sorted fields were updated leave it and are
+ * merged back where they now belong, unless so many changed that rebuilding
+ * it costs less. A change of a channel it follows filters every row again.
+ * Views follow their table and store until disposed or collected.
  */
 export class RowView<S extends Schema = Schema> {
   readonly source: Table<S>;
+  /** The filter applied: the query's own, and the conditions of the channels followed. */
   #filter: Expression | undefined;
+  #own: Expression | undefined;
   #sort: readonly SortKey[] = [];
   #query: Readonly<RowQuery<S>> = {};
+  /** The store followed, which channels (all but `excluding` without a list), and the store's revision last read. */
+  #following:
+    | {
+        store: SelectionStore<S>;
+        channels: readonly string[] | undefined;
+        excluding: readonly string[];
+        revision: number;
+      }
+    | undefined;
+  /** The selections of the channels followed, as last composed (null before), and their row sets. */
+  #chosen: readonly DataSelection<S>[] | null = null;
+  #sets: readonly ReadonlyRowSet<S>[] = [];
   /** The comparator of #sort for the table after a number of writes: it holds their arrays. */
   #compare: { writes: number; compare: (a: number, b: number) => number } | undefined;
   #restriction: ReadonlyRowSet<S> | null = null;
@@ -113,8 +148,11 @@ export class RowView<S extends Schema = Schema> {
   #toldWrites: number;
   #revision = 0;
   #queryRevision = 0;
+  /** The query revision listeners were last told of: a read may catch up with the store before its listener runs. */
+  #toldQuery = 0;
   #listeners = new Set<() => void>();
-  #unsubscribe: () => void;
+  /** What stops following the table and the store; held apart from the view so its finalizer can run them. */
+  #stops: Stops = {};
 
   constructor(source: Table<S>, query: RowQuery<S> = {}) {
     this.source = source;
@@ -128,22 +166,39 @@ export class RowView<S extends Schema = Schema> {
       if (view) view.#changed(change);
       else stop();
     });
-    this.#unsubscribe = stop;
-    followers.register(this, stop, this);
+    this.#stops.table = stop;
+    followers.register(this, this.#stops, this);
   }
 
-  /** Increments whenever what the view shows may have changed: its table, query, or restriction. */
+  /** Increments whenever what the view shows may have changed: its table, query, restriction, or channels. */
   get revision(): number {
+    this.#sync();
     return this.#revision;
   }
 
   /**
-   * Increments when `setQuery` or `restrict` changes which rows the view
-   * selects and how it orders them, and not when its table changes: readers
-   * tell a new question from new data with it.
+   * Increments when `setQuery`, `restrict`, or a channel the view follows
+   * changes which rows it selects and how it orders them, and not when its
+   * table changes: readers tell a new question from new data with it.
    */
   get queryRevision(): number {
+    this.#sync();
     return this.#queryRevision;
+  }
+
+  /**
+   * The filter the view applies: its query's, and the condition of each
+   * channel it follows; undefined for none. `query.filter` is its own alone.
+   */
+  get filter(): Expression | undefined {
+    this.#sync();
+    return this.#filter;
+  }
+
+  /** Whether row sets restrict the view: its own (`restrict`), or a channel's it follows. */
+  get restricted(): boolean {
+    this.#sync();
+    return this.#restriction !== null || this.#sets.length > 0;
   }
 
   /** Bytes the view's positions hold, not counting its table. */
@@ -156,7 +211,10 @@ export class RowView<S extends Schema = Schema> {
     return this.read().length;
   }
 
-  /** The filter (as an expression) and sort keys the view applies, to change one and keep the other. */
+  /**
+   * The filter (as an expression), sort keys, and channels followed the view
+   * was given, to change one and keep the others.
+   */
   get query(): Readonly<RowQuery<S>> {
     return this.#query;
   }
@@ -181,7 +239,7 @@ export class RowView<S extends Schema = Schema> {
     return lo < length && indices[lo] === position ? lo : -1;
   }
 
-  /** Changes the filter and sort; the restriction stays. */
+  /** Changes the filter, sort, and channels followed; the restriction stays. */
   setQuery(query: RowQuery<S>): void {
     this.#apply(query);
     this.#rebuild = true;
@@ -260,9 +318,10 @@ export class RowView<S extends Schema = Schema> {
     return () => this.#listeners.delete(listener);
   }
 
-  /** Stops following the table and releases the positions. */
+  /** Stops following the table and the store, and releases the positions. */
   dispose(): void {
-    this.#unsubscribe();
+    this.#stops.table?.();
+    this.#unfollow();
     followers.unregister(this);
     this.#listeners.clear();
     this.#indices = undefined;
@@ -291,14 +350,79 @@ export class RowView<S extends Schema = Schema> {
       if (source.kind(field) === "geometry")
         throw new Error(`Rows cannot sort by geometry ("${field}")`);
     }
-    this.#filter = filter === true ? undefined : filter;
+    const selection = query.selection && followed(query.selection, this.source);
+    // Checked whole before the store followed until now is let go.
+    this.#unfollow();
+    this.#chosen = null;
+    this.#own = filter === true ? undefined : filter;
     this.#sort = sort;
     this.#compare = undefined;
     this.#query = Object.freeze({
-      ...(this.#filter !== undefined && { filter: this.#filter }),
+      ...(this.#own !== undefined && { filter: this.#own }),
       ...(sort.length > 0 && { sort: sort as readonly SortKey<PositionField<S>>[] }),
+      ...(selection && { selection: selection.query }),
     });
-    this.#reads = new Set([...fieldsOf(filter), ...sort.map(({ field }) => field)]);
+    if (selection) {
+      const { channels, excluding, query: given } = selection;
+      // Held weakly by the store, as by the table: a view no one keeps stops following it.
+      const ref = new WeakRef(this);
+      const stop = given.store.subscribe(() => {
+        const view = ref.deref();
+        if (view) view.#heard();
+        else stop();
+      });
+      this.#stops.store = stop;
+      this.#following = { store: given.store, channels, excluding, revision: Number.NaN };
+    }
+    this.#compose();
+  }
+
+  #unfollow() {
+    this.#stops.store?.();
+    delete this.#stops.store;
+    this.#following = undefined;
+  }
+
+  /** Catches up with the store's channels followed, if they changed since last read. */
+  #sync() {
+    const following = this.#following;
+    if (!following || following.store.revision === following.revision) return;
+    if (!this.#compose()) return;
+    this.#rebuild = true;
+    this.#queryRevision++;
+    this.#revision++;
+  }
+
+  /** A change of the store: listeners hear of it unless a read before it told them already. */
+  #heard() {
+    this.#sync();
+    if (this.#queryRevision !== this.#toldQuery) this.#tell();
+  }
+
+  /**
+   * The filter and row sets of the channels followed, from the store as it
+   * is now; false where they hold what they held when last composed.
+   */
+  #compose(): boolean {
+    const following = this.#following;
+    const chosen: DataSelection<S>[] = [];
+    if (following) {
+      const { store, channels, excluding } = following;
+      following.revision = store.revision;
+      for (const channel of channels ?? store.channels) {
+        if (excluding.includes(channel)) continue;
+        const selection = store.get(channel);
+        if (selection) chosen.push(selection);
+      }
+    }
+    const known = this.#chosen;
+    if (known && chosen.length === known.length && chosen.every((s, i) => s === known[i]))
+      return false;
+    this.#chosen = chosen;
+    this.#sets = chosen.flatMap((s) => (s.kind === "rows" ? [s.rows] : []));
+    this.#filter = and(this.#own, chosen);
+    this.#reads = new Set([...fieldsOf(this.#filter), ...this.#sort.map(({ field }) => field)]);
+    return true;
   }
 
   #changed(change: TableChange) {
@@ -339,15 +463,26 @@ export class RowView<S extends Schema = Schema> {
 
   #invalidate() {
     this.#revision++;
+    this.#tell();
+  }
+
+  #tell() {
+    this.#toldQuery = this.#queryRevision;
     for (const listener of [...this.#listeners]) listener();
   }
 
   /** Whether every row shows, in table order: no positions needed. */
   get #identity(): boolean {
-    return this.#filter === undefined && this.#sort.length === 0 && this.#restriction === null;
+    return (
+      this.#filter === undefined &&
+      this.#sort.length === 0 &&
+      this.#restriction === null &&
+      this.#sets.length === 0
+    );
   }
 
   #maintain() {
+    this.#sync();
     const source = this.source;
     const writes = writesOf(source as unknown as Table);
     if (!this.#rebuild && this.#version === source.version && this.#writes === writes) return;
@@ -454,11 +589,11 @@ export class RowView<S extends Schema = Schema> {
     this.#length = kept;
     // Compiled now: a column's array can move and its category codes change as the table does.
     const test = this.#filter === undefined ? undefined : compileExpression(this.#filter, source);
-    const restriction = this.#restriction;
-    if (restriction && !restriction.current) return;
+    const sets = this.#restrictions();
+    if (sets.some((set) => !set.current)) return;
     const fresh = rows.filter(
       (row, i) =>
-        row !== rows[i - 1] && (!test || test.at(row)) && (!restriction || restriction.has(row)),
+        row !== rows[i - 1] && (!test || test.at(row)) && sets.every((set) => set.has(row)),
     );
     // Filtered rows keep table order.
     if (fresh.length > 0)
@@ -498,11 +633,11 @@ export class RowView<S extends Schema = Schema> {
     const source = this.source as unknown as Table;
     // Compiled now: a column's array can move and its category codes change as the table does.
     const test = this.#filter === undefined ? undefined : compileExpression(this.#filter, source);
-    const restriction = this.#restriction;
-    if (restriction && !restriction.current) return new Uint32Array(0);
+    const sets = this.#restrictions();
+    if (sets.some((set) => !set.current)) return new Uint32Array(0);
     const kept = new Uint32Array(to - from);
     let n = 0;
-    if (test && !restriction) {
+    if (test && sets.length === 0) {
       // Each row is written and kept by the count, without a branch on the
       // test: filters that keep rows at random would mispredict it. A
       // missing result (NaN, from a branch of `if`) keeps no row.
@@ -514,11 +649,16 @@ export class RowView<S extends Schema = Schema> {
     } else {
       for (let row = from; row < to; row++) {
         if (test && !test.at(row)) continue;
-        if (restriction && !restriction.has(row)) continue;
+        if (!sets.every((set) => set.has(row))) continue;
         kept[n++] = row;
       }
     }
     return n === kept.length ? kept : kept.slice(0, n);
+  }
+
+  /** The row sets restricting the view: its own, and those of the channels it follows. */
+  #restrictions(): readonly ReadonlyRowSet<S>[] {
+    return this.#restriction ? [this.#restriction, ...this.#sets] : this.#sets;
   }
 
   #reserve(length: number) {
@@ -532,6 +672,37 @@ export class RowView<S extends Schema = Schema> {
 /** Views a table's rows; see `RowView`. */
 export function rowView<S extends Schema>(source: Table<S>, query?: RowQuery<S>): RowView<S> {
   return new RowView(source, query);
+}
+
+/** A query's selection checked against the view's table (types check the rest), its lists copied. */
+function followed<S extends Schema>(given: ViewSelection<S>, source: Table<S>) {
+  const { store, channels, excluding } = given;
+  if (store.source !== source) {
+    const of = (table: Table<S>, otherwise: string) =>
+      table.name === undefined ? otherwise : `"${table.name}"`;
+    throw new Error(
+      `rowView selection.store: a store of ${of(store.source, "another table")}; this view shows ${of(source, "its own table")}, so give a store of ${of(source, "it")}`,
+    );
+  }
+  if (channels && excluding !== undefined)
+    throw new Error("rowView selection: give channels or excluding, not both");
+  const query = Object.freeze({
+    store,
+    ...(channels && { channels: Object.freeze([...channels]) }),
+    ...(excluding !== undefined && { excluding: Object.freeze([excluding].flat()) }),
+  });
+  return { query, channels: query.channels, excluding: query.excluding ?? [] };
+}
+
+/** A view's own filter joined with the conditions of the channels it follows. */
+function and<S extends Schema>(
+  own: Expression | undefined,
+  chosen: readonly DataSelection<S>[],
+): Expression | undefined {
+  const all = own === undefined ? [] : [own];
+  for (const selection of chosen)
+    if (selection.kind === "predicate") all.push(selection.expression);
+  return all.length <= 1 ? all[0] : ["and", ...all];
 }
 
 /** Whether ascending `values` hold `value`. */
@@ -563,4 +734,9 @@ export function fieldsOf(expression: Expression | undefined): string[] {
   return operands.flatMap(fieldsOf);
 }
 
-const followers = new FinalizationRegistry<() => void>((stop) => stop());
+type Stops = { table?: () => void; store?: () => void };
+
+const followers = new FinalizationRegistry<Stops>((stops) => {
+  stops.table?.();
+  stops.store?.();
+});

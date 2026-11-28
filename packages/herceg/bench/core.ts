@@ -2241,6 +2241,127 @@ measure(
     for (const chart of bars) chart.dispose();
   }
 
+  // The data guide's cross-filtered dashboard at 365,000 rows, declared:
+  // each panel a view of the rows every other panel's channel leaves, the
+  // days', regions', and months' groups of three of them, and each chart
+  // bound to its channel through lineage. A filter step sets the orders'
+  // brush: three views filter again, and the groups of two follow, within
+  // the set (`brush`); then the brush's membership, the scenes (the orders'
+  // line counting its days' coverage and drawing them highlighted), and
+  // the text. Then the same step with charts that highlight nothing, and
+  // the same three views over a store of their own, read after each set,
+  // which time the views' filtering alone.
+  {
+    const DAYS = 91_250;
+    const AREAS = ["North", "South", "East", "West"];
+    const n = DAYS * AREAS.length;
+    const days = new Float64Array(n);
+    const revenue = new Float64Array(n);
+    const orders = new Float64Array(n);
+    const region = new Array<string>(n);
+    const month = new Array<string>(n);
+    for (let d = 0, i = 0; d < DAYS; d++)
+      for (const area of AREAS) {
+        days[i] = d * 86_400_000;
+        region[i] = area;
+        month[i] = `m${Math.floor(d / 30)}`;
+        revenue[i] = 4000 + ((i * 7919) % 3000);
+        orders[i] = 80 + ((i * 104_729) % 60);
+        i++;
+      }
+    const sales = table({
+      time: days,
+      region: category(region),
+      month: category(month),
+      revenue,
+      orders,
+    });
+    const store = selectionStore(sales);
+    const made: { dispose(): void }[] = [];
+    const rowsFor = (own: string, of = store) => {
+      const view = rowView(sales, { selection: { store: of, excluding: own } });
+      made.push(view);
+      return view;
+    };
+    const byDay = groupRows(rowsFor("orders"), { by: ["time"], ops: { orders: sum("orders") } });
+    const byRegion = groupRows(rowsFor("regions"), {
+      by: ["region"],
+      ops: { revenue: sum("revenue") },
+    });
+    const byMonth = groupRows(rowsFor("months"), {
+      by: ["month"],
+      ops: { revenue: sum("revenue") },
+    });
+    const stops: (() => void)[] = [];
+    const shown = rowsFor("revenue");
+    const panels = () =>
+      [
+        [line(shown as never, { x: "time", y: "revenue", color: "region" }), "revenue"],
+        [line(byDay.table as unknown as Table, { x: "time", y: "orders" }), "orders"],
+        [bar(byRegion.table as unknown as Table, { x: "region", y: "revenue" }), "regions"],
+        [bar(byMonth.table as unknown as Table, { x: "month", y: "revenue" }), "months"],
+      ] as const;
+    const charts = panels().map(([mark, channel]) => {
+      const selection = rowSelection({ store, channel, lineage: lineageReader });
+      const chart = new ChartModel({ marks: [mark as never], rowSelection: selection });
+      chart.setSize(800, 300, 1);
+      stops.push(selection.highlight(chart));
+      return chart;
+    });
+    for (const chart of charts) chart.scene(estimateText, true);
+    let at = 0;
+    const range = () => {
+      const from = (at++ % 20) * 1000;
+      return selectWhere(
+        col("time")
+          .ge(from * 86_400_000)
+          .and(col("time").le((from + 30_000) * 86_400_000)),
+      );
+    };
+    // The charts' coverage is theirs to count, in their scenes: the orders'
+    // line's of its 91,250 days, followed by the rows the brush moved over.
+    phases(
+      "cross-filter: a filter step, 365,000 rows, four panels, declared views",
+      () => store.set("orders", range()),
+      membershipOf(store as never, "orders"),
+      [],
+      "orders",
+      charts,
+    );
+    for (const stop of stops.splice(0)) stop();
+    for (const chart of charts) chart.dispose();
+    // The same step with charts that highlight nothing: the views and groups, and the scenes.
+    const plain = panels().map(([mark]) => {
+      const chart = new ChartModel({ marks: [mark as never] });
+      chart.setSize(800, 300, 1);
+      chart.scene(estimateText, true);
+      return chart;
+    });
+    measure(
+      "cross-filter: the same step, the charts highlighting nothing",
+      () => {
+        store.set("orders", range());
+        for (const chart of plain) chart.scene(estimateText, true);
+      },
+      { warmup: 5, samples: 30 },
+    );
+    for (const chart of plain) chart.dispose();
+    const alone = selectionStore(sales);
+    const views = ["revenue", "regions", "months"].map((own) => rowsFor(own, alone));
+    measure(
+      "cross-filter: three views filter again, 365,000 rows, no groups",
+      () => {
+        alone.set("orders", range());
+        for (const view of views) void view.length;
+      },
+      { warmup: 5, samples: 30 },
+    );
+    // Gone before the cases after it, which its 365,000 rows and 91,250 groups would slow.
+    for (const groups of [byDay, byRegion, byMonth]) groups.dispose();
+    for (const view of made) view.dispose();
+    gc?.();
+  }
+
   // Batches of 1,000 rows appended to a brushed table, which grows, then to one keeping its last million.
   for (const rolling of [false, true]) {
     const sales = salesOf(M, rolling ? M : undefined);

@@ -5,6 +5,7 @@ import { contributorsOf } from "../../src/data/contributor-records.ts";
 import { relationTo } from "../../src/data/contributors.ts";
 import { deriveTable } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
+import { compileExpression } from "../../src/data/expression.ts";
 import { groupRows } from "../../src/data/groups.ts";
 import { pivotRows } from "../../src/data/pivot.ts";
 import { RowSet } from "../../src/data/row-set.ts";
@@ -252,6 +253,14 @@ function held(store: ReturnType<typeof selectionStore>, channel: string) {
   return selection?.kind === "rows" ? Array.from(selection.rows.positions()) : selection;
 }
 
+/** The positions of the rows a channel's condition holds now; undefined for a channel of rows. */
+function meeting(store: ReturnType<typeof selectionStore>, channel: string) {
+  const selection = store.get(channel);
+  if (selection?.kind !== "predicate") return undefined;
+  const { at } = compileExpression(selection.expression, store.source);
+  return Array.from({ length: store.source.length }, (_, row) => row).filter((row) => at(row));
+}
+
 describe("gestures on a bar of groups through lineage", () => {
   const setup = (brush?: "x" | "y" | "lasso") => {
     const source = sales();
@@ -298,9 +307,11 @@ describe("gestures on a bar of groups through lineage", () => {
         "pointer",
         0,
       );
-      expect(held(store, "regions")).toEqual([3, 4, 5]);
+      // The regions' condition, on the source's region, holding their rows.
+      expect(held(store, "regions")).toMatchObject({ kind: "predicate" });
+      expect(meeting(store, "regions")).toEqual([3, 4, 5]);
     },
-    "writes a brush along its groups' axis as the rows of the groups it holds",
+    "writes a brush along its groups' axis as the condition of the groups' keys it holds",
   );
 
   contractTest(
@@ -308,11 +319,15 @@ describe("gestures on a bar of groups through lineage", () => {
     () => {
       const { store, link } = setup();
       link.brushed({ kind: "items", items: ['[0,"revenue","South"]'] }, null, true, "pointer", 0);
-      expect(held(store, "regions")).toEqual([3, 4]);
+      expect(held(store, "regions")).toEqual({
+        kind: "predicate",
+        expression: ["==", ["field", "region"], "South"],
+      });
+      expect(meeting(store, "regions")).toEqual([3, 4]);
       link.brushed({ kind: "series", series: ['[0,"revenue"]'] }, null, true, "pointer", 0);
-      expect(held(store, "regions")).toEqual([0, 1, 2, 3, 4, 5]);
+      expect(meeting(store, "regions")).toEqual([0, 1, 2, 3, 4, 5]);
     },
-    "writes items' and series' rows behind them",
+    "writes items' and series' conditions of the groups' keys",
   );
 
   it("writes a lasso's items' rows behind them", () => {
@@ -1159,7 +1174,7 @@ describe("bindings through lineage, from review, round 3", () => {
     });
     // The error bars' series, named after its high end, stands for every row behind them.
     link.brushed({ kind: "series", series: ['[0,"b"]'] }, null, true, "pointer", 0);
-    expect(held(store, "c")).toEqual([0, 1, 2, 3]);
+    expect(meeting(store, "c")).toEqual([0, 1, 2, 3]);
   });
 
   it("refuse brushes along counts of groups of groups", () => {

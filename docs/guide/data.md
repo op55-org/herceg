@@ -351,16 +351,50 @@ const { indices, length } = view.read(); // positions into `requests`, in view o
 | Member | Does |
 | --- | --- |
 | `read()` | Brings the view current and returns its positions. |
-| `query`, `setQuery(query)` | The filter and sort; change one and keep the other with `setQuery({ ...view.query, sort })`. |
+| `query`, `setQuery(query)` | The filter, sort, and channels followed, as given; change one and keep the others with `setQuery({ ...view.query, sort })`. |
+| `filter`, `restricted` | What the view applies now: its own filter joined with the conditions of the channels it follows (undefined for none), and whether row sets restrict it. |
 | `restrict(rowSet)` | Shows only a row set's rows (`null` for all). |
 | `indexOf(position)` | Where a table row shows in the view, or -1. |
-| `subscribe(listener)`, `dispose()` | Told when the view goes out of date; stop following the table. |
+| `subscribe(listener)`, `dispose()` | Told when the view goes out of date; stop following the table and the store. |
 
 Views follow their table. A change marks them out of date at once, and the
 next `read` catches up: appended rows are filtered and merged into the
 order, rows that left a rolling window are dropped, and a change to a field
 the view filters or sorts by re-sorts the changed rows. Sorts are stable,
 with missing values last in either direction and categories by label.
+
+**Following a selection store.** With `selection`, a view shows only the
+rows the channels of a [selection store](#row-sets-and-selection-stores)
+of its table hold too, and filters again as they change:
+
+```ts
+const filters = selectionStore(requests);
+const slow = rowView(requests, { filter: col("latency").gt(250), selection: { store: filters } });
+const others = rowView(requests, { selection: { store: filters, excluding: "services" } });
+```
+
+- **Which channels.** Every channel the store holds, those set later too;
+  `channels` lists some (`[]` follows none), or `excluding` leaves some
+  out, as a [cross-filtered](#cross-filtering) panel leaves out its own.
+  Not both.
+- **Conditions and row sets.** A channel's condition joins the view's own
+  `filter`, and rows appended later meet it or not; a channel's row set
+  restricts the view as `restrict` does, intersected with the view's own
+  and with other channels' sets, and holds no row appended later. A
+  channel holding nothing adds nothing.
+- **What it costs.** A channel's change filters every row of the table
+  again when the view is next read (groups and totals of the view read it
+  at once), and tells the view's listeners only when what the view applies
+  changed. Appends are filtered as before, only the new rows.
+- **One table.** The store must be of the view's table: types refuse a
+  store of another, and so does the view at run time (`rowView
+  selection.store: a store of "visits"; this view shows "sales", so give a
+  store of "sales"`).
+- **Writing.** A gesture on a chart of the view (a brush, a selected
+  item, through a binding or in the `select` event's conditions) is
+  written within the view's own filter and restriction, not those of the
+  channels it follows: they are other panels' filters, so channels never
+  copy one another's conditions.
 
 Series marks take a view where they take a table: lines, areas, bars,
 points, rugs, error bars, box plots, boxen, violins, candlesticks, heatmaps,
@@ -397,8 +431,12 @@ Limits:
 
 In a spec, a view is a data entry naming its table:
 `{ "source": "requests", "view": { "filter": [">", ["field", "latency"], 250] } }`,
-with `sort` as `[{ "field": "latency", "order": "descending" }]`. In
-Python, `hg.view(requests, filter=hg.col("latency") > 250, sort="time")`.
+with `sort` as `[{ "field": "latency", "order": "descending" }]` and
+`selection` as `{ "excluding": "services" }` (or `{ "channels": [...] }`,
+or `{}` for every channel): it follows the store `loadSpec` makes for its
+table, the one the spec's `rowSelection` binds, or the one given in
+`loadSpec`'s `stores`. In Python, `hg.view(requests, filter=hg.col("latency")
+> 250, sort="time", selection=hg.Channels(excluding="services"))`.
 
 ## Row sets and selection stores
 
@@ -421,8 +459,7 @@ const store = selectionStore(trips);
 store.set("brush", selectWhere(col("fare").gt(20)));
 store.set("picked", selectRows(new RowSet(trips).addAll([3, 7, 9])));
 
-const filtered = rowView(trips, { filter: store.condition(["brush"]) });
-store.subscribe(() => filtered.setQuery({ filter: store.condition(["brush"]) }));
+const brushed = rowView(trips, { selection: { store, channels: ["brush"] } });
 ```
 
 `store.condition(channels)` is the conjunction of those channels'
@@ -449,10 +486,11 @@ if (held?.kind === "rows") store.set("picked", selectRows(held.rows.copy().add(1
 over an ordered table, only the words that hold members); a copy of a set
 from before a reset is empty. Freezing copies nothing. Positions, `size`,
 and `current` still follow the table: a frozen set's rows leave as the table
-drops them, and none are left after a reset. Nothing propagates on its own: the application decides which
-views read which channels ([Cross-filtering](#cross-filtering) shows a
-dashboard's). Grids and charts bound to a channel write and
-highlight it (see [Selected rows](interaction.md#selected-rows)).
+drops them, and none are left after a reset. Views follow the channels
+they name ([Following a selection store](#row-views);
+[Cross-filtering](#cross-filtering) shows a dashboard's), and grids and
+charts bound to a channel write and highlight it (see
+[Selected rows](interaction.md#selected-rows)).
 
 ## Row groups
 
@@ -492,10 +530,17 @@ bar(traffic.table, { x: "service", y: "latency", series: "region" }); // the las
 - **Order.** Groups come in the order they first appeared. The view's
   filter and restriction choose rows; its sort orders each group's rows,
   not the groups. A group whose rows all leave (a filter, a rolling
-  window) leaves the tables, and comes back after the others when rows
-  return: give a category axis of groups a `domain` to keep its bars in
-  place ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)),
-  and draw a line of groups through a view sorted by its x.
+  window) leaves the tables, and comes back in its place when rows
+  return, so bars of groups and a line of days keep their order as
+  filters change. A group's place is remembered as long as its key is,
+  as tables forget labels no row holds: past about twice as many keys as
+  the table has rows, those no row of the table holds are forgotten (a
+  rolling window's old days), and a group whose key was forgotten comes
+  back last, as a new one. A key that first
+  appears after the others comes last too, so draw a line of groups whose
+  rows arrive out of order through a view sorted by its x, and give a
+  category axis a `domain` to keep a band where a group left
+  ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)).
 - **Typing.** `tableOf(field)` is typed by the fields `by` lists, so a chart
   of the regions' table cannot name `service`.
 
@@ -675,32 +720,41 @@ draws: `hg.Chart(hg.derive(df).aggregate(by="region", revenue=("revenue",
 A cross-filtered dashboard draws one table in several panels, and each
 panel's filter narrows the others: brushing a time range shows only those
 days everywhere else, and clicking a region's bar shows only that region.
-The pieces above make it without rebuilding a table: a selection store
-holds the filters, each panel draws a row view of the rows every other
-filter leaves, and the panels that sum draw groups of their view. As a
-filter changes, the views and groups follow it in place, and the marks keep
-the tables they were given.
+The pieces above declare it, with no listeners and no table rebuilt: a
+selection store holds a channel for each panel, each panel draws a row
+view that follows every channel but its own, the panels that sum draw
+groups of their view, and each chart's row selection writes its brush or
+its clicked bar to its own channel. As a channel changes, the views and
+groups follow it in place, and the marks keep the tables they were given.
 
 The example has four panels over a row a day and region (`time`, `region`,
 `month` as `"2025-03"`, `revenue`, `orders`): revenue per region over time,
 orders a day, revenue per region, and revenue per month.
 
 ```ts
-import { bar, col, createChart, groupRows, line, rowView, selectionStore, selectWhere, sum } from "herceg";
+import {
+  bar,
+  createChart,
+  groupRows,
+  line,
+  lineage,
+  rowSelection,
+  rowView,
+  type SelectionGesture,
+  selectionStore,
+  sum,
+} from "herceg";
 
-// The filters: a channel for each panel that filters the others.
+// The filters: a channel for each panel, which filters the others.
 const filters = selectionStore(sales);
-const channels = ["revenue", "orders", "regions", "months"];
 
-/** The rows a panel shows: those every filter but its own leaves. */
-function rowsFor(panel: string) {
-  const others = channels.filter((channel) => channel !== panel);
-  const view = rowView(sales, { filter: filters.condition(others) });
-  filters.subscribe(({ channel }) => {
-    if (channel !== panel) view.setQuery({ ...view.query, filter: filters.condition(others) });
-  });
-  return view;
-}
+/** The rows a panel shows: those every other panel's channel leaves. */
+const rowsFor = (panel: string) =>
+  rowView(sales, { selection: { store: filters, excluding: panel } });
+
+/** A panel's brushes or clicks set its channel to rows of `sales`, through its groups. */
+const filtering = (channel: string, events: SelectionGesture[]) =>
+  rowSelection({ store: filters, channel, events, lineage });
 
 // Panels that sum draw groups of their rows, which follow the view.
 const byDay = groupRows(rowsFor("orders"), { by: ["time"], ops: { orders: sum("orders") } });
@@ -711,84 +765,177 @@ const byRegion = groupRows(rowsFor("regions"), {
 const byMonth = groupRows(rowsFor("months"), { by: ["month"], ops: { revenue: sum("revenue") } });
 
 const revenueChart = createChart(revenueElement, {
-  marks: [line(rowsFor("revenue"), { x: "time", y: "revenue", series: "region" })],
+  marks: [line(rowsFor("revenue"), { x: "time", y: "revenue", color: "region" })],
   interaction: { brush: "x" },
+  rowSelection: filtering("revenue", ["brush"]),
 });
 const ordersChart = createChart(ordersElement, {
-  // Days a filter empties come back after the others: drawn sorted by time.
-  marks: [line(rowView(byDay.table, { sort: [{ field: "time" }] }), { x: "time", y: "orders" })],
+  marks: [line(byDay.table, { x: "time", y: "orders" })],
   interaction: { brush: "x" },
+  rowSelection: filtering("orders", ["brush"]),
 });
-// Bars keep their places as their groups leave and come back: the axes list them.
+// The axis lists the regions: a bar a filter empties keeps its band.
 const regionsChart = createChart(regionsElement, {
   x: { domain: ["North", "South", "East", "West"] },
   marks: [bar(byRegion.table, { x: "region", y: "revenue", color: "region" })],
   interaction: { select: "items" },
+  rowSelection: filtering("regions", ["click"]),
 });
 const monthsChart = createChart(monthsElement, {
-  x: { domain: [...sales.categories("month").dictionary] }, // in order of time, as the rows came
   marks: [bar(byMonth.table, { x: "month", y: "revenue" })],
   interaction: { select: "items" },
+  rowSelection: filtering("months", ["click"]),
 });
-
-// A brush filters the others to its range; a selected bar to its region or month.
-for (const [chart, channel] of [
-  [revenueChart, "revenue"],
-  [ordersChart, "orders"],
-] as const)
-  chart.on("select", ({ selection, phase }) => {
-    if (phase !== "commit") return;
-    const x = selection?.kind === "brush" ? selection.x : undefined;
-    filters.set(channel, x ? selectWhere(col("time").ge(x[0]).and(col("time").le(x[1]))) : null);
-  });
-for (const [chart, channel] of [
-  [regionsChart, "regions"],
-  [monthsChart, "months"],
-] as const)
-  chart.on("select", ({ conditions, phase }) => {
-    if (phase !== "commit") return;
-    filters.set(channel, conditions[0] ? selectWhere(conditions[0].condition) : null);
-  });
 ```
 
-- **One store, a channel for each filter.** `filters.condition(others)` is
-  the conjunction of the conditions in every channel but the panel's own
-  (a channel holding rows adds none), and undefined (every row) while none
-  holds one. A panel is never filtered by its own channel: it keeps its
-  brush or its selected bar in place.
-- **Selections become conditions.** A brush commits its range; a selected
-  bar's condition names its group's field (`region`, `month`), which is
-  the table's field too, so it filters the table's rows.
-- **Groups follow their view.** Their tables stay the same objects as the
-  groups change, so the marks keep drawing them. A group a filter empties
-  leaves its table and comes back after the others, so the line of days
-  draws through a view sorted by time, and the bar axes list their
-  categories in `domain` ([How bands are ordered](axes-and-legends.md#how-bands-are-ordered)).
+- **One store, a channel for each panel.** `rowView(sales, { selection:
+  { store, excluding } })` shows the rows every other channel holds: their
+  conditions joined, their row sets intersected
+  ([Following a selection store](#row-views)). A panel is never filtered
+  by its own channel, so it keeps its brush or its selected bar in place.
+- **Bindings write the channels.** A brush writes its range as a
+  condition on `time`; a bar of groups, through `lineage`, the condition
+  of its group's key (`region == "West"`); the orders' brush, along its
+  groups' axis, a condition on the rows' times
+  ([Selected rows through lineage](interaction.md#selected-rows-through-lineage)).
+  Each condition holds for rows that arrive later. Each chart highlights
+  what its own channel holds.
+- **Groups follow their view, and keep their places.** Their tables stay
+  the same objects as the groups change, so the marks keep drawing them.
+  A group a filter empties leaves its table, and comes back in its place
+  when its rows do ([Row groups](#row-groups)): the line of days stays in
+  order of time, and the months' bars in theirs. The regions' axis lists
+  its bands in `domain`, so a bar a filter empties keeps its band, empty;
+  the months' axis has a band for each month that has rows.
 
-**What a filter step costs.** Setting a channel tells the store's
-listeners, which give each other panel's view its new condition. Groups
-follow their view at once: within the `set` call, the view filters every
-row of the table again and the groups compute again from it, then write
-their table in place (the values that differ and the groups added, or the
-whole table when a group leaves). A view no groups follow, as the revenue
-lines', filters when its chart reads it. Each chart draws once, in the
-next frame. No table is made or replaced: the marks hold the same tables
-throughout. Keeping the views and groups up to date takes about 0.2 ms a
-step over 2,924 rows (two years of days in four regions) and 12 ms over
-365,000, before the charts draw (Node, Apple M6).
+**In a spec**, a panel is the same entries: a view following the channels,
+groups of it, and a binding of the table. The regions' panel:
+
+```json
+{
+  "version": 1,
+  "data": {
+    "sales": {
+      "columns": {
+        "region": ["North", "South"],
+        "month": ["2025-03", "2025-03"],
+        "revenue": [4200, 5100]
+      }
+    },
+    "shown": { "source": "sales", "view": { "selection": { "excluding": "regions" } } },
+    "byRegion": {
+      "source": "shown",
+      "groups": { "by": ["region"], "ops": { "revenue": { "op": "sum", "field": "revenue" } } }
+    }
+  },
+  "x": { "domain": ["North", "South", "East", "West"] },
+  "marks": [
+    { "type": "bar", "data": "byRegion", "x": "region", "y": "revenue", "color": "region" }
+  ],
+  "interaction": { "select": "items" },
+  "rowSelection": { "data": "sales", "channel": "regions", "events": ["click"] }
+}
+```
+
+`loadSpec` makes one store for each table the spec's bindings and views
+name. Panels loaded from several specs filter each other through one table
+and one store given to each: `loadSpec(spec, buffers, { tables: { sales },
+stores: { sales: filters } })`.
+
+**In Python**, `hg.view(..., selection=hg.Channels(excluding=...))`,
+`hg.group_rows`, and a `hg.SelectionBinding` of the data make the same
+specs:
+
+```python
+import herceg as hg
+
+
+def shown(panel):
+    """The rows a panel shows: those every other panel's channel leaves."""
+    return hg.view(sales, selection=hg.Channels(excluding=panel))
+
+
+def filtering(channel, events):
+    """A panel's brushes or clicks set its channel to rows of sales."""
+    return hg.SelectionBinding(channel, data=sales, events=events)
+
+
+revenue = hg.Chart(shown("revenue"), brush="x", row_selection=filtering("revenue", ["brush"]))
+revenue.line(x="time", y="revenue", color="region")
+
+by_day = hg.group_rows(shown("orders"), by="time", orders=("orders", "sum"))
+orders = hg.Chart(by_day, brush="x", row_selection=filtering("orders", ["brush"]))
+orders.line(x="time", y="orders")
+
+by_region = hg.group_rows(shown("regions"), by="region", revenue=("revenue", "sum"))
+regions = hg.Chart(
+    by_region,
+    x=hg.AxisOptions(domain=["North", "South", "East", "West"]),
+    select="items",
+    row_selection=filtering("regions", ["click"]),
+)
+regions.bar(x="region", y="revenue", color="region")
+
+by_month = hg.group_rows(shown("months"), by="month", revenue=("revenue", "sum"))
+months = hg.Chart(by_month, select="items", row_selection=filtering("months", ["click"]))
+months.bar(x="month", y="revenue")
+```
+
+Each Python chart holds the store of its own copy of `sales`, as separate
+notebook outputs and widgets do (sharing one across a page is on the
+[roadmap](../roadmap.md#python-and-live-integration)). A chart's view
+follows its own binding's channels, and a channel set from Python
+(`hg.SelectionBinding(..., selection=hg.col("month") == "2025-03")`, or a
+widget's `row_selection`) filters its views in static output too. The four
+specs filter each other where a page loads them over one table and store,
+as above.
+
+**A grid among the panels** shows a view following the others' channels
+and writes the rows selected in it to a channel of its own, which the
+other panels' views intersect with their conditions:
+
+```ts
+import { createGridModel } from "herceg/grid";
+
+const model = createGridModel({
+  data: rowView(sales, { selection: { store: filters, excluding: "grid" } }),
+  columns: [{ field: "time" }, { field: "region" }, { field: "revenue" }],
+  selectionStore: filters,
+  channel: "grid",
+});
+```
+
+The grid keeps the row at its top in place as rows come back above it,
+so clearing a filter can leave it scrolled down the list:
+`model.scrollTo({ top: 0 })` on a filter step shows it from its first row
+([how a grid follows its view](grids.md#a-grid)).
+
+**What a filter step costs.** A channel's change tells the views that
+follow it. Groups follow their view at once: within the `set` call, the
+view filters every row of the table again and the groups compute again
+from it, then write their table in place (the values that differ and the
+groups added, or the whole table when a group leaves or comes back). A
+view no groups follow, as the revenue lines', filters when its chart reads
+it. Each chart draws once, in the next frame. No table is made or
+replaced: the marks hold the same tables throughout. Keeping the views and
+groups up to date takes about 0.08 ms a step over 2,924 rows (two years
+of days in four regions) and 8 ms over 365,000, the same as listeners
+setting each view's filter would take, before the charts draw. The
+charts' part over 365,000 rows is about 6 ms more, most of it the four
+charts' scenes (5 ms). Each chart highlights what its own channel holds,
+so the orders' line counts the selected rows of its 91,250 days as it
+draws: the whole step takes about 14 ms, and 13 ms with charts that
+highlight nothing (Node, Apple M6).
 
 **Streaming.** Rows appended to the table go through the same path, but
 only the new rows rather than the whole table: each view filters them by
-its condition (a brush's condition holds for rows that arrive later), the
-groups add them to the groups they join or start new ones, and each chart
-draws once a frame. 1,000 rows take about 0.25 ms before drawing, whether
-every view takes them or a brush leaves them out. A new day joins the line
-in its place, and a new month's bar follows the listed months. New months
-keep, among themselves, the order their groups came in, which a filter
-that empties one and its clear can change, so give the axis the months
-again as they arrive:
-`monthsChart.update({ x: { domain: [...sales.categories("month").dictionary] } })`.
-Rows a rolling window drops leave the views and groups the same way.
+its channels' conditions (a brush's condition holds for rows that arrive
+later; a grid's row set holds none of them), the groups add them to the
+groups they join or start new ones, and each chart draws once a frame.
+1,000 rows take about 0.25 ms before drawing, whether every view takes
+them or a brush leaves them out. A day's late rows join its group in its
+place, and a new month's bar comes after the others. Rows a rolling
+window drops leave the views and groups the same way.
 
 **Where it stops.**
 
@@ -804,22 +951,12 @@ Rows a rolling window drops leave the views and groups the same way.
   step (the [ranked-bars recipe](axes-and-legends.md#how-bands-are-ordered)).
 - A panel's totals (`rowTotals` of its view) follow its filters; a share of
   the unfiltered total needs a second totals over a view without them.
-- A grid among the panels selects rows of the table it shows (its panel's
-  groups), in a selection store of its own, and `filters.condition` reads
-  conditions only. To filter the others by a selected group, set the
-  grid's channel in `filters` to a condition on the table's fields from
-  the group's values (`col("month").eq(month)`), as a selected bar's
-  condition does. The grid keeps the row at its top in place as groups
-  come back above it, so clearing a filter can leave it scrolled down the
-  list: `model.scrollTo({ top: 0 })` on a filter step shows it from its
-  first row ([how a grid follows its view](grids.md#a-grid)).
+- A grid of a panel's groups selects rows of the groups' table, in a
+  store of its own; grids showing groups of their own are refused a
+  store of the source yet.
 - Drilling into a panel (years, then a year's months) changes what it
   groups by, which is new groups and a new table for the mark: a drill
   step rebuilds that panel; a filter step does not.
-
-Python has row views with a fixed filter (`hg.view`), but no selection
-stores or row groups, so this pattern is for TypeScript and the
-framework adapters.
 
 ## Row pivots
 
@@ -938,9 +1075,19 @@ first time a mark uses it, without building Python objects per value:
   `append` and `replace` refuse matrices.
 
 - `hg.ordered(data, by=, max_rows=)` is [an ordered table](#rows-that-arrive-late),
-  and `hg.view(data, filter=, sort=, descending=)` a [row view](#row-views)
-  for series marks; both pass where a chart or mark takes data.
+  and `hg.view(data, filter=, sort=, descending=, selection=)` a
+  [row view](#row-views) for series marks, following the channels
+  `hg.Channels(...)` names of the store the chart's bindings of the data
+  write; both pass where a chart or mark takes data.
+- `hg.group_rows(data, by=, **operations)` is [row groups](#row-groups) of
+  a view or data, with operations as pandas' named aggregation takes them
+  (`n="count"`, `revenue=("revenue", "sum")`; counts, sums, means,
+  minimums, and maximums). It is the table of the last grouping column's
+  groups; `.level("region")` is an upper level's, and charts of both levels
+  share one grouping. `hg.row_totals(data, **operations)` is
+  [totals](#totals). Both compute in the browser and follow their view.
 
-Selection stores, row groups, and pivots are TypeScript only.
+Selection stores other than charts' bindings, and pivots, are TypeScript
+only.
 Live notebook charts stream rows from Python (see
 [Notebooks and Streamlit](python/notebooks-and-streamlit.md)).

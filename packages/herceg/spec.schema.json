@@ -3000,11 +3000,13 @@
       ]
     },
     "DataSpec": {
-      "description": "A table: its columns, rows derived from another table of the spec, or a view of another's rows.",
+      "description": "A table: its columns, rows derived from another table of the spec, a view of another's rows, or groups or totals of a view's rows.",
       "anyOf": [
         { "$ref": "#/$defs/ColumnsSpec" },
         { "$ref": "#/$defs/DerivedSpec" },
-        { "$ref": "#/$defs/ViewSpec" }
+        { "$ref": "#/$defs/ViewSpec" },
+        { "$ref": "#/$defs/GroupsSpec" },
+        { "$ref": "#/$defs/TotalsSpec" }
       ]
     },
     "DendrogramSpec": {
@@ -4124,6 +4126,53 @@
       "description": "Grid lines across the plot at an axis' major ticks: `zIndex` places them among the marks (-1, under marks of the default 0, by default).",
       "type": "object",
       "properties": { "zIndex": { "title": "Z index", "type": "number" } },
+      "additionalProperties": false
+    },
+    "GroupOpSpec": {
+      "description": "An aggregate groups and totals keep as their rows come and go: a count of rows (of a field's finite values, with `field`), or the sum, mean, minimum, or maximum of a field's finite values. Other aggregates (a median, a distinct count) are a derived table's.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "title": "Op",
+          "anyOf": [
+            { "const": "count" },
+            { "type": "string", "enum": ["sum", "mean", "min", "max"] }
+          ]
+        },
+        "field": { "title": "Field", "type": "string" }
+      },
+      "anyOf": [
+        { "required": ["op"], "properties": { "op": { "const": "count" } } },
+        {
+          "required": ["op", "field"],
+          "properties": { "op": { "type": "string", "enum": ["sum", "mean", "min", "max"] } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "GroupsSpec": {
+      "description": "The rows of the view or table `source` grouped by the values of `by`, level by level (by the first field, then the first two, ...), one row per group, with each group's aggregates (`groupRows`): the last level's table, or with `level` the table of the level of that grouping field. Groups come in the order their keys first appeared, and a group whose rows all leave and come back takes its place again. Entries of one source, `by`, and `ops` share their groups. Charts built from the spec keep them current as the view changes.",
+      "type": "object",
+      "properties": {
+        "source": { "title": "Source", "type": "string" },
+        "groups": {
+          "title": "Groups",
+          "type": "object",
+          "properties": {
+            "by": { "title": "By", "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "ops": {
+              "title": "Ops",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": { "$ref": "#/$defs/GroupOpSpec" }
+            },
+            "level": { "title": "Level", "type": "string" }
+          },
+          "required": ["by"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["source", "groups"],
       "additionalProperties": false
     },
     "GuideSpec": {
@@ -9806,6 +9855,29 @@
         }
       ]
     },
+    "TotalsSpec": {
+      "description": "One row of aggregates over every row the view or table `source` shows (`rowTotals`), current as the view changes: a KPI, a rule at the mean.",
+      "type": "object",
+      "properties": {
+        "source": { "title": "Source", "type": "string" },
+        "totals": {
+          "title": "Totals",
+          "type": "object",
+          "properties": {
+            "ops": {
+              "title": "Ops",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": { "$ref": "#/$defs/GroupOpSpec" }
+            }
+          },
+          "required": ["ops"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["source", "totals"],
+      "additionalProperties": false
+    },
     "TrackLabelPlaceSpec": {
       "description": "A label place of a side track's labels (`TrackPlaceSpec`), with the places along the geometry that `LabelPlaceSpec` gives: series labels' and rules' (a vertical rule's labels stand above or below the plot, where no track is kept, so they take no `room`).",
       "type": "object",
@@ -10230,8 +10302,20 @@
       },
       "additionalProperties": false
     },
+    "ViewSelectionSpec": {
+      "description": "The channels of the store of a view's table that it follows (the store the spec's bindings of that table write, which `loadSpec` makes or is given): the view shows the rows each of their conditions and row sets holds, and filters again as they change. Every channel, those made later too, by default; `channels` lists them, or `excluding` leaves some out (a panel's own); not both.",
+      "type": "object",
+      "properties": {
+        "channels": { "title": "Channels", "type": "array", "items": { "type": "string" } },
+        "excluding": {
+          "title": "Excluding",
+          "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+        }
+      },
+      "additionalProperties": false
+    },
     "ViewSpec": {
-      "description": "The rows of the table `source` that `view` shows: those its filter keeps, in the order its sort gives (table order without), read from the table without a copy, and following it as it changes (`rowView`). Every mark that draws series takes a view; annotation and layout marks take tables.",
+      "description": "The rows of the table `source` that `view` shows: those its filter keeps, and with `selection` those the channels of the table's selection store hold too, in the order its sort gives (table order without), read from the table without a copy, and following it as it changes (`rowView`). Every mark that draws series takes a view; annotation and layout marks take tables.",
       "type": "object",
       "properties": {
         "source": { "title": "Source", "type": "string" },
@@ -10256,7 +10340,8 @@
                 "required": ["field"],
                 "additionalProperties": false
               }
-            }
+            },
+            "selection": { "title": "Selection", "$ref": "#/$defs/ViewSelectionSpec" }
           },
           "additionalProperties": false
         }

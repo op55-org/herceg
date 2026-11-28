@@ -1183,9 +1183,7 @@ export class GridModel<S extends Schema = Schema, R extends Schema = S> extends 
    */
   #records = (): MarkRows => {
     const view = this.data as unknown as RowView;
-    const { filter } = view.query;
-    if ((filter === undefined || filter === true) && view.restriction === null)
-      return wholeTable(this.#table);
+    if (view.filter === undefined && !view.restricted) return wholeTable(this.#table);
     this.#recordRows = view.markRows(this.#recordRows);
     return this.#recordRows;
   };

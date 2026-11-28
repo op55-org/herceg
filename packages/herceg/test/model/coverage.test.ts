@@ -67,9 +67,12 @@ function covers(
   measured?: { field: string; values: ArrayLike<number> },
 ) {
   const relation = coverage.relation;
+  // Read all at once, as lines and bars of many groups read them, and one by one.
+  const counts = coverage.counts();
   for (let t = 0; t < relation.targets; t++) {
     const of = rows(t);
     const selected = of.filter((p) => selection[p]).length;
+    expect([t, counts.selected(t), counts.total(t)]).toEqual([t, selected, of.length]);
     expect([t, coverage.selected(t), coverage.total(t)]).toEqual([t, selected, of.length]);
     expect(coverage.state(t)).toBe(
       selected === 0 ? "none" : selected === of.length ? "all" : "partial",
@@ -231,6 +234,22 @@ describe("coverage", () => {
     store.set("c", selectRows(new RowSet(source).addAll([0, 3, 4])));
     expect([0, 1, 2, 3, 4].map((t) => coverage.selected(t))).toEqual([1, 1, 1, 2, 2]);
     expect(coverageWork.incidences - before).toBe(1);
+  });
+
+  it("read targets of one source row each from the membership, at once as one by one", () => {
+    const source = salesOf(60, 4);
+    const kept = deriveTable(source, [{ filter: [">=", ["field", "x"], 4] }]);
+    const store = selectionStore(source);
+    store.set("c", selectWhere(col("v").ge(3)));
+    const coverage = coverageOf(relationTo(kept, source)!, undefined, store, "c");
+    const counts = coverage.counts();
+    const each = Array.from({ length: kept.length }, (_, t) => [
+      counts.selected(t),
+      counts.total(t),
+    ]);
+    expect(each).toEqual(each.map((_, t) => [coverage.selected(t), coverage.total(t)]));
+    expect(each.some(([selected]) => selected === 1)).toBe(true);
+    expect(each.some(([selected]) => selected === 0)).toBe(true);
   });
 
   it("counts a coverage group again by one of its targets", () => {

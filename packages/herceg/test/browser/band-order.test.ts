@@ -84,19 +84,14 @@ contractTest(
     await frame();
     expect(selects.at(-1)?.conditions[0]?.condition).toEqual(["==", ["field", "region"], "East"]);
 
-    // A filter empties three groups, and its clear brings them back after
-    // West: the bands stay listed, each bar where it was.
+    // A filter empties three groups, and its clear brings them back in
+    // their places, before West: the bands stay listed, each bar where it was.
     rows.setQuery({ filter: col("region").eq("West") });
     await frame();
     expect(chart.getPanels()[0]!.x!.categories).toEqual(LISTED);
     rows.setQuery({ filter: true });
     await frame();
-    expect(byRegion.table.categories("region").dictionary).toEqual([
-      "West",
-      "North",
-      "South",
-      "East",
-    ]);
+    expect(byRegion.table.categories("region").dictionary).toEqual(REGIONS);
     expect(chart.getPanels()[0]!.x!.categories).toEqual(LISTED);
     expect(LISTED.map((name) => at(chart, name))).toEqual(centers);
   },

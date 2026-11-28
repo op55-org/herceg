@@ -319,15 +319,44 @@ set. Delivery is synchronous: a change a listener makes while another is
 delivered reaches later listeners first, so readers that report in order
 (grids) skip a change older than one they heard.
 
+**Views following channels.** A view given `selection` keeps its own
+query (`query`, what it was given) apart from what it applies (`filter`,
+its own filter joined with the followed channels' conditions, and
+`restricted`, its own row set or the channels' intersected). It holds the
+store weakly through its listener. A store change composes the chosen
+channels again at once, comparing the selections they hold with those it
+composed last (a channel it does not follow, or one set to what it held,
+changes nothing); where they differ, the view joins their conditions,
+counts a new query, and rebuilds its positions on the next read. Reads
+(`revision`, `queryRevision`, `filter`, `read`) compose first too, so a
+view read before its listener runs is current. Its listeners hear a
+store's change only where `queryRevision` moved since they were last
+told, so a panel's groups do not recompute for its own channel.
+Gestures' conditions on a chart of a view (bindings' writes, the `select`
+event's conditions, `model/item-conditions.ts`) read the view's own
+filter and restriction, so one channel never absorbs another's
+condition; groups, totals, provenance, and coverage read what it
+applies.
+
 Series marks over a view keep the view's table as their table and the view
 as `mark.view`, and read the view's rows as every mark reads its rows
 ([Marks' rows](#marks-rows)): series, extents, bins, stacks, category
 bands, and size, color, and opacity domains come from the rows shown, and
 facets split them by panel. Stacks over a view restack when its query
 changes (`queryRevision`) and otherwise follow its table's changes. Specs
-name a view as a data entry with `source` and `view` (`filter`, `sort`);
-there, annotation and layout marks, derived tables, and row selections
-refuse a view, naming its table instead. The WebGL painter uploads whole columns,
+name a view as a data entry with `source` and `view` (`filter`, `sort`,
+`selection`); there, annotation and layout marks, derived tables, and row
+selections refuse a view, naming its table instead.
+
+**Loading specs.** `loadSpec` loads entries in the order they need each
+other, whatever order the spec lists them in: tables, the stores bindings
+and views name (one per table, made with the bindings that name it so
+their channels exist before a view composes, or given in `stores`),
+views, groups, and totals (each loading its source first; a cycle is
+refused), then marks, then bindings. Groups entries of one source, `by`,
+and `ops` share one `RowGroups`, each entry naming a level's table
+(`level`, the last by default), and groups and totals of a table read one
+whole-table view of it. The WebGL painter uploads whole columns,
 so view points stay on the CPU.
 
 ## Row groups
@@ -394,6 +423,19 @@ whose rows move will need the lists to follow `Table.identity`.
 **Keys.** A group's key is its path of values (labels, numbers, or null);
 its id is the key as JSON with infinities as text. Readers name groups by
 key, never by number or code, which change on renumbering and compaction.
+
+**Places.** Each level gives a key a rank when its group first appears
+(`GroupLevel.ranks`, 8 bytes a group), and remembers it in a map by key
+(below the first level, by the parent's rank), so a group that leaves and
+returns takes its rank again. A return below the level's last rank marks
+the level out of order; once the batch is in, `#compact` sorts its
+surviving groups by rank, renumbers them (member lists are dropped, the
+table resets), and children follow their parents. A return after the
+last rank appends without a reset. Remembered keys are swept once a
+level remembers more than twice the table's rows plus 64: those no row
+holds are forgotten, as dictionaries forget labels, so a rolling window
+of unique keys stays bounded. Groups bounded by a limit (pivots') keep
+no places.
 
 Memory: 4 bytes per table row (each row's group); for tables that drop
 rows, 8 bytes per row per aggregated field; about 6 bytes per shown row once

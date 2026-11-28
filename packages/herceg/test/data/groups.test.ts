@@ -3,12 +3,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { count, max, mean, min, sum } from "../../src/data/aggregations.ts";
 import { category, encodedCategory, time } from "../../src/data/column.ts";
+import { relationTo } from "../../src/data/contributors.ts";
 import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { groupId, groupRows } from "../../src/data/groups.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
+import { selectionStore, selectWhere } from "../../src/data/selection.ts";
 import { type Schema, type Table, type TableChange, table } from "../../src/data/table.ts";
+import { coverageOf } from "../../src/model/coverage.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 /** A table's rows as objects, missing values as null. */
 const rows = <S extends Schema>(t: Table<S>) =>
@@ -869,3 +873,133 @@ function changesOf(t: Table) {
   t.subscribe((change) => changes.push(change));
   return changes;
 }
+
+describe("groups that come back", () => {
+  const sales = () =>
+    table({
+      region: ["North", "South", "East", "West", "North", "East"],
+      year: [2024, 2024, 2024, 2025, 2025, 2025],
+      revenue: [1, 2, 3, 4, 5, 6],
+    });
+
+  contractTest("data.groups.return", () => {
+    const t = sales();
+    const view = rowView(t);
+    const groups = groupRows(view, { by: ["region"], ops: { revenue: sum("revenue") } });
+    const changes: TableChange[] = [];
+    groups.table.subscribe((change) => changes.push(change));
+    const order = () => rows(groups.table).map(({ region }) => region);
+    expect(order()).toEqual(["North", "South", "East", "West"]);
+    // South and East leave, then come back: in their places, the table reset once.
+    view.setQuery({ filter: col("year").eq(2025).and(col("region").ne("East")) });
+    expect(order()).toEqual(["North", "West"]);
+    changes.length = 0;
+    view.setQuery({});
+    expect(order()).toEqual(["North", "South", "East", "West"]);
+    expect(changes.map(({ reset }) => reset)).toEqual([true]);
+    expect(rows(groups.table).map(({ revenue }) => revenue)).toEqual([6, 2, 9, 4]);
+    expect(groups.indexOf(["East"])).toBe(2);
+    expect(groups.groupOf(2)).toBe(2);
+    expect(Array.from(groups.members(2))).toEqual([2, 5]);
+    // A key first seen while West was away goes after it.
+    view.setQuery({ filter: col("region").ne("West") });
+    t.append({ region: ["Centre"], year: [2025], revenue: [7] });
+    view.setQuery({});
+    expect(order()).toEqual(["North", "South", "East", "West", "Centre"]);
+    // The last group, back, takes the end again: an append, as a new group's.
+    view.setQuery({ filter: col("region").ne("Centre") });
+    changes.length = 0;
+    view.setQuery({});
+    expect(order()).toEqual(["North", "South", "East", "West", "Centre"]);
+    expect(changes.map(({ reset, appended }) => [reset, appended])).toEqual([[false, 1]]);
+  });
+
+  it("come back in place on every level, under parents that came back too", () => {
+    const t = sales();
+    const view = rowView(t);
+    const groups = groupRows(view, { by: ["year", "region"], ops: { n: count() } });
+    const keys = () => Array.from({ length: groups.length }, (_, g) => groups.keyOf(g));
+    const before = keys();
+    expect(before).toEqual([
+      [2024, "North"],
+      [2024, "South"],
+      [2024, "East"],
+      [2025, "West"],
+      [2025, "North"],
+      [2025, "East"],
+    ]);
+    view.setQuery({ filter: col("year").eq(2025) });
+    view.setQuery({ filter: col("region").ne("North") });
+    expect(keys()).toEqual([
+      [2024, "South"],
+      [2024, "East"],
+      [2025, "West"],
+      [2025, "East"],
+    ]);
+    view.setQuery({});
+    expect(keys()).toEqual(before);
+    expect(rows(groups.tableOf("year"))).toEqual([
+      { year: 2024, n: 3 },
+      { year: 2025, n: 3 },
+    ]);
+    expect(Array.from(groups.childrenOf(1, 0))).toEqual([3, 4, 5]);
+  });
+
+  contractTest("data.groups.return.forgotten", () => {
+    // A rolling window of 4 rows: keys the table no longer holds are
+    // forgotten once a level remembers more than 2 × 4 + 64, and come back last.
+    const t = table({ k: category(["a", "b", "c", "d"]) }, { maxRows: 4 });
+    const view = rowView(t);
+    const groups = groupRows(view, { by: ["k"], ops: { n: count() } });
+    const order = () => rows(groups.table).map(({ k }) => k);
+    // "b" leaves the view while the table still holds it.
+    view.setQuery({ filter: col("k").ne("b") });
+    for (let i = 0; i < 3; i++) t.append({ k: ["b"] });
+    view.setQuery({});
+    expect(order()).toEqual(["b", "d"]);
+    // Seventy new keys stream through; "a" leaves the window early, and is forgotten.
+    for (let i = 0; i < 70; i++) t.append({ k: [`n${i}`] });
+    t.append({ k: ["n68", "n69", "a", "a"] });
+    expect(order()).toEqual(["n68", "n69", "a"]);
+    // A key the view hides while the table holds it is remembered through the sweeps.
+    const held = table({ k: category(["kept", "x"]) }, { maxRows: 4 });
+    const shown = rowView(held);
+    const kept = groupRows(shown, { by: ["k"], ops: { n: count() } });
+    shown.setQuery({ filter: col("k").ne("kept") });
+    for (let i = 0; i < 100; i++) held.append({ k: [`n${i}`, "kept"] });
+    shown.setQuery({});
+    expect(rows(kept.table).map(({ k }) => k)).toEqual(["kept", "n98", "n99"]);
+  });
+
+  it("keep coverage and highlighting right across the reset a return makes", () => {
+    const t = sales();
+    const view = rowView(t);
+    const groups = groupRows(view, { by: ["region"], ops: { revenue: sum("revenue") } });
+    const store = selectionStore(t);
+    store.set("c", selectWhere(col("year").eq(2024)));
+    const relation = relationTo(groups.table, t)!;
+    const coverage = coverageOf(relation, "revenue", store, "c");
+    const release = coverage.hold();
+    const read = () =>
+      rows(groups.table).map(({ region }, g) => [region, coverage.selected(g), coverage.total(g)]);
+    expect(read()).toEqual([
+      ["North", 1, 2],
+      ["South", 1, 1],
+      ["East", 1, 2],
+      ["West", 0, 1],
+    ]);
+    const layout = relation.layout;
+    view.setQuery({ filter: col("region").ne("South") });
+    view.setQuery({});
+    expect(relation.layout).toBeGreaterThan(layout);
+    expect(read()).toEqual([
+      ["North", 1, 2],
+      ["South", 1, 1],
+      ["East", 1, 2],
+      ["West", 0, 1],
+    ]);
+    store.set("c", selectWhere(col("region").eq("East")));
+    expect(read().map(([, selected]) => selected)).toEqual([0, 0, 2, 0]);
+    release();
+  });
+});

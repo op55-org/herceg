@@ -195,6 +195,11 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         lambda o: hg.Chart(DATA, row_selection=o).line(x="t", y="v"),
         {"channel": "c"},
     ),
+    "Channels": (
+        "selection",
+        lambda o: hg.Chart(hg.view(DATA, selection=o)).line(x="t", y="v"),
+        {},
+    ),
     "BarStyle": ("theme.style.bar", _styled("bar"), {}),
     "LineStyle": ("theme.style.line", _styled("line"), {}),
     "TooltipStyle": ("theme.style.tooltip", _styled("tooltip"), {}),

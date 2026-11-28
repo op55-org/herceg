@@ -244,6 +244,25 @@ export class Coverage {
     return this.#selected[this.relation.groupOf(target)] ?? 0;
   }
 
+  /**
+   * The counts as they are now, caught up once, for readers of many
+   * targets (a line's selected runs, a bar per group): `selected` and
+   * `total` catch up at every call, through the relation's records.
+   */
+  counts(): { selected(target: number): number; total(target: number): number } {
+    this.#sync();
+    if (this.#direct)
+      return {
+        selected: (target) => this.#directly(target, true),
+        total: (target) => this.#directly(target, false),
+      };
+    const [selected, total, relation] = [this.#selected, this.#total, this.relation];
+    return {
+      selected: (target) => selected[relation.groupOf(target)] ?? 0,
+      total: (target) => total[relation.groupOf(target)] ?? 0,
+    };
+  }
+
   /** All contributors of `target`. */
   total(target: number): number {
     this.#sync();

@@ -1,0 +1,123 @@
+{
+  "about": "The data guide's cross-filtered dashboard as specs, one per panel: each panel draws a view of the rows every other panel's channel leaves (or groups of it), and its brush or click sets its own channel of the store of sales' rows. \"spec\" is the guide's spec, its tables named as the guide names them; \"python\" is what the guide's Python writes, which names its tables data, data2, and data3. Both leave out the columns of the table every panel reads, which the page gives. The browser test (test/browser/cross-filtering.test.ts) loads both over one table and store and checks each step against the source's rows, as it checks the guide's TypeScript; python/tests/test_cross_filter.py checks that the guide's Python writes \"python\".",
+  "spec": {
+    "revenue": {
+      "version": 1,
+      "data": {
+        "sales": { "columns": {} },
+        "shown": { "source": "sales", "view": { "selection": { "excluding": "revenue" } } }
+      },
+      "marks": [
+        { "type": "line", "data": "shown", "x": "time", "y": "revenue", "color": "region" }
+      ],
+      "interaction": { "brush": "x" },
+      "rowSelection": { "data": "sales", "channel": "revenue", "events": ["brush"] }
+    },
+    "orders": {
+      "version": 1,
+      "data": {
+        "sales": { "columns": {} },
+        "shown": { "source": "sales", "view": { "selection": { "excluding": "orders" } } },
+        "byDay": {
+          "source": "shown",
+          "groups": { "by": ["time"], "ops": { "orders": { "op": "sum", "field": "orders" } } }
+        }
+      },
+      "marks": [{ "type": "line", "data": "byDay", "x": "time", "y": "orders" }],
+      "interaction": { "brush": "x" },
+      "rowSelection": { "data": "sales", "channel": "orders", "events": ["brush"] }
+    },
+    "regions": {
+      "version": 1,
+      "data": {
+        "sales": { "columns": {} },
+        "shown": { "source": "sales", "view": { "selection": { "excluding": "regions" } } },
+        "byRegion": {
+          "source": "shown",
+          "groups": { "by": ["region"], "ops": { "revenue": { "op": "sum", "field": "revenue" } } }
+        }
+      },
+      "x": { "domain": ["North", "South", "East", "West"] },
+      "marks": [
+        { "type": "bar", "data": "byRegion", "x": "region", "y": "revenue", "color": "region" }
+      ],
+      "interaction": { "select": "items" },
+      "rowSelection": { "data": "sales", "channel": "regions", "events": ["click"] }
+    },
+    "months": {
+      "version": 1,
+      "data": {
+        "sales": { "columns": {} },
+        "shown": { "source": "sales", "view": { "selection": { "excluding": "months" } } },
+        "byMonth": {
+          "source": "shown",
+          "groups": { "by": ["month"], "ops": { "revenue": { "op": "sum", "field": "revenue" } } }
+        }
+      },
+      "marks": [{ "type": "bar", "data": "byMonth", "x": "month", "y": "revenue" }],
+      "interaction": { "select": "items" },
+      "rowSelection": { "data": "sales", "channel": "months", "events": ["click"] }
+    }
+  },
+  "python": {
+    "revenue": {
+      "version": 1,
+      "tooltip": true,
+      "interaction": { "brush": "x" },
+      "rowSelection": { "channel": "revenue", "data": "data", "events": ["brush"] },
+      "data": {
+        "data": { "columns": {} },
+        "data2": { "source": "data", "view": { "selection": { "excluding": "revenue" } } }
+      },
+      "marks": [{ "type": "line", "x": "time", "y": "revenue", "color": "region", "data": "data2" }]
+    },
+    "orders": {
+      "version": 1,
+      "tooltip": true,
+      "interaction": { "brush": "x" },
+      "rowSelection": { "channel": "orders", "data": "data", "events": ["brush"] },
+      "data": {
+        "data": { "columns": {} },
+        "data2": { "source": "data", "view": { "selection": { "excluding": "orders" } } },
+        "data3": {
+          "source": "data2",
+          "groups": { "by": ["time"], "ops": { "orders": { "op": "sum", "field": "orders" } } }
+        }
+      },
+      "marks": [{ "type": "line", "x": "time", "y": "orders", "data": "data3" }]
+    },
+    "regions": {
+      "version": 1,
+      "x": { "domain": ["North", "South", "East", "West"] },
+      "tooltip": true,
+      "interaction": { "select": "items" },
+      "rowSelection": { "channel": "regions", "data": "data", "events": ["click"] },
+      "data": {
+        "data": { "columns": {} },
+        "data2": { "source": "data", "view": { "selection": { "excluding": "regions" } } },
+        "data3": {
+          "source": "data2",
+          "groups": { "by": ["region"], "ops": { "revenue": { "op": "sum", "field": "revenue" } } }
+        }
+      },
+      "marks": [
+        { "type": "bar", "x": "region", "y": "revenue", "color": "region", "data": "data3" }
+      ]
+    },
+    "months": {
+      "version": 1,
+      "tooltip": true,
+      "interaction": { "select": "items" },
+      "rowSelection": { "channel": "months", "data": "data", "events": ["click"] },
+      "data": {
+        "data": { "columns": {} },
+        "data2": { "source": "data", "view": { "selection": { "excluding": "months" } } },
+        "data3": {
+          "source": "data2",
+          "groups": { "by": ["month"], "ops": { "revenue": { "op": "sum", "field": "revenue" } } }
+        }
+      },
+      "marks": [{ "type": "bar", "x": "month", "y": "revenue", "data": "data3" }]
+    }
+  }
+}

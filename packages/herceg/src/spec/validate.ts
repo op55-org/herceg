@@ -90,6 +90,8 @@ import {
   type GridFacetSpec,
   type GridLayoutSpec,
   type GridLinesSpec,
+  type GroupOpSpec,
+  type GroupsSpec,
   type InsetIndicatorSpec,
   type InsetSpec,
   type InsidePlace,
@@ -129,8 +131,10 @@ import {
   type TimeColumnSpec,
   type TitleSpec,
   type TooltipSpec,
+  type TotalsSpec,
   type TreeLook,
   type ViewLimitsSpec,
+  type ViewSelectionSpec,
   type ViewSpec,
   type WrappedFacetSpec,
   type XAxisSpec,
@@ -758,6 +762,51 @@ const TRANSFORMS: Record<string, { required: string[]; checks: Record<string, Ch
     checks: { rolling: operations(ROLLING_OPS, true), size: count, by: fields },
   },
   sort: { required: [], checks: { sort: field, order: oneOf("ascending", "descending") } },
+};
+
+/** The aggregates groups and totals keep. */
+const GROUP_OPS = ["count", "sum", "mean", "min", "max"];
+
+/** Groups' or totals' aggregates (`kind`), by the names of the fields they make. */
+const groupOps =
+  (kind: "groups" | "totals"): Check =>
+  (v, path) => {
+    object(v, path);
+    for (const [name, item] of Object.entries(v as Record<string, unknown>)) {
+      const at = `${path}.${name}`;
+      object(item, at);
+      const { op } = item as Record<string, unknown>;
+      if (
+        typeof op === "string" &&
+        (AGGREGATE_OPS as readonly string[]).includes(op) &&
+        !GROUP_OPS.includes(op)
+      )
+        throw refusal(
+          `${at}.op`,
+          `"${op}" is not one ${kind} keep; use ${either(GROUP_OPS)}, or a derived table's aggregate`,
+        );
+      checkProperties(
+        item as Record<string, unknown>,
+        at,
+        op === "count" ? ["op"] : ["op", "field"],
+        {
+          op: oneOf(...GROUP_OPS),
+          field,
+        } satisfies ChecksOf<GroupOpSpec>,
+      );
+    }
+  };
+
+/** A view's channels: listed, or all but those excluded. */
+const viewSelection: Check = (v, path) => {
+  object(v, path);
+  const selection = v as Record<string, unknown>;
+  if (selection.channels !== undefined && selection.excluding !== undefined)
+    throw refusal(path, "give channels or excluding, not both");
+  properties(selection, path, {
+    channels: strings,
+    excluding: (e, at) => (typeof e === "string" ? undefined : strings(e, at)),
+  } satisfies ChecksOf<ViewSelectionSpec>);
 };
 
 /** The steps of a derived table. */
@@ -4275,9 +4324,49 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
                       });
                     }
                   },
+                  selection: viewSelection,
                 } satisfies ChecksOf<ViewSpec["view"]>);
               },
             } satisfies ChecksOf<ViewSpec>);
+          } else if (entry.source !== undefined && entry.groups !== undefined) {
+            checkProperties(entry, at, ["groups"], {
+              source: string,
+              groups: (g, where) => {
+                object(g, where);
+                const groups = g as Record<string, unknown>;
+                checkProperties(groups, where, ["by"], {
+                  // A list, as groupRows takes: one field is ["region"].
+                  by: (by, path) => {
+                    if (!Array.isArray(by)) fail(path, "a list of field names", by);
+                    fields(by, path);
+                  },
+                  ops: groupOps("groups"),
+                  level: (level, path) => {
+                    field(level, path);
+                    const by = [groups.by].flat() as string[];
+                    if (!by.includes(level as string))
+                      throw refusal(
+                        path,
+                        `"${level}" is not one of by (${by.map((f) => `"${f}"`).join(", ")}); name one of them`,
+                      );
+                  },
+                } satisfies ChecksOf<GroupsSpec["groups"]>);
+              },
+            } satisfies ChecksOf<GroupsSpec>);
+          } else if (entry.source !== undefined && entry.totals !== undefined) {
+            checkProperties(entry, at, ["totals"], {
+              source: string,
+              totals: (t, where) => {
+                object(t, where);
+                checkProperties(t as Record<string, unknown>, where, ["ops"], {
+                  ops: (ops, path) => {
+                    groupOps("totals")(ops, path);
+                    if (Object.keys(ops as object).length === 0)
+                      fail(path, 'at least one aggregate, such as { n: { op: "count" } }', ops);
+                  },
+                } satisfies ChecksOf<TotalsSpec["totals"]>);
+              },
+            } satisfies ChecksOf<TotalsSpec>);
           } else if (entry.source !== undefined) {
             checkProperties(entry, at, ["transform"], {
               source: string,

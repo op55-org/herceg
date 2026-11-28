@@ -20,7 +20,6 @@ import {
   type Removed,
   setContributors,
 } from "./contributor-records.ts";
-import type { Expression } from "./expression.ts";
 import { checkAggregates, GroupLevel, GroupTable } from "./group-levels.ts";
 import { measureOf, operandsOf } from "./group-lineage.ts";
 import { MemberRuns } from "./group-members.ts";
@@ -221,6 +220,18 @@ export class RowGroups<
   #renumbered = 0;
   /** Set when a group lost its last row. */
   #emptied = false;
+  /**
+   * Each level's keys, with their place in the order keys first appeared:
+   * on the first level by value, below by the parent's place and then the
+   * value. Kept after a key's group leaves, so that it comes back in its
+   * place, until the keys a level remembers pass twice the table's rows
+   * (plus 64): then keys no group holds are forgotten, as a table's
+   * dictionaries forget labels. Bounded groups (pivots) keep none.
+   */
+  #places: Map<unknown, unknown>[];
+  #remembered: number[];
+  /** Levels a group came back to before groups that stayed, out of their keys' order. */
+  #unordered: boolean[];
   readonly #bounds: GroupBounds | undefined;
   /** Set when bounded groups computed every group afresh, renumbering them. */
   #fresh = false;
@@ -273,13 +284,15 @@ export class RowGroups<
 
   /**
    * `bounds` limits how far the groups grow; row pivots (data/pivot.ts)
-   * give them, and `at`, what names the aggregates in messages.
+   * give them, and `at`, what names the aggregates in messages. `names`
+   * name the levels' tables by their grouping fields (a spec's entries).
    */
   constructor(
     view: RowView<S>,
     options: GroupOptions<FieldName<S>, Record<string, GroupAggregate>>,
     bounds?: GroupBounds,
     at = "groupRows ops",
+    names?: ReadonlyMap<string, string>,
   ) {
     const source = view.source as unknown as Table;
     this.view = view;
@@ -296,6 +309,9 @@ export class RowGroups<
     });
     this.by = Object.freeze(by);
     this.#lookups = by.map(() => new Map());
+    this.#places = by.map(() => new Map());
+    this.#remembered = by.map(() => 0);
+    this.#unordered = by.map(() => false);
     const { aggregates, read, times, leveled } = checkAggregates(source, options.ops ?? {}, at, by);
     this.aggregates = aggregates;
     this.#read = read;
@@ -314,7 +330,10 @@ export class RowGroups<
     this.#seen = this.#state();
     this.#refresh();
     for (const level of this.#levels) {
-      level.table = new GroupTable(this.#columns(level, 0, level.count, true));
+      level.table = new GroupTable(
+        this.#columns(level, 0, level.count, true),
+        names?.get(by[level.depth]!),
+      );
       level.published = { version: level.table.version, length: level.count };
       level.unmark();
       keepers.set(level.table, this as unknown as RowGroups);
@@ -550,6 +569,7 @@ export class RowGroups<
     this.#children = null;
     this.#compare = null;
     this.#scratch = new Uint32Array(0);
+    this.#places = this.#places.map(() => new Map());
     this.#listeners.clear();
   }
 
@@ -666,6 +686,12 @@ export class RowGroups<
       source,
       target: level.table,
       aggregates: this.aggregates,
+      keys: this.by.slice(0, depth + 1),
+      view: this.view as unknown as RowView,
+      get following() {
+        groups.#update();
+        return !groups.#stopped && !groups.#frozen;
+      },
       get revision() {
         groups.#update();
         return groups.#lineage;
@@ -744,8 +770,8 @@ export class RowGroups<
     if (change.inserted) this.#recompute = this.#rekeyed = true;
     else if (change.updated) {
       const query = this.view.query;
-      // A view keeps its filter as an expression.
-      const keys = new Set<string>([...this.by, ...fieldsOf(query.filter as Expression)]);
+      // The filter the view applies: its own and its channels' conditions.
+      const keys = new Set<string>([...this.by, ...fieldsOf(this.view.filter)]);
       if (change.fields.some((field) => keys.has(field))) this.#recompute = this.#rekeyed = true;
       else if (change.fields.some((field) => this.#read.includes(field))) this.#recompute = true;
       else if (query.sort?.some(({ field }) => change.fields.includes(field)))
@@ -857,12 +883,14 @@ export class RowGroups<
    */
   #finish(everyGroup: boolean) {
     this.#refresh();
-    const reset = this.#emptied
-      ? this.#compact()
-      : this.#fresh
-        ? this.#levels.map(() => true)
-        : null;
+    const reset =
+      this.#emptied || this.#unordered.includes(true)
+        ? this.#compact()
+        : this.#fresh
+          ? this.#levels.map(() => true)
+          : null;
     this.#fresh = false;
+    if (this.#remembered.some((count) => count > 2 * this.#source.length + 64)) this.#forgetKeys();
     const changes = this.#levels.map((level) =>
       level.publish(reset?.[level.depth] ?? false, everyGroup, (from, to) =>
         this.#columns(level, from, to, false),
@@ -1169,7 +1197,8 @@ export class RowGroups<
 
   /**
    * Drops groups left without rows, level by level from the first (a group's
-   * groups below leave with it); the others keep their order. Returns the
+   * groups below leave with it), and puts groups that came back before
+   * others in their keys' places; the others keep their order. Returns the
    * levels whose groups were renumbered, whose tables start over.
    */
   #compact(): boolean[] {
@@ -1179,15 +1208,23 @@ export class RowGroups<
     const reset: boolean[] = [];
     // The renumbering of the level above, which its groups' parents follow.
     let above: Int32Array | null = null;
+    let reordered = false;
     for (const level of this.#levels) {
-      const remap = new Int32Array(level.count);
-      let kept = 0;
+      const remap = new Int32Array(level.count).fill(-1);
+      const kept: number[] = [];
       for (let group = 0; group < level.count; group++)
-        remap[group] = level.rows[group]! > 0 ? kept++ : -1;
-      const lost = kept < level.count;
-      level.renumber(lost ? remap : null, kept, above);
-      reset.push(lost);
-      above = lost ? remap : null;
+        if (level.rows[group]! > 0) kept.push(group);
+      const unordered = this.#unordered[level.depth]!;
+      this.#unordered[level.depth] = false;
+      if (unordered) kept.sort((a, b) => level.ranks[a]! - level.ranks[b]!);
+      kept.forEach((group, i) => {
+        remap[group] = i;
+      });
+      const moved = unordered || kept.length < level.count;
+      level.renumber(moved ? remap : null, kept.length, above);
+      reset.push(moved);
+      above = moved ? remap : null;
+      reordered = unordered;
     }
     // The last level's groups were renumbered: its rows' groups too.
     if (above) {
@@ -1197,7 +1234,9 @@ export class RowGroups<
         const group = slots[index]!;
         if (group >= 0) slots[index] = above[group]!;
       }
-      this.#members?.renumber(above, this.#levels.at(-1)!.count);
+      // Runs move down only; in a new order they are listed again when asked for.
+      if (reordered) this.#members = null;
+      else this.#members?.renumber(above, this.#levels.at(-1)!.count);
     }
     // Ids of the surviving keys only, so values seen once do not stay forever.
     const fields = this.#fields;
@@ -1274,7 +1313,7 @@ export class RowGroups<
     const making = this.#making;
     const add = (value: string | number | null) => {
       if (making) this.#ask(({ groups, values }) => (groups[0] = values[0] = first.count + 1));
-      return first.add(value, -1);
+      return this.#added(first, value, -1);
     };
     const ids = fields.map((field, depth) => this.#idReader(field, depth === 0 ? add : null));
     if (ids.length === 1) return ids[0]!;
@@ -1294,13 +1333,54 @@ export class RowGroups<
               groups[depth] = level.count + 1;
               values[depth] = fields[depth]!.ids.size;
             });
-          next = level.add(this.#valueAt(fields[depth]!, position), group);
+          next = this.#added(level, this.#valueAt(fields[depth]!, position), group);
           lookup.set(combined, next);
         }
         group = next;
       }
       return group;
     };
+  }
+
+  /**
+   * Adds a group of `value` under `parent` to `level`, in its key's place
+   * where the level remembers it: a group that came back before groups
+   * that stayed puts the level out of order, which `#compact` puts right.
+   */
+  #added(level: GroupLevel, value: string | number | null, parent: number): number {
+    if (this.#bounds) return level.add(value, parent);
+    const { depth } = level;
+    const above = depth > 0 ? this.#levels[depth - 1]!.ranks[parent]! : -1;
+    const places = placesUnder(this.#places, depth, above);
+    const key = mapKey(this.#fields[depth]!, value);
+    let rank = places.get(key);
+    if (rank === undefined) {
+      rank = level.nextRank++;
+      places.set(key, rank);
+      this.#remembered[depth]!++;
+    } else if (rank < level.lastRank) this.#unordered[depth] = true;
+    return level.add(value, parent, rank);
+  }
+
+  /**
+   * Forgets the keys no row of the table holds, at every level, keeping
+   * those of rows the view hides: at most one key per row and level.
+   */
+  #forgetKeys() {
+    const old = this.#places;
+    const fields = this.#fields;
+    this.#places = fields.map(() => new Map());
+    this.#remembered = fields.map(() => 0);
+    for (let position = 0; position < this.#source.length; position++)
+      for (let depth = 0, above = -1; depth < fields.length; depth++) {
+        const key = mapKey(fields[depth]!, this.#valueAt(fields[depth]!, position));
+        const rank = placesUnder(old, depth, above).get(key);
+        if (rank === undefined) break;
+        const places = placesUnder(this.#places, depth, above);
+        if (!places.has(key)) this.#remembered[depth]!++;
+        places.set(key, rank);
+        above = rank;
+      }
   }
 
   /**
@@ -1627,6 +1707,17 @@ export function groupId(key: GroupKey): string {
   return JSON.stringify(key, (_, value) =>
     typeof value === "number" && !Number.isFinite(value) ? String(value) : value,
   );
+}
+
+/** A level's places of keys under the group of rank `above` on the level above (the first level's all). */
+function placesUnder(
+  places: readonly Map<unknown, unknown>[],
+  depth: number,
+  above: number,
+): Map<unknown, number> {
+  const level = places[depth]!;
+  if (depth === 0) return level as Map<unknown, number>;
+  return (level.get(above) ?? level.set(above, new Map()).get(above)) as Map<unknown, number>;
 }
 
 /** A key's value as a field's ids are keyed: missing numbers are NaN. */

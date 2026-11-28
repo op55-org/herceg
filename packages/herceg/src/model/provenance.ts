@@ -53,7 +53,8 @@ export function provenanceOf(
 ): Provenance {
   const table = mark.table;
   const parts = JSON.parse(key) as unknown[];
-  const condition = itemCondition(model, mark, key, parts, panel) ?? null;
+  // Exactly its rows: within the channels its view follows too.
+  const condition = itemCondition(model, mark, key, parts, panel, true) ?? null;
   const own = groupsOf(mark, key, parts);
   return {
     groups: own ? [...own, ...facetsOf(model, panel, mark)].map((g) => timed(table, g)) : [],

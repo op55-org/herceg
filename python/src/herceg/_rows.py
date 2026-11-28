@@ -42,11 +42,13 @@ class SelectionBinding:
     the channel follows the brush (a widget's views, and other views of
     the data, then change as it moves). ``data`` is the table, an object
     given to the chart or one of its marks; by default, the chart's data.
-    A chart drawing a table made from it (``hg.group_by``, totals, pivots,
-    derived tables) highlights what of each group or total the channel
-    holds, through its lineage; ``budget`` caps the bytes of the indexes
-    this takes (16 per row of the table by default), beyond which
-    highlighting stops and the chart says so.
+    A chart drawing a table made from it (``hg.group_rows``,
+    ``hg.row_totals``, derived tables) highlights what of each group or
+    total the channel holds, through its lineage; ``budget`` caps the bytes
+    of the indexes this takes (16 per row of the table by default), beyond
+    which highlighting stops and the chart says so. Views of the data that
+    follow its channels (``hg.view(data, selection=hg.Channels(...))``)
+    show only the rows those hold.
     ``fields`` are more of its columns to send with the chart than its
     marks read, so that conditions set from Python (``widget.row_selection
     = hg.col("fare") > 20``, or another widget's brush) can test them.

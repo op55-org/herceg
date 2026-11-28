@@ -37,26 +37,31 @@ export function within(
   key: string,
   mark: Mark,
   condition: Expression | null | undefined,
+  exact?: boolean,
 ): Expression | undefined {
   const facets = facetsOf(model, key, mark);
   return viewed(
     mark,
     condition != null && facets.length > 0 ? ["and", condition, ...matching(facets)] : condition,
+    exact,
   );
 }
 
 /**
- * `condition` on the rows `mark` shows: within its view's filter;
- * undefined where its view shows rows a set of them names, which no
- * condition says.
+ * `condition` on the rows `mark` shows: within its view's own filter, as
+ * gestures write it (the channels a view follows are other panels'
+ * filters, which a channel written must not take in); `exact`, within
+ * every filter it applies, as provenance says its rows. Undefined where a
+ * row set restricts the view, which no condition says.
  */
 export function viewed(
   mark: Mark,
   condition: Expression | null | undefined,
+  exact?: boolean,
 ): Expression | undefined {
   const view = mark.view;
-  if (condition == null || view?.restriction) return undefined;
-  const filter = view?.query.filter;
+  if (condition == null || (exact ? view?.restricted : view?.restriction)) return undefined;
+  const filter = exact ? view?.filter : view?.query.filter;
   if (filter === undefined || filter === true) return condition;
   const shown =
     filter !== null && typeof filter === "object" && "expression" in filter
@@ -77,6 +82,7 @@ export function itemCondition(
   key: string,
   parts: readonly unknown[],
   panel?: string,
+  exact?: boolean,
 ): Expression | undefined {
   const table = mark.table;
   const laid = model
@@ -89,11 +95,13 @@ export function itemCondition(
   if (table && laid.length > 0) {
     const each = laid.map(({ layout, panel: at }) => {
       const given = layout!.conditionOf?.(key, table);
-      return within(model, at, mark, given === undefined ? grouped() : given);
+      return within(model, at, mark, given === undefined ? grouped() : given, exact);
     });
     return each.includes(undefined) ? undefined : any(each as Expression[]);
   }
-  return panel === undefined ? viewed(mark, grouped()) : within(model, panel, mark, grouped());
+  return panel === undefined
+    ? viewed(mark, grouped(), exact)
+    : within(model, panel, mark, grouped(), exact);
 }
 
 const and = (parts: readonly Expression[]): Expression =>
