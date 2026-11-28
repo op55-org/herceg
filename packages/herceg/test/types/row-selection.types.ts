@@ -9,7 +9,7 @@ import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid } from "../../src/dom/grid.ts";
 import { createGridModel } from "../../src/grid/model.ts";
-import { lineage } from "../../src/index.ts";
+import { lineage, type ViewSelection } from "../../src/index.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
@@ -22,6 +22,13 @@ const stops = table({ t: [0, 1], n: [3, 4] });
 type Trips = { km: "number"; fare: "number"; kind: "category" };
 const focus = selectionStore(trips);
 const near = selectionStore(stops);
+
+// A view follows the channels of a store of its own table's rows.
+const followed: ViewSelection<Trips> = { store: focus, excluding: "trips" };
+rowView(trips, { selection: followed });
+rowView(trips, { selection: { store: focus, channels: ["a", "b"] } });
+// @ts-expect-error a store of another table's rows
+rowView(trips, { selection: { store: near } });
 
 // Bindings of tables of different schemas, each typed by its own.
 const chart = createChart(element, {

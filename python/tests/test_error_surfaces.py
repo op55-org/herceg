@@ -315,6 +315,23 @@ def _calls(tmp: Path) -> dict[str, Call]:
             {"used": ["v"]},
             function=hg.View.source_columns,
         ),
+        "hg.group_rows": Call(hg.group_rows, {"data": DATA, "by": "s", "n": "count"}),
+        "hg.row_totals": Call(hg.row_totals, {"data": DATA, "n": "count"}),
+        "RowGroups.level": Call(
+            _method(lambda: hg.group_rows(DATA, by="s", n="count"), "level"),
+            {"column": "s"},
+            function=hg.RowGroups.level,
+        ),
+        "RowGroups.source_columns": Call(
+            _method(lambda: hg.group_rows(DATA, by="s", n="count"), "source_columns"),
+            {"used": ["s"]},
+            function=hg.RowGroups.source_columns,
+        ),
+        "RowTotals.source_columns": Call(
+            _method(lambda: hg.row_totals(DATA, n="count"), "source_columns"),
+            {"used": ["n"]},
+            function=hg.RowTotals.source_columns,
+        ),
         "hg.matrix": Call(
             hg.matrix,
             {"columns": MATRIX, "x": "x", "y": "y"},
@@ -503,6 +520,8 @@ EXCLUDED = {
     "hg.GridCells": "made by grid()",
     "hg.Derived": "made by hg.derive",
     "hg.View": "made by hg.view",
+    "hg.RowGroups": "made by hg.group_rows",
+    "hg.RowTotals": "made by hg.row_totals",
     "hg.Ordered": "made by hg.ordered",
     "hg.Expr": "made by hg.col and hg.when",
     "hg.Condition": "made by hg.when",
@@ -720,7 +739,7 @@ def test_unknown_keywords_are_unknown_options(tmp_path):
         parameters = inspect.signature(call.function or call.make).parameters.values()
         if not any(parameter.kind is parameter.VAR_KEYWORD for parameter in parameters):
             continue
-        if label.startswith("Derived."):
+        if label.startswith("Derived.") or label in ("hg.group_rows", "hg.row_totals"):
             continue  # their keywords name output columns
         try:
             call.make(**call.arguments({**call.given, "colour": 1}))

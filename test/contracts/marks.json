@@ -6338,6 +6338,8 @@
       "matrix": "a table of a matrix",
       "ordered": "a table kept in order of a field",
       "view": "rows of a table a filter and sort choose",
+      "group_rows": "groups of a table's rows and their aggregates, kept as the rows change",
+      "row_totals": "totals of a table's rows, kept as the rows change",
       "spec_schema": "the spec's JSON Schema, for editors"
     },
     "react": {

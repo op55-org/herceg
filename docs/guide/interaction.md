@@ -1403,9 +1403,9 @@ them:
 | --- | --- |
 | A click on an item (a bar, a point, a slice), or Space on it | The rows behind its value (a bar's `revenue`, a slice's `value`; a band's or error bar's, every row behind it), as rows of the source; Shift adds, Ctrl or Cmd toggles. |
 | A lasso | The rows behind the items inside it, each behind its own series' field (a bar of `y: ["revenue", "margin"]` writes the rows behind each segment's value). |
-| A brush along the groups' axis | A condition on the source's fields where every step between writes one (a derived table's group fields, bins, fields passed through), as a brush of the source would; otherwise the rows behind the groups inside it, of the series shown. |
+| A brush along the groups' axis | A condition on the source's fields where every step between writes one (groups' keys, a derived table's group fields, bins, fields passed through), as a brush of the source would, joined with the own filter of the view the groups or totals read (not the channels it follows); otherwise (a view restricted to a row set, groups stopped or frozen at their limit, a mark of several value fields) the rows behind the groups inside it, of the series shown. |
 | A brush along the values axis (counts, sums, means, a range of minimums and maximums, rolling sums) | Refused when the chart is made: its values are aggregates, which no brush selects rows by. |
-| Items and series (`interaction.select`) | As a brush along the groups' axis writes: a condition where one is written back (the items of a category), otherwise the rows behind them, of the value field their series is of. |
+| Items and series (`interaction.select`) | As a brush along the groups' axis writes: a condition where one is written back (a group's key, as `region == "West"`, which rows appended later meet; the items of a category), otherwise the rows behind them, of the value field their series is of. |
 | A grid's row, range, or select-all | The rows behind the rows selected. |
 
 Charts of the source following the channel then highlight those rows, and

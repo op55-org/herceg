@@ -132,6 +132,12 @@ export interface LinkedRecord extends Recorded, Dropping {
   readonly kind: "links";
   /** The aggregates the groups' tables hold, as their options name them; the other fields are keys. */
   readonly aggregates: readonly Aggregated[];
+  /** The level's grouping fields, its key: fields of the source, value for value. */
+  readonly keys: readonly string[];
+  /** The view whose rows the groups hold. */
+  readonly view: RowView;
+  /** Whether the groups still follow their view (not stopped, nor frozen at a limit). */
+  readonly following: boolean;
   /** The links, top first. */
   links(): readonly ContributorLink[];
   /**

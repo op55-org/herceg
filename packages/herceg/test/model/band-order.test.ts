@@ -153,8 +153,8 @@ describe("bands on category axes", () => {
   });
 
   contractTest("axis.bands.order.groups", () => {
-    // Groups a filter empties leave their table and come back after the
-    // others; bars over a listed domain stay where they were.
+    // Groups a filter empties leave their table and come back in the place
+    // their keys first took; bars over a listed domain stay where they were.
     const rows = rowView(sales());
     const byRegion = groupRows(rows, { by: ["region"], ops: { revenue: sum("revenue") } });
     const byYear = groupRows(rows, { by: ["year"], ops: { revenue: sum("revenue") } });
@@ -188,9 +188,9 @@ describe("bands on category axes", () => {
     rows.setQuery({ filter: true });
     const cleared = draw(true);
     expect(cleared).toEqual(before);
-    // Without a domain, the groups' new order shows.
-    expect(draw(false).regions).toEqual(["West", "North", "South", "East"]);
-    expect(draw(false).years).toEqual(["2025", "2024"]);
+    // Without a domain too, the groups are back in their places.
+    expect(draw(false).regions).toEqual(REGIONS);
+    expect(draw(false).years).toEqual(["2024", "2025"]);
   });
 
   contractTest("axis.bands.order.ranked", () => {

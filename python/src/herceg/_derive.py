@@ -12,6 +12,7 @@ import functools
 import inspect
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, TypedDict, TypeVar, overload
 
 import numpy as np
@@ -30,6 +31,7 @@ from ._errors import (
     listed,
     located,
     python_values,
+    refuses,
     refusing,
     shown,
 )
@@ -719,30 +721,46 @@ class Derived:
         keys = [by] if isinstance(by, str) else [] if by is None else list(by)
         if not operations:
             raise ChartError('aggregate: needs at least one operation, such as n="count"')
-        specs = []
         kinds = {name: self._kinds[name] for name in keys}
+        named = self._operations("aggregate", operations, AGGREGATES)
+        specs = [{**spec, "as": name} for name, (spec, _) in named.items()]
+        kinds |= {name: kind for name, (_, kind) in named.items()}
+        step = {"aggregate": specs, **({"by": keys} if keys else {})}
+        return self._then(step, _Kinds(list(kinds), kinds))
+
+    def _operations(
+        self, role: str, operations: Mapping[str, Any], known: Sequence[str]
+    ) -> dict[str, tuple[dict[str, Any], str]]:
+        """Named operations as pandas' named aggregation writes them, each as
+        the spec's ``{"op", "field"}`` with the kind of its result, refused at
+        the keyword naming it; groups and totals know fewer than derived
+        tables do (`known`), and refuse the others in words."""
+        named: dict[str, tuple[dict[str, Any], str]] = {}
+        kept = "totals" if role == "row_totals" else "groups"
         for name, operation in operations.items():
             # Each operation is at the keyword naming its output.
-            at = Role("aggregate").key(name)
+            at = Role(role).key(name)
             if not isinstance(operation, str) and not (listlike(operation) and len(operation) == 2):
                 raise at.error(
                     'expected an operation, such as "count", or a (column, '
                     f"operation) pair; received {shown(operation)}"
                 )
             column, op = (None, operation) if isinstance(operation, str) else tuple(operation)
-            if not isinstance(op, str) or op not in AGGREGATES:
-                raise at.error(f"unknown operation {shown(op)}; name one of {listed(AGGREGATES)}")
+            if isinstance(op, str) and op in AGGREGATES and op not in known:
+                raise at.error(
+                    f"{shown(op)} is not one {kept} keep; use {listed(known)}, or "
+                    "hg.derive(data).aggregate(...)"
+                )
+            if not isinstance(op, str) or op not in known:
+                raise at.error(f"unknown operation {shown(op)}; name one of {listed(known)}")
             if column is None and op != "count":
                 raise at.error(f'{shown(op)} needs a column; give ("column", {shown(op)})')
             if column is not None:
                 self._require(column, at.label, ("number", "time"), at=str(at.path), one=True)
-            specs.append(
-                {"op": op, **({"field": column} if column is not None else {}), "as": name}
-            )
             keeps = column is not None and op in _KEEPS_KIND and self._kinds[column] == "time"
-            kinds[name] = "time" if keeps else "number"
-        step = {"aggregate": specs, **({"by": keys} if keys else {})}
-        return self._then(step, _Kinds(list(kinds), kinds))
+            spec = {"op": op, **({"field": column} if column is not None else {})}
+            named[name] = (spec, "time" if keeps else "number")
+        return named
 
     @_step
     def rolling(
@@ -883,7 +901,10 @@ class View:
     mark's data. The chart sends the data's columns once and the view as a
     question about them, answered in the browser as rows change: views of
     one table cost no copies. Colors, legends, and row selections stay the
-    data's; a row selection binds the data itself.
+    data's; a row selection binds the data itself. With ``selection``, an
+    ``hg.Channels``, it shows only the rows the channels of the data's
+    selection store hold too, the store the chart's bindings of the data
+    write.
     """
 
     def __init__(
@@ -907,6 +928,46 @@ class View:
         return reads | {name for name in _names_used(used) if name in self._kinds}
 
 
+@refuses
+@dataclass(frozen=True)
+class Channels:
+    """The channels of a selection store a view follows (``hg.view(data,
+    selection=hg.Channels(...))``): the view shows the rows each of their
+    conditions and row sets holds, and filters again as they change. Every
+    channel by default, those made later too; ``channels`` names them (one
+    or a list), or ``excluding`` leaves some out, as a panel of a
+    cross-filtered dashboard leaves out its own: ``hg.Channels(excluding=
+    "regions")``. Not both."""
+
+    channels: str | Sequence[str] | None = None
+    excluding: str | Sequence[str] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.channels is not None and self.excluding is not None:
+            raise ChartError("Channels: give channels or excluding, not both")
+        for option in ("channels", "excluding"):
+            given = getattr(self, option)
+            names = [given] if isinstance(given, str) else given
+            if given is not None and (
+                not listlike(names) or not all(isinstance(name, str) for name in names)
+            ):
+                raise ChartError(
+                    f"Channels {option}: expected a channel's name or a list of them; "
+                    f"received {shown(given)}"
+                )
+
+    def _spec(self) -> dict[str, Any]:
+        """The channels as a view's ``selection`` writes them."""
+        if self.channels is not None:
+            listed = [self.channels] if isinstance(self.channels, str) else list(self.channels)
+            return {"channels": listed}
+        if self.excluding is None:
+            return {}
+        return {
+            "excluding": self.excluding if isinstance(self.excluding, str) else list(self.excluding)
+        }
+
+
 @checks_hints("view")
 def view(
     data: Any,
@@ -914,11 +975,14 @@ def view(
     filter: Expr | None = None,
     sort: str | Sequence[str] | None = None,
     descending: bool | Sequence[bool] = False,
+    selection: Channels | None = None,
 ) -> View:
     """The rows of ``data`` (a data source or a derived table) where
     ``filter`` holds, ordered by the ``sort`` columns (each ``descending``
     or not), for series marks to draw: ``hg.view(flights, filter=hg.col(
-    "delay") >= -20)``."""
+    "delay") >= -20)``. With ``selection``, only those the channels of the
+    data's selection store hold too: ``hg.view(sales, selection=
+    hg.Channels(excluding="regions"))``."""
     if isinstance(data, View):
         raise ChartError(
             "view data: already a view; give its data, and join the filters with &", path="data"
@@ -958,7 +1022,185 @@ def view(
         order.append({"field": key, "order": "descending" if down else "ascending"})
     if order:
         query["sort"] = order
+    if selection is not None:
+        if not isinstance(selection, Channels):
+            raise ChartError(
+                "view selection: expected the channels to follow, as "
+                f'hg.Channels(excluding="regions"); received {shown(selection)}',
+                path="selection",
+            )
+        query["selection"] = selection._spec()
     return View(data, query, checked._kinds, checked._table)
+
+
+#: The operations row groups and totals keep as their rows come and go.
+GROUP_OPERATIONS = ("count", "sum", "mean", "min", "max")
+
+
+class RowGroups:
+    """The rows of a view (or of data) grouped by the values of ``by``
+    columns, one row per group with each named operation, kept current in
+    the browser as the view's rows change: ``hg.group_rows(view, by=
+    "region", revenue=("revenue", "sum"))``.
+
+    Pass it as a chart's or mark's data: it is the table of the last
+    grouping column's groups; ``.level("region")`` is the table of an
+    upper level's. Groups come in the order their keys first appeared, and
+    a group whose rows all leave and come back takes its place again. A
+    row selection binds the data the groups come from
+    (``hg.SelectionBinding("focus", data=sales)``), which they then
+    highlight and select through.
+    """
+
+    def __init__(
+        self,
+        source: Any,
+        by: tuple[str, ...],
+        operations: dict[str, dict[str, Any]],
+        kinds: _Kinds,
+        level: str,
+        table: Table | _InOrder | None,
+    ) -> None:
+        #: What the groups read: a view, or data.
+        self.source = source
+        #: The grouping columns, level by level.
+        self.by = by
+        #: The level whose groups the table holds: the last grouping column's, or an upper one's.
+        self.level_of = level
+        self._operations = operations
+        # Every level's columns, of which this level's table has its keys and operations.
+        self._every = kinds
+        names = [*by[: by.index(level) + 1], *operations]
+        self._kinds = _Kinds(names, {name: kinds[name] for name in names})
+        self._table = table
+
+    @property
+    def columns(self) -> dict[str, str]:
+        """The table's columns and their kinds: the grouping columns down to
+        its level, then each operation's."""
+        return {name: self._kinds[name] for name in self._kinds}
+
+    def level(self, column: str) -> RowGroups:
+        """The table of the groups by ``by`` down to ``column``: ``groups.
+        level("region")`` of groups by region and service, one row a region."""
+        if not isinstance(column, str) or column not in self.by:
+            named = ", ".join(repr(name) for name in self.by)
+            given = repr(column) if isinstance(column, str) else shown(column)
+            raise ChartError(
+                f"RowGroups level: {given} is not one of by ({named}); name one of them",
+                path="column",
+            )
+        if column == self.level_of:
+            return self
+        return RowGroups(self.source, self.by, self._operations, self._every, column, self._table)
+
+    def _spec(self) -> dict[str, Any]:
+        """The groups as a spec's data entry writes them, but for its source."""
+        spec: dict[str, Any] = {"by": list(self.by)}
+        if self._operations:
+            spec["ops"] = self._operations
+        if self.level_of != self.by[-1]:
+            spec["level"] = self.level_of
+        return {"groups": spec}
+
+    def source_columns(self, used: Iterable[str] = ()) -> set[str]:
+        """Columns of the source the groups read: the grouping columns and
+        those operations read, whatever ``used`` the table's are."""
+        _names_used(used)
+        reads = set(self.by)
+        reads |= {op["field"] for op in self._operations.values() if "field" in op}
+        return reads
+
+
+class RowTotals:
+    """One row of named operations over every row of a view (or of data),
+    kept current in the browser as the view's rows change:
+    ``hg.row_totals(view, n="count", revenue=("revenue", "sum"))``. Pass it
+    as a chart's or mark's data: a KPI, a gauge, a rule at the mean."""
+
+    def __init__(
+        self,
+        source: Any,
+        operations: dict[str, dict[str, Any]],
+        kinds: _Kinds,
+        table: Table | _InOrder | None,
+    ) -> None:
+        #: What the totals read: a view, or data.
+        self.source = source
+        self._operations = operations
+        self._kinds = kinds
+        self._table = table
+
+    @property
+    def columns(self) -> dict[str, str]:
+        """The table's columns, one per operation, and their kinds."""
+        return {name: self._kinds[name] for name in self._kinds}
+
+    def _spec(self) -> dict[str, Any]:
+        """The totals as a spec's data entry writes them, but for its source."""
+        return {"totals": {"ops": self._operations}}
+
+    def source_columns(self, used: Iterable[str] = ()) -> set[str]:
+        """Columns of the source the operations read, whatever ``used`` the
+        table's are."""
+        _names_used(used)
+        return {op["field"] for op in self._operations.values() if "field" in op}
+
+
+def _rows_of(data: Any, role: str) -> Derived:
+    """What groups and totals read (a view, or data), checked as derived rows."""
+    if isinstance(data, (RowGroups, RowTotals)):
+        raise ChartError(
+            f"{role} data: groups or totals; group a view of their data, or derive from it",
+            path="data",
+        )
+    if isinstance(data, View):
+        return Derived(data, [], data._kinds, data._table)
+    return derive(data)
+
+
+def group_rows(data: Any, *, by: str | Sequence[str], **operations: Any) -> RowGroups:
+    """The rows of ``data`` (a view, a data source, or a derived table)
+    grouped by the ``by`` columns, with each named operation as in pandas'
+    named aggregation (``n="count"``, ``revenue=("revenue", "sum")``):
+    counts, sums, means, minimums, and maximums, which groups keep as rows
+    come and go. ``.level(column)`` gives an upper level's table."""
+    rows = _rows_of(data, "group_rows")
+    # The grouping columns are read first: a column of data none can be is refused at by.
+    located("by", lambda: rows._require(by, "group_rows by", _VALUES, at="by", given=True))
+    keys = (by,) if isinstance(by, str) else tuple(by)
+    if not keys:
+        raise ChartError("group_rows by: expected at least one column to group by", path="by")
+    if len(set(keys)) != len(keys):
+        raise ChartError("group_rows by: each column once", path="by")
+    named = rows._operations("group_rows", operations, GROUP_OPERATIONS)
+    clash = next((name for name in named if name in keys), None)
+    if clash is not None:
+        raise (
+            Role("group_rows")
+            .key(clash)
+            .error("an operation cannot have the name of a grouping column; rename it")
+        )
+    kinds = {name: rows._kinds[name] for name in keys} | {
+        name: kind for name, (_, kind) in named.items()
+    }
+    ops = {name: spec for name, (spec, _) in named.items()}
+    table = data._table if isinstance(data, View) else rows._table
+    return RowGroups(data, keys, ops, _Kinds(list(kinds), kinds), keys[-1], table)
+
+
+def row_totals(data: Any, **operations: Any) -> RowTotals:
+    """One row of each named operation over every row of ``data`` (a view,
+    a data source, or a derived table), as ``group_rows`` takes them:
+    ``hg.row_totals(view, n="count", avg=("latency", "mean"))``."""
+    rows = _rows_of(data, "row_totals")
+    if not operations:
+        raise ChartError('row_totals: needs at least one operation, such as n="count"')
+    named = rows._operations("row_totals", operations, GROUP_OPERATIONS)
+    kinds = {name: kind for name, (_, kind) in named.items()}
+    ops = {name: spec for name, (spec, _) in named.items()}
+    table = data._table if isinstance(data, View) else rows._table
+    return RowTotals(data, ops, _Kinds(list(kinds), kinds), table)
 
 
 class Ordered:

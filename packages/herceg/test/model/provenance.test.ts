@@ -11,6 +11,7 @@ import { col } from "../../src/data/expr.ts";
 import { compileExpression, type Expression } from "../../src/data/expression.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
+import { selectionStore, selectRows, selectWhere } from "../../src/data/selection.ts";
 import { type Table, table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
@@ -172,6 +173,28 @@ describe("rows marks", () => {
       marks: [bar(restricted, { x: "month", y: "revenue", series: "region" })],
     });
     const held = clicked(only, ...rectAt(only, 0));
+    expect(held.condition).toBeNull();
+    expect([...held.rows!().positions]).toEqual([0]);
+  });
+
+  it("add the conditions of the channels a view follows, and say nothing for their row sets", () => {
+    const data = sales();
+    const store = selectionStore(data);
+    const view = rowView(data, { filter: col("revenue").gt(4), selection: { store } });
+    store.set("others", selectWhere(col("region").eq("N")));
+    const model = build({ marks: [bar(view, { x: "month", y: "revenue", series: "region" })] });
+    const item = clicked(model, ...rectAt(model, 0));
+    expect(item.condition).toEqual([
+      "and",
+      ["and", ["==", ["field", "month"], "Jan"], ["==", ["field", "region"], "N"]],
+      ["and", [">", ["field", "revenue"], 4], ["==", ["field", "region"], "N"]],
+    ]);
+    expect([...item.rows!().positions]).toEqual([0]);
+    expectRowsMatch(item, data);
+    // A channel's row set restricts the view, which no condition says.
+    store.set("picked", selectRows(new RowSet(data).addAll([0, 1, 2])));
+    const picked = build({ marks: [bar(view, { x: "month", y: "revenue", series: "region" })] });
+    const held = clicked(picked, ...rectAt(picked, 0));
     expect(held.condition).toBeNull();
     expect([...held.rows!().positions]).toEqual([0]);
   });

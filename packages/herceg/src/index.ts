@@ -52,7 +52,13 @@ export { fromMatrix } from "./data/matrix.ts";
 export type { SortKey } from "./data/order.ts";
 export { OrderedTable, type OrderedTableOptions, orderedTable } from "./data/ordered.ts";
 export { type ReadonlyRowSet, RowSet } from "./data/row-set.ts";
-export { type RowQuery, type RowSnapshot, RowView, rowView } from "./data/row-view.ts";
+export {
+  type RowQuery,
+  type RowSnapshot,
+  RowView,
+  rowView,
+  type ViewSelection,
+} from "./data/row-view.ts";
 export {
   type ConditionSelection,
   type DataSelection,

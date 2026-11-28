@@ -11,6 +11,7 @@ import {
 } from "../data/column.ts";
 import { deriveTable } from "../data/derive.ts";
 import { geometry } from "../data/geometry.ts";
+import { type GroupAggregate, RowGroups } from "../data/groups.ts";
 import { fromMatrix } from "../data/matrix.ts";
 import { orderedTable } from "../data/ordered.ts";
 import { setOrigin } from "../data/origin.ts";
@@ -24,6 +25,7 @@ import {
   selectWhere,
 } from "../data/selection.ts";
 import { type Table, table } from "../data/table.ts";
+import { RowTotals } from "../data/totals.ts";
 import { holds, misfit } from "../fields/check.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import { readsTable } from "../marks/annotation.ts";
@@ -79,6 +81,7 @@ import type {
   ColumnSpec,
   ColumnsSpec,
   DataSpec,
+  GroupsSpec,
   Histogram1DSpec,
   Histogram2DSpec,
   LabelSpec,
@@ -96,11 +99,18 @@ export type SpecBuffer = ArrayBuffer | ArrayBufferView;
 export interface LoadedSpec {
   /** Chart options with marks, ready for `createChart` or `renderToSVG`. */
   config: ChartConfig & { width?: number; height?: number };
-  /** The spec's tables by name; changing them updates charts built from the spec. */
+  /**
+   * The spec's tables by name, groups' and totals' tables too; changing the
+   * tables of columns updates charts built from the spec (the others follow
+   * them).
+   */
   tables: Map<string, Table>;
   /** The spec's views of tables' rows (`{ source, view }` entries) by name; changing their queries updates charts. */
   views: Map<string, RowView>;
-  /** The selection stores `rowSelection` binds, by table name: those given in `stores`, or new ones. */
+  /**
+   * The selection stores `rowSelection` binds and views follow, by table
+   * name, one per table: those given in `stores`, or new ones.
+   */
   stores: Map<string, SelectionStore>;
   /** Paths of the properties this herceg does not know, such as `marks[0].strokeWidht`. */
   unknown: string[];
@@ -122,8 +132,9 @@ export interface LoadOptions {
    */
   tables?: ByName<AnyTable>;
   /**
-   * The selection stores `rowSelection` binds, by table name; a store of a
-   * table's own is made for each one left out. Each must be of that table.
+   * The selection stores `rowSelection` binds and views follow, by table
+   * name; a store of a table's own is made for each one left out. Each must
+   * be of that table.
    */
   stores?: ByName<AnyStore>;
 }
@@ -178,7 +189,21 @@ export function loadSpec(
     );
   const unknown = found.map(({ path }) => path);
   const views = new Map<string, RowView>();
-  const tables = loadTables(spec.data ?? {}, buffers, byName(options.tables), views);
+  const listed = Array.isArray(spec.rowSelection);
+  const bindings = (
+    spec.rowSelection === undefined ? [] : [spec.rowSelection].flat()
+  ) as readonly RowSelectionSpec[];
+  const givenTables = byName(options.tables);
+  const tables = new Map<string, Table>();
+  const stores = storesOf(
+    bindings,
+    listed,
+    byName(options.stores),
+    buffers,
+    (name) => tables.get(name) ?? givenTables?.get(name),
+  );
+  // Tables, then the stores the bindings and views name, the views, groups, and totals, in the order they need each other.
+  loadTables(spec.data ?? {}, buffers, givenTables, views, stores, tables);
   const marks = spec.marks.map((mark, index) => loadMark(mark, index, tables, views));
   marks.forEach(tooltipKinds);
   const {
@@ -190,14 +215,12 @@ export function loadSpec(
     layout,
     x,
     navigator: strip,
-    rowSelection: bindings,
+    rowSelection: _bindings,
     fields: displays,
     ...chart
   } = spec;
-  const stores = new Map<string, SelectionStore>();
   const rows =
-    bindings &&
-    loadRowSelection(bindings, tables, views, marks, buffers, byName(options.stores), stores);
+    bindings.length > 0 && loadRowSelection(bindings, listed, tables, views, marks, stores);
   const facet = split && new Facet(split);
   const subplots = panels && new Panels(panels, layout);
   const navigator = strip ? rangeNavigator(strip === true ? {} : strip) : undefined;
@@ -217,7 +240,7 @@ export function loadSpec(
     },
     tables,
     views,
-    stores,
+    stores: stores.made,
     unknown,
   };
 }
@@ -286,24 +309,95 @@ function byName<T>(values: ByName<T> | undefined): ReadonlyMap<string, T> | unde
 }
 
 /**
+ * A spec's tables' selection stores, one per table, whatever names name it
+ * (tables given twice, entries sharing a groups' level table): the one
+ * given for any of its names, or one made and given at once what the
+ * bindings naming the table hold (`selection`), so views following them
+ * and their groups start from it. `tableNamed` gives the tables loaded so
+ * far and those given. A binding that names no table is given its table's
+ * store, and seeds a store made, once its table is found from the marks:
+ * then only views no mark draws can have been made before it.
+ */
+function storesOf(
+  bindings: readonly RowSelectionSpec[],
+  listed: boolean,
+  given: ReadonlyMap<string, SelectionStore> | undefined,
+  buffers: readonly SpecBuffer[],
+  tableNamed: (name: string) => Table | undefined,
+) {
+  const made = new Map<string, SelectionStore>();
+  const byTable = new Map<Table, SelectionStore>();
+  /** The store given for a name of `table`; two given for its names must be one. */
+  const givenFor = (table: Table) => {
+    const of = given ? [...given].filter(([, store]) => store.source === table) : [];
+    const other = of.find(([, store]) => store !== of[0]![1]);
+    if (other)
+      throw new Error(
+        `stores.${other[0]}: "${other[0]}" and "${of[0]![0]}" name one table, and their stores given differ; give them one store`,
+      );
+    return of[0]?.[1];
+  };
+  const own = new Set<SelectionStore>();
+  const seeded = new Set<number>();
+  const seed = (store: SelectionStore, table: Table, i: number) => {
+    const { channel, selection } = bindings[i]!;
+    if (!own.has(store) || seeded.has(i) || !selection) return;
+    seeded.add(i);
+    const at = `${listed ? `rowSelection[${i}]` : "rowSelection"}.selection`;
+    const held = loadSelection(selection, table, buffers, at);
+    try {
+      store.set(channel, held);
+    } catch (error) {
+      // A condition of fields the table lacks, or not true or false.
+      throw within(`${at}.expression`, error);
+    }
+  };
+  return {
+    made,
+    /** Table `name`'s store, seeded by the bindings naming it, and by binding `found`, whose table it is. */
+    of(name: string, table: Table, found?: number): SelectionStore {
+      let store = made.get(name);
+      if (!store) {
+        const offered = given?.get(name);
+        if (offered && offered.source !== table)
+          throw new Error(
+            `stores.${name}: the store given is of another table; give a store of table "${name}"`,
+          );
+        store = byTable.get(table) ?? givenFor(table);
+        if (!store) {
+          store = selectionStore(table);
+          own.add(store);
+        }
+        made.set(name, store);
+        byTable.set(table, store);
+      }
+      bindings.forEach(({ data }, i) => {
+        const named = data === name || (data !== undefined && tableNamed(data) === table);
+        if (named || i === found) seed(store!, table, i);
+      });
+      return store;
+    },
+  };
+}
+
+type Stores = ReturnType<typeof storesOf>;
+
+/**
  * A spec's row selection, its bindings' tables resolved by name (or, left
- * out, the one table the marks read) and their stores taken from `given`
- * or made, into `stores`.
+ * out, the one table the marks read) and their stores taken from `stores`.
  */
 function loadRowSelection(
-  spec: RowSelectionSpec | readonly RowSelectionSpec[],
+  bindings: readonly RowSelectionSpec[],
+  listed: boolean,
   tables: ReadonlyMap<string, Table>,
   views: ReadonlyMap<string, RowView>,
   marks: readonly ChartMark[],
-  buffers: readonly SpecBuffer[],
-  given: ReadonlyMap<string, SelectionStore> | undefined,
-  stores: Map<string, SelectionStore>,
+  stores: Stores,
 ): RowSelection {
   const read = [...new Set(marks.flatMap((mark) => tablesOf(mark)))];
-  const bindings = (Array.isArray(spec) ? spec : [spec]) as readonly RowSelectionSpec[];
   return rowSelection(
-    ...bindings.map(({ data, channel, events, effect, selection, budget }, i) => {
-      const path = Array.isArray(spec) ? `rowSelection[${i}]` : "rowSelection";
+    ...bindings.map(({ data, channel, events, effect, live, budget }, i) => {
+      const path = listed ? `rowSelection[${i}]` : "rowSelection";
       let name = data;
       if (name === undefined) {
         if (read.length !== 1)
@@ -320,26 +414,7 @@ function loadRowSelection(
         throw new Error(
           `${path}.data: no table ${JSON.stringify(name)} in data; name one of ${names(tables)}`,
         );
-      let store = given?.get(name!) ?? stores.get(name!);
-      if (store && store.source !== table)
-        throw new Error(
-          `stores.${name}: the store given is of another table; give a store of table "${name}"`,
-        );
-      if (!store) {
-        // A store given keeps what it holds; one made here starts with the spec's.
-        store = selectionStore(table);
-        if (selection) {
-          const at = `${path}.selection`;
-          const held = loadSelection(selection, table, buffers, at);
-          try {
-            store.set(channel, held);
-          } catch (error) {
-            // A condition of fields the table lacks, or not true or false.
-            throw within(`${at}.expression`, error);
-          }
-        }
-      }
-      stores.set(name!, store);
+      const store = stores.of(name!, table, i);
       // Marks of tables derived from the bound one highlight it through lineage.
       return {
         store,
@@ -348,6 +423,7 @@ function loadRowSelection(
         budget,
         ...(events && { events }),
         ...(effect && { effect }),
+        ...(live !== undefined && { live }),
       };
     }),
   );
@@ -373,24 +449,77 @@ function loadSelection(
   return selectRows(new RowSet(table).addAll(positions));
 }
 
+/** Refuses `field` where `table` lacks it, at `at`, as derived tables' steps do. */
+function has(table: Table, field: string, at: string): void {
+  if (!table.has(field))
+    throw new Error(
+      `${at}: no field "${field}"; the rows have ${table
+        .fields()
+        .map((f) => `"${f}"`)
+        .join(", ")}`,
+    );
+}
+
+/** Refuses the fields of groups' or totals' `ops` that `table` lacks. */
+function fieldsOf(ops: Record<string, { field?: string }>, table: Table, at: string): void {
+  for (const [name, { field }] of Object.entries(ops))
+    if (field !== undefined) has(table, field, `${at}.${name}.field`);
+}
+
 /**
- * Every table of the spec; derived tables after the tables they derive
- * from. Tables in `given` are used rather than made from their columns.
+ * Every table of the spec: tables before the tables, views, groups, and
+ * totals made from them, a view's store before the view. Tables in `given`
+ * are used rather than made from their columns. Groups entries of one
+ * source, `by`, and `ops` share their groups, each entry a level's table.
  */
 function loadTables(
   data: Record<string, DataSpec>,
   buffers: readonly SpecBuffer[],
   given: ReadonlyMap<string, Table> | undefined,
   views: Map<string, RowView>,
-): Map<string, Table> {
-  const tables = new Map<string, Table>();
+  stores: Stores,
+  tables: Map<string, Table>,
+): void {
   const loading = new Set<string>();
+  const entries = Object.entries(data);
+  /** Groups by what they group (source, by, ops), and the names of their levels' tables. */
+  const grouped = new Map<string, RowGroups>();
+  const levelNames = new Map<string, Map<string, string>>();
+  // Entries of one source, grouping, and aggregates share them, however their objects are written.
+  const groupsKey = ({ source, groups }: GroupsSpec) =>
+    JSON.stringify([
+      source,
+      groups.by,
+      Object.entries(groups.ops ?? {})
+        .map(([name, { op, field }]) => [name, op, field ?? null])
+        .sort(([a], [b]) => (a! < b! ? -1 : 1)),
+    ]);
+  for (const [name, entry] of entries)
+    if ("groups" in entry) {
+      const named = levelNames.get(groupsKey(entry)) ?? new Map<string, string>();
+      const level = entry.groups.level ?? entry.groups.by.at(-1)!;
+      if (!named.has(level)) named.set(level, name);
+      levelNames.set(groupsKey(entry), named);
+    }
+  /** Views of whole tables that groups and totals of a table read, one per table. */
+  const whole = new Map<string, RowView>();
   /** Table `of`, as `at` names it: tables and views are made from tables, never from views. */
   const tableAt = (at: string, of: string): Table => {
     const entry = data[of];
     if (entry && "view" in entry)
       throw new Error(`${at}: "${of}" is a view of "${entry.source}"; name "${entry.source}"`);
     return load(of);
+  };
+  /** The rows of `of`, a view or a table, as groups and totals read them. */
+  const rowsAt = (at: string, of: string): RowView => {
+    if (!Object.hasOwn(data, of))
+      throw new Error(`${at}: no table "${of}" in data; name one of ${names(data)}`);
+    load(of);
+    const view = views.get(of);
+    if (view) return view;
+    const rows = whole.get(of) ?? rowView(tables.get(of)!);
+    whole.set(of, rows);
+    return rows;
   };
   const load = (name: string): Table => {
     const done = tables.get(name) ?? given?.get(name);
@@ -401,13 +530,24 @@ function loadTables(
     const entry = data[name];
     if (!entry) throw new Error(`data: no table "${name}"`);
     if ("view" in entry) {
+      const known = views.get(name);
+      if (known) return known.source;
       if (!Object.hasOwn(data, entry.source))
         throw new Error(
           `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
         );
       const of = tableAt(`data.${name}.source`, entry.source);
+      const { selection, ...query } = entry.view;
+      // Outside the view's errors: a binding's or a given store's say their own paths.
+      const store = selection && stores.of(entry.source, of);
       try {
-        views.set(name, rowView(of, entry.view as never));
+        views.set(
+          name,
+          rowView(of, {
+            ...query,
+            ...(selection && { selection: { ...selection, store } }),
+          } as never),
+        );
       } catch (error) {
         throw within(`data.${name}.view`, error);
       }
@@ -441,26 +581,70 @@ function loadTables(
       return loaded;
     }
     if (loading.has(name))
-      throw new Error(`data.${name}.source: the table derives from itself; derive it from another`);
-    loading.add(name);
-    if (!Object.hasOwn(data, entry.source))
       throw new Error(
-        `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
+        "transform" in entry
+          ? `data.${name}.source: the table derives from itself; derive it from another`
+          : `data.${name}.source: the table is made from itself; make it from another`,
       );
-    const source = tableAt(`data.${name}.source`, entry.source);
-    let derived: Table;
-    try {
-      derived = deriveTable(source, entry.transform, { name });
-    } catch (error) {
-      throw within(`data.${name}`, error);
+    loading.add(name);
+    let made: Table;
+    if ("groups" in entry) {
+      const rows = rowsAt(`data.${name}.source`, entry.source);
+      const { by, ops = {}, level = by.at(-1)! } = entry.groups;
+      for (const [i, field] of by.entries())
+        has(rows.source, field, `data.${name}.groups.by[${i}]`);
+      fieldsOf(ops, rows.source, `data.${name}.groups.ops`);
+      const key = groupsKey(entry);
+      let groups = grouped.get(key);
+      if (!groups) {
+        try {
+          groups = new RowGroups(
+            rows,
+            { by, ops: ops as Record<string, GroupAggregate> },
+            undefined,
+            `data.${name}.groups.ops`,
+            levelNames.get(key),
+          );
+        } catch (error) {
+          const { message } = error as Error;
+          throw message.startsWith("data.") ? error : within(`data.${name}.groups.by`, error);
+        }
+        grouped.set(key, groups);
+      }
+      made = groups.tableOf(level);
+      // The entries of the same groups are their levels' tables: known with this one, so a
+      // binding naming an entry of the same level is known to name this table (`storesOf`).
+      for (const [other, sibling] of entries)
+        if ("groups" in sibling && other !== name && !tables.has(other) && !given?.has(other))
+          if (groupsKey(sibling) === key)
+            tables.set(other, groups.tableOf(sibling.groups.level ?? sibling.groups.by.at(-1)!));
+    } else if ("totals" in entry) {
+      const rows = rowsAt(`data.${name}.source`, entry.source);
+      fieldsOf(entry.totals.ops, rows.source, `data.${name}.totals.ops`);
+      made = new RowTotals(
+        rows,
+        { ops: entry.totals.ops as Record<string, GroupAggregate> },
+        name,
+        `data.${name}.totals.ops`,
+      ).table;
+    } else {
+      if (!Object.hasOwn(data, entry.source))
+        throw new Error(
+          `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
+        );
+      const source = tableAt(`data.${name}.source`, entry.source);
+      try {
+        made = deriveTable(source, entry.transform, { name });
+      } catch (error) {
+        throw within(`data.${name}`, error);
+      }
     }
-    tables.set(name, derived);
-    return derived;
+    tables.set(name, made);
+    return made;
   };
-  for (const name of Object.keys(data)) load(name);
+  for (const [name] of entries) load(name);
   // A view names no table.
   for (const name of views.keys()) if (!given?.has(name)) tables.delete(name);
-  return tables;
 }
 
 function loadTable(name: string, data: ColumnsSpec, buffers: readonly SpecBuffer[]): Table {

@@ -246,7 +246,15 @@ hg.Chart(trips, row_selection=picked).histogram(x="distance").to_svg()  # drawn 
   (`hg.Look`; the unselected look outlined in the bar's color by
   default). Inspected points then carry `coverage`, an `hg.Coverage` of
   `selected` and `total` rows, `state`, `channel`, and for counts and sums
-  its `measure` (`hg.CoverageMeasure`).
+  its `measure` (`hg.CoverageMeasure`). The same holds for
+  `hg.group_rows` and `hg.row_totals`, whose clicks on a bar and brushes
+  along the groups' axis write the condition of the groups' keys
+  (`region == "West"`).
+- A view following the channels (`hg.view(sales, selection=hg.Channels())`)
+  shows only the rows the chart's channel holds (a brush's, a click's, or
+  a `selection` set from Python), filtering again as it changes, and groups
+  of it sum only those rows; static output draws them filtered by the
+  binding's `selection` ([Cross-filtering](../data.md#cross-filtering)).
 
 ## Streamlit
 

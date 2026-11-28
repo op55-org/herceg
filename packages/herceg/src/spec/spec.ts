@@ -417,8 +417,11 @@ type LonLat = readonly [number, number];
  */
 export type ThemeName = "light" | "dark" | "high-contrast" | "high-contrast-dark" | "auto";
 
-/** A table: its columns, rows derived from another table of the spec, or a view of another's rows. */
-export type DataSpec = ColumnsSpec | DerivedSpec | ViewSpec;
+/**
+ * A table: its columns, rows derived from another table of the spec, a
+ * view of another's rows, or groups or totals of a view's rows.
+ */
+export type DataSpec = ColumnsSpec | DerivedSpec | ViewSpec | GroupsSpec | TotalsSpec;
 
 export interface ColumnsSpec {
   columns: Record<Field, ColumnSpec>;
@@ -451,18 +454,72 @@ export interface ColumnsSpec {
 
 /**
  * The rows of the table `source` that `view` shows: those its filter
- * keeps, in the order its sort gives (table order without), read from the
- * table without a copy, and following it as it changes (`rowView`). Every
- * mark that draws series takes a view; annotation and layout marks take
- * tables.
+ * keeps, and with `selection` those the channels of the table's selection
+ * store hold too, in the order its sort gives (table order without), read
+ * from the table without a copy, and following it as it changes
+ * (`rowView`). Every mark that draws series takes a view; annotation and
+ * layout marks take tables.
  */
 export interface ViewSpec {
   source: string;
   view: {
     filter?: Expression;
     sort?: readonly { field: Field; order?: "ascending" | "descending" }[];
+    selection?: ViewSelectionSpec;
   };
 }
+
+/**
+ * The channels of the store of a view's table that it follows (the store
+ * the spec's bindings of that table write, which `loadSpec` makes or is
+ * given): the view shows the rows each of their conditions and row sets
+ * holds, and filters again as they change. Every channel, those made later
+ * too, by default; `channels` lists them, or `excluding` leaves some out (a
+ * panel's own); not both.
+ */
+export interface ViewSelectionSpec {
+  channels?: readonly string[];
+  excluding?: string | readonly string[];
+}
+
+/**
+ * The rows of the view or table `source` grouped by the values of `by`,
+ * level by level (by the first field, then the first two, ...), one row per
+ * group, with each group's aggregates (`groupRows`): the last level's
+ * table, or with `level` the table of the level of that grouping field.
+ * Groups come in the order their keys first appeared, and a group whose
+ * rows all leave and come back takes its place again. Entries of one
+ * source, `by`, and `ops` share their groups. Charts built from the spec
+ * keep them current as the view changes.
+ */
+export interface GroupsSpec {
+  source: string;
+  groups: {
+    /** @minItems 1 */
+    by: readonly Field[];
+    ops?: Record<Field, GroupOpSpec>;
+    level?: Field;
+  };
+}
+
+/**
+ * One row of aggregates over every row the view or table `source` shows
+ * (`rowTotals`), current as the view changes: a KPI, a rule at the mean.
+ */
+export interface TotalsSpec {
+  source: string;
+  totals: { ops: Record<Field, GroupOpSpec> };
+}
+
+/**
+ * An aggregate groups and totals keep as their rows come and go: a count
+ * of rows (of a field's finite values, with `field`), or the sum, mean,
+ * minimum, or maximum of a field's finite values. Other aggregates (a
+ * median, a distinct count) are a derived table's.
+ */
+export type GroupOpSpec =
+  | { op: "count"; field?: Field }
+  | { op: "sum" | "mean" | "min" | "max"; field: Field };
 
 /**
  * Rows computed from the table `source` by `transform`, in order. Charts

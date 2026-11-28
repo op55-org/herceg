@@ -19,7 +19,11 @@
 // - Budgets: what a binding's routes build is counted before it is made,
 //   and again as tables grow; past it, the binding stops highlighting.
 
-import { contributorsOf, type Measure } from "../data/contributor-records.ts";
+import {
+  type ContributorRecord,
+  contributorsOf,
+  type Measure,
+} from "../data/contributor-records.ts";
 import { type ContributorRelation, relationTo } from "../data/contributors.ts";
 import { compileExpression, type Expression } from "../data/expression.ts";
 import { lineageOf } from "../data/lineage.ts";
@@ -106,7 +110,13 @@ export interface LineageRoute {
   report: (error: ChartError) => void;
   /** The bound table's rows behind `targets` (positions of the table drawn), for `field`'s value where given. */
   rows(targets: ArrayLike<number>, field?: string): RowSet;
-  /** `condition` on the table drawn, on the bound table's fields; null where no condition says it. */
+  /**
+   * `condition` on the table drawn, on the bound table's fields; null where
+   * no condition says it. Through groups and totals, a condition of their
+   * keys is the same condition on their view's table, within the view's
+   * own filter, for a chart drawing one value field of them: where it draws
+   * several, whose rows differ by field, a gesture's rows are its field's.
+   */
   back(condition: Expression): Expression | null;
   /**
    * What a gesture's selection of the table drawn (a brush, a lasso, items,
@@ -236,6 +246,26 @@ function fieldsOf(mark: Mark | LayoutMark): (string | undefined)[] {
   if (spec[`${across}1`] !== undefined || spec[`${across}Error`] !== undefined) return [undefined];
   const fields = fieldsAt(mark, across);
   return fields.length > 0 ? fields : [undefined];
+}
+
+/**
+ * `condition` on a groups' or totals' table, on its view's table: the same
+ * condition where it reads only the record's keys (totals have none),
+ * within the view's own filter (as a gesture on a chart of the view writes:
+ * the channels it follows are other panels' filters); null where it reads
+ * an aggregate, a row set restricts the view, or the producer stopped.
+ */
+function keyed(
+  record: Exclude<ContributorRecord, { kind: "derived" }>,
+  condition: Expression,
+): Expression | null {
+  const keys = record.kind === "links" ? record.keys : [];
+  const following = record.kind === "links" ? record.following : record.current();
+  const { view } = record;
+  if (!following || view.restriction || readOf(condition).some((field) => !keys.includes(field)))
+    return null;
+  const filter = view.query.filter as Expression | undefined;
+  return filter === undefined ? condition : ["and", condition, filter];
 }
 
 /** Positions of `table`'s rows meeting `condition` now. */
@@ -475,13 +505,18 @@ class Route implements LineageRoute {
   back(condition: Expression): Expression | null {
     let table = this.target;
     let written: Expression | null = condition;
-    // Through every derivation between, to the bound table: none rewrites groups' or totals'.
-    while (table !== this.bound.table) {
+    // Through every derivation, groups, and totals between, to the bound table.
+    while (written !== null && table !== this.bound.table) {
       const lineage = lineageOf(table);
-      if (!lineage) return null;
-      written = lineage.back(written);
-      if (written === null) return null;
-      table = lineage.source;
+      if (lineage) {
+        written = lineage.back(written);
+        table = lineage.source;
+        continue;
+      }
+      const record = contributorsOf(table);
+      if (!record || record.kind === "derived" || this.fields.length > 1) return null;
+      written = keyed(record, written);
+      table = record.source;
     }
     return written;
   }
@@ -723,14 +758,15 @@ class Route implements LineageRoute {
       };
       const entry: (typeof split)[number] = { s, rows };
       split.push(entry);
+      const counts = coverage.counts();
       for (let k = 0; k < s.length; k++) {
         const row = rowOf(s, k);
-        const selected = coverage.selected(row);
+        const selected = counts.selected(row);
         if (selected === 0) {
           rows.off.push(row);
           continue;
         }
-        if (selected >= coverage.total(row)) {
+        if (selected >= counts.total(row)) {
           rows.on.push(row);
           continue;
         }
@@ -791,8 +827,9 @@ class Route implements LineageRoute {
     const key = this.relation.classOf(field);
     const made = this.#bytes.get(key);
     if (made?.revision === revision) return made.bytes;
+    const { selected } = coverage.counts();
     const bytes = new Uint8Array(this.target.length);
-    for (let row = 0; row < bytes.length; row++) bytes[row] = coverage.selected(row) > 0 ? 1 : 0;
+    for (let row = 0; row < bytes.length; row++) bytes[row] = selected(row) > 0 ? 1 : 0;
     this.#bytes.set(key, { revision, bytes });
     return bytes;
   }

@@ -713,3 +713,25 @@ styles](docs/guide/styling.md#role-styles) and
   draw a selection's shapes of their own (histograms, box plots,
   candlesticks, heatmaps) are refused a store through lineage yet. See
   [Groups highlighting their rows](docs/guide/data.md#groups-highlighting-their-rows).
+- **Cross-filtering is declared.** Row views follow a selection store's
+  channels: `rowView(sales, { selection: { store, excluding: "regions" }
+  })` shows the rows every other channel holds (conditions joined, row
+  sets intersected; `channels` lists them instead), filters again as they
+  change, and filters only new rows as rows arrive; `view.filter` and
+  `view.restricted` say what it applies. A brush along groups' axis and a
+  selected bar of groups write the condition of the groups' keys on the
+  source (`region == "West"`), so a dashboard's panels filter each other
+  with no listeners. Specs gain `view.selection`, `groups` entries (`{
+  "source", "groups": { "by", "ops", "level" } }`, entries of one grouping
+  sharing it) and `totals` entries; `loadSpec` makes one store per table
+  for bindings and views, takes others in `stores`, and passes bindings'
+  `live`. Python gains `hg.view(..., selection=hg.Channels(excluding=...))`,
+  `hg.group_rows(view, by=..., **operations)` (`hg.RowGroups`, with
+  `.level(column)`), and `hg.row_totals(view, **operations)`. See
+  [Cross-filtering](docs/guide/data.md#cross-filtering).
+- **Groups that come back take their place.** A group a filter or a
+  window empties returns where it first appeared while its key is
+  remembered, rather than after the others, so bars and lines of groups
+  keep their order without a `domain` or a sorted view. Changed: groups'
+  tables and the bands of category axes over them, which listed returning
+  groups last. See [Row groups](docs/guide/data.md#row-groups).

@@ -14,7 +14,6 @@
 import type { ColumnInput, NumericArray } from "./column.ts";
 import { time } from "./column.ts";
 import { setContributors, type TotalsRecord } from "./contributor-records.ts";
-import type { Expression } from "./expression.ts";
 import { addCompensated, checkAggregates, GroupLevel, GroupTable } from "./group-levels.ts";
 import type { GroupAggregate, GroupSchema, NamedAggregate } from "./groups.ts";
 import type { RemovalLog } from "./removal-log.ts";
@@ -85,7 +84,13 @@ export class RowTotals<
   readonly #stop: () => void;
   readonly #listeners = new Set<() => void>();
 
-  constructor(view: RowView<S>, options: { ops: Record<string, GroupAggregate> }) {
+  /** `name` names the table (a spec's entry), and `at` the aggregates in messages. */
+  constructor(
+    view: RowView<S>,
+    options: { ops: Record<string, GroupAggregate> },
+    name?: string,
+    at = "rowTotals ops",
+  ) {
     const source = view.source as unknown as Table;
     this.view = view;
     this.#source = source;
@@ -93,15 +98,9 @@ export class RowTotals<
       throw new TypeError(
         "rowTotals options: expected { ops }, aggregates by name such as { n: count() }",
       );
-    const { aggregates, read, times, leveled } = checkAggregates(
-      source,
-      options.ops,
-      "rowTotals ops",
-    );
+    const { aggregates, read, times, leveled } = checkAggregates(source, options.ops, at);
     if (aggregates.length === 0)
-      throw new RangeError(
-        "rowTotals ops: expected at least one aggregate, such as { n: count() }",
-      );
+      throw new RangeError(`${at}: expected at least one aggregate, such as { n: count() }`);
     this.aggregates = aggregates;
     this.#read = read;
     this.#times = times;
@@ -113,7 +112,7 @@ export class RowTotals<
     this.#compute(snapshot);
     this.#settle(snapshot);
     this.#seen = this.#state();
-    level.table = new GroupTable(this.#columns(true));
+    level.table = new GroupTable(this.#columns(true), name);
     level.published = { version: level.table.version, length: 1 };
     level.unmark();
     this.table = level.table as unknown as Table<R>;
@@ -199,8 +198,8 @@ export class RowTotals<
     this.#heard++;
     if (change.inserted) this.#recompute = this.#rekeyed = true;
     else if (change.updated) {
-      // A view keeps its filter as an expression.
-      const keys = fieldsOf(this.view.query.filter as Expression);
+      // The filter the view applies: its own and its channels' conditions.
+      const keys = fieldsOf(this.view.filter);
       if (change.fields.some((field) => keys.includes(field)))
         this.#recompute = this.#rekeyed = true;
       else if (change.fields.some((field) => this.#read.includes(field))) this.#recompute = true;
@@ -264,10 +263,7 @@ export class RowTotals<
 
   /** Whether the view shows every row of its table, in some order. */
   #all({ indices }: RowSnapshot): boolean {
-    const { filter } = this.view.query;
-    return (
-      !indices || ((filter === undefined || filter === true) && this.view.restriction === null)
-    );
+    return !indices || (this.view.filter === undefined && !this.view.restricted);
   }
 
   /** Computes the totals again from every row the view shows, keeping what drops will need. */

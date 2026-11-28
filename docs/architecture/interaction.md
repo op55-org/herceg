@@ -915,7 +915,10 @@ each target's [contributors](data.md#contributors) through a relation:
 measure, the selected rows' count or sum beside the target's value (rows
 all selected read the target's value itself); `of(target, field)` gives
 them together, with a measure only of the field named. Each read catches
-the relation up first, so a target's value and its counts agree. It is
+the relation up first, so a target's value and its counts agree; readers
+of every target (a line's selected runs, a bar per group) read
+`counts()`, caught up once, since a catch-up walks the relation's records,
+their producers, and their views. It is
 kept per relation, store, channel, and class of fields, so fields reading
 the same rows share it, two stores of one table under one channel name do
 not, and two aggregates of one group reading different finite values do

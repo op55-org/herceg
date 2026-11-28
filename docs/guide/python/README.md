@@ -78,6 +78,11 @@ share.panel("share").pie("region", "revenue", inner_radius=0.6)
 - **Data** is pandas, Polars, PyArrow, a mapping of names to arrays or
   lists, or a list of records ([Data in Python](../data.md#data-in-python)).
   `hg.derive` filters, bins, aggregates, and rolls in the browser.
+  `hg.view(df, selection=hg.Channels(excluding="regions"))` shows the rows
+  the channels of the data's row selection hold, and `hg.group_rows(view,
+  by="region", revenue=("revenue", "sum"))` and `hg.row_totals(view, ...)`
+  keep groups and totals of a view as its rows change: a
+  [cross-filtered dashboard](../data.md#cross-filtering)'s panels.
 - **Options** are dataclasses (`hg.AxisOptions`, `hg.InspectionOptions`,
   `hg.Tooltip`, `hg.Theme`, ...) or dicts of the same fields. Names have one spelling,
   snake_case where TypeScript has camelCase.
@@ -163,6 +168,8 @@ text to a point, second x scale (`twiny`), formatter callbacks (write an
 - In Streamlit, a chart that changes between runs is sent whole, engine
   included (about 430 KiB gzipped); unchanged charts are not resent. Hover
   is not reported, nor pan and zoom without `on_viewport`.
-- Row groups, row totals, pivots, and grids are TypeScript only.
-  `hg.view` sends a filter and sort for the browser to apply; Python does
-  not compute the view's rows.
+- Pivots and grids are TypeScript only. `hg.view`, `hg.group_rows`, and
+  `hg.row_totals` send a question for the browser to answer; Python does
+  not compute their rows. Each chart's views follow the channels of its
+  own copy of the data, so separate charts filter each other only where a
+  page loads their specs over one table and store.

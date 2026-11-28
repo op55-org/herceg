@@ -92,8 +92,8 @@ export class GroupTable extends Table {
     reset: boolean;
   } | null = null;
 
-  constructor(columns: Record<string, ColumnInput>) {
-    super(columns);
+  constructor(columns: Record<string, ColumnInput>, name?: string) {
+    super(columns, name === undefined ? {} : { name });
     super.subscribe((change) => {
       const held = this.#held;
       if (!held) {
@@ -161,6 +161,14 @@ export class GroupLevel {
   parents = new Int32Array(0);
   /** Rows per group. */
   rows = new Float64Array(0);
+  /**
+   * Each group's place in the order its key first appeared at the level
+   * (row groups keep their groups in it, groups.ts); the next key's, and
+   * the last group's.
+   */
+  ranks = new Float64Array(0);
+  nextRank = 0;
+  lastRank = -1;
   /** Per aggregate: a running count, sum, minimum, or maximum per group. */
   running: Float64Array[];
   /** Per aggregate, for sums and means: what rounding left out of the running sum. */
@@ -198,25 +206,28 @@ export class GroupLevel {
     this.finite = this.low.map((low) => low && new Float64Array(0));
   }
 
-  /** Bytes the level's arrays take per group of room: its parent, rows, marks, and each aggregate's running values. */
+  /** Bytes the level's arrays take per group of room: its parent, rows, rank, marks, and each aggregate's running values. */
   get bytesPerGroup(): number {
-    return 14 + this.aggregates.reduce((sum, _, k) => sum + 8 + (this.low[k] ? 25 : 0), 0);
+    return 22 + this.aggregates.reduce((sum, _, k) => sum + 8 + (this.low[k] ? 25 : 0), 0);
   }
 
   get byteLength(): number {
     let bytes = this.parents.byteLength + this.rows.byteLength + 2 * this.stale.byteLength;
+    bytes += this.ranks.byteLength;
     for (const running of this.running) bytes += running.byteLength;
     for (const low of this.low) bytes += 3 * (low?.byteLength ?? 0);
     for (const overflowed of this.overflowed) bytes += overflowed?.byteLength ?? 0;
     return bytes;
   }
 
-  /** Adds a group without rows. */
-  add(value: string | number | null, parent: number): number {
+  /** Adds a group without rows, whose key first appeared `rank`th (a new key's place by default). */
+  add(value: string | number | null, parent: number, rank = this.nextRank++): number {
     const group = this.count++;
     if (group >= this.rows.length) this.#reserve(Math.max(64, Math.ceil((group + 1) * 1.5)));
     this.values[group] = value;
     this.parents[group] = parent;
+    this.ranks[group] = rank;
+    this.lastRank = Math.max(this.lastRank, rank);
     return group;
   }
 
@@ -266,6 +277,9 @@ export class GroupLevel {
     this.ids = [];
     this.parents = new Int32Array(0);
     this.rows = new Float64Array(0);
+    this.ranks = new Float64Array(0);
+    this.nextRank = 0;
+    this.lastRank = -1;
     this.running = this.running.map(() => new Float64Array(0));
     this.low = this.low.map((low) => low && new Float64Array(0));
     this.error = this.error.map((error) => error && new Float64Array(0));
@@ -526,19 +540,21 @@ export class GroupLevel {
   renumber(remap: Int32Array | null, count: number, parentRemap: Int32Array | null) {
     const parents = this.parents;
     if (remap) {
-      for (let group = 0; group < this.count; group++) {
-        const to = remap[group]!;
-        if (to < 0 || to === group) continue;
-        parents[to] = parents[group]!;
-        this.rows[to] = this.rows[group]!;
-        this.values[to] = this.values[group]!;
-        for (const running of this.running) running[to] = running[group]!;
-        for (const low of this.low) if (low) low[to] = low[group]!;
-        for (const error of this.error) if (error) error[to] = error[group]!;
-        for (const overflowed of this.overflowed)
-          if (overflowed) overflowed[to] = overflowed[group]!;
-        for (const finite of this.finite) if (finite) finite[to] = finite[group]!;
+      // Groups leaving move the others down, in place; a new order reads a copy.
+      let down = true;
+      for (let group = 0; group < this.count && down; group++) down = remap[group]! <= group;
+      const arrays: ArrayLike<unknown>[] = [parents, this.rows, this.ranks, this.values];
+      const { running, low, error, overflowed, finite } = this;
+      for (const array of [...running, ...low, ...error, ...overflowed, ...finite])
+        if (array) arrays.push(array);
+      for (const array of arrays as number[][]) {
+        const from = down ? array : array.slice(0, this.count);
+        for (let group = 0; group < this.count; group++) {
+          const to = remap[group]!;
+          if (to >= 0) array[to] = from[group]!;
+        }
       }
+      this.lastRank = count > 0 ? this.ranks[count - 1]! : -1;
       this.values.length = count;
       this.clear(count, this.count);
       this.count = count;
@@ -619,6 +635,7 @@ export class GroupLevel {
     const old = this.rows.length;
     this.parents = grow(this.parents);
     this.rows = grow(this.rows);
+    this.ranks = grow(this.ranks);
     this.running = this.running.map(grow);
     this.low = this.low.map((low) => low && grow(low));
     this.error = this.error.map((error) => error && grow(error));

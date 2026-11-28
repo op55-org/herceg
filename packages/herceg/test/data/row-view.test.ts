@@ -1,10 +1,14 @@
+import v8 from "node:v8";
+import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { category } from "../../src/data/column.ts";
 import { col, when } from "../../src/data/expr.ts";
 import { orderedTable } from "../../src/data/ordered.ts";
 import { RowSet } from "../../src/data/row-set.ts";
-import { rowView } from "../../src/data/row-view.ts";
-import { table } from "../../src/data/table.ts";
+import { type RowView, rowView } from "../../src/data/row-view.ts";
+import { selectionStore, selectRows, selectWhere } from "../../src/data/selection.ts";
+import { type Table, table } from "../../src/data/table.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 /** The positions a view shows, as an array. */
 function shown(view: { read(): { indices: Uint32Array | undefined; length: number } }): number[] {
@@ -423,5 +427,203 @@ describe("finding rows in views", () => {
       expect(view.indexOf(t.length)).toBe(-1);
       expect(view.indexOf(0.5)).toBe(-1);
     }
+  });
+});
+
+describe("row views following a store's channels", () => {
+  const sales = () =>
+    table(
+      {
+        day: [1, 2, 3, 4, 5, 6],
+        region: category(["N", "S", "N", "S", "E", "N"]),
+        revenue: [10, 20, 30, 40, 50, 60],
+      },
+      { name: "sales" },
+    );
+
+  contractTest("data.view.channels", () => {
+    const t = sales();
+    const store = selectionStore(t);
+    const all = rowView(t, { selection: { store } });
+    const listed = rowView(t, { selection: { store, channels: ["days"] } });
+    const others = rowView(t, { selection: { store, excluding: "regions" } });
+    // Nothing held: every row, with no positions.
+    expect(all.read().indices).toBeUndefined();
+    store.set("days", selectWhere(col("day").ge(3)));
+    store.set("regions", selectWhere(col("region").eq("N")));
+    // Every channel's condition, joined; the listed one; all but the panel's own.
+    expect(shown(all)).toEqual([2, 5]);
+    expect(shown(listed)).toEqual([2, 3, 4, 5]);
+    expect(shown(others)).toEqual([2, 3, 4, 5]);
+    // A channel made later is followed by default, not by a list.
+    store.set("big", selectWhere(col("revenue").gt(35)));
+    expect(shown(all)).toEqual([5]);
+    expect(shown(listed)).toEqual([2, 3, 4, 5]);
+    expect(shown(others)).toEqual([3, 4, 5]);
+    // The view's own filter joins them; the query is what was asked.
+    others.setQuery({ ...others.query, filter: col("region").eq("S") });
+    expect(shown(others)).toEqual([3]);
+    expect(others.query.filter).toEqual(["==", ["field", "region"], "S"]);
+    expect(others.filter).toEqual([
+      "and",
+      ["==", ["field", "region"], "S"],
+      [">=", ["field", "day"], 3],
+      [">", ["field", "revenue"], 35],
+    ]);
+    store.set("big", null);
+    store.set("days", null);
+    expect(shown(all)).toEqual([0, 2, 5]);
+    expect(all.filter).toEqual(["==", ["field", "region"], "N"]);
+  });
+
+  contractTest("data.view.channels.rows", () => {
+    const t = sales();
+    const store = selectionStore(t);
+    const view = rowView(t, { selection: { store, excluding: ["own"] } });
+    // Row sets intersect, with each other, conditions, and the view's own restriction.
+    store.set("grid", selectRows(new RowSet(t).addAll([0, 1, 2, 3])));
+    store.set("lasso", selectRows(new RowSet(t).addAll([1, 2, 3, 5])));
+    store.set("days", selectWhere(col("day").le(3)));
+    expect(shown(view)).toEqual([1, 2]);
+    expect(view.restricted).toBe(true);
+    view.restrict(new RowSet(t).add(2));
+    expect(shown(view)).toEqual([2]);
+    view.restrict(null);
+    // Rows appended later meet conditions or not, and are in no row set.
+    store.set("grid", null);
+    store.set("lasso", null);
+    t.append({ day: [2, 9], region: ["E", "E"], revenue: [1, 2] });
+    expect(shown(view)).toEqual([0, 1, 2, 6]);
+    store.set("lasso", selectRows(new RowSet(t).addAll([0, 6])));
+    t.append({ day: [1], region: ["E"], revenue: [3] });
+    expect(shown(view)).toEqual([0, 6]);
+    // An empty row set held shows no row; a cleared channel, every row it allowed.
+    store.set("lasso", selectRows(new RowSet(t)));
+    expect(view.length).toBe(0);
+    store.set("lasso", null);
+    expect(shown(view)).toEqual([0, 1, 2, 6, 8]);
+    expect(view.restricted).toBe(false);
+  });
+
+  it("follow appends incrementally, and filter again on a new channel value only", () => {
+    const t = sales();
+    const store = selectionStore(t);
+    const view = rowView(t, { selection: { store, excluding: "regions" } });
+    let told = 0;
+    view.subscribe(() => told++);
+    store.set("days", selectWhere(col("day").ge(3)));
+    const asked = view.queryRevision;
+    expect(told).toBe(1);
+    expect(shown(view)).toEqual([2, 3, 4, 5]);
+    // A channel the view leaves out changes nothing it shows.
+    store.set("regions", selectWhere(col("region").eq("N")));
+    expect(view.queryRevision).toBe(asked);
+    expect(told).toBe(1);
+    // Appended rows are tested against the condition, not the table filtered again.
+    t.append({ day: [2, 7], region: ["N", "S"], revenue: [1, 2] });
+    expect(view.queryRevision).toBe(asked);
+    expect(shown(view)).toEqual([2, 3, 4, 5, 7]);
+    // A new value filters again, once.
+    store.set("days", selectWhere(col("day").ge(5)));
+    expect(view.queryRevision).toBe(asked + 1);
+    expect(told).toBe(3);
+    expect(shown(view)).toEqual([4, 5, 7]);
+  });
+
+  it("answer a reader that runs before their own listener, and tell listeners once", () => {
+    const t = sales();
+    const store = selectionStore(t);
+    // A store listener made before the view reads it as the change is delivered.
+    const seen: number[][] = [];
+    let view: RowView<ReturnType<typeof sales> extends Table<infer S> ? S : never>;
+    store.subscribe(() => seen.push(shown(view)));
+    view = rowView(t, { selection: { store } });
+    let told = 0;
+    view.subscribe(() => told++);
+    store.set("days", selectWhere(col("day").ge(4)));
+    expect(seen).toEqual([[3, 4, 5]]);
+    expect(told).toBe(1);
+    // A listener replacing the channel as it hears a change: the view reads the store as it is.
+    const replacing = store.subscribe(({ selection }) => {
+      if (selection?.kind === "predicate" && JSON.stringify(selection.expression).endsWith(",2]"))
+        store.set("days", selectWhere(col("day").ge(6)));
+    });
+    store.set("days", selectWhere(col("day").ge(2)));
+    expect(shown(view)).toEqual([5]);
+    replacing();
+  });
+
+  it("refuse a store of another table, and channels with exclusions", () => {
+    const t = sales();
+    const visits = table({ day: [1] }, { name: "visits" });
+    const twin = table({ day: [1], region: category(["N"]), revenue: [1] });
+    expect(() =>
+      rowView(t, { selection: { store: selectionStore(visits) as never } }),
+    ).toThrowError(
+      'rowView selection.store: a store of "visits"; this view shows "sales", so give a store of "sales"',
+    );
+    // Tables are compared, not their fields.
+    expect(() => rowView(t, { selection: { store: selectionStore(twin) as never } })).toThrow(
+      /a store of another table/,
+    );
+    const store = selectionStore(t);
+    expect(() =>
+      rowView(t, { selection: { store, channels: ["a"], excluding: "b" } }),
+    ).toThrowError("rowView selection: give channels or excluding, not both");
+    // A replacement refused keeps the view following its store.
+    const view = rowView(t, { selection: { store } });
+    expect(() => view.setQuery({ selection: { store: selectionStore(visits) as never } })).toThrow(
+      /a store of "visits"/,
+    );
+    store.set("days", selectWhere(col("day").ge(6)));
+    expect(shown(view)).toEqual([5]);
+  });
+
+  it("let go of their store when disposed or given another query", () => {
+    const t = sales();
+    const store = selectionStore(t);
+    const view = rowView(t, { selection: { store } });
+    view.setQuery({});
+    store.set("days", selectWhere(col("day").ge(6)));
+    expect(view.read().indices).toBeUndefined();
+    view.setQuery({ selection: { store, channels: [] } });
+    expect(view.read().indices).toBeUndefined();
+    view.setQuery({ selection: { store } });
+    expect(shown(view)).toEqual([5]);
+    view.dispose();
+    let told = 0;
+    view.subscribe(() => told++);
+    store.set("days", null);
+    expect(told).toBe(0);
+  });
+
+  it("let go of the store they follow last once no one keeps them", async () => {
+    v8.setFlagsFromString("--expose-gc");
+    const gc = vm.runInNewContext("gc") as () => void;
+    const t = sales();
+    const stopped: string[] = [];
+    const counted = (name: string) => {
+      const store = selectionStore(t);
+      const subscribe = store.subscribe.bind(store);
+      store.subscribe = (listener) => {
+        const stop = subscribe(listener);
+        return () => {
+          stopped.push(name);
+          stop();
+        };
+      };
+      return store;
+    };
+    const [first, last] = [counted("first"), counted("last")];
+    (() => {
+      const view = rowView(t, { selection: { store: first } });
+      view.setQuery({ selection: { store: last } });
+    })();
+    // Neither store changes again, so only the view's finalizer can stop its subscription.
+    for (let i = 0; i < 20 && stopped.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      gc();
+    }
+    expect(stopped).toEqual(["first", "last"]);
   });
 });

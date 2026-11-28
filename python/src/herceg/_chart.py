@@ -39,6 +39,8 @@ from ._derive import (
     Derived,
     Expr,
     Ordered,
+    RowGroups,
+    RowTotals,
     View,
     _fields_of,
     _writes,
@@ -6890,17 +6892,19 @@ class Chart:
         }
 
     def _derived_specs(self) -> dict[str, dict[str, Any]]:
-        """The derived tables marks read, directly or through other derived tables."""
+        """The derived tables, views, groups, and totals marks read, directly
+        or through others."""
         used = self._used_fields()
+
+        def entry(data: Any) -> dict[str, Any]:
+            if isinstance(data, View):
+                return {"view": data.query}
+            if isinstance(data, (RowGroups, RowTotals)):
+                return data._spec()
+            return {"transform": list(data.steps)}
+
         return {
-            table_name(table): {
-                "source": table_name(source),
-                **(
-                    {"view": data.query}
-                    if isinstance(data := self._tables[table][0], View)
-                    else {"transform": list(data.steps)}
-                ),
-            }
+            table_name(table): {"source": table_name(source), **entry(self._tables[table][0])}
             for table, source in sorted(self._derived.items())
             if table in used
         }
@@ -6970,7 +6974,7 @@ class Chart:
         for index, (source, _) in enumerate(self._tables):
             if source is data:
                 return index
-        if isinstance(data, Derived):
+        if isinstance(data, (Derived, RowGroups, RowTotals)):
             source = self._table(data.source, data._table)
             self._tables.append((data, _DerivedColumns(data)))
             self._derived[len(self._tables) - 1] = source
@@ -7860,7 +7864,7 @@ class Chart:
             for k, field in enumerate(item_fields(value))
         ]
         if not fields and text is None and not parts and not names:
-            if data is not None and not isinstance(data, (Derived, Matrix)):
+            if data is not None and not isinstance(data, (Derived, RowGroups, RowTotals, Matrix)):
                 Table(data)  # data it reads nothing of is still a table
             return None
         table = self._mark_table(data)
@@ -9028,9 +9032,10 @@ class _Columns(Protocol):
 
 
 class _DerivedColumns:
-    """A derived table's columns, as charts check fields: names and kinds, no values."""
+    """A derived table's columns (or groups' or totals'), as charts check
+    fields: names and kinds, no values."""
 
-    def __init__(self, derived: Derived) -> None:
+    def __init__(self, derived: Derived | RowGroups | RowTotals) -> None:
         self.names = tuple(derived._kinds)
         self._kinds = derived._kinds
 
@@ -9261,9 +9266,14 @@ def _part_fields(label: Any) -> list[tuple[str, Any]]:
 
 
 def _passes(data: Any, name: str) -> bool:
-    """Whether column ``name`` of the rows of ``data``, a derived table or a
-    view, is its source's unchanged, as the engine's lineage says: no step
-    makes or replaces it, and an aggregate keeps it as a group."""
+    """Whether column ``name`` of the rows of ``data``, a derived table, a
+    view, or groups or totals, is its source's unchanged, as the engine's
+    lineage says: no step makes or replaces it, and an aggregate (groups)
+    keeps it as a group."""
+    if isinstance(data, RowGroups):
+        return name in data.by
+    if isinstance(data, RowTotals):
+        return False
     if not isinstance(data, Derived):
         return True
     for step in data.steps:
