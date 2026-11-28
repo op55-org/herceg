@@ -5,6 +5,18 @@
 /** Browser engines every browser suite must pass in, as scripts/browser/browsers.ts runs them. */
 export const ENGINES = ["chromium", "firefox", "webkit"];
 
+/** The engines `HERCEG_BROWSERS` (a comma-separated list) names, in ENGINES' order; every engine when unset. */
+export function chosenEngines(value) {
+  if (value === undefined) return ENGINES;
+  const names = value.split(",").map((name) => name.trim());
+  for (const name of names)
+    if (!ENGINES.includes(name))
+      throw new Error(
+        `HERCEG_BROWSERS: no browser "${name}"; name chromium, firefox, or webkit, comma-separated`,
+      );
+  return ENGINES.filter((engine) => names.includes(engine));
+}
+
 /**
  * Each suite: the command that runs it from the repository root, and where
  * its tests run ("node", "browser", or "python").
