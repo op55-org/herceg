@@ -35,7 +35,9 @@ import {
   type VisibilityState,
   visibilityState,
 } from "herceg/spec";
-import { decodePayload, type PayloadHeader } from "herceg/web";
+// From its module rather than herceg/web, whose families' imports would make
+// esbuild load every mark this single file holds lazily, wrapped.
+import { decodePayload, type PayloadHeader } from "../../packages/herceg/src/web/payload.ts";
 import {
   CAMERAS,
   DRILLS,

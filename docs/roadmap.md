@@ -44,8 +44,6 @@ in the [guides](README.md).
   hardware.
 - **Process and GPU memory in Firefox and WebKit**, which the harness
   measures in Chrome only, and benchmarks on more machines.
-- **Smaller spec loader**: mark families loaded as specs name them, so
-  `herceg/web` pages fetch less up front.
 
 ## Charts
 

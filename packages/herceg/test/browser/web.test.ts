@@ -2,9 +2,11 @@
 // or fetched; unmounted with their fetch aborted; observed as a page inserts,
 // moves, and removes them; and what they tell the page as DOM events.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MountedChart } from "../../src/dom/chart.ts";
+import { type Chart, MountedChart } from "../../src/dom/chart.ts";
+import { chartFromSpec } from "../../src/from-spec.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
+import { type Family, forgetFamilies } from "../../src/web/families.ts";
 import { getChart, mount, unmount } from "../../src/web/mount.ts";
 import { observe } from "../../src/web/observe.ts";
 import { encodePayload } from "../../src/web/payload.ts";
@@ -45,6 +47,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const type of TYPES) document.removeEventListener(type, listen);
   page.remove();
+  forgetFamilies();
 });
 
 /** A fragment host, as herceg.web.fragment writes one, holding `held` as its payload. */
@@ -514,5 +517,128 @@ describe("observing a page", () => {
       },
     });
     stop();
+  });
+});
+
+describe("fragments of marks herceg/web loads as they need them", () => {
+  const data = { d: { columns: { x: [0, 1, 2, 3], y: [1, 3, 2, 4], g: ["a", "b", "a", "b"] } } };
+  const plain = { width: 400, height: 200, renderer: "svg", data } as const;
+  const heatmap: ChartSpec = {
+    ...plain,
+    marks: [{ type: "heatmap", data: "d", x: "x", y: "g", color: "y" }],
+  };
+  const pie: ChartSpec["marks"][number] = { type: "pie", data: "d", category: "g", value: "y" };
+  /** A dashboard of series, a heatmap, and a pie, each in its subplot. */
+  const mixed: ChartSpec = {
+    ...plain,
+    panels: [{ id: "a" }, { id: "b" }, { id: "c" }],
+    marks: [
+      { type: "line", data: "d", x: "x", y: "y", panel: "a" },
+      { type: "heatmap", data: "d", x: "x", y: "g", color: "y", panel: "b" },
+      { ...pie, panel: "c" },
+    ],
+  };
+  /** An importer of families that waits for `held`, counting imports by family. */
+  const holding = (held: Promise<unknown> = Promise.resolve()) => {
+    const imports = new Map<Family, number>();
+    forgetFamilies((family, load) => {
+      imports.set(family, (imports.get(family) ?? 0) + 1);
+      return held.then(load);
+    });
+    return imports;
+  };
+
+  it("import each family once for every chart of the page, and draw them all", async () => {
+    const imports = holding();
+    const specs: ChartSpec[] = [heatmap, mixed, mixed, { ...plain, marks: [pie] }];
+    const hosts = specs.map((_, i) => host(`f${i}`));
+    page.append(...hosts);
+    const charts = await Promise.all(
+      hosts.map((element, i) => mount(element, { src: encodePayload(specs[i]!) })),
+    );
+    expect(charts.map((chart) => chart.root.querySelector("svg") !== null)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(Object.fromEntries(imports)).toEqual({ matrix: 1, layouts: 1, panels: 1 });
+    expect(heard.map(({ type }) => type)).toEqual(Array(4).fill("herceg:ready"));
+  });
+
+  it("fail a chart whose family does not load, draw the others, and load it later", async () => {
+    let failing = true;
+    forgetFamilies((family, load) =>
+      family === "matrix" && failing
+        ? Promise.reject(new TypeError("Failed to fetch dynamically imported module"))
+        : load(),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const [broken, fine] = [host("g0"), host("g1")];
+    page.append(broken, fine);
+    const failed = mount(broken, { src: encodePayload(heatmap) });
+    const drawn = mount(fine, { src: encodePayload({ ...plain, marks: [pie] }) });
+    await expect(failed).rejects.toMatchObject({ code: "load-failed", phase: "load" });
+    await drawn;
+    logged.mockRestore();
+    const message =
+      'payload: the code of "heatmap" marks could not load (Failed to fetch dynamically imported module); check that the page serves every file of herceg\'s assets';
+    expect(broken.querySelector('[role="alert"]')!.textContent).toBe(
+      `Chart could not be rendered\n${message}`,
+    );
+    expect(heard.map(({ type, detail }) => [type, (detail as { id: string }).id])).toEqual([
+      ["herceg:error", "g0"],
+      ["herceg:ready", "g1"],
+    ]);
+    expect((heard[0]!.detail as { error: { message: string } }).error.message).toBe(message);
+    // The page serves the file again: the chart mounted afresh draws.
+    failing = false;
+    unmount(broken);
+    await expect(mount(broken, { src: encodePayload(heatmap) })).resolves.toBeDefined();
+  });
+
+  it("abort a chart unmounted while its code loads, telling nothing", async () => {
+    let release!: () => void;
+    const imports = holding(new Promise<void>((resolve) => (release = resolve)));
+    const element = host("u");
+    page.append(element);
+    const mounting = mount(element, { src: encodePayload(heatmap) });
+    // A second mount while the first loads is the first.
+    expect(mount(element)).toBe(mounting);
+    await vi.waitFor(() => expect(imports.get("matrix")).toBe(1));
+    unmount(element);
+    await expect(mounting).rejects.toMatchObject({ name: "AbortError" });
+    release();
+    await tick();
+    expect(getChart(element)).toBeUndefined();
+    expect(element.querySelector("[data-herceg-runtime]")).toBeNull();
+    expect(element.querySelector<HTMLElement>("[data-herceg-fallback]")!.hidden).toBe(false);
+    expect(heard).toEqual([]);
+    // Mounted again, it takes the code the first import brought.
+    await mount(element, { src: encodePayload(heatmap) });
+    expect(imports.get("matrix")).toBe(1);
+  });
+
+  it("draw groups highlighted through lineage as the full loader's chart does", async () => {
+    const grouped: ChartSpec = {
+      ...plain,
+      data: { ...data, byG: { source: "d", groups: { by: ["g"], ops: { n: { op: "count" } } } } },
+      marks: [{ type: "bar", data: "byG", x: "g", y: "n" }],
+      rowSelection: { channel: "a", data: "d", selection: { kind: "rows", rows: [0] } },
+    };
+    const imports = holding();
+    const element = host("l");
+    const other = document.createElement("div");
+    page.append(element, other);
+    const chart = await mount(element, { src: encodePayload(grouped) });
+    expect(Object.fromEntries(imports)).toEqual({ tables: 1, selection: 1, lineage: 1 });
+    const full = chartFromSpec(other, grouped);
+    await full.ready;
+    const markup = (of: Chart) =>
+      of.root.querySelector("svg")!.outerHTML.replace(/herceg-\d+/g, "");
+    expect(markup(chart)).toBe(markup(full));
+    // Group "a" holds rows 0 and 2: half its bar is drawn selected.
+    expect(markup(chart).match(/fill-opacity="1"/g)).toHaveLength(1);
+    full.destroy();
   });
 });

@@ -7,7 +7,7 @@ import { type Chart, createChart } from "../dom/chart.ts";
 import { showFailure } from "../dom/errors.ts";
 import type { ChartEvents } from "../dom/events.ts";
 import { ChartError, type ChartErrorInfo, chartError, errorInfo } from "../spec/errors.ts";
-import { type LoadedSpec, loadSpec } from "../spec/load.ts";
+import type { LoadedSpec } from "../spec/load-with.ts";
 import {
   type EdgePayload,
   edgePayload,
@@ -21,6 +21,7 @@ import {
   type VisibilityPayload,
   viewportEventPayload,
 } from "./events.ts";
+import { loadSpecWithFamilies } from "./families.ts";
 import { loadPayloadSpec, type PayloadSource } from "./load.ts";
 import { readInline } from "./payload.ts";
 
@@ -217,7 +218,7 @@ async function start(
   return chart;
 }
 
-/** The spec of the host's payload, loaded: given, fetched, or held as JSON. */
+/** The spec of the host's payload, loaded with the code it names: given, fetched, or held as JSON. */
 async function specOf(
   host: HTMLElement,
   src: PayloadSource | undefined,
@@ -235,11 +236,7 @@ async function specOf(
       message: `fragment ${JSON.stringify(host.id)}: it holds no payload and names none to fetch; make it with herceg.web.fragment(chart)`,
     });
   const { spec, buffers } = readInline(template.content.textContent ?? "");
-  try {
-    return loadSpec(spec, buffers);
-  } catch (error) {
-    throw chartError(error, "validate");
-  }
+  return loadSpecWithFamilies(spec, buffers, { signal });
 }
 
 function hideFallback(host: HTMLElement) {

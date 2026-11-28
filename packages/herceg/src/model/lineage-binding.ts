@@ -121,8 +121,14 @@ export function resolve<B extends RouteBinding>(
   }
   for (const bound of bindings) {
     if ([...routes.values()].some((route) => route.bound === bound)) continue;
-    // A binding through lineage says which tables no lineage connects.
-    kitOf(bound)?.unrelated(readers, bound);
+    // Named tables say which no lineage connects.
+    const reader = readers.find(({ table }) => table.name !== undefined);
+    if (reader && bound.table.name !== undefined)
+      throw new ChartError({
+        code: "invalid-option",
+        path: "rowSelection",
+        message: `rowSelection store: ${reader.name} reads ${named(reader.table)}, whose rows no lineage connects to ${named(bound.table)}; bind a store of ${named(reader.table)} (channel "${bound.channel}")`,
+      });
     throw new ChartError({
       code: "invalid-option",
       path: "rowSelection",

@@ -464,6 +464,24 @@ answering instead, a byte range past the end, an unknown protocol).
 | `getChart(element)` | Its chart. |
 
 Importing `herceg/web` changes nothing until one of these is called.
+
+**What a page downloads.** `herceg/web` carries the spec loader with the
+series and annotation marks: line, area, bar, point, rule, region, text,
+error bars, candlesticks, and rugs. The code of other marks loads as a
+spec names them, by family: segments (with custom marks' code),
+distributions, matrices (heatmaps, contours, dendrograms), layouts (pie to
+Sankey), networks, maps, and 3D; so does the code of facets and subplots,
+navigators, time breaks, tables made from other tables (`source`), and row
+selections. `mount` and `loadPayload` check the spec first, then import
+what it needs, each family once per page, and resolve once it is in.
+Bundle the application with code splitting, as Vite, Rollup, esbuild
+(`splitting: true`), and webpack do for dynamic imports, and serve every
+chunk: a chunk that does not load fails the charts needing it with a
+`load-failed` error (`payload: the code of "contour" marks could not load
+(...); check that the page serves every file of herceg's assets`), and the
+next chart tries again. `herceg/spec`'s `chartFromSpec` and `loadSpec`
+carry every mark and stay synchronous.
+
 Fragments report through DOM events that bubble and cross shadow roots
 (typed in `HercegEventMap`), with JSON details:
 

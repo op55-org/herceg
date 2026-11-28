@@ -124,10 +124,21 @@ web.fragment(requests_chart(), id="requests", data_url="/charts/requests.bin")
 | `web.payload(chart)` | The spec and columns as one [binary payload](../export.md#payloads-and-page-fragments), which the browser views without parsing or copying. |
 
 - **Caching.** Files are named by a hash of their content: serve them with
-  `Cache-Control: public, max-age=31536000, immutable`. A page fetches the
-  engine once (330 KiB gzipped, then modules as charts need them). Ten
-  fragments of a 200-point line are 61 KB of HTML; ten
-  `to_html(full_page=False)` outputs are 10.7 MB.
+  `Cache-Control: public, max-age=31536000, immutable`. Ten fragments of a
+  200-point line are 61 KB of HTML; ten `to_html(full_page=False)` outputs
+  are 10.7 MB.
+- **What a page downloads.** The engine once: 181 KiB gzipped in two files,
+  with the series and annotation marks (line, area, bar, point, rule,
+  region, text, error bars, candlesticks, rugs). Other marks load with the
+  first chart that draws them, by family and once per page: segments (with
+  custom marks' code, 17 KiB), distributions (histograms, box plots, boxen,
+  violins; 27 KiB), matrices (heatmaps, contours, dendrograms; 23 KiB),
+  layouts (pie, funnel, gauge, radar, treemap, sunburst, Sankey; 41 KiB),
+  networks (31 KiB), maps (23 KiB), and 3D (32 KiB); so do facets and
+  subplots, navigators, time breaks, tables made from other tables, and row
+  selections. The interaction controller follows each page's first frame.
+  Serve every file `web.manifest().files` lists: a missing one fails the
+  charts that need it, naming their mark.
 - **Routes** are the application's: Herceg never adds one, so the
   application decides caching and access. A million-point line's payload
   is 16 MB.

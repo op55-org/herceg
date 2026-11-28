@@ -120,7 +120,9 @@ framework's runtime out, as an application already ships it.
   `herceg-pivot` pivots without a DOM; `herceg-pdf`, `herceg-pdf-fonts`,
   `herceg-pdf-document` (a two-chart A4 report), `herceg-spec-pdf` (one
   buffered spec), and `herceg-image` export; `herceg-web` is the page
-  script `herceg.web` serves. None has a counterpart among the other
+  script `herceg.web` serves, and `herceg-web-heatmap`,
+  `herceg-web-segment`, and `herceg-web-dashboard` add the mark families
+  those pages load. None has a counterpart among the other
   libraries' entries.
 - **What a line chart carries.** Styles, positioned guides, and layout
   options are plain values, so every chart carries their code (about

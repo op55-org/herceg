@@ -11,7 +11,7 @@
 // Everything is checked before any typed array views the bytes.
 
 import { ChartError } from "../spec/errors.ts";
-import type { SpecBuffer } from "../spec/load.ts";
+import type { SpecBuffer } from "../spec/load-with.ts";
 import type { ChartSpec } from "../spec/spec.ts";
 
 /** The payload format version this herceg writes and reads. */

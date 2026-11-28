@@ -991,7 +991,8 @@ marks' tables come from ([Contributors](data.md#contributors)): a bar of
 - **The kit** (`model/lineage-kit.ts`) is the `lineage` export: the
   binding's `lineage` option holds it, and the resolver reaches it through
   that, so a chart without it loads none of the kit, coverage, or the
-  contributor relations. The spec loader imports it, so specs need no
+  contributor relations. The spec loader brings it (`herceg/web` imports it
+  when a spec's binding can reach through lineage), so specs need no
   opt-in. A route holds the relation (`relationTo`) and a coverage per
   class of the fields its marks draw (their value axis's fields, a layout
   mark's `value`). It refuses marks that draw a selection's shapes of

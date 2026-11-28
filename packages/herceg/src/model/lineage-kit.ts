@@ -176,8 +176,6 @@ export interface LineageKit {
   admit(routes: readonly LineageRoute[], bound: RouteBinding): void;
   /** Refuses `reader`'s table, which reaches bindings of `nearest` and of `further`. */
   ambiguous(reader: Reader, nearest: Table, further: Table): never;
-  /** Refuses a binding no reader's table reaches, naming them where they have names. */
-  unrelated(readers: readonly Reader[], bound: RouteBinding): void;
   /** Draws `model`'s marks of tables reached through lineage, as of the routes its configuration has now. */
   highlight(model: ChartModel, routes: () => Resolution): LineageHighlight;
   /** Selections of one table as one: a condition where each is one, else the rows they hold together. */
@@ -1008,15 +1006,6 @@ export const lineage: SelectionLineage = /* @__PURE__ */ Object.freeze({
       path: "rowSelection",
       message: `rowSelection: ${reader.name} reads ${named(target)}, which comes from ${named(further)}, whose store is bound, and binds a store of ${named(nearest)} too; bind one of them`,
     });
-  },
-  unrelated(readers: readonly Reader[], bound: RouteBinding) {
-    const reader = readers.find(({ table }) => table.name !== undefined);
-    if (reader && bound.table.name !== undefined)
-      throw new ChartError({
-        code: "invalid-option",
-        path: "rowSelection",
-        message: `rowSelection store: ${reader.name} reads ${named(reader.table)}, whose rows no lineage connects to ${named(bound.table)}; bind a store of ${named(reader.table)} (channel "${bound.channel}")`,
-      });
   },
   highlight(model: ChartModel, routes: () => Resolution): LineageHighlight {
     // The routes of the configuration drawn: those of one it replaced let go of what they hold.

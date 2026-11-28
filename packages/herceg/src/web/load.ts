@@ -1,8 +1,9 @@
 // Chart options from a payload: fetched from a URL or given as bytes.
 
 import type { ChartOptions } from "../dom/chart.ts";
-import { ChartError, chartError } from "../spec/errors.ts";
-import { type LoadedSpec, loadSpec } from "../spec/load.ts";
+import { ChartError } from "../spec/errors.ts";
+import type { LoadedSpec } from "../spec/load-with.ts";
+import { loadSpecWithFamilies } from "./families.ts";
 import { decodePayload } from "./payload.ts";
 
 /** Where a payload comes from: a URL to fetch, or its bytes. */
@@ -11,9 +12,10 @@ export type PayloadSource = string | URL | ArrayBuffer | ArrayBufferView;
 /**
  * The chart options of a payload (see `encodePayload`; Python's
  * `herceg.web.payload(chart)`), fetched from `source` when it is a URL,
- * for `createChart` or an adapter's `<Chart>`. Rejects with a `ChartError`
- * for a response that is not a payload or a spec the engine refuses, and
- * with the `signal`'s reason when it aborts.
+ * for `createChart` or an adapter's `<Chart>`, once the code of the marks
+ * it draws has loaded. Rejects with a `ChartError` for a response that is
+ * not a payload, a spec the engine refuses, or code that could not load,
+ * and with the `signal`'s reason when it aborts.
  */
 export async function loadPayload(
   source: PayloadSource,
@@ -35,11 +37,7 @@ export async function loadPayloadSpec(
       : source;
   signal?.throwIfAborted();
   const { header, buffers } = decodePayload(bytes);
-  try {
-    return loadSpec(header.spec, buffers);
-  } catch (error) {
-    throw chartError(error, "validate");
-  }
+  return loadSpecWithFamilies(header.spec, buffers, { signal });
 }
 
 async function fetchPayload(url: string, signal: AbortSignal | undefined): Promise<ArrayBuffer> {

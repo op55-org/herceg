@@ -337,12 +337,51 @@ times as epoch ms with the axes holding them named, categories as labels,
 rows as positions in the data drawn. There is no revision: a fragment sent
 again is a new chart.
 
-**Assets** (`python/js/build.mjs`). The pages' script is an ES module built
-with code splitting, every file named by a hash of its content. A manifest
-lists the entry, its static imports (preloaded with `modulepreload`), and
-every file. `herceg.web.assets` writes the preloads and module script with
-the page's nonce, which a module's imports inherit, so `script-src
-'nonce-...'` alone admits them. The entry's static closure is the spec
-loader, which imports every mark a spec can name; the interaction
-controller and other chunks load as charts need them. `Chart.to_html`
-stays self-contained, with the single-file bundle inlined.
+**Mark families** (`web/families.ts`). The spec loader
+(`spec/load-with.ts`) takes its marks from a table of mark type to
+constructor, and the code of spec features (tables made from tables,
+selection stores and row-selection bindings, the lineage kit, facets and
+subplots, navigators, time breaks) from a kit. `loadSpec` builds the whole
+table and kit statically (`spec/load.ts`), so `herceg/spec`, static
+exports, spec-PDF, and Python's engines load every spec synchronously.
+`herceg/web` carries series and annotations (`spec/families/series.ts`)
+and imports the rest as a spec names them:
+
+| Family | Marks or feature | Needed when |
+| --- | --- | --- |
+| `shapes` | segment, with custom marks' code | a segment mark |
+| `distributions` | histogram, boxplot, boxen, violin | one of its marks |
+| `matrix` | heatmap, contour, dendrogram | one of its marks |
+| `layouts` | pie, funnel, gauge, radar, treemap, sunburst, sankey | one of its marks |
+| `networks`, `maps`, `three-d` | graph; geoshape, geopoint; point3d, line3d, surface | one of their marks |
+| `tables` | views, derived tables, groups, totals | a data entry with `source` |
+| `selection` | selection stores, row-selection bindings | `rowSelection`, or a view's `selection` |
+| `lineage` | the lineage kit | `rowSelection` with a derived, groups, or totals entry, or a given table that records contributors |
+| `panels`, `navigator`, `breaks` | facets and subplots; the navigator; time breaks | `facet` or `panels`; `navigator`; `x.breaks` |
+
+The spec is checked first, synchronously and whole (the validator stays
+eager), so a refused spec loads nothing. Each family is imported once per
+page, however many charts wait for it. A failed import fails each chart
+waiting for it with a `load-failed` error naming that chart's mark
+(`payload: the code of "contour" marks could not load (...); check that
+the page serves every file of herceg's assets`), and is forgotten, so a
+later chart tries again. A chart's wait races its abort signal, so
+unmounting while code loads rejects that chart's `mount` alone. The loader then receives only
+what the spec named, so a spec loads alike whatever other charts loaded
+before it.
+
+**Assets** (`python/js/build.mjs`). The pages' script is an ES module
+built with Rolldown, every file named by a hash of its content and of what
+it imports. A first build finds the modules the entry imports statically;
+the second puts them in one chunk, so a page fetches two files before its
+first frame (esbuild split the same modules into 46 by which lazy chunks
+share them). Lazy chunks are named for what they load (`matrix-*.js`,
+`interaction-*.js`); code two of them share is a chunk of its own, never a
+copy. Each `import()` of a lazy chunk also imports, in parallel, the shared
+chunks it would find only once it had arrived, so a family takes one round
+trip. A manifest lists the entry, its static imports (preloaded with
+`modulepreload`), and every file. `herceg.web.assets` writes the preloads
+and module script with the page's nonce, which a module's imports inherit,
+so `script-src 'nonce-...'` alone admits them. `Chart.to_html`, the
+notebook widget, and the Streamlit component stay single files with every
+mark: their bytes are inline or served by the local Python process.

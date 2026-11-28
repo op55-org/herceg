@@ -46,6 +46,7 @@ const KINDS = [
   "heatmap",
   "facets",
   "layout",
+  "dashboard",
   "inset",
   "map",
   "network",
@@ -53,6 +54,33 @@ const KINDS = [
   "treemap",
   "three",
 ];
+
+/** The families of herceg/web's code its charts load as they need them, as the files are named. */
+const FAMILIES = [
+  "shapes",
+  "distributions",
+  "matrix",
+  "layouts",
+  "networks",
+  "maps",
+  "three-d",
+  "tables",
+  "selection",
+  "lineage-kit",
+  "panels",
+  "breaks",
+];
+
+/** The chunks `file` imports statically, transitively, as the build wrote them. */
+function staticImports(file: string, found = new Set<string>()): Set<string> {
+  const code = readFileSync(new URL(file, STATIC), "utf8");
+  for (const [, name] of code.matchAll(/(?:from|import)\s*["'`]\.\/([^"'`]+)["'`]/g))
+    if (!found.has(name!)) {
+      found.add(name!);
+      staticImports(name!, found);
+    }
+  return found;
+}
 
 let server: ChildProcess;
 let origin = "";
@@ -152,9 +180,12 @@ describe.each(engines)("web pages in %s", (engine) => {
     const html = await response!.text();
     await events(page, "herceg:ready", 10);
     // Ten charts' data, without a byte of the engine.
-    const engineCode = readFileSync(new URL(manifest.entry, STATIC), "utf8");
+    // The engine's code: the largest of the entry and the chunks it preloads.
+    const [engineCode] = [manifest.entry, ...manifest.preload]
+      .map((name) => readFileSync(new URL(name, STATIC), "utf8"))
+      .sort((a, b) => b.length - a.length);
     expect(html.length).toBeLessThan(80_000);
-    expect(html).not.toContain(engineCode.slice(2000, 2200));
+    expect(html).not.toContain(engineCode!.slice(2000, 2200));
     expect(html.match(/<template data-herceg-payload>/g)).toHaveLength(10);
     const first = await hits();
     expect(first[ENTRY]).toBe(1);
@@ -198,6 +229,68 @@ describe.each(engines)("web pages in %s", (engine) => {
       expect(errors).toEqual([]);
       await context.close();
     }
+  });
+
+  it("fetch the code of each family a page's charts draw once, and none they do not", async () => {
+    /** The family files fetched since the last reset, by family. */
+    const families = async () => {
+      const fetched = await hits();
+      return Object.fromEntries(
+        Object.entries(fetched).flatMap(([path, count]) => {
+          const family = FAMILIES.find((name) => path.startsWith(`/_herceg/${name}-`));
+          return family ? [[family, count]] : [];
+        }),
+      );
+    };
+    for (const [kinds, expected] of [
+      ["line", {}],
+      ["heatmap", { matrix: 1 }],
+      ["dashboard", { matrix: 1, layouts: 1, panels: 1 }],
+      ["line,heatmap,dashboard", { matrix: 1, layouts: 1, panels: 1 }],
+    ] as const) {
+      for (const data of ["page", "url"]) {
+        await reset();
+        const { context, page, errors } = await open(browser);
+        await page.goto(`${origin}/test/page?kinds=${kinds}&n=3&data=${data}`);
+        await events(page, "herceg:ready", kinds.split(",").length * 3);
+        expect(await families(), `${kinds} from the ${data}`).toEqual(expected);
+        expect(errors).toEqual([]);
+        await context.close();
+      }
+    }
+  });
+
+  it("fetch the chunks a family imports with it, not a level of imports at a time", async () => {
+    const { context, page, errors } = await open(browser);
+    await page.goto(`${origin}/test/page?kinds=heatmap,map,network,three`);
+    await events(page, "herceg:ready", 4);
+    const timings = new Map(
+      await page.evaluate(() =>
+        (performance.getEntriesByType("resource") as PerformanceResourceTiming[]).map(
+          ({ name, startTime, responseEnd }) => [
+            new URL(name).pathname.replace("/_herceg/", ""),
+            { start: startTime, end: responseEnd },
+          ],
+        ),
+      ),
+    );
+    const atOnce = new Set([manifest.entry, ...manifest.preload]);
+    let checked = 0;
+    for (const family of FAMILIES) {
+      const file = manifest.files.find((name) => name.startsWith(`${family}-`))!;
+      const fetched = timings.get(file);
+      if (!fetched) continue;
+      for (const chunk of staticImports(file))
+        if (!atOnce.has(chunk)) {
+          // Requested as the family is, not once it is in and read.
+          expect(timings.get(chunk)!.start, `${chunk} of ${file}`).toBeLessThan(fetched.end);
+          checked++;
+        }
+    }
+    expect(checked).toBeGreaterThan(4);
+    expect(await page.evaluate(() => window.violations)).toEqual([]);
+    expect(errors).toEqual([]);
+    await context.close();
   });
 
   it.each(["nonce", "dynamic"])(
@@ -460,7 +553,9 @@ describe.each(engines)("web pages in %s", (engine) => {
     const { context, page } = await open(browser);
     const started = Date.now();
     const response = await page.goto(`${origin}/test/page?kinds=large&data=url`);
-    expect((await response!.text()).length).toBeLessThan(4000);
+    // The page holds the chart's size and title, and herceg's script tags.
+    const html = (await response!.text()).replace(/<link rel="modulepreload"[^>]*>\n/g, "");
+    expect(html.length).toBeLessThan(4000);
     await events(page, "herceg:ready", 1);
     console.log(`${engine}: a million points from data_url ready in ${Date.now() - started} ms`);
     expect((await hits())["/test/payload/large.bin"]).toBe(1);

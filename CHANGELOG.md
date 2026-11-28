@@ -735,3 +735,17 @@ styles](docs/guide/styling.md#role-styles) and
   keep their order without a `domain` or a sorted view. Changed: groups'
   tables and the bands of category axes over them, which listed returning
   groups last. See [Row groups](docs/guide/data.md#row-groups).
+- **Pages load the marks they draw.** A `herceg/web` page (and Python's
+  `herceg.web` fragments) loads the spec loader with the series and
+  annotation marks, 181 KiB gzipped in two files where it loaded 445 KiB
+  in seventeen, and imports other marks by family as a spec names them,
+  each once per page: segments, distributions, matrices, layouts,
+  networks, maps, and 3D, and the code of facets and subplots, navigators,
+  time breaks, tables made from other tables, and row selections. A page
+  of a line chart draws its first frame in 33 ms rather than 48 (Chrome, a
+  local server, cold cache), a heatmap's in 34 rather than 47. A family
+  that does not load fails the charts needing it with a `load-failed`
+  error naming their mark, and the next chart tries again. `herceg/spec`,
+  static exports, and Python's notebook and HTML output still carry every
+  mark and load specs synchronously. See [Payloads and page
+  fragments](docs/guide/export.md#payloads-and-page-fragments).

@@ -295,6 +295,11 @@ could load for some chart, not what its own chart downloads.
   `herceg-image`, and `herceg-web` measure those subpaths, and
   `herceg-grid-sparklines` a grid with a sparkline column; the other
   libraries have no counterparts.
+- `herceg-web` is a page's script with series and annotation marks;
+  `herceg-web-heatmap`, `herceg-web-segment`, and `herceg-web-dashboard`
+  (a line, a heatmap, and a pie in panels) add the families of marks and
+  features those pages load before their first frame, taken from the
+  package's source as the page imports them.
 - `herceg-lineage` is a bar of row groups highlighting a selection of their
   source's rows: the chart, its row selection, and the lineage reader
   (contributors and coverage), which it takes from the package's source
