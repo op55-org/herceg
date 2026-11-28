@@ -11,10 +11,11 @@ from typing import Any, Literal, TypedDict, cast
 import numpy as np
 
 from .. import _data as hg_data
-from .._chart import _AREA_CHANNELS, _LINE_CHANNELS, AxisOptions, Chart, HelperOptions
+from .._chart import AxisOptions, Chart, HelperOptions
 from .._data import Column, listlike
 from .._encoding import Encodings, SeriesLabels
 from .._errors import ChartError, Role, is_number, listed, located
+from .._marks.series import _AREA_CHANNELS, _LINE_CHANNELS
 from . import _numerics as numerics
 from ._common import (
     ExpressOptions,

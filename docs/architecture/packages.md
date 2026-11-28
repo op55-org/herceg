@@ -103,6 +103,22 @@ built by `npm run build:python`: a classic script for HTML output, a
 DOM-free script for export in an embedded V8, and ES modules for live
 charts and web pages.
 
+**Where the code is.** `herceg/_chart.py` holds `hg.Chart` (its
+constructor, layout methods, output, and spec assembly, with the checks
+every mark's method shares), its options (`hg.AxisOptions`, `hg.Panel`,
+`hg.Camera`, ...), and `hg.Panel`'s mark methods. The mark methods are
+written by family in `herceg/_marks/`, the engine's families:
+`series.py`, `distributions.py`, `matrices.py`, `annotations.py`,
+`layouts.py`, `networks.py`, `maps.py`, and `three_d.py`, each with the
+options and helpers only its marks use; `common.py` holds what several
+families share, among it the decorator every mark method takes, and
+`tooltips.py` the tooltip options. `Chart`'s body binds them
+(`line = _marks.series.line`), so `hg.Chart` lists each with its signature
+and docs. A new mark's method goes in its family's module, with
+`self,  # type: Chart` for mypy, and is bound on `Chart` and `Panel`. The
+one-call helpers (`hg.line`, `hg.bar`, ...) are in `herceg/_helpers.py`;
+`herceg.express` is split by Seaborn's families.
+
 **Live notebook charts** (`chart.widget()`, an anywidget) keep the current
 data in Python and send each change as one message: appended or replaced
 columns as binary buffers, changed options as JSON.

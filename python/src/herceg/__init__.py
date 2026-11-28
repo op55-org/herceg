@@ -25,8 +25,6 @@ the pages a web application serves, and ``herceg.flask`` wires it into Flask
 """
 
 from ._chart import (
-    SCHEMES,
-    SYMBOLS,
     Animation,
     AxisOptions,
     Break,
@@ -34,44 +32,13 @@ from ._chart import (
     Chart,
     ChartOptions,
     ChartUpdate,
-    Dash,
     HelperOptions,
     InspectionOptions,
-    Jitter,
     Navigator,
     Panel,
     Projection,
     RadarOptions,
     SegmentOptions,
-    Tooltip,
-    TooltipField,
-    TooltipTotal,
-    area,
-    bar,
-    boxen,
-    boxplot,
-    candlestick,
-    choropleth,
-    contour,
-    funnel,
-    gauge,
-    graph,
-    heatmap,
-    histogram,
-    line,
-    line_3d,
-    matrix,
-    pie,
-    radar,
-    sankey,
-    scatter,
-    scatter_3d,
-    scatter_geo,
-    segment,
-    sunburst,
-    surface,
-    treemap,
-    violin,
 )
 from ._data import Matrix
 from ._derive import (
@@ -95,6 +62,7 @@ from ._derive import (
     when,
 )
 from ._encoding import (
+    SYMBOLS,
     Arrow,
     BarLabels,
     CalendarBreak,
@@ -196,6 +164,33 @@ from ._guides import (
     colorbar,
     legend,
 )
+from ._helpers import (
+    area,
+    bar,
+    boxen,
+    boxplot,
+    candlestick,
+    choropleth,
+    contour,
+    funnel,
+    gauge,
+    graph,
+    heatmap,
+    histogram,
+    line,
+    line_3d,
+    pie,
+    radar,
+    sankey,
+    scatter,
+    scatter_3d,
+    scatter_geo,
+    segment,
+    sunburst,
+    surface,
+    treemap,
+    violin,
+)
 from ._interaction import (
     Binding,
     Brush,
@@ -220,6 +215,10 @@ from ._interaction import (
     ZoomAction,
 )
 from ._layout import Cell, Grid, GridCells, Weight
+from ._marks.common import SCHEMES, Dash
+from ._marks.matrices import matrix
+from ._marks.series import Jitter
+from ._marks.tooltips import Tooltip, TooltipField, TooltipTotal
 from ._pdf import save, to_pdf
 from ._rows import RowSelection, SelectionBinding
 from ._schema import spec_schema

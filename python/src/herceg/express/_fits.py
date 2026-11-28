@@ -11,10 +11,11 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._chart import _LINE_CHANNELS, _POINT_CHANNELS, Chart
+from .._chart import Chart
 from .._data import Column
 from .._encoding import Encodings, SeriesLabels
 from .._errors import ChartError, is_integer, is_number
+from .._marks.series import _LINE_CHANNELS, _POINT_CHANNELS
 from . import _numerics as numerics
 from . import _regression as regression
 from ._common import (

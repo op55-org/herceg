@@ -9,10 +9,12 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
-from .._chart import _BAR_CHANNELS, _LINE_CHANNELS, _POINT_CHANNELS, Chart, Dash
+from .._chart import Chart
 from .._data import Column, listlike
 from .._encoding import BarLabels, Encodings, SeriesLabels
 from .._errors import ChartError
+from .._marks.common import Dash
+from .._marks.series import _BAR_CHANNELS, _LINE_CHANNELS, _POINT_CHANNELS
 from . import _numerics as numerics
 from ._common import (
     ErrorBar,
