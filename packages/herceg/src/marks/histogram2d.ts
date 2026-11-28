@@ -33,11 +33,13 @@ import type { SelectionLooks } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { DrawnMark, PickQuery, PickResult } from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
-import { paint, rasterAxes } from "./heatmap-raster.ts";
+import { ImageSource, paint, rasterAxes } from "./heatmap-raster.ts";
+import { heatmapUpdates } from "./heatmap-updates.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
 import {
   type AxisFormat,
   type BandContext,
+  type CellRows,
   type Frame,
   frozen,
   type Hit,
@@ -186,6 +188,19 @@ interface Picked {
 
 /** What selections hold of each series' cells, by membership, then by the cells. */
 const picks = new WeakMap<Uint8Array, WeakMap<Cells, Picked>>();
+/** Cells as selections are counted in them, by the cells. */
+const cellRows = new WeakMap<Cells, CellRows>();
+
+/** Whether ascending `rows` holds `row`. */
+function hasRow(rows: Uint32Array, row: number): boolean {
+  let [lo, hi] = [0, rows.length];
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (rows[mid]! < row) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < rows.length && rows[lo] === row;
+}
 
 /** One chart's cells: bins and counts over the whole table, as of its version and zone. */
 interface Binned {
@@ -206,7 +221,7 @@ interface PanelCounts {
 /** What each raster buffer holds, keyed by the buffer, whichever 2D histogram painted it. */
 const painted = new WeakMap<
   ArrayBuffer,
-  { inputs: readonly unknown[]; image: readonly number[] }
+  { inputs: readonly unknown[]; image: readonly number[]; source: ImageSource }
 >();
 
 /**
@@ -241,6 +256,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   readonly #rosters = new WeakMap<Series, Series[]>();
   /** What the selection drawn with each series holds of its cells, for tooltips. */
   readonly #selected = new WeakMap<Series, Picked>();
+  /** The selection last drawn: a selection of other bytes is a change. */
+  #drawnSelection: Uint8Array | undefined;
 
   constructor(input: Histogram2DSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
@@ -556,17 +573,59 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   }
 
   /**
-   * How many of each cell's rows `selected` holds, and their weight, and
-   * how many rows each cell has: one pass over the rows the cells counted,
-   * kept while the selection and the cells are the same.
+   * How many of each cell's rows the selection holds, and their weight, and
+   * how many rows each cell has, kept while the selection and the cells are
+   * the same: without weights, for a store's selection, by what changed in
+   * it once what follows changes has loaded (`cellCounts`); else one pass
+   * over the rows the cells counted, summing weights in the rows' order.
    */
-  #picked(cells: Cells, selected: Uint8Array, values: NumericArray): Picked {
+  #picked(cells: Cells, drawing: SelectionDrawing, values: NumericArray): Picked {
+    const { selected } = drawing;
     let byCells = picks.get(selected);
     if (!byCells) {
       byCells = new WeakMap();
       picks.set(selected, byCells);
     }
     const known = byCells.get(cells);
+    if (known) return known;
+    const count = cells.counts.length;
+    const picked = {
+      rows: new Float64Array(count),
+      weights: new Float64Array(count),
+      all: new Float64Array(count),
+      values: new Float64Array(count).fill(Number.NaN),
+    };
+    const weights =
+      this.spec.weight === undefined ? undefined : this.table.numbers(this.spec.weight as never);
+    const rows = this.#cellRows(cells);
+    // Other bytes than those drawn last are a change, which loads what follows changes.
+    const { membership } = drawing;
+    const drawn = this.#drawnSelection;
+    this.#drawnSelection = selected;
+    const updates = membership && heatmapUpdates(drawn !== undefined && drawn !== selected);
+    if (!weights && updates) {
+      // A cell's rows are its count, and its selected rows their weight.
+      const counts = updates.cellCounts(rows, membership!, selected);
+      for (let k = 0; k < count; k++) {
+        picked.rows[k] = picked.weights[k] = counts[k]!;
+        picked.all[k] = cells.counts[k]!;
+        if (counts[k]! > 0) picked.values[k] = values[k]!;
+      }
+    } else
+      rows.forEach((at, row) => {
+        picked.all[at]!++;
+        if (selected[row] !== 1) return;
+        picked.rows[at]!++;
+        picked.weights[at]! += weights ? weights[row]! : 1;
+        picked.values[at] = values[at]!;
+      });
+    byCells.set(cells, picked);
+    return picked;
+  }
+
+  /** The cells as a selection's rows are counted in them: each row's cell, as the rows were counted. */
+  #cellRows(cells: Cells): CellRows {
+    const known = cellRows.get(cells);
     if (known) return known;
     const { xEdges, yEdges, of: rows } = cells;
     const count = cells.counts.length;
@@ -575,37 +634,37 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     // Each bin pair's cell, -1 for those holding nothing.
     const cellAt = new Int32Array(nx * ny).fill(-1);
     for (let k = 0; k < count; k++) cellAt[cells.rows[k]! * nx + cells.columns[k]!] = k;
-    const picked = {
-      rows: new Float64Array(count),
-      weights: new Float64Array(count),
-      all: new Float64Array(count),
-      values: new Float64Array(count).fill(Number.NaN),
-    };
     const xs = this.#numbers("x");
     const ys = this.#numbers("y");
     const weights =
       this.spec.weight === undefined ? undefined : this.table.numbers(this.spec.weight as never);
     const xStep = this.#explicit.x ? 0 : evenStep(xEdges);
     const yStep = this.#explicit.y ? 0 : evenStep(yEdges);
-    const length = rows ? rows.length : xs.length;
-    for (let k = 0; k < length && count > 0; k++) {
-      const row = rows ? rows[k]! : k;
+    const cellOf = (row: number) => {
       // As counted: rows without a usable weight are in no cell.
       const weight = weights ? weights[row]! : 1;
-      if (!(weight >= 0 && weight < Infinity)) continue;
+      if (!(weight >= 0 && weight < Infinity)) return -1;
       const c = xStep > 0 ? evenBinOf(xEdges, xStep, xs[row]!) : binOf(xEdges, xs[row]!);
-      if (c < 0) continue;
+      if (c < 0) return -1;
       const r = yStep > 0 ? evenBinOf(yEdges, yStep, ys[row]!) : binOf(yEdges, ys[row]!);
-      const at = r < 0 ? -1 : cellAt[r * nx + c]!;
-      if (at < 0) continue;
-      picked.all[at]!++;
-      if (selected[row] !== 1) continue;
-      picked.rows[at]!++;
-      picked.weights[at]! += weight;
-      picked.values[at] = values[at]!;
-    }
-    byCells.set(cells, picked);
-    return picked;
+      return r < 0 ? -1 : cellAt[r * nx + c]!;
+    };
+    const made: CellRows = {
+      key: cells,
+      count,
+      // A facet panel's cells count its own rows alone.
+      cellOf: (row) => (!rows || hasRow(rows, row) ? cellOf(row) : -1),
+      forEach(visit) {
+        const length = rows ? rows.length : xs.length;
+        for (let k = 0; k < length && count > 0; k++) {
+          const row = rows ? rows[k]! : k;
+          const at = cellOf(row);
+          if (at >= 0) visit(at, row);
+        }
+      },
+    };
+    cellRows.set(cells, made);
+    return made;
   }
 
   /**
@@ -620,7 +679,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const colors = this.#colorScale(cells, frame.theme, frame.paint);
     if (!colors) return [];
     const whole = this.geometry(series, frame).flatMap(drawing.dim);
-    const picked = this.#picked(cells, drawing.selected, s.values);
+    const picked = this.#picked(cells, drawing, s.values);
     this.#selected.set(s, picked);
     // Cells whose measure overflowed are left out of the image, and so of the selection's squares.
     const shown = (k: number) => picked.rows[k]! > 0 && Number.isFinite(s.values[k]!);
@@ -775,12 +834,12 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     // An unchanged frame draws the image last painted into the series'
     // buffer again, without placing a cell.
     let pixels = frame.bytes(key, "raster", 0);
-    const last = painted.get(pixels.buffer);
-    let image =
-      last && last.inputs.length === inputs.length && last.inputs.every((v, i) => v === inputs[i])
-        ? last.image
-        : undefined;
-    if (!image) {
+    let last = painted.get(pixels.buffer);
+    if (
+      !last ||
+      last.inputs.length !== inputs.length ||
+      !last.inputs.every((v, i) => v === inputs[i])
+    ) {
       const buffer = (stage: string, length: number) => frame.doubles(key, stage, length);
       const nx = cells.xEdges.length - 1;
       const ny = cells.yEdges.length - 1;
@@ -813,11 +872,22 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
                 cells.yEdges.length - 1,
               ),
       };
-      paint(source, across, down, colors, "mean", pixels, (stage) => buffer(stage, count));
-      image = [across.from, across.to, across.size, down.from, down.to, down.size];
-      painted.set(pixels.buffer, { inputs, image });
+      // Kept for the buffer while its size is, so drawings put only new revisions.
+      const known = painted.get(pixels.buffer)?.source;
+      const image =
+        known?.columns === across.size && known.rows === down.size
+          ? known
+          : new ImageSource(pixels, across.size, down.size);
+      paint(source, across, down, colors, "mean", image.pixels, (stage) => buffer(stage, count));
+      image.changed();
+      last = {
+        inputs,
+        image: [across.from, across.to, across.size, down.from, down.to, down.size],
+        source: image,
+      };
+      painted.set(pixels.buffer, last);
     }
-    const [x0, x1, columns, y0, y1, rows] = image as [
+    const [x0, x1, columns, y0, y1, rows] = last.image as [
       number,
       number,
       number,
@@ -836,7 +906,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
         height: y1 - y0,
         columns,
         rows,
-        pixels: pixels.subarray(0, columns * rows * 4),
+        pixels: last.source.pixels,
+        source: last.source,
       },
     ];
   }

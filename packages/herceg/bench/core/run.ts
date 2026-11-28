@@ -35,6 +35,7 @@ const AREAS = [
   "grid",
   "totals",
   "transitions",
+  "heatmap",
 ];
 
 const { values } = parseArgs({ options: { area: { type: "string" } } });

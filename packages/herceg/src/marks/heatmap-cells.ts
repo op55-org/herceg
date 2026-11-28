@@ -135,7 +135,25 @@ export function placeCells(
   breaks?: Breaks,
   name = "heatmap",
 ): AxisCells {
-  let [values, cells] = distinct(column);
+  const [values, cells] = distinct(column);
+  return cellsAt(values, cells, step, time, breaks, name);
+}
+
+/**
+ * `placeCells`' cells, from the column's distinct finite values (ascending)
+ * and each row's index among them (-1 for none), which it takes as its own:
+ * how a patch of the cells (marks/heatmap-patch.ts) places them, so that
+ * what it places equals what placing the column again would.
+ */
+export function cellsAt(
+  distinctValues: Float64Array,
+  rowCells: Int32Array,
+  step: number | undefined,
+  time: boolean,
+  breaks: Breaks | undefined,
+  name: string,
+): AxisCells {
+  let [values, cells] = [distinctValues, rowCells];
   let places = values;
   if (breaks) {
     const kept = new Int32Array(values.length);
@@ -316,7 +334,8 @@ export function distinct(column: NumericArray, sorted = true): [Float64Array, In
   const ids = new Map<number, number>();
   const own = new Int32Array(column.length);
   for (let i = 0; i < column.length; i++) {
-    const v = column[i]!;
+    // Zero is one value whatever its sign, as its row found first would otherwise say.
+    const v = column[i]! + 0;
     if (!Number.isFinite(v)) {
       own[i] = -1;
       continue;

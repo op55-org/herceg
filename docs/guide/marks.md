@@ -409,6 +409,15 @@ hg.heatmap(color=grid, x=xs, y=ys)  # a 2D array: row i, column j at y[i], x[j]
   pixel as the mean of its block (`sampling: { reduce: "max" }` or `"min"`
   keeps hot cells). Memory follows the rows and pixels, so there is no cell
   limit. Tooltips still report the single cell under the pointer.
+- **Updates.** Appends, drops, and edits patch the cells and paint only
+  the pixels of the cells they touched; on canvas, only those pixels are
+  put to the screen, so a column streaming into a rolling window costs
+  about that column. Set `colorDomain` when values stream: with an
+  automatic domain, a value past either end recolors every cell. Brushing
+  a heatmap counts only the rows that entered or left the brush and leaves
+  the image as it is. The code that patches loads with a heatmap's first
+  change; changes before it arrives draw the heatmap again in full. See
+  [Heatmap cells](../architecture/marks.md#heatmap-cells).
 - **Colors.** `colors`, `colorDomain`, and `colorMidpoint` set the color
   scale ([Styling](styling.md#continuous-color)). Heatmaps show a color
   legend or a colorbar instead of series entries.

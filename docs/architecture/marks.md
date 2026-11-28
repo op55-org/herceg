@@ -459,7 +459,7 @@ regions use the same outlines.
 ## Heatmap cells
 
 A heatmap's number or time axis holds cells (`marks/heatmap-cells.ts`): one
-per distinct finite value, found once per table version and ordered.
+per distinct finite value, ordered, found again when the table changes.
 
 - **Edges.** Without a step, a boundary lies halfway between neighbors,
   computed once and shared, so no value falls between cells; the ends
@@ -479,6 +479,26 @@ per distinct finite value, found once per table version and ordered.
 - **Extents.** The y extent of an x range reads each x cell's lowest and
   highest y cell (two Int32 per x cell), so automatic y follows x without
   scanning rows. Heatmaps are `tight`: automatic domains end at cell edges.
+- **Updates** (`marks/heatmap-patch.ts`). When the scene is built after
+  table changes, the cells are patched from what the changes add up to
+  ([changes since a version](data.md#tables)): each axis merges the
+  values that came into its distinct values and renumbers the rows kept
+  (one copy, and a subtraction when the values kept stay in one run, as
+  when a window slides); the cell index keeps its order, leaves out rows
+  that left, and inserts those that came by cell and position; shared
+  cells reduce again from the rows of each cell touched. The result is
+  the cells, index, and values a rebuild makes, and the cells touched go
+  to the image ([Heatmap rasters](rendering.md#heatmap-rasters)). Cells
+  are built again past an eighth of the rows, on a reset or an insertion,
+  more than 16 changes behind, and when bands change order; heatmaps of
+  facets' or views' rows, calendars, time breaks, and bounded cells are
+  always built again. Patching is a chunk of its own, loaded by the first
+  change a heatmap or 2D histogram sees (`marks/heatmap-updates.ts`): a
+  mark's first frame (mounting, a static export) and charts whose data
+  never changes do not load it; a mark exported again after a change
+  does. Until it has loaded, a change builds the cells and image again,
+  as a chart drawn afresh would; the change after it loads builds the cells
+  it then follows, and later changes patch them. Nothing waits for it.
 - **Breaks.** Values inside breaks have no cell; others are placed in the
   time shown (`Breaks.collapse`), so cells meet at seams.
 - **Calendars** (`marks/heatmap-calendar.ts`) convert each distinct instant
@@ -529,6 +549,18 @@ most 1,000 bins per axis). Cells holding something become the series, with
 centers as positions and measures as values, painted through the heatmap's
 raster code (`AxisCells`) and found through a `CellIndex`. The color scale
 runs from 0 to the fullest cell of every panel, so facets compare.
+
+**Selection in cells.** Heatmaps and 2D histograms draw a store's selection
+as the cells holding selected rows. Each cell's count of selected rows is
+kept with the cells, with a copy of the bytes it counted (a byte a row),
+and moved by the rows whose byte changed: a brush step compares the bytes
+four at a time and finds the cells of only the rows that left or joined,
+and the image is neither placed nor painted again. The counting loads with
+patching, on the first selection change; until then each step counts every
+row. It reads no membership history: pages reading lineage load that
+eagerly, and the patching chunk importing it would split it out of their
+first chunk. Other selections, weighted 2D histograms, cells that changed
+with the table, and another membership count every row.
 
 ## Dendrograms
 

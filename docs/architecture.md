@@ -170,7 +170,7 @@ formats, field displays, and expression trees; no functions or typed arrays.
 
 | Page | Covers |
 | --- | --- |
-| [Data](architecture/data.md) | Tables and columns, memory amplification, series rows and stacks, derived tables, row views and selections, row groups, row totals, pivots, level of detail |
+| [Data](architecture/data.md) | Tables and columns, changes since a version, memory amplification, series rows and stacks, derived tables, row views and selections, row groups, row totals, pivots, level of detail |
 | [Marks](architecture/marks.md) | Series keys, identity and color, encodings and channels, band axes, bars, heatmaps, contours, annotations, custom marks, layout marks, networks, maps, 3D |
 | [Rendering](architecture/rendering.md) | Drawings, renderers and how one is chosen, browser layers, paint order and picking, points and GPU clouds, rasters, scheduling, animation |
 | [Layout](architecture/layout.md) | Scale instances, positions, chart layout, guides, legends, facets and subplots, insets, two y axes, text, themes and styles, time breaks, the range navigator |

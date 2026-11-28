@@ -32,7 +32,9 @@ export class CellIndex {
    * them) whose cell column `x[row]` and cell row `y[row]` lie in a grid of
    * `columns` x `lines` and whose `values[row]` is finite. Cell indices are
    * whole numbers (band indices, -1 for none); fractions would corrupt the
-   * counting sorts.
+   * counting sorts. With `order`, the positions are known to be in that
+   * order already (null: every position, in order), as a patch of an index
+   * finds them (marks/heatmap-patch.ts).
    */
   constructor(
     x: NumericArray,
@@ -41,6 +43,7 @@ export class CellIndex {
     columns: number,
     lines: number,
     rows?: Uint32Array,
+    order?: Uint32Array | null,
   ) {
     this.x = x;
     this.y = y;
@@ -48,6 +51,10 @@ export class CellIndex {
     this.columns = columns;
     this.lines = lines;
     this.rows = rows;
+    if (order !== undefined) {
+      this.order = order ?? undefined;
+      return;
+    }
     // Cells and values by position: the columns themselves, or for a subset
     // of rows gathered from them (16 bytes per position while building), so
     // the loops below, over every row of large grids, read them directly.
@@ -120,6 +127,39 @@ export class CellIndex {
       }
       visit(c, r, from, to);
       from = to;
+    }
+  }
+
+  /** The entries [from, to) of the cell at column `c`, row `r` (from = to for none), in cell order. */
+  runOf(c: number, r: number): [number, number] {
+    return [this.#past(c - 1, r), this.#past(c, r)];
+  }
+
+  /**
+   * Calls `visit` with each cell of columns `c0` to `c1` in rows `r0` to
+   * `r1` holding positions, and the entries [from, to) of its positions,
+   * in cell order, as `forEachIn` finds them.
+   */
+  forEachRunIn(
+    c0: number,
+    c1: number,
+    r0: number,
+    r1: number,
+    visit: (c: number, r: number, from: number, to: number) => void,
+  ): void {
+    const n = this.length;
+    for (let i = this.#past(c0 - 1, r0); i < n; ) {
+      const row = this.rowOf(this.positionAt(i));
+      const c = this.x[row]!;
+      const r = this.y[row]!;
+      if (r > r1) return;
+      if (c < c0 || c > c1) {
+        i = this.#past(c0 - 1, c < c0 ? r : r + 1);
+        continue;
+      }
+      const end = this.#past(c, r);
+      visit(c, r, i, end);
+      i = end;
     }
   }
 

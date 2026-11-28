@@ -4,9 +4,9 @@ import {
   type NumericField,
   type PositionField,
   type Schema,
-  scanExtent,
   type Table,
   type TimeField,
+  untold,
 } from "../data/table.ts";
 import { rasterDrawing } from "../draw/raster.ts";
 import type { ChartFields, ShownField } from "../fields/chart.ts";
@@ -27,13 +27,17 @@ import {
   type AxisCells,
   bandOf,
   boundedCells,
+  cellsAt,
   distinct,
   heldCells,
   placeCells,
   stepCell,
 } from "./heatmap-cells.ts";
+import type { ImagePixels, PatchedImage } from "./heatmap-image-patch.ts";
 import { heatmapFormError } from "./heatmap-input.ts";
-import { paint, rasterAxes } from "./heatmap-raster.ts";
+import type { CellsState, FollowedCells, HeatmapKit } from "./heatmap-patch.ts";
+import { ImageSource, paint, rasterAxes } from "./heatmap-raster.ts";
+import { heatmapUpdates, heatmapWork } from "./heatmap-updates.ts";
 import { definedFields } from "./line.ts";
 import {
   ANY_KIND,
@@ -42,6 +46,7 @@ import {
   type BandList,
   type Bands,
   bandIndices,
+  type CellRows,
   type ChartMark,
   type Frame,
   fieldBands,
@@ -58,7 +63,7 @@ import {
   seriesKey,
 } from "./mark.ts";
 import { rampLegend } from "./ramp-legend.ts";
-import { isRowView, type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
+import { extentAt, isRowView, type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -234,7 +239,14 @@ const SAMPLERS: readonly string[] = ["mean", "max", "min"];
 /** What each raster buffer holds, keyed by the buffer, whichever mark painted it. */
 interface Painted {
   inputs: readonly unknown[];
+  /** What its pixels are of besides the cells and where the axes put them. */
+  look: readonly unknown[];
   image: readonly [number, number, number, number, number, number];
+  source: ImageSource;
+  /** Where its cells are along each axis, for cells kept between versions. */
+  where: ImagePixels | undefined;
+  /** The version of the cells it was painted from (`CellsState`), NaN for cells not kept. */
+  version: number;
 }
 
 /**
@@ -263,7 +275,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * Cell lookups for tooltips and the keyboard, keyed by the rows they index
    * (a facet panel's), or for whole columns by the x cell array.
    */
-  readonly #cells = new WeakMap<object, CellIndex>();
+  readonly #cells = new WeakMap<object, { index: CellIndex; version: number }>();
   /** Each index of rows' cells, with the rows sharing a cell combined (see `combine`). */
   readonly #resolved = new WeakMap<CellIndex, CombinedCells>();
   /**
@@ -322,6 +334,15 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   readonly #selected = new WeakMap<Series, HeldCells>();
   /** Each index's cells with values, as selections are counted in them. */
   readonly #runs = new WeakMap<CellIndex, CellRuns>();
+  /**
+   * The cells of a whole table's series (see `#current`), kept between
+   * versions once what follows changes has loaded.
+   */
+  #followed: FollowedCells | undefined;
+  /** The table's version the cells were last read at, which a later one tells a change from. */
+  #seen: number | undefined;
+  /** The selection last drawn: a selection of other bytes is a change. */
+  #drawnSelection: Uint8Array | undefined;
 
   constructor(input: HeatmapSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
@@ -510,6 +531,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   /**
    * The cells along a number or time axis, for the table's version and,
    * along x, the time axis' breaks, which leave cells out and move them.
+   * A whole table's cells without breaks follow its changes (see
+   * `patchAxis`): kept while none touches the field, else patched.
    */
   #axisCells(
     axis: "x" | "y",
@@ -541,13 +564,47 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       throw new Error(
         `heatmap ${axis}1: cells between edges cannot leave out time breaks yet; drop ${axis}.breaks`,
       );
-    const cells =
+    // Cells along a whole table's column follow its changes, once what
+    // follows them has loaded: placed again (found) is a change, which loads it.
+    const follows = !rows.positions && end === undefined && !breaks;
+    const updates = follows ? heatmapUpdates(!!found) : undefined;
+    const change = updates && found && updates.changesSince(table, found.version);
+    let cells: AxisCells | undefined;
+    let counts: Uint32Array | undefined;
+    if (updates && found && change) {
+      if (!updates.touches(change, [field])) [cells, counts] = [found.cells, found.counts];
+      else {
+        counts = found.counts ?? updates.countCells(found.cells);
+        const column = numbersAt(rows, field);
+        const patched = updates.patchAxis(
+          KIT,
+          found.cells,
+          counts,
+          column,
+          change,
+          field,
+          step,
+          time,
+          name,
+        );
+        [cells, counts] = patched ? [patched.cells, patched.counts] : [undefined, undefined];
+      }
+    }
+    if (!cells) heatmapWork.axesPlaced++;
+    cells ??=
       end === undefined
         ? placeCells(numbersAt(rows, field), step, time, breaks, name)
         : boundedCells(numbersAt(rows, field), numbersAt(rows, end), name);
-    if (found) [found.revision, found.cells] = [revision, cells];
+    const version = updates ? updates.versionOf(KIT, table) : Number.NaN;
+    if (found)
+      [found.revision, found.cells, found.version, found.counts] = [
+        revision,
+        cells,
+        version,
+        counts,
+      ];
     else {
-      placed.unshift({ revision, breaks, cells });
+      placed.unshift({ revision, breaks, cells, version, counts });
       placed.length = Math.min(placed.length, 4);
     }
     return cells;
@@ -775,10 +832,14 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
         ? undefined
         : s.fields?.tones(this.table, spec.color, spec, undefined, paint);
     if (tones) return tones;
-    const extent = this.#valueExtent(s);
     const tone = spec.reduce === "sum" ? undefined : this.#toneOf(s);
-    const lo = tone?.min ?? extent?.[0];
-    const hi = tone?.max ?? extent?.[1];
+    let [lo, hi] = [tone?.min, tone?.max];
+    // The values' extent only where it sets an end: a change of one value
+    // under a fixed domain reads no other.
+    if (!spec.colorDomain && (lo === undefined || hi === undefined)) {
+      const extent = this.#valueExtent(s);
+      [lo, hi] = [lo ?? extent?.[0], hi ?? extent?.[1]];
+    }
     const domain =
       spec.colorDomain ?? (lo === undefined || hi === undefined ? undefined : [lo, hi]);
     if (!domain) return undefined;
@@ -795,10 +856,9 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       return this.#sumsOf(s) ?? undefined;
     }
     const rows = this.rows();
-    if (this.#extent?.rows !== rows) {
-      const values = numbersAt(rows, this.spec.color);
-      this.#extent = { rows, extent: scanExtent(values, 0, values.length) ?? null };
-    }
+    // A whole table keeps its fields' extents, appends widening them.
+    if (this.#extent?.rows !== rows)
+      this.#extent = { rows, extent: extentAt(rows, this.spec.color) ?? null };
     return this.#extent.extent ?? undefined;
   }
 
@@ -887,7 +947,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     // Every row of each cell, which combining its values leaves one of.
     const { values } = this.cellsOf(s, across, down);
     const runs = this.#runsOf(this.#indexOf(s, across, down), values);
-    const held = this.#heldOf(runs, drawing.selected);
+    const held = this.#heldOf(runs, drawing);
     this.#selected.set(s, held);
     // An image of no cell draws nothing.
     if (held.lit.length === 0) return whole;
@@ -976,11 +1036,14 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /**
-   * How many of each cell's rows `selected` holds, and the rows the values
-   * of the cells holding any are at, for an image of them: one pass over the
-   * cells' rows, kept while the selection and the cells are the same.
+   * How many of each cell's rows the selection holds, and the rows the
+   * values of the cells holding any are at, for an image of them: for a
+   * store's selection, by what changed in it once what follows changes has
+   * loaded (`cellCounts`), else in one pass over the cells' rows; kept
+   * while the selection and the cells are the same.
    */
-  #heldOf(runs: CellRuns, selected: Uint8Array): HeldCells {
+  #heldOf(runs: CellRuns, drawing: SelectionDrawing): HeldCells {
+    const { selected } = drawing;
     let byRuns = helds.get(selected);
     if (!byRuns) {
       byRuns = new WeakMap();
@@ -989,29 +1052,67 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     const known = byRuns.get(runs);
     if (known) return known;
     const { index, last } = runs;
-    const counts = new Uint32Array(last.length);
+    // Other bytes than those drawn last are a change, which loads what follows changes.
+    const { membership } = drawing;
+    const drawn = this.#drawnSelection;
+    this.#drawnSelection = selected;
+    const updates = membership && heatmapUpdates(drawn !== undefined && drawn !== selected);
+    let counts: Uint32Array;
+    if (updates) counts = updates.cellCounts(this.#cellRows(runs), membership!, selected);
+    else {
+      counts = new Uint32Array(last.length);
+      let k = 0;
+      index.forEachRun((_c, _r, from, to) => {
+        // Cells without a value are not among the runs: their last row tells them apart.
+        if (k >= last.length || index.rowOf(index.positionAt(to - 1)) !== last[k]) return;
+        let count = 0;
+        for (let i = from; i < to; i++) count += selected[index.rowOf(index.positionAt(i))]!;
+        counts[k++] = count;
+      });
+    }
     const lit: number[] = [];
-    let k = 0;
-    index.forEachRun((_c, _r, from, to) => {
-      // Cells without a value are not among the runs: their last row tells them apart.
-      if (k >= last.length || index.rowOf(index.positionAt(to - 1)) !== last[k]) return;
-      let count = 0;
-      for (let i = from; i < to; i++) count += selected[index.rowOf(index.positionAt(i))]!;
-      counts[k] = count;
-      if (count > 0) lit.push(last[k]!);
-      k++;
-    });
+    for (let k = 0; k < last.length; k++) if (counts[k]! > 0) lit.push(last[k]!);
     const held: HeldCells = { runs, selected: counts, lit: Uint32Array.from(lit) };
     byRuns.set(runs, held);
     return held;
   }
 
-  /**
-   * The cell of `runs` whose value is at `row`, or -1: a binary search for
-   * the row's cell among the runs, which are in cell order (by row, then
-   * column), as the index is.
-   */
-  #cellAtRow(runs: CellRuns, row: number): number {
+  /** The cells of `runs` as a selection's rows are counted in them (see `CellRows`). */
+  #cellRows(runs: CellRuns): CellRows {
+    const known = cellRows.get(runs);
+    if (known) return known;
+    const { index, last } = runs;
+    const rows: CellRows = {
+      key: runs,
+      count: last.length,
+      // The row's cell among the runs, if the index holds the row in it.
+      cellOf: (row) => {
+        const k = this.#runAt(runs, row);
+        if (k < 0) return -1;
+        const [from, to] = index.runOf(index.x[row]!, index.y[row]!);
+        let [lo, hi] = [from, to];
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (index.rowOf(index.positionAt(mid)) < row) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo < to && index.rowOf(index.positionAt(lo)) === row ? k : -1;
+      },
+      forEach: (visit) => {
+        let k = 0;
+        index.forEachRun((_c, _r, from, to) => {
+          if (k >= last.length || index.rowOf(index.positionAt(to - 1)) !== last[k]) return;
+          for (let i = from; i < to; i++) visit(k, index.rowOf(index.positionAt(i)));
+          k++;
+        });
+      },
+    };
+    cellRows.set(runs, rows);
+    return rows;
+  }
+
+  /** The run of `runs` of the cell `row` is in, or -1: a binary search, as runs are in cell order. */
+  #runAt(runs: CellRuns, row: number): number {
     const { index, columns, lines, last } = runs;
     const c = index.x[row]!;
     const r = index.y[row]!;
@@ -1021,12 +1122,26 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       if (lines[mid]! < r || (lines[mid] === r && columns[mid]! < c)) lo = mid + 1;
       else hi = mid;
     }
-    return lo < last.length && last[lo] === row ? lo : -1;
+    return lo < last.length && lines[lo] === r && columns[lo] === c ? lo : -1;
+  }
+
+  /**
+   * The cell of `runs` whose value is at `row`, or -1: a binary search for
+   * the row's cell among the runs, which are in cell order (by row, then
+   * column), as the index is.
+   */
+  #cellAtRow(runs: CellRuns, row: number): number {
+    const k = this.#runAt(runs, row);
+    return k >= 0 && runs.last[k] === row ? k : -1;
   }
 
   /**
    * The image of the cells of `s`, keyed `key`, as its buffers are: every
-   * cell, or with `held`, those holding selected rows.
+   * cell, or with `held`, those holding selected rows. An image of cells
+   * kept between versions (`#current`) repaints only what a change touched
+   * where the axes put every cell where they did, or the image moved by
+   * whole pixels along x (a window sliding over a lattice); its source
+   * tells drawings what to put again.
    */
   #image(
     s: Series,
@@ -1038,18 +1153,29 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     const { x, y, plot } = frame;
     const acrossAxis = this.resolve(s, "x", x);
     const downAxis = this.resolve(s, "y", y);
-    const inputs = [
+    const cells = this.cellsOf(s, acrossAxis, downAxis);
+    const followed = this.#followed?.state;
+    const state = !held && followed?.cells === cells ? followed : undefined;
+    const sampling = this.spec.sampling?.reduce ?? "mean";
+    // What the pixels are of besides the cells and where the axes put them.
+    const look = [
       this,
       // Display colors cells take, made again as they or the colors they read change.
-      "legend" in colors ? colors : undefined,
+      ...("legend" in colors
+        ? [colors]
+        : [colors.domain[0], colors.domain[1], colors.midpoint, colors.stops.join()]),
       held?.lit,
-      this.table.version,
+      frame.theme,
+      sampling,
+    ];
+    const inputs = [
+      ...look,
+      cells,
       acrossAxis.ordinals,
       downAxis.ordinals,
       s.rows,
       s.places?.x,
       s.places?.y,
-      frame.theme,
       ...x.domain,
       ...x.range,
       x.bandwidth,
@@ -1065,9 +1191,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     // An unchanged frame draws the image last painted into the series'
     // buffer again, without placing a cell.
     let pixels = frame.bytes(key, "raster", 0);
-    const last = painted.get(pixels.buffer);
-    let image = last && sameInputs(last.inputs, inputs) ? last.image : undefined;
-    if (!image) {
+    let last = painted.get(pixels.buffer);
+    if (!last || !sameInputs(last.inputs, inputs)) {
       const buffer = (stage: string, length: number) => frame.doubles(key, stage, length);
       const axes = rasterAxes(
         { ...acrossAxis, scale: x },
@@ -1080,27 +1205,71 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       const [across, down] = axes;
       const count = across.size * down.size;
       pixels = frame.bytes(key, "raster", count * 4);
-      const { index, values } = this.cellsOf(s, acrossAxis, downAxis);
-      // With `held`, only the rows of the cells holding selected rows are painted.
-      const rows = held ? held.lit : s.rows;
-      const source = {
-        ...{
+      const known = painted.get(pixels.buffer);
+      const source =
+        known?.source.columns === across.size && known.source.rows === down.size
+          ? known.source
+          : new ImageSource(pixels, across.size, down.size);
+      // Where the image puts cells kept between versions, for a later change to patch.
+      const updates = state && heatmapUpdates();
+      const where = updates && {
+        x: updates.axisPixels(across, acrossAxis.cells?.values),
+        y: updates.axisPixels(down, downAxis.cells?.values),
+      };
+      const image: PatchedImage = {
+        across,
+        down,
+        cells,
+        colors,
+        sampling,
+        pixels: source.pixels,
+        buffer: (stage) => buffer(stage, count),
+      };
+      const patched =
+        state &&
+        where &&
+        known?.where &&
+        known.source === source &&
+        known.version === state.from &&
+        sameInputs(known.look, look) &&
+        updates!.patchImage(KIT, image, state, source, known.where, where, {
           x: acrossAxis.ordinals,
           y: downAxis.ordinals,
-          values,
-          rows,
-          length: rows ? rows.length : s.length,
-        },
-        // The cells' index, or one of those holding selected rows.
-        index: () =>
-          held ? new CellIndex(index.x, index.y, values, index.columns, index.lines, rows) : index,
+        });
+      if (!patched) {
+        // With `held`, only the rows of the cells holding selected rows are painted.
+        const rows = held ? held.lit : s.rows;
+        const { index, values } = cells;
+        const paintSource = {
+          ...{
+            x: acrossAxis.ordinals,
+            y: downAxis.ordinals,
+            values,
+            rows,
+            length: rows ? rows.length : s.length,
+          },
+          // The cells' index, or one of those holding selected rows.
+          index: () =>
+            held
+              ? new CellIndex(index.x, index.y, values, index.columns, index.lines, rows)
+              : index,
+        };
+        paint(paintSource, across, down, colors, sampling, source.pixels, image.buffer);
+        heatmapWork.pixels += count;
+        source.changed();
+      }
+      last = {
+        inputs,
+        look,
+        image: [across.from, across.to, across.size, down.from, down.to, down.size],
+        source,
+        where,
+        version: state?.version ?? Number.NaN,
       };
-      const sampling = this.spec.sampling?.reduce ?? "mean";
-      paint(source, across, down, colors, sampling, pixels, (stage) => buffer(stage, count));
-      image = [across.from, across.to, across.size, down.from, down.to, down.size];
-      painted.set(pixels.buffer, { inputs, image });
+      painted.set(pixels.buffer, last);
     }
-    const [x0, x1, columns, y0, y1, rows] = image;
+    const [x0, x1, columns, y0, y1, rows] = last.image;
+    const { source } = last;
     return [
       {
         kind: "raster",
@@ -1112,7 +1281,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
         height: y1 - y0,
         columns,
         rows,
-        pixels: pixels.subarray(0, columns * rows * 4),
+        pixels: source.pixels,
+        source,
       },
     ];
   }
@@ -1255,6 +1425,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     columns = across.count,
     rows = down.count,
   ): CombinedCells {
+    const kept = this.#current(s, across, down, columns, rows);
+    if (kept) return kept.cells;
     const key = s.rows ?? s.x;
     const read = this.#read.get(key);
     const { index: own } = read ?? {};
@@ -1305,15 +1477,80 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     columns = across.count,
     rows = down.count,
   ): CellIndex {
+    const kept = this.#current(s, across, down, columns, rows);
+    if (kept) return kept.index;
     const x = across.ordinals;
     const y = down.ordinals;
     const key = s.rows ?? x;
     const cached = this.#cells.get(key);
-    if (cached?.x === x && cached.y === y && cached.values === s.values && cached.rows === s.rows)
-      return cached;
-    const index = new CellIndex(x, y, s.values, columns, rows, s.rows);
-    this.#cells.set(key, index);
-    return index;
+    const { version } = this.table;
+    // Values are read at every version: a column that fills its buffer is the same array at each.
+    const index = cached?.index;
+    if (
+      cached?.version === version &&
+      index!.x === x &&
+      index!.y === y &&
+      index!.values === s.values &&
+      index!.rows === s.rows
+    )
+      return index!;
+    const made = new CellIndex(x, y, s.values, columns, rows, s.rows);
+    this.#cells.set(key, { index: made, version });
+    return made;
+  }
+
+  /**
+   * The cells of a series of a whole table in one panel (no row view,
+   * facet split, panel's own bands, calendar, or cells between edges),
+   * kept between table versions once what follows changes has loaded (see
+   * `FollowedCells`): a version after the one last read is a change, which
+   * loads it. Undefined for other series, and until it loads: their cells
+   * are built for each version.
+   */
+  #current(
+    s: Series,
+    across: ResolvedAxis,
+    down: ResolvedAxis,
+    columns: number,
+    lines: number,
+  ): CellsState | undefined {
+    const { spec, table } = this;
+    // Cells around time breaks are another chart's than those without.
+    const breaks = across.cells?.breaks ?? down.cells?.breaks;
+    if (
+      s.rows ||
+      s.places ||
+      this.view ||
+      this.#layout ||
+      breaks ||
+      spec.x2 !== undefined ||
+      spec.y2 !== undefined
+    )
+      return undefined;
+    const seen = this.#seen;
+    this.#seen = table.version;
+    const updates = heatmapUpdates(seen !== undefined && seen !== table.version);
+    if (!updates) return undefined;
+    this.#followed ??= new updates.FollowedCells(KIT);
+    const placing = [this.#field("x"), this.#field("y")];
+    return this.#followed.read(
+      table,
+      {
+        x: across.ordinals,
+        y: down.ordinals,
+        xValues: across.cells?.values,
+        yValues: down.cells?.values,
+        columns,
+        lines,
+        values: s.values,
+      },
+      {
+        x: across.cells ? undefined : this.bandKeys.get(s.x),
+        y: down.cells ? undefined : this.bandKeys.get(s.y),
+      },
+      { read: [...placing, spec.color], placing },
+      spec.reduce ?? "last",
+    );
   }
 }
 
@@ -1341,11 +1578,42 @@ interface HeldCells {
 
 /** What selections hold of cells, by membership, then by the cells. */
 const helds = new WeakMap<Uint8Array, WeakMap<CellRuns, HeldCells>>();
+/** Cells as selections are counted in them, by the cells. */
+const cellRows = new WeakMap<CellRuns, CellRows>();
 
 /** A series' cells: their values by table row (none at rows a cell shares), and their index. */
-interface CombinedCells {
+export interface CombinedCells {
   values: NumericArray;
   index: CellIndex;
+}
+
+/**
+ * The value of the cell whose rows are entries [from, to) of `index`,
+ * combined by `reduce`: the last of them, or their mean, sum, least, or
+ * greatest, summed in their order. A mean of values near the largest
+ * doubles, whose sum overflows, is of the values scaled to the largest of
+ * them, scaled back; a sum that overflows has no value.
+ */
+export function reduceRun(index: CellIndex, from: number, to: number, reduce: CellReduce): number {
+  const source = index.values;
+  let total = reduce === "min" ? Infinity : reduce === "max" ? -Infinity : 0;
+  let value = 0;
+  for (let i = from; i < to; i++) {
+    value = source[index.rowOf(index.positionAt(i))]!;
+    if (reduce === "mean" || reduce === "sum") total += value;
+    else if (reduce === "min") total = Math.min(total, value);
+    else if (reduce === "max") total = Math.max(total, value);
+  }
+  let cell = reduce === "last" ? value : reduce === "mean" ? total / (to - from) : total;
+  if (reduce === "mean" && !Number.isFinite(total)) {
+    let largest = 0;
+    for (let i = from; i < to; i++)
+      largest = Math.max(largest, Math.abs(source[index.rowOf(index.positionAt(i))]!));
+    let scaled = 0;
+    for (let i = from; i < to; i++) scaled += source[index.rowOf(index.positionAt(i))]! / largest;
+    cell = Math.max(-largest, Math.min(largest, (scaled / (to - from)) * largest));
+  }
+  return cell;
 }
 
 /**
@@ -1355,42 +1623,27 @@ interface CombinedCells {
  * cells is its own. A facet panel's cells go `into` the buffer its split
  * shares, at its own rows only.
  */
-function combine(index: CellIndex, reduce: CellReduce, into?: Float64Array): CombinedCells {
-  let shared = false;
-  index.forEachRun((_c, _r, from, to) => {
-    if (to - from > 1) shared = true;
-  });
-  if (!shared) return { values: index.values, index };
-  const source = index.values;
+export function combine(index: CellIndex, reduce: CellReduce, into?: Float64Array): CombinedCells {
+  if (crowdedIn(index) === 0) return { values: index.values, index };
   let values: Float64Array;
   if (into && index.rows) {
     values = into;
     for (const row of index.rows) values[row] = Number.NaN;
-  } else values = new Float64Array(source.length).fill(Number.NaN);
+  } else values = new Float64Array(index.values.length).fill(Number.NaN);
   index.forEachRun((_c, _r, from, to) => {
-    let total = reduce === "min" ? Infinity : reduce === "max" ? -Infinity : 0;
-    let value = 0;
-    for (let i = from; i < to; i++) {
-      value = source[index.rowOf(index.positionAt(i))]!;
-      if (reduce === "mean" || reduce === "sum") total += value;
-      else if (reduce === "min") total = Math.min(total, value);
-      else if (reduce === "max") total = Math.max(total, value);
-    }
-    let cell = reduce === "last" ? value : reduce === "mean" ? total / (to - from) : total;
-    // A mean of values near the largest doubles, whose sum overflows: of the
-    // values scaled to the largest of them, scaled back.
-    if (reduce === "mean" && !Number.isFinite(total)) {
-      let largest = 0;
-      for (let i = from; i < to; i++)
-        largest = Math.max(largest, Math.abs(source[index.rowOf(index.positionAt(i))]!));
-      let scaled = 0;
-      for (let i = from; i < to; i++) scaled += source[index.rowOf(index.positionAt(i))]! / largest;
-      cell = Math.max(-largest, Math.min(largest, (scaled / (to - from)) * largest));
-    }
-    values[index.rowOf(index.positionAt(to - 1))] = cell;
+    values[index.rowOf(index.positionAt(to - 1))] = reduceRun(index, from, to, reduce);
   });
   const combined = new CellIndex(index.x, index.y, values, index.columns, index.lines, index.rows);
   return { values, index: combined };
+}
+
+/** How many cells of `index` hold more than one position. */
+export function crowdedIn(index: CellIndex): number {
+  let crowded = 0;
+  index.forEachRun((_c, _r, from, to) => {
+    if (to - from > 1) crowded++;
+  });
+  return crowded;
 }
 
 /** The least and greatest sum of the values of the rows sharing a place (`x` and `y`). */
@@ -1442,6 +1695,10 @@ interface PlacedCells {
   revision: string;
   readonly breaks: Breaks | undefined;
   cells: AxisCells;
+  /** The table's version, for cells that follow its changes (NaN for others). */
+  version: number;
+  /** Rows in each cell, once a patch needed them. */
+  counts: Uint32Array | undefined;
 }
 
 /** The cells a facet panel's rows hold along an axis, as of the cells they were found among. */
@@ -1460,6 +1717,18 @@ interface Columns {
 
 /** What each raster buffer holds, keyed by the buffer, whichever heatmap painted it. */
 const painted = new WeakMap<ArrayBuffer, Painted>();
+
+/** What following changes (heatmap-patch.ts) is handed of this module's code, rather than importing it. */
+const KIT: HeatmapKit = {
+  CellIndex,
+  cellsAt,
+  combine,
+  crowdedIn,
+  reduceRun,
+  paint,
+  untold,
+  work: heatmapWork,
+};
 
 function sameInputs(a: readonly unknown[], b: readonly unknown[]): boolean {
   return a.length === b.length && a.every((value, i) => value === b[i]);

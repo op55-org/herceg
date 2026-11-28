@@ -46,6 +46,7 @@ import { dashPattern } from "../style/dash.ts";
 import type { DotLook } from "./features.ts";
 import type { GuideKit } from "./guides.ts";
 import { itemResolver } from "./items.ts";
+import type { Membership } from "./memberships.ts";
 import type { ChartModel } from "./model.ts";
 
 /**
@@ -132,6 +133,8 @@ export type Chosen = (series: Series | undefined) => {
   readonly selected: Uint8Array;
   readonly key: object;
   readonly version: number;
+  /** The store channel's membership the bytes are of: counts kept for it follow the bytes that changed. */
+  readonly membership?: Membership | undefined;
 };
 
 /** How a mark draws what a selection holds and what it does not, by its looks. */
@@ -215,13 +218,15 @@ export class Highlighter {
       // Each part stands for the drawn series of its key, whose slot it keeps.
       const parts = (list: readonly Series[], suffix: string) =>
         list.map((p) => ({ ...p, key: p.key + suffix, whole: p.whole ?? byKey.get(p.key) }));
+      const all = chosen(undefined);
       const drawing: SelectionDrawing = {
-        selected: chosen(undefined).selected,
+        selected: all.selected,
         dimmed: (list) => mark.geometry(parts(list, OFF), own(OFF), key, rows).flatMap(paint.dim),
         lit: (list) => mark.geometry(parts(list, ON), own(ON), key, rows).map(paint.lit),
         dim: paint.dim,
         shown: paint.lit,
         squares: kit.squares ?? (() => undefined),
+        membership: all.membership,
       };
       return mark.selectedGeometry(series, frame, drawing);
     }
