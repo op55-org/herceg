@@ -1,12 +1,17 @@
 // A heatmap's image: where its cells fall among the image's pixels along
 // each axis, and painting the image from the table's rows. Both run once
 // per repaint, over the rows and the image's pixels, never per cell slot,
-// in buffers the chart keeps between frames.
+// in buffers the chart keeps between frames. A repaint of some rectangles
+// (`paint`'s region, heatmap-image-patch.ts) reads the rows of the cells in
+// them and writes only their pixels, each summed in the order a whole
+// repaint sums it; the image's source (`ImageSource`) tells drawings what
+// they must put again.
 
 import type { NumericArray } from "../data/column.ts";
 import type { CellIndex } from "../lod/cell-index.ts";
 import type { SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
+import type { RasterPatch, RasterSource } from "../scene/scene.ts";
 import type { AxisCells } from "./heatmap-cells.ts";
 import type { BandPlaces } from "./series.ts";
 
@@ -22,10 +27,12 @@ export interface AxisPlacement {
 export type Buffer = (stage: string, length: number) => Float64Array;
 
 /** One axis of the image, projected once per distinct cell before painting. */
-interface AxisRaster {
+export interface AxisRaster {
   from: number;
   to: number;
   size: number;
+  /** Cells (or bands) along it, which `pixels` or `starts` and `ends` place. */
+  length: number;
   whole: boolean;
   pixels: Float64Array | undefined;
   starts: Float64Array | undefined;
@@ -95,6 +102,7 @@ function rasterAxis(
     from,
     to,
     size,
+    length,
     whole: size === count,
     pixels: undefined,
     starts,
@@ -183,19 +191,23 @@ export function paint(
   reduce: "mean" | "max" | "min",
   pixels: Uint8ClampedArray,
   buffer: (stage: string) => Float64Array,
+  region?: Region,
 ): void {
   const across = x.size;
   const count = across * y.size;
-  pixels.fill(0, 0, count * 4);
+  // Only the region's pixels are written; `source` holds at least the rows of every cell in it.
+  const [x0, y0, x1, y1] = region ?? [0, 0, across, y.size];
+  for (let r = y0; r < y1; r++) pixels.fill(0, (r * across + x0) * 4, (r * across + x1) * 4);
   const regular = x.pixels !== undefined && y.pixels !== undefined;
   if (regular && x.whole && y.whole) {
-    paintWhole(source, x.pixels!, y.pixels!, across, colors, pixels);
+    paintWhole(source, x.pixels!, y.pixels!, across, colors, pixels, region);
     return;
   }
   const mean = reduce === "mean";
   const max = reduce === "max";
   const totals = buffer("totals");
-  if (regular) totals.fill(mean ? 0 : NaN, 0, count);
+  if (regular)
+    for (let r = y0; r < y1; r++) totals.fill(mean ? 0 : NaN, r * across + x0, r * across + x1);
   // Until coloring, the pixel bytes hold integer counts for blocks, or
   // fractional area weights for spans. Neither needs another plot buffer.
   const weights = regular
@@ -213,12 +225,14 @@ export function paint(
           totals,
           weights as Uint32Array,
           scaled ? overflowed : undefined,
+          region,
         )
     : (scaled: boolean) => {
         const index = source.index();
         const [xStarts, xEnds] = [x.starts!, x.ends!];
         const [yStarts, yEnds] = [y.starts!, y.ends!];
         const { values, order, rows: positions } = index;
+        const [rx0, ry0, rx1, ry1] = [x0, y0, x1, y1];
         // Read repeated rows once per cell, then weight their aggregate by
         // the area of the cell in each pixel. A pixel within just one cell
         // shows its last finite row, matching tooltips and whole lattices.
@@ -237,9 +251,10 @@ export function paint(
             else if (max ? !(total >= value) : !(total <= value)) total = value;
           }
           const rows = to - from;
-          for (let r = Math.floor(y0); r < y1; r++) {
+          const [r1, c1] = [Math.min(y1, ry1), Math.min(x1, rx1)];
+          for (let r = Math.max(Math.floor(y0), ry0); r < r1; r++) {
             const dy = Math.min(y1, r + 1) - Math.max(y0, r);
-            for (let c = Math.floor(x0); c < x1; c++) {
+            for (let c = Math.max(Math.floor(x0), rx0); c < c1; c++) {
               const at = r * across + c;
               const w = (Math.min(x1, c + 1) - Math.max(x0, c)) * dy;
               if (scaled) {
@@ -266,30 +281,39 @@ export function paint(
   // Only overflowed sums are repeated, with values divided by 2^64 to
   // leave room for 2^32 rows. Span weights are recounted in Float64.
   if (mean) {
-    for (let i = 0; i < count; i++) {
-      if (weights[i]! > 0 && (!lasts || Number.isNaN(lasts[i]!)) && !Number.isFinite(totals[i]!)) {
-        overflowed.set(i, regular ? weights[i]! : 0);
-        totals[i] = 0;
+    for (let r = y0; r < y1; r++)
+      for (let i = r * across + x0, end = r * across + x1; i < end; i++) {
+        if (
+          weights[i]! > 0 &&
+          (!lasts || Number.isNaN(lasts[i]!)) &&
+          !Number.isFinite(totals[i]!)
+        ) {
+          overflowed.set(i, regular ? weights[i]! : 0);
+          totals[i] = 0;
+        }
       }
-    }
     if (overflowed.size) pass(true);
   }
-  for (let i = 0; i < count; i++) {
-    // Read the weight before coloring takes its bytes; empty pixels stay transparent.
-    const weight = weights[i]!;
-    if (weight === 0) continue;
-    const scaled = overflowed.get(i);
-    const value =
-      lasts && !Number.isNaN(lasts[i]!)
-        ? lasts[i]!
-        : !mean
-          ? totals[i]!
-          : scaled !== undefined
-            ? (totals[i]! / scaled) * 2 ** 64
-            : totals[i]! / weight;
-    colors.write(Math.min(Number.MAX_VALUE, Math.max(-Number.MAX_VALUE, value)), pixels, i * 4);
-  }
+  for (let r = y0; r < y1; r++)
+    for (let i = r * across + x0, end = r * across + x1; i < end; i++) {
+      // Read the weight before coloring takes its bytes; empty pixels stay transparent.
+      const weight = weights[i]!;
+      if (weight === 0) continue;
+      const scaled = overflowed.get(i);
+      const value =
+        lasts && !Number.isNaN(lasts[i]!)
+          ? lasts[i]!
+          : !mean
+            ? totals[i]!
+            : scaled !== undefined
+              ? (totals[i]! / scaled) * 2 ** 64
+              : totals[i]! / weight;
+      colors.write(Math.min(Number.MAX_VALUE, Math.max(-Number.MAX_VALUE, value)), pixels, i * 4);
+    }
 }
+
+/** Pixels of an image a repaint keeps to: x0, y0, x1, y1, ends exclusive. */
+export type Region = readonly [number, number, number, number];
 
 /**
  * One pixel per slot. Missing values leave their cell transparent rather
@@ -302,6 +326,7 @@ function paintWhole(
   across: number,
   colors: Pick<SequentialScale, "write">,
   pixels: Uint8ClampedArray,
+  region: Region | undefined,
 ): void {
   for (const turn = new Turns(source); turn.next(); ) {
     const { x, y, values, length } = turn;
@@ -312,9 +337,14 @@ function paintWhole(
       if (a < 0 || b < 0 || !Number.isFinite(value)) continue;
       const c = xPixels[a]!;
       const r = yPixels[b]!;
-      if (c >= 0 && r >= 0) colors.write(value, pixels, (r * across + c) * 4);
+      if (c < 0 || r < 0 || (region && outside(region, c, r))) continue;
+      colors.write(value, pixels, (r * across + c) * 4);
     }
   }
+}
+
+function outside([x0, y0, x1, y1]: Region, c: number, r: number): boolean {
+  return c < x0 || c >= x1 || r < y0 || r >= y1;
 }
 
 /** Reduce lattice blocks separately so the row loop only reads integer counts. */
@@ -326,6 +356,7 @@ function reduceBlocks(
   totals: Float64Array,
   counts: Uint32Array,
   scaled: Map<number, number> | undefined,
+  region: Region | undefined,
 ): void {
   const across = xAxis.size;
   const xPixels = xAxis.pixels!;
@@ -339,7 +370,7 @@ function reduceBlocks(
       if (a < 0 || b < 0 || !Number.isFinite(value)) continue;
       const c = xPixels[a]!;
       const r = yPixels[b]!;
-      if (c < 0 || r < 0) continue;
+      if (c < 0 || r < 0 || (region && outside(region, c, r))) continue;
       const at = r * across + c;
       if (scaled) {
         if (scaled.has(at)) totals[at]! += value / 2 ** 64;
@@ -407,5 +438,33 @@ class Turns {
     [this.x, this.y, this.values, this.length] = [x, y, values, length];
     this.#next = start + length;
     return true;
+  }
+}
+
+/** Revisions of an image a raster source keeps what changed of. */
+const KEPT_PATCHES = 4;
+
+/**
+ * An image a mark keeps in a frame's buffer between frames (see
+ * `RasterSource`): its exact pixels, and its revisions as it paints them.
+ */
+export class ImageSource implements RasterSource {
+  readonly pixels: Uint8ClampedArray<ArrayBuffer>;
+  readonly columns: number;
+  readonly rows: number;
+  revision = 0;
+  readonly patches: RasterPatch[] = [];
+
+  constructor(bytes: Uint8ClampedArray<ArrayBuffer>, columns: number, rows: number) {
+    this.pixels = bytes.subarray(0, columns * rows * 4);
+    this.columns = columns;
+    this.rows = rows;
+  }
+
+  /** Records a revision: the columns the pixels moved and the rectangles painted after; null for all of them. */
+  changed(shift = 0, rects: Int32Array | null = null): void {
+    this.revision++;
+    this.patches.push({ revision: this.revision, shift, rects });
+    if (this.patches.length > KEPT_PATCHES) this.patches.shift();
   }
 }

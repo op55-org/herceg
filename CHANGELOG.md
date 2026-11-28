@@ -757,3 +757,19 @@ styles](docs/guide/styling.md#role-styles) and
   columns, so a key on a hidden column no longer puts a lone "1" beside
   the other; `aria-sort` is unchanged. See [A
   grid](docs/guide/grids.md#a-grid).
+- **Heatmaps patch what a change touched.** Appends, drops, and edits
+  patch a heatmap's cells (its axes' cells, the cell index, and shared
+  cells' values) from what the table's changes since the last frame add up
+  to, and paint again only the pixels of the cells they touched; a window
+  sliding along x moves the image and paints the columns it uncovers.
+  Patched cells and images equal rebuilt ones bit for bit. On canvas, each
+  image's offscreen copy is sent only the pixels that changed since it was
+  last drawn, and a frame that changes none (a hover, a brush) sends none.
+  One cell of a 1024² heatmap changed: 0.2 ms rather than 30 (Node); a
+  512 × 256 heatmap streaming a column at 10 Hz sends 1 KB to its canvas
+  per tick rather than 512 KB (Chrome). Brushing a heatmap or an
+  unweighted 2D histogram counts only the rows that entered or left the
+  brush. The patching loads on a heatmap's first change, in a chunk of its
+  own, so charts whose data never changes and one-off static exports do
+  not load it. See [Heatmap cells](docs/architecture/marks.md#heatmap-cells)
+  and [Heatmap rasters](docs/architecture/rendering.md#heatmap-rasters).

@@ -15,6 +15,7 @@ import { keyPrefix } from "../model/identity.ts";
 import type { MarkSeries } from "../model/inspect.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
+import type { Membership } from "../model/memberships.ts";
 import type { Nearest } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
@@ -169,6 +170,23 @@ export interface SelectionDrawing {
    * for squares, for the mark to draw an image of those cells instead.
    */
   squares(cells: CellShares, key: string): Geometry[] | undefined;
+  /**
+   * The store channel's membership `selected` is the bytes of, when the
+   * selection is a store's: marks of cells count its rows in them by what
+   * changed in it (cell-counts.ts) rather than in a pass over every row.
+   */
+  membership?: Membership | undefined;
+}
+
+/** A mark's cells as a selection's rows are counted in them (cell-counts.ts). */
+export interface CellRows {
+  /** Stands for the cells and the rows in each: counts are kept while it is the same object. */
+  readonly key: object;
+  readonly count: number;
+  /** The cell the table's row at `position` is counted in, or -1. */
+  cellOf(position: number): number;
+  /** Visits each row counted in a cell, with the cell. */
+  forEach(visit: (cell: number, position: number) => void): void;
 }
 
 /** A mark's cells as `SelectionDrawing.squares` draws a selection's share of each. */

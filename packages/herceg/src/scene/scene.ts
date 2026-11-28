@@ -554,6 +554,40 @@ export interface RasterGeometry extends Geometry {
   columns: number;
   rows: number;
   pixels: Uint8ClampedArray<ArrayBuffer>;
+  /**
+   * The image these pixels are, as its mark keeps it between frames: while
+   * `pixels` are its own, drawings put only what changed since they last
+   * drew it.
+   */
+  source?: RasterSource | undefined;
+}
+
+/**
+ * An image a mark keeps for as long as it draws it (a heatmap's cells):
+ * its pixels, a revision counting their changes, and what each of the last
+ * few changed, so that a drawing holding an older revision puts only that.
+ */
+export interface RasterSource {
+  /** `columns × rows` RGBA pixels, row 0 at the top; the same array while the image lasts. */
+  readonly pixels: Uint8ClampedArray<ArrayBuffer>;
+  readonly columns: number;
+  readonly rows: number;
+  readonly revision: number;
+  /** What the last revisions changed, oldest first (at most four). */
+  readonly patches: readonly RasterPatch[];
+}
+
+/**
+ * What one revision of a raster source changed: the pixels it moved, by
+ * `shift` columns (rightward positive, the columns it left uncovered among
+ * the rectangles), and the rectangles painted after it; null rectangles for
+ * every pixel.
+ */
+export interface RasterPatch {
+  readonly revision: number;
+  readonly shift: number;
+  /** x, y, width, height of each rectangle, in pixels after the shift. */
+  readonly rects: Int32Array | null;
 }
 
 /** One shape of a custom mark: path data in SVG syntax, with its style. */

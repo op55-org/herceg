@@ -54,10 +54,12 @@ export function channelsChosen(
     const table = mark.table;
     const selection = table && channelSelection(channels, table);
     if (!selection) return undefined;
+    const membership = held[channels.findIndex((c) => c.table === table)]!;
     const chosen = {
-      selected: held[channels.findIndex((c) => c.table === table)]!.selected,
+      selected: membership.selected,
       key: selection,
       version: selection.kind === "rows" ? selection.rows.version : -1,
+      membership,
     };
     return () => chosen;
   };

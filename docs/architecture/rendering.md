@@ -252,6 +252,35 @@ order, the panel's rows, the scales, the plot, the raster ratio, the theme,
 or the mark changes, so a legend toggle or brush neither places nor paints a
 cell. Each zoom or pan paints again in one pass.
 
+**Patched images.** After a table change the cells followed (see [Heatmap
+cells](marks.md#heatmap-cells)), a heatmap paints its image again only
+where it changed: the pixels of each cell the change touched and of cells
+that came, went, or moved along an axis, and, when a window slid along a
+lattice x axis by whole pixels, the image moved by that many columns and
+the columns it uncovered. The rectangles are gathered by 64 × 64 tile and
+joined where they line up. Past 16 rectangles or half the image, when the
+colors changed (an automatic domain that moved), when the plot or a zoom
+changed the axes' pixels, or when the cells were built again, the whole
+image is painted. A rectangle is painted from every row of the cells the
+axes put in it, in the order a whole paint reads them, so a patched image
+equals one painted afresh bit for bit; a test compares the two across
+random edits, drops, and appends, for every reducer, on lattices, blocks,
+and spans. The patching loads with the cells' (`marks/heatmap-patch.ts`);
+until it has, each change paints the whole image.
+
+**Raster sources.** A heatmap's or 2D histogram's image is a
+`RasterSource` (`scene/scene.ts`): its pixels, a revision, and its last
+four patches (a shift and the rectangles painted, or the whole image).
+Canvas drawing (`draw/raster.ts`) keeps an offscreen canvas per source and
+the revision it holds. A frame at the same revision (a hover, a brush)
+puts nothing. A canvas behind by kept patches moves its pixels once by
+their shifts (drawn onto itself with `copy` compositing) and puts the
+rectangles they painted, earlier ones moved by later shifts. A canvas
+further behind, a whole repaint, more than 16 rectangles, and a new canvas
+or one whose context was lost put the whole image. Images without a source
+of their own (a look's colored copy, a transition's frame) are put whole
+at each draw; SVG and exports encode the whole image.
+
 **Cell index.** Tooltips report the cell under the pointer even where its
 pixel shows a block: the scale maps the pointer to a band, or the inverse
 finds the cell whose span holds the value (binary search over edges), and a
